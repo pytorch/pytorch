@@ -1422,5 +1422,81 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
+class TestFullyShardCustomAllocator(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(torch.cuda.device_count(), 2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_register_fsdp_forward_method(self):
+        """Based on https://github.com/pytorch/pytorch/issues/109385"""
+
+        class VisionTransformer(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.patch_proj = nn.Conv2d(3, 1024, kernel_size=14, stride=14)
+
+            def forward_features(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.patch_proj(imgs).flatten(2).transpose(1, 2)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.forward_features(imgs).sum(dim=1)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.vit, self.projector = VisionTransformer(), nn.Linear(1024, 256)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                # Run `vit.forward_features`, which is not `forward`!
+                patch_embeddings = self.vit.forward_features(imgs)
+                return self.projector(patch_embeddings)
+
+        from torch.distributed.fsdp._fully_shard._fsdp_common import (
+            _set_fsdp_comm_allocator,
+        )
+
+        allocator_calls = []
+
+        def allocator(
+            size: tuple[int, ...], *, dtype: torch.dtype, device: torch.device
+        ) -> torch.Tensor:
+            allocator_calls.append((size, dtype, device))
+            return torch.empty(size, dtype=dtype, device=device)
+
+        _set_fsdp_comm_allocator(allocator)
+
+        torch.manual_seed(42)
+        model = Model()
+        ref_model = copy.deepcopy(model).cuda()
+        fully_shard(model.vit)
+        fully_shard(model.projector)
+        fully_shard(model)
+        register_fsdp_forward_method(model.vit, "forward_features")
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(4, 3, 224, 224, device="cuda")
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+        ref_loss.backward()
+        loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+        check_sharded_parity(self, ref_model, model)
+
+        expected_allocator_calls = [
+            ((603136,), torch.float32, torch.device("cuda", self.rank)),
+            ((262400,), torch.float32, torch.device("cuda", self.rank)),
+            ((262400,), torch.float32, torch.device("cuda", self.rank)),
+            ((603136,), torch.float32, torch.device("cuda", self.rank)),
+            ((262400,), torch.float32, torch.device("cuda", self.rank)),
+            ((131200,), torch.float32, torch.device("cuda", self.rank)),
+            ((603136,), torch.float32, torch.device("cuda", self.rank)),
+            ((301568,), torch.float32, torch.device("cuda", self.rank)),
+        ]
+        self.assertEqual(allocator_calls, expected_allocator_calls)
+
+
 if __name__ == "__main__":
     run_tests()
