@@ -32,7 +32,6 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.cuda.graphs import thread_cuda_stream_capture_mode
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -2653,31 +2652,10 @@ def run_fallback_kernel(
                 return out
             return e
 
-        has_cuda_tensor = any(
-            isinstance(a, FakeTensor) and a.fake_device.type == "cuda"
-            for a in flat_args
-        )
-
         flat_args = [to_real_tensor(a) for a in flat_args]
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
 
-        # If one of the inputs is a CUDA tensor, it is possible that
-        # running the fallback kernel will do an unsafe
-        # action. Unfortunately, there are scenarios where pytorch can
-        # have a stream currently capturing on the current stream that
-        # is using fake tensors (in particular, for shape inference in
-        # higher order operators). We need to prevent stream capture
-        # from breaking in this case. This is basically always safe
-        # because the unsafe actions tend to be lazy initialization of
-        # things like CUFFT plans, which won't be destroyed.
-        maybe_relaxed: typing.ContextManager = contextlib.nullcontext()
-        if has_cuda_tensor:
-            cudart = torch.cuda.cudart()
-            maybe_relaxed = thread_cuda_stream_capture_mode(
-                cudart.cudaStreamCaptureMode.Relaxed
-            )
-        with maybe_relaxed:
-            r = func(*args, **kwargs)
+        r = func(*args, **kwargs)
 
     storages: set[_StoragePointer] = set()
 
