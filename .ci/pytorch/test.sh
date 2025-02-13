@@ -421,6 +421,7 @@ test_inductor_cpp_wrapper_shard() {
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
     --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
