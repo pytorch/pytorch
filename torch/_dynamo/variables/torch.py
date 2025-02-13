@@ -1,5 +1,33 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+"""
+This module implements variable tracking for torch functions and operations during Dynamo tracing.
+
+It provides classes to handle different types of torch operations:
+
+TorchInGraphFunctionVariable: Handles torch.* functions that should be captured in the FX graph.
+Provides special handling for constant folding, tensor methods, and torch function overrides.
+Manages complex cases like out= variants and parameter construction.
+
+TorchCtxManagerClassVariable: Handles torch context managers like torch.no_grad(), autocast, etc.
+Provides implementations for entering/exiting these contexts during tracing.
+
+DispatchKeySetVariable: Represents torch.DispatchKeySet for managing dispatch keys and
+device-specific operations during tracing.
+
+The module includes special handling for:
+- Constant folding of pure functions
+- Tensor method calls
+- torch.nn.Parameter construction
+- __torch_function__ overrides
+- Context manager state tracking
+- Device and dtype management
+
+This is a core part of Dynamo's tracing system, translating torch operations into
+traceable graph nodes while preserving correct semantics and handling edge cases.
+"""
+
 import functools
 import inspect
 import logging
@@ -977,7 +1005,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, [packed_input_vt], {}
             )
             assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
-            flat_args_vts, in_spec_vt = out_vt.items
+            flat_args_vts, input_spec_vt = out_vt.items
             assert isinstance(flat_args_vts, ListVariable)
 
             # Handle the case when the input contains a non-graphable type.
@@ -1009,7 +1037,7 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
             #
             # TODO handle `pytree._register_constant`-ed values.
             try:
-                in_spec = in_spec_vt.as_python_constant()
+                input_spec = input_spec_vt.as_python_constant()
             except NotImplementedError:
                 unimplemented(
                     """
@@ -1025,10 +1053,10 @@ This error is most likely due to a call to `mark_traceable`-ed function, where o
             f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
                 fn.__name__, f_spec
             )
-            in_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                fn.__name__ + "_in_spec", in_spec
+            input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                fn.__name__ + "_input_spec", input_spec
             )
-            all_args = (f_spec_proxy, in_spec_proxy, *proxified_flat_args)
+            all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
             # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
             # the call and wrap output into a VariableTracker.
