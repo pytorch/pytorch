@@ -48,6 +48,7 @@ struct nextafter_functor {
 #if __METAL_VERSION__ >= 310
     return static_cast<T>(::metal::nextafter(a, b));
 #else
+    using U = typename bit_type<T>::type;
     if (a == b) {
       return a;
     }
@@ -55,9 +56,10 @@ struct nextafter_functor {
       return NAN;
     }
     if (a == 0) {
-      return b > 0 ? static_cast<T>(1.0) : static_cast<T>(-1.0);
+      constexpr auto eps = as_type<T>(static_cast<U>(1));
+      return b > 0 ? eps : -eps;
     }
-    auto bits = as_type<typename bit_type<T>::type>(a);
+    auto bits = as_type<U>(a);
     (a > 0) ^ (a > b) ? bits++ : bits--;
     return as_type<T>(bits);
 #endif
