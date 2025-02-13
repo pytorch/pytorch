@@ -1007,6 +1007,51 @@ def chunk_default(func, *args, **kwargs):
             for x in func(inp._values, **new_kwargs)
         ]
 
+@register_jagged_func(
+    torch.ops.aten.cumsum.default, "self: jt_all, dim: any, dtype: any?"
+)
+def async_cumsum(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    from .nested_tensor import nested_from_padded
+
+    inp = new_kwargs.pop("input")
+    dim = new_kwargs.pop("dim")
+
+    if dim < inp._ragged_idx:
+        raise RuntimeError("cumsum(): not supported for NestedTensor on batch dimension")
+    elif dim == inp._ragged_idx:
+        min_seqlen = inp._maybe_min_seqlen
+        max_seqlen = inp._maybe_max_seqlen
+        padded_max_S = max_seqlen
+
+        total_L = inp._values.shape[inp._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *inp.shape[: inp._ragged_idx],
+            padded_max_S,
+            *inp.shape[inp._ragged_idx + 1 :],
+        )
+        padded_inp = inp.to_padded_tensor(0.0, output_size=padded_shape)
+        return nested_from_padded(
+            func(padded_inp, dim),
+            offsets=inp._offsets,
+            ragged_idx=inp._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+    
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        len(inp._size), dim, inp._ragged_idx, "cumsum"
+    )
+    
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):

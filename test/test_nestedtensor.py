@@ -1648,6 +1648,23 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @onlyCPU
     @skipMeta
+    def test_nested_tensor_cumsum(self, device):
+        nt1 = torch.nested.nested_tensor([
+            torch.tensor([3, 2, 5, 6, 1]),
+            torch.tensor([2, 3, 4, 1]),
+            torch.tensor([1, 7, 6]),
+        ], layout=torch.jagged)
+        nt2 = torch.cumsum(nt1, dim=1)
+        expected = torch.nested.nested_tensor([
+            torch.tensor([3,  5, 10, 16, 17]),
+            torch.tensor([2,  5,  9, 10]),
+            torch.tensor([1, 8, 14]),
+        ], layout=torch.jagged)
+        self.assertEqual(expected.values(), nt2.values())
+
+
+    @onlyCPU
+    @skipMeta
     @dtypes(torch.float)
     def test_nested_tensor_sum_dim(self, device, dtype):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
