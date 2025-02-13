@@ -1154,18 +1154,31 @@ Vectorized<uint8_t> inline clamp_min(const Vectorized<uint8_t>& a, const Vectori
 }
 
 template<typename T>
-Vectorized<int32_t> inline convert_to_int32(const T* ptr) {
-  return Vectorized<int32_t>::loadu(ptr);
+std::enable_if_t<!(std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>), Vectorized<int32_t>>
+inline convert_to_int32(const T* ptr, int count=Vectorized<int32_t>::size()) {
+  return Vectorized<int32_t>::loadu(ptr, count);
 }
 
-template<>
-Vectorized<int32_t> inline convert_to_int32<int8_t>(const int8_t* ptr) {
-  return _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
+template<typename T>
+std::enable_if_t<std::is_same_v<T, int8_t>, Vectorized<int32_t>>
+inline convert_to_int32(const int8_t* ptr, int count=Vectorized<int32_t>::size()) {
+  if (count == Vectorized<int32_t>::size()) {
+    return _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
+  } else {
+    auto a = Vectorized<int8_t>::loadu(ptr, count);
+    return _mm512_cvtepi8_epi32(_mm512_castsi512_si128(a));
+  }
 }
 
-template<>
-Vectorized<int32_t> inline convert_to_int32<uint8_t>(const uint8_t* ptr) {
-  return _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
+template<typename T>
+std::enable_if_t<std::is_same_v<T, uint8_t>, Vectorized<int32_t>>
+inline convert_to_int32(const uint8_t* ptr, int count=Vectorized<int32_t>::size()) {
+  if (count == Vectorized<int32_t>::size()) {
+    return _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
+  } else {
+    auto a = Vectorized<uint8_t>::loadu(ptr, count);
+    return _mm512_cvtepu8_epi32(_mm512_castsi512_si128(a));
+  }
 }
 
 template <>
