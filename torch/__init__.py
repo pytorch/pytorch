@@ -610,7 +610,6 @@ class SymFloat:
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
-        self.node.expr = sympy.Float(self.node.expr)
 
     def __truediv__(self, other):
         if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
