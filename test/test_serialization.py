@@ -1155,7 +1155,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL print"):
                 torch.load(f, weights_only=True)
             with torch.serialization.safe_globals([print]):
                 f.seek(0)
@@ -1248,7 +1248,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             if unsafe_global:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` or .* to allowlist"):
+                                            r"use `torch.serialization.add_safe_globals\(\[torch.testing._internal.two_tensor.TwoTensor\]\)` or .* to allowlist"):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
