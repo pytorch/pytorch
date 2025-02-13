@@ -641,6 +641,31 @@ MPS_DOWNSTREAM_XFAILLIST = {
     "nn.functional.conv3d": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=15.0),
 }
 
+"""XFails specific to MacOS 13"""
+MACOS_13_XFAILLIST = {
+    # FFT and BFloat16 support was added in MacOS 14
+    "bfloat16": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.fft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.fft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.fftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.hfft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.hfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.hfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ifft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ifft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ifftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ihfft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ihfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.ihfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.irfft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.irfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.irfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.rfft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+}
+
 """Other uncategorized xfails"""
 OTHER_XFAILLIST = {
     # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -815,6 +840,7 @@ append_skips(XFAILLIST_GRAD)
 append_skips(COMPLEX_XFAILLIST)
 append_skips(OTHER_XFAILLIST)
 append_skips(MPS_DOWNSTREAM_XFAILLIST)
+append_skips(MACOS_13_XFAILLIST)
 append_skips(ERRORINPUT_XFAILLIST)
 
 
