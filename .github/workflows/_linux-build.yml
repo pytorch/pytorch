@@ -160,12 +160,13 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         run: .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
-        if: always()
+        if: always() && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
