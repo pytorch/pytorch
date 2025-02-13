@@ -81,6 +81,7 @@ def mps_ops_grad_modifier(ops):
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
+        '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
@@ -334,6 +335,7 @@ def mps_ops_modifier(ops):
         'sgn',
         'sinc',
         'slice',
+        'special.spherical_bessel_j0',
         'special.zeta',
         'split',
         'split_with_sizes',
@@ -788,7 +790,6 @@ def mps_ops_modifier(ops):
         'special.ndtri': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
-        'special.spherical_bessel_j0': None,
         'special.xlog1py': None,
         'svd_lowrank': None,
         'symeig': None,
@@ -798,7 +799,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'segment_reduce_': None,
-        '_upsample_bilinear2d_aa': None,
+        '_upsample_bilinear2d_aa': [torch.uint8],  # uint8 is for CPU only
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -2722,16 +2723,16 @@ class TestMPS(TestCaseMPS):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
 
-        def run_lu_factor_ex_test(size, *batch_dims, check_errors):
+        def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
             input_mps = input_cpu.to('mps')
             out_cpu = torch.linalg.lu_factor_ex(input_cpu, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
             out_cpu = torch.linalg.lu_factor_ex(input_cpu.mT, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps.mT, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
         # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4]
@@ -2744,7 +2745,9 @@ class TestMPS(TestCaseMPS):
                     run_lu_factor_ex_test(size, batch_size, check_errors=check_errors)
         # test >3D matrices
         run_lu_factor_ex_test(32, 10, 10, check_errors=False)
-        run_lu_factor_ex_test(32, 2, 2, 2, 2, 10, 10, check_errors=True)
+        run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
+        # big matrix check with batch size > 1
+        run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -12577,6 +12580,10 @@ class TestConsistency(TestCaseMPS):
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
+
+            if op.name == "_upsample_bilinear2d_aa" and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+                # Similar to the above, float vs double precision aresults in slight error
+                atol, rtol = 2e-5, 2e-6
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
