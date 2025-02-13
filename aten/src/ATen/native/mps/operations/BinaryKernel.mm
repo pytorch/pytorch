@@ -8,6 +8,7 @@
 #include <ATen/native/mps/operations/BinaryKernel.h>
 // For MTLLanguageVersion_3_1
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -30,7 +31,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
+static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name, bool supports_dense = true) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
   Tensor input = iter.input(0);
@@ -44,7 +45,15 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   const uint32_t numThreads = iter.numel();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto computeEncoder = mpsStream->commandEncoder();
+      if (supports_dense && iter.is_contiguous()) {
+        const auto kernel_name = fmt::format("{}_dense_{}", func_name, scalarToMetalTypeString(input));
+        auto binaryPSO = lib.getPipelineStateForFunc(kernel_name);
+        [computeEncoder setComputePipelineState:binaryPSO];
+        mtl_setArgs(computeEncoder, input, other, out);
+        mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
+        return;
+      }
       const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
@@ -80,7 +89,7 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   auto iter =
       TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
 
-  mps::binary_mps_impl(iter, "complex_mul");
+  mps::binary_mps_impl(iter, "complex_mul", false);
 }
 
 } // namespace mps
@@ -101,12 +110,12 @@ static void fmin_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
-  mps::binary_mps_impl(iter, "copysign");
+  mps::binary_mps_impl(iter, "copysign", false);
 }
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
-  mps::binary_mps_impl(iter, "nextafter_kernel");
+  mps::binary_mps_impl(iter, "nextafter_kernel", false);
 }
 
 static void zeta_mps_kernel(TensorIteratorBase& iter) {
@@ -132,7 +141,7 @@ Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
 
-  mps::binary_mps_impl(iter, "polar");
+  mps::binary_mps_impl(iter, "polar", false);
   return output;
 }
 
@@ -148,7 +157,7 @@ Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) 
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
 
-  mps::binary_mps_impl(iter, "complex_kernel");
+  mps::binary_mps_impl(iter, "complex_kernel", false);
   return output;
 }
 } // namespace at::native
