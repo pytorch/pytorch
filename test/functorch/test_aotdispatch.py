@@ -6415,6 +6415,125 @@ metadata incorrectly.
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
 
+    def test_qsubclass(self):
+        from torch.testing._internal.subclasses import I32QuantRWTensor
+
+        i32 = torch.ones(3, 5, dtype=torch.int32)
+        inp = I32QuantRWTensor.from_src(i32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
+    def test_qsubclass_1dim(self):
+        from torch.testing._internal.subclasses import I32QuantRWTensor
+
+        i32 = torch.ones(5, dtype=torch.int32)
+        inp = I32QuantRWTensor.from_src(i32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
+    def test_nested_qsubclass(self):
+        from torch.testing._internal.subclasses import F32_QI32QuantRWTensor
+
+        f32 = torch.randn(3, 5, dtype=torch.float32)
+        inp = F32_QI32QuantRWTensor.from_src(f32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
+    def test_dynamic_sym_missing_source_sc(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x[0]
+
+        x = torch.randn(3, 4)
+        sx = WrapperSubclass(x)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+
+        # y = fn(x)
+        y_sc = fn(sx)
+
+    def test_sc_glu(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return torch.nn.functional.glu(x, 0)
+
+        x = torch.randn(0, 1, 2, 0)
+        torch._dynamo.mark_dynamic(x, 2)
+        x = WrapperSubclass(x)
+        # torch._dynamo.mark_dynamic(x, 1)
+
+        y_sc = fn(x)
+
+    def test_sym_accum(self):
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._logging.set_logs(recompiles=True)
+
+        @torch.compile
+        def accumulate(X0, start):
+            start = start.item()
+            torch._check(start >= 0)
+            torch._check(start < X0.size(0))
+            result = X0[start]
+            for i in range(0, 10 - start + 1):
+                idx = start + 1 + i
+                torch._check(idx >= 0)
+                torch._check(idx < X0.size(0))
+                result += X0[idx]
+            return result
+
+        X0 = torch.randn(100, 100)
+
+        for i in range(10):
+            print(i)
+            accumulate(X0, torch.tensor(i))
+
+    def test_sc_hop(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return out_dtype(torch.ops.aten.mm.default, torch.int32, x, self.weight)
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        m = M(weight)
+        x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        x = WrapperSubclass(x)
+
+        y = torch.compile(m, backend="aot_eager")(x)
+
+    def test_sc_layout(self):
+        from torch._functorch._aot_autograd.functional_utils import from_fun
+
+        wsc = WrapperSubclass(torch.randn(1, 2))
+        print(wsc.layout)
+        wsc_fun = from_fun(wsc)
+        print(wsc_fun.layout)
+
+        x = WrapperSubclass(from_fun(torch.randn(1, 2)))
+        print(x.layout)
+
+        x = WrapperSubclass.__tensor_unflatten__(
+            {"a": from_fun(torch.randn(1, 2))}, None, None, None
+        )
+        print(x.layout)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

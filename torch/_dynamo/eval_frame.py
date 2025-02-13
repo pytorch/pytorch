@@ -24,6 +24,7 @@ import traceback
 import types
 import warnings
 import weakref
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -855,6 +856,28 @@ def optimize(*args, **kwargs):
     return _optimize(rebuild_ctx, *args, **kwargs)
 
 
+_dynamo_override_backend: Optional[str] = None
+
+
+def get_dynamo_override_backend() -> Optional[str]:
+    global _dynamo_override_backend
+    return _dynamo_override_backend
+
+
+def set_dynamo_override_backend(backend: Optional[str]):
+    global _dynamo_override_backend
+    _dynamo_override_backend = backend
+
+
+@contextmanager
+def dynamo_override_backend(backend: str):
+    global _dynamo_override_backend
+    original_dynamo_override_backend = _dynamo_override_backend
+    _dynamo_override_backend = backend
+    yield
+    _dynamo_override_backend = original_dynamo_override_backend
+
+
 def _optimize(
     rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
     backend="inductor",
@@ -906,6 +929,10 @@ def _optimize(
         or (not justknobs_check("pytorch/compiler:enable_dynamo"))
     ):
         return _NullDecorator()
+
+    override_backend = get_dynamo_override_backend()
+    if override_backend is not None:
+        backend = override_backend
 
     backend = get_compiler_fn(backend)
 
