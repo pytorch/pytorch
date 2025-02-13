@@ -104,6 +104,9 @@ class MPSBasicTests(TestCase):
     def test_pointwise_digamma(self):
         self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_sinc(self):
+        self.common(torch.special.sinc, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_zeta(self):
         self.common(
             torch.special.zeta,
@@ -161,6 +164,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
