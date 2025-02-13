@@ -7,21 +7,51 @@ import subprocess
 import requests
 
 
+WITH_LF = False  # False
+LF = "lf." if WITH_LF else ""
+
 CONFIGS = {
     "dynamo39": {
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
+    "aot_eager39": {
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 3, 3, {LF}linux.12xlarge)",
+    },
+    "subclasses39": {
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 3, 3, {LF}linux.12xlarge)",
+    },
     "dynamo311": {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "eager311": {
-        "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+    "eager313": {
+        f"linux-focal-py3.13-clang10 / test (default, 1, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 2, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 3, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 4, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 5, 5, {LF}linux.4xlarge)",
+    },
+    "dynamo_wrapped313": {
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 1, 3, {LF}linux.2xlarge)",
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 2, 3, {LF}linux.2xlarge)",
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 3, 3, {LF}linux.2xlarge)",
+    },
+    "aot_eager313": {
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 3, 3, {LF}linux.12xlarge)",
+    },
+    "subclasses313": {
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 3, 3, {LF}linux.12xlarge)",
     },
 }
 
@@ -58,9 +88,11 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     pprint.pprint(workflow_jobs)
 
     # Figure out which jobs we need to download logs for
+    # TODO: Add double checking WITH_LF / without
     required_jobs = []
     for config in configs:
         required_jobs.extend(list(CONFIGS[config]))
+
     for job in required_jobs:
         assert (
             job in workflow_jobs
@@ -73,6 +105,7 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
 
     def download_report(job_name, subdir):
         job_id = workflow_jobs[job_name]
+
         for listing in listings:
             name = listing["name"]
             if not name.startswith("test-reports-"):

@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
     run_tests,
+    skipIfTorchSubclasses,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -624,6 +625,7 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfTorchSubclasses("TBD")
     def test_cuda_bad_call(self):
         # Initialize CUDA
         t = torch.zeros(5, 5).cuda().cpu()
@@ -924,6 +926,7 @@ if __name__ == "__main__":
         TEST_WITH_ASAN,
         "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024",
     )
+    @skipIfTorchSubclasses("TBD")
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
             var = torch.arange(1.0, 26).view(5, 5).requires_grad_(requires_grad)
@@ -1039,6 +1042,7 @@ if __name__ == "__main__":
             msg=f'Failed to serialize successfully for "{device}" device!',
         )
 
+    @skipIfTorchSubclasses("TBD")
     def test_empty_shared(self):
         t = torch.tensor([])
         t.share_memory_()

@@ -82,6 +82,9 @@ if test_dir is None:
 
     inductor_expected_failures = set()
     inductor_skips = set()
+
+    subclasses_expected_failures = set()
+    subclasses_skips = set()
 else:
     dynamo_failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
     dynamo_skips_directory = os.path.join(test_dir, "dynamo_skips")
@@ -94,6 +97,15 @@ else:
 
     inductor_expected_failures = set(os.listdir(inductor_failures_directory))
     inductor_skips = set(os.listdir(inductor_skips_directory))
+
+    subclasses_failures_directory = os.path.join(
+        test_dir, "subclasses_expected_failures"
+    )
+    subclasses_skips_directory = os.path.join(test_dir, "subclasses_skips")
+
+    subclasses_expected_failures = set(os.listdir(subclasses_failures_directory))
+    subclasses_skips = dynamo_skips | set(os.listdir(subclasses_skips_directory))
+
 
 # TODO: due to case sensitivity problems, for now list these files by hand
 extra_dynamo_skips = {
@@ -133,4 +145,11 @@ if len(inductor_intersection) > 0:
     raise AssertionError(
         "there should be no overlap between inductor_expected_failures "
         "and inductor_skips, got " + str(inductor_intersection)
+    )
+
+subclasses_intersection = subclasses_expected_failures.intersection(subclasses_skips)
+if len(subclasses_intersection) > 0:
+    raise AssertionError(
+        "there should be no overlap between subclasses_expected_failures "
+        "and subclasses_skips, got " + str(subclasses_intersection)
     )

@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
+    skipIfTorchSubclasses,
     subtest,
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
@@ -3974,6 +3975,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.split(nt, 2, 1)
 
+    @skipIfTorchSubclasses("TBD")
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
