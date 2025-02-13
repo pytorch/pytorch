@@ -7,7 +7,7 @@ import subprocess
 import requests
 
 
-WITH_LF = True # False
+WITH_LF = False  # False
 LF = "lf." if WITH_LF else ""
 
 CONFIGS = {

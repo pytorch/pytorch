@@ -6467,6 +6467,18 @@ metadata incorrectly.
         # y = fn(x)
         y_sc = fn(sx)
 
+    def test_sc_glu(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return torch.nn.functional.glu(x, 0)
+
+        x = torch.randn(0, 1, 2, 0)
+        torch._dynamo.mark_dynamic(x, 2)
+        x = WrapperSubclass(x)
+        # torch._dynamo.mark_dynamic(x, 1)
+
+        y_sc = fn(x)
+
     def test_sym_accum(self):
         torch._dynamo.config.capture_scalar_outputs = True
         torch._logging.set_logs(recompiles=True)
@@ -6505,6 +6517,22 @@ metadata incorrectly.
         x = WrapperSubclass(x)
 
         y = torch.compile(m, backend="aot_eager")(x)
+
+    def test_sc_layout(self):
+        from torch._functorch._aot_autograd.functional_utils import from_fun
+
+        wsc = WrapperSubclass(torch.randn(1, 2))
+        print(wsc.layout)
+        wsc_fun = from_fun(wsc)
+        print(wsc_fun.layout)
+
+        x = WrapperSubclass(from_fun(torch.randn(1, 2)))
+        print(x.layout)
+
+        x = WrapperSubclass.__tensor_unflatten__(
+            {"a": from_fun(torch.randn(1, 2))}, None, None, None
+        )
+        print(x.layout)
 
 
 # entries in here don't work and need to be fixed.

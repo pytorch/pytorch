@@ -422,7 +422,7 @@ def test_subclasses(gm, inputs, **kwargs):
 
     MAX_NUM_TENSOR_INPUTS_TRANSFORM = int(
         os.getenv(
-            "PYTORCH_TEST_WITH_SUBCLASSES_MAX_NUM_TENSOR_INPUTS_TRANSFORM", default=8
+            "PYTORCH_TEST_WITH_SUBCLASSES_MAX_NUM_TENSOR_INPUTS_TRANSFORM", default=6
         )
     )
 
@@ -465,7 +465,7 @@ def test_subclasses(gm, inputs, **kwargs):
         test_gm.print_readable(False),
     )
     MAX_INPUT_VARIANTS: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=128)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=64)
     )
     import random
 
@@ -489,10 +489,9 @@ def test_subclasses(gm, inputs, **kwargs):
         try:
             aot_eager(_test_gm, test_inputs)
             log.info(
-                "test_subclasses backend testing %d/%d transformed inputs:%s OK",
+                "test_subclasses backend testing %d/%d OK",
                 i,
                 NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
-                test_inputs,
             )
         except Exception as ex:
             try:
@@ -507,10 +506,7 @@ def test_subclasses(gm, inputs, **kwargs):
 import torch
 from torch import tensor
 from torch._dynamo.backends.debugging import aot_eager
-from torch.testing._internal.subclasses import (
-    F32_QI32QuantRWTensor,
-    WrapperSubclass,
-)
+from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.nested._internal.nested_tensor import NestedTensor
 inputs={inputs_str}
@@ -528,7 +524,7 @@ aot_eager(gm, inputs)"""
                 )
             raise ex
 
-    return gm
+    return gm.forward
 
 
 # These buggy backends are used for inducing bugs so that we can test

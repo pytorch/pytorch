@@ -48,6 +48,9 @@ def to_fun(t):
         return t
 
 
+#
+
+
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
         attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]

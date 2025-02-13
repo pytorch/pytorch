@@ -374,7 +374,9 @@ def similarity(x: Failure, y: Failure) -> int:  # [0, 100]
     r = fuzz.ratio(x.msg, y.msg)
     return r
 
-SIMILARITY_THRESHOLD: int = 75
+
+SIMILARITY_THRESHOLD: int = 78
+
 
 def categorize(categories, f: Failure):
     if not categories:
@@ -407,11 +409,21 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
 
     i = 0
     num_tcs = len(test_tcs.items())
-    print_step = int(num_tcs / 1000 / 10) * 1000
+    progress_n = 10
+    print_step = int(num_tcs / 1000 / progress_n) * 1000
+    import time
+
+    prev_time_s = time.time()
+    progress_i = 0
     with open(f"{dirname}/report", "w") as file:
         for _i, (k, tv) in enumerate(test_tcs.items()):
             if _i % print_step == 0:
-                print(f"...processing... {_i}/{num_tcs}")
+                ts = time.time()
+                print(
+                    f"[{progress_i}/{progress_n}]...processing... {_i}/{num_tcs} dur_s:{int(ts - prev_time_s)}"
+                )
+                prev_time_s = ts
+                progress_i += 1
 
             if tv.is_skipped():
                 continue
@@ -483,13 +495,14 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir, name="
     print("*** Find passed in dynamo, missing in SC")
     find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
-    #report_control_pass_test_notpass(
+    # report_control_pass_test_notpass(
     #   tcs_ae,
     #   tcs_sc,
     #   f"test_pass_ae_notpass_sc_{name}"
-    #)
-    #report_control_pass_test_notpass(
+    # )
+
+    # report_control_pass_test_notpass(
     #   tcs_dw,
     #   tcs_ae,
-    #   f"test_pass_dw_notpass_aw_{name}"
-    #)
+    #   f"test_pass_dw_notpass_ae_{name}"
+    # )
