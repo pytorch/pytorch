@@ -108,6 +108,50 @@ class CodegenInductorTest(InductorTestCase):
             config_patches=config_patches,
         )
         self.count_code("@triton.jit", code, 3)
+    
+    @parametrize("shape,alignment_bytes", 
+        [
+        ((512, 1), 32), 
+        ((32, 30), 64), 
+        ]
+    )
+    def test_concat_alignments(self, shape, alignment_bytes):
+        """
+        When we generate no-op concat kernel, alignment of the inputs
+        and outputs should be honored based on padding_alignment_bytes.
+        """
+
+        def foo(x, y):
+            return torch.cat([x, y], dim=0)
+
+        def get_input(size: list[int], alignment_bytes: int) -> torch.Tensor:
+            device = torch.device("cpu")
+            size_padded = list(size)
+            elem_size = 4 # float32
+            pad_elems = alignment_bytes // elem_size
+            size_padded[-1] = (size_padded[-1] + pad_elems - 1) // pad_elems * pad_elems
+            full = torch.randn(size_padded, dtype=torch.float32).to(device)
+            view = torch.as_strided(full, size, full.stride())
+            return view
+
+        x = get_input(shape, alignment_bytes)
+        y = get_input(shape, alignment_bytes)
+
+        _, code = self.run_and_compare(foo, x, y,
+            config_patches={
+                "padding_alignment_bytes": alignment_bytes,
+                "disable_padding_cpu": False,
+                "pad_channels_last": True,
+                "pad_outputs": True,
+                "padding_stride_threshold": 0,
+                "triton.prefer_nd_tiling": True,
+                "max_pointwise_cat_inputs" : 1,
+        })
+       
+        output_shape = (shape[0] + shape[0], shape[1])
+        output_stride = x.stride()
+        output_line = f"buf3 = empty_strided_cpu({output_shape}, {output_stride}, torch.float32)"
+        self.count_code(output_line, code, 1)
 
 
 if __name__ == "__main__":

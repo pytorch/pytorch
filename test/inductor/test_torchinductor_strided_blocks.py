@@ -895,7 +895,6 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
-
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
 @config.patch("triton.use_block_ptr", True)
