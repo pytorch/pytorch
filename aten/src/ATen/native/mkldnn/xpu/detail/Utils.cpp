@@ -207,7 +207,59 @@ bool is_broadcast(const at::Tensor& t) {
   return false;
 }
 
+void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
+  // oneDNN support one of src and wei broadcasted on batch dim
+  // tensor shape = [b, m, n]
+  constexpr int dim_b = 0;
+  constexpr int dim_m = 1;
+  constexpr int dim_n = 2;
+  auto only_broadcasted_on_batch =
+      [dim_b, dim_m, dim_n](const at::Tensor& tensor) {
+        auto tensor_dim = tensor.dim();
+        bool is_bmm = tensor_dim == 3;
+        if (!is_bmm)
+          return false;
+        bool broadcast_on_mn =
+            tensor.stride(dim_m) == 0 || tensor.stride(dim_n) == 0;
+        bool has_broadcast_on_batch =
+            tensor.stride(dim_b) == 0 && tensor.size(dim_b) > 1;
+        // We do not support broadcast on dim m,n,k.
+        // We can further optimize the case that both dim b and m are
+        // broadcasted.
+        if (broadcast_on_mn)
+          return false;
+        return has_broadcast_on_batch;
+      };
+  bool m1_only_batch_broadcasted = only_broadcasted_on_batch(m1);
+  bool m2_only_batch_broadcasted = only_broadcasted_on_batch(m2);
+  bool has_broadcast = m1_only_batch_broadcasted || m2_only_batch_broadcasted;
+  bool both_broadcast = m1_only_batch_broadcasted && m2_only_batch_broadcasted;
+  if (both_broadcast) {
+    // oneDNN does not support both src and wei broadcasted on batch dim. We
+    // copy the smaller one.
+    if (m1.size(dim_m) < m2.size(dim_n)) {
+      m1 = m1.contiguous();
+      m1_only_batch_broadcasted = false;
+    } else {
+      m2 = m2.contiguous();
+    }
+  }
+  if (has_broadcast) {
+    at::Tensor& tensor = m1_only_batch_broadcasted ? m1 : m2;
+    tensor = tensor
+                 .as_strided(
+                     {tensor.size(dim_m), tensor.size(dim_n)},
+                     {tensor.stride(dim_m), tensor.stride(dim_n)})
+                 .unsqueeze(dim_b);
+  }
+  return;
+}
+
 bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
+  // TODO: We always call contiguous on dst.
+  // delete it after fix the case that dst is transposed on batch and m dim.
+  if (is_dst)
+    return false;
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -232,11 +284,10 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
   if (is_broadcast(tensor)) {
     return false;
   }
-
   if (is_dst) {
-    // The memory format of the destination tensor should always
-    // be plain with n axis contiguous
-    if (strides[-1] != 1)
+    // The memory format of the destination tensor should always be plain
+    // with n axis contiguous
+    if (strides[tensor_dim - 1] != 1)
       return false;
   } else {
     // the src and weight must have at least one of the axes
