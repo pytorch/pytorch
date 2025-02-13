@@ -1247,8 +1247,12 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(sd, f, pickle_protocol=pickle_protocol)
             f.seek(0)
             if unsafe_global:
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[torch.testing._internal.two_tensor.TwoTensor\]\)` or .* to allowlist"):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "use `torch.serialization.add_safe_globals"
+                    r"\(\[torch.testing._internal.two_tensor.TwoTensor\]\)`"
+                    " or .* to allowlist"
+                ):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
