@@ -957,7 +957,7 @@ class SliceVariable(VariableTracker):
             stop, variables.TensorVariable
         ):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
-        self.items = [start, stop, step]
+        self.items = (start, stop, step)
 
         super().__init__(**kwargs)
 
