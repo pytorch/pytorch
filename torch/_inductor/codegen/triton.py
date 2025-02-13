@@ -3554,6 +3554,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
+        
+        self.signature = signature
 
         return code.getvalue()
 
@@ -3659,6 +3661,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             arg_types=arg_types,
             grid_fn=grid_fn.__name__,
             triton_meta=self.triton_meta,
+            signature=self.signature,
         )
 
         for ws in reversed(self.args.workspace_args):

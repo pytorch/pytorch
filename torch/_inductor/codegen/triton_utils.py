@@ -161,9 +161,9 @@ def equal_1_arg_indices(
     indices: Optional[list[int]] = None,
 ) -> tuple[int, ...]:
     if indices is None:
-        indices = list(range(len(args)))
+        indices = list(range(len(args) if args is not None else 0))
 
-    equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
+    equal_to_1 = tuple(i for i, arg in zip(indices, args or []) if _arg_equals_1(arg))
 
     return equal_to_1
 
