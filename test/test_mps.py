@@ -701,7 +701,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
@@ -6528,14 +6527,23 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
-    def test_cholesky(self):
+    def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_cholesky_test(size, *batch_dims, upper):
+        def run_cholesky_test(size, *batch_dims, upper=False, check_errors=False):
+            if check_errors:
+                # expect failure for non-positive definite matrix
+                input_mps = torch.eye(size, dtype=torch.float32, device="mps")
+                input_mps[0, 0] = -1
+                error_msg = r'The factorization could not be completed because the input is not positive-definite'
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
+                return
+            # output checks for positive definite matrix
             input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
             input_mps = input_cpu.to('mps')
-            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
-            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
             self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
 
         # test with different even/odd matrix sizes
@@ -6551,6 +6559,18 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_cholesky_test(128, 10, 10, upper=False)
         run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
+        run_cholesky_test(32, 2, upper=False, check_errors=True)
+        run_cholesky_test(32, 2, upper=True, check_errors=True)
+
+    def test_linalg_cholesky_info(self):
+        # non psd matrix with leading minor of order 2 being not positive definite
+        A = torch.tensor([
+            [4.0, 1.0, 0.0],
+            [1.0, -2.0, 1.0],
+            [0.0, 1.0, 3.0]
+        ], device="mps")
+        with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
