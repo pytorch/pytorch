@@ -462,7 +462,7 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
+if(NOT EMSCRIPTEN)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
     # excessively spills intermediate vector registers to the stack
