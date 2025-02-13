@@ -3,6 +3,7 @@ import functools
 import operator
 import os
 import unittest.mock as mock
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -203,6 +204,41 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
+
+    def test_allow_in_graph_dataclass(self):
+        class MyOutput(NamedTuple):
+            foo: Any
+            bar: Any
+
+        @torch.compiler.allow_in_graph
+        def trace_me(dc):
+            return dc.bar + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(d):
+            inner = MyOutput(foo=d, bar=d+1)
+            outer = MyOutput(foo=inner, bar=d+2)
+            return trace_me(outer)
+
+        func(torch.randn(10))
+
+        gm_str = backend.graphs[0].print_readable(print_output=False)
+        self.assertExpectedInline(
+            torch._dynamo.testing.normalize_gm(gm_str),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_d_: "f32[10]"):
+        l_d_ = L_d_
+
+        add: "f32[10]" = l_d_ + 1
+
+        add_1: "f32[10]" = l_d_ + 2
+
+        trace_me: "f32[10]" = dynamo_test_decorators_trace_me(dynamo_test_decorators_MyOutput(dynamo_test_decorators_MyOutput(l_d_, add), add_1));  l_d_ = add = add_1 = None
+        return (trace_me,)
+""",  # NOQA: B950
+        )
 
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
