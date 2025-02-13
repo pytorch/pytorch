@@ -58,13 +58,31 @@ class GdsFile:
 
     cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
 
+    See the `cufile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+    for more details.
+
     Args:
         filename (str): Name of the file to open.
         flags (int): Flags to pass to ``os.open`` when opening the file. ``os.O_DIRECT`` will
             be added automatically.
 
-    .. _CUDA GPUDirect Storage Documentation:
-        https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api
+    Example::
+
+        >>> # xdoctest: +SKIP("gds filesystem requirements")
+        >>> src1 = torch.randn(1024, device="cuda")
+        >>> src2 = torch.randn(2, 1024, device="cuda")
+        >>> file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+        >>> file.save_storage(src1.untyped_storage(), offset=0)
+        >>> file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+        >>> dest1 = torch.empty(1024, device="cuda")
+        >>> dest2 = torch.empty(2, 1024, device="cuda")
+        >>> file.load_storage(dest1.untyped_storage(), offset=0)
+        >>> file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        >>> torch.equal(src1, dest1)
+        True
+        >>> torch.equal(src2, dest2)
+        True
+
     """
 
     def __init__(self, filename: str, flags: int):
