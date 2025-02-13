@@ -610,6 +610,10 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+
+        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
+            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -809,7 +813,7 @@ def _compile_fx_inner(
 
         # Don't clog up the main tlparse output with disabled cache
         if cache_info is not None:
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": f"fx_graph_cache_{cache_state}",
@@ -817,10 +821,13 @@ def _compile_fx_inner(
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-
         compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # Clear Compiled Triton Kernels per inductor compile, as the future objects
+    # may not be valid for use after they are run/autotuned
+    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
         logging.INFO,
@@ -913,7 +920,7 @@ class _InProcessFxCompile(FxCompile):
                 )
                 return fd.getvalue()
 
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "fx_graph_runnable",
@@ -992,7 +999,10 @@ class _InProcessFxCompile(FxCompile):
                             "name": "inductor_post_to_pre_grad_nodes",
                             "encoding": "json",
                         },
-                        payload_fn=lambda: provenance_tracking_json,
+                        payload_fn=lambda: json.dumps(provenance_tracking_json),
+                    )
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
+                        provenance_tracking_json
                     )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1674,8 +1684,6 @@ def fw_compiler_freezing(
         aot_example_inputs,  # type: ignore[arg-type]
     )
 
-    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
-
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
 
@@ -1923,6 +1931,7 @@ def compile_fx(
                     colored=True,
                 ),
             )
+            torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 

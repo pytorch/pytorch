@@ -1,4 +1,24 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides Source classes that track the origins of values in PyTorch Dynamo.
+Sources represent where values come from (e.g. local variables, globals, attributes) and
+are used for guard generation and code reconstruction during compilation.
+
+The module includes specialized sources for:
+- Local variables and synthetic locals
+- Global variables and constants
+- Object attributes and method calls
+- NN module specialization (specialized vs unspecialized)
+- Random values and tensor properties
+- Default argument handling
+- FSDP (Fully Sharded Data Parallel) modules
+
+Sources play a key role in Dynamo's guard system by tracking value origins for
+guard generation, and in code reconstruction by providing methods to rebuild
+the code needed to recreate values.
+"""
+
 import dataclasses
 import enum
 from typing import Any, Optional, Union
@@ -554,18 +574,70 @@ class DictGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen):
+        # reconstruct dict.__getitem__(dct, key)
+
+        # Load dict.__getitem__
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dict_getitem")
+        )
+
+        # Load dict
         self.base.reconstruct(codegen)
+
+        # Load key
         if isinstance(self.index, Source):
             self.index.reconstruct(codegen)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+
+        codegen.extend_output(create_call_function(2, False))
 
     def name(self):
         if isinstance(self.index, ConstDictKeySource):
             return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
         else:
             return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class ListGetItemSource(GetItemSource):
+    """
+    Same as GetItemSource with reconstruct and name overridden to be list specific.
+    """
+
+    def reconstruct(self, codegen):
+        # Reconstruct list.__getitem__(lst, index) to avoid any side effects
+        # from possibly overridden __getitem__.
+
+        # Load list.__getitem__
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "list_getitem")
+        )
+
+        # Load the list
+        self.base.reconstruct(codegen)
+
+        # Load the index
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        # Index can be of following types
+        # 1) index is a slice - example 1:4
+        # 2) index is a constant - example string, integer
+        assert not isinstance(self.index, Source)
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            return f"list.__getitem__({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -795,6 +867,23 @@ def is_from_optimizer_source(source: Source):
 def is_from_defaults(source: Source):
     if isinstance(source, DefaultsSource):
         return True
+
+    # Accessed with func.__kwdefaults__["foo"]
+    if (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__kwdefaults__"
+    ):
+        return True
+
+    # Accessed with func.__defaults__[0]
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__defaults__"
+    ):
+        return True
+
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False

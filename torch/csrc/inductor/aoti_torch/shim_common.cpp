@@ -120,6 +120,7 @@ const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
 AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
+AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
@@ -1153,7 +1154,19 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << '\n';
-  std::cout << "Dtype: " << t->dtype() << '\n';
+
+  // Print dtypes and for float types, print exact precision
+  auto scalarType = t->scalar_type();
+  if (scalarType == at::ScalarType::Float) {
+    std::cout << "Dtype: float32" << std::endl;
+  } else if (scalarType == at::ScalarType::Half) {
+    std::cout << "Dtype: float16" << std::endl;
+  } else if (scalarType == at::ScalarType::BFloat16) {
+    std::cout << "Dtype: bfloat16" << std::endl;
+  } else {
+    std::cout << "Dtype: " << t->dtype() << '\n';
+  }
+
   if (numel > 0) {
     // torch/aten `mean()` function only supports float and complex dtypes
     // See:
