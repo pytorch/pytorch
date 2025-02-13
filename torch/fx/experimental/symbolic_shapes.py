@@ -287,6 +287,7 @@ def uninteresting_files() -> set[str]:
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
+    import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
 
@@ -303,6 +304,8 @@ def uninteresting_files() -> set[str]:
         torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
+        torch._logging._internal,
+        torch._logging.structured,
     ]
     import torch._dynamo.guards
 
@@ -4244,10 +4247,8 @@ class ShapeEnv:
                 "symbol": str(symbol),
                 "node_id": id(sym_node),
                 "vr": f"[{vr.lower}, {vr.upper}]",
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(),
             },
         )
 
@@ -5902,6 +5903,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5940,6 +5942,18 @@ class ShapeEnv:
             + maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
+        )
+
+        dtrace_structured(
+            "guard_on_data_dependent_error",
+            metadata_fn=lambda: {
+                "expr": repr(expr),
+                "unhinted_expr": repr(unhinted_expr),
+                "expr_id": id(expr_sym_node),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
@@ -6756,10 +6770,10 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
+                                "expr_node_id": id(expr_sym_node),
                             },
                         )
                         dtrace_structured(
@@ -6767,13 +6781,13 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
+                                "expr_node_id": id(expr_sym_node),
+                                "user_stack": structured.get_user_stack(3),
+                                "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },
@@ -6787,6 +6801,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
+                            expr_sym_node=expr_sym_node,
                         )
                 else:
                     expr = new_expr

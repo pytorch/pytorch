@@ -13902,18 +13902,13 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_cholesky_ex_out
+    MPS: linalg_cholesky_ex_out_mps
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
-  dispatch:
-    CompositeImplicitAutograd: linalg_cholesky
-    MPS: linalg_cholesky_mps
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CompositeImplicitAutograd: linalg_cholesky_out
-    MPS: linalg_cholesky_out_mps
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg

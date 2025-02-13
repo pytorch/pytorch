@@ -126,7 +126,9 @@ def _type_repr(obj: object) -> str:
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    if isinstance(obj, type):
+    # Extension: If we don't ignore GenericAlias then `list[int]` will print
+    # simply "list".
+    if isinstance(obj, type) and not isinstance(obj, types.GenericAlias):
         if obj.__module__ == "builtins":
             return obj.__qualname__
         return f"{obj.__module__}.{obj.__qualname__}"

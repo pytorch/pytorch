@@ -380,8 +380,15 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
 #if SYCL_COMPILER_VERSION >= 20250000
     auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
-    auto free = c10::xpu::get_raw_device(device_index)
-                    .get_info<sycl::ext::intel::info::device::free_memory>();
+    auto& device = c10::xpu::get_raw_device(device_index);
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        at::xpu::getDeviceProperties(device_index)->name,
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
     return std::make_tuple(free, total);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(

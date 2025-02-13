@@ -1,5 +1,28 @@
 # mypy: ignore-errors
 
+"""
+Function-related variable tracking classes for Dynamo's symbolic execution.
+
+This module contains classes that track different types of functions during graph
+compilation, including:
+- User-defined functions and methods
+- Built-in functions and methods
+- Wrapped functions (e.g. from decorators)
+- Special function types (e.g. functools.partial)
+- Triton kernels and related function types
+
+These classes are responsible for:
+- Tracking function calls and their arguments
+- Managing function closures and cell variables
+- Handling function attributes and special methods
+- Maintaining guards for function identity and closure contents
+- Supporting function inlining and specialization
+- Enabling proper symbolic execution of different function types
+
+The variable trackers here work together with the rest of Dynamo to enable
+accurate graph capture while handling Python's various function-related behaviors.
+"""
+
 import builtins
 import functools
 import inspect

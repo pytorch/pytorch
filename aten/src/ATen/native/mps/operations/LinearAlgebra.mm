@@ -20,6 +20,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_cholesky_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
@@ -1051,7 +1052,11 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
   }
 }
 
-static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor& out) {
+static void linalg_cholesky_mps_impl(const Tensor& input,
+                                     bool upper,
+                                     bool check_errors,
+                                     const Tensor& out,
+                                     const Tensor& info) {
   using namespace mps;
 
   TORCH_CHECK(out.is_mps());
@@ -1061,9 +1066,11 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
   if (input.numel() == 0 || out.numel() == 0) {
     out.zero_();
-    return out;
+    return;
   }
-  resize_output(out, input.sizes());
+  auto input_sizes = input.sizes();
+  resize_output(out, input_sizes);
+  resize_output(info, {input_sizes.begin(), input_sizes.end() - 2});
   out.copy_(input);
 
   int64_t ndim = out.dim();
@@ -1083,14 +1090,16 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
 
-  Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
+  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
+  auto info_sizes = info.sizes();
+  info_.fill_(0);
 
   MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       auto computeEncoder = stream->commandEncoder();
-      mtl_setArgs(computeEncoder, out, success, N, NB);
+      mtl_setArgs(computeEncoder, out, info_, N, NB);
       for (int64_t k = 0; k < numBlocks; k++) {
         [computeEncoder setComputePipelineState:factorDiagonalPSO];
         mtl_setBytes(computeEncoder, k, 4);
@@ -1118,10 +1127,32 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
       }
     });
   }
-
-  TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
-  out.tril_(); //
-  return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
+  int status;
+  if (check_errors) {
+    if (info_.dim() > 0) {
+      // batch case
+      for (const auto i : c10::irange(B)) {
+        status = info_[i].item<int>();
+        TORCH_CHECK(
+            status == 0,
+            "linalg.cholesky(): (Batch element ",
+            i,
+            "):  The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
+            status,
+            " is not positive-definite).");
+      }
+    } else {
+      // single matrix case(no batch size)
+      status = info.item<int>();
+      TORCH_CHECK(
+          status == 0,
+          "linalg.cholesky(): The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
+          status,
+          " is not positive-definite).");
+    }
+  }
+  out.tril_();
+  upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
 } // namespace mps
 
@@ -1285,21 +1316,19 @@ Tensor& addbmm_out_mps(const Tensor& self,
 
 Tensor cholesky_mps(const Tensor& self, bool upper) {
   auto out = at::empty_like(self, MemoryFormat::Contiguous);
-  mps::linalg_cholesky_mps_impl(self, upper, out);
+  cholesky_mps_out(self, upper, out);
   return out;
 }
 
 Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
-  return mps::linalg_cholesky_mps_impl(self, upper, out);
+  auto info = at::empty({}, self.options().dtype(kInt));
+  mps::linalg_cholesky_mps_impl(self, upper, true, out, info);
+  return out;
 }
 
-Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
-  return mps::linalg_cholesky_mps_impl(self, upper, out);
-}
-
-Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
-  auto out = at::empty_like(self, MemoryFormat::Contiguous);
-  return mps::linalg_cholesky_mps_impl(self, upper, out);
+TORCH_IMPL_FUNC(linalg_cholesky_ex_out_mps)
+(const Tensor& self, bool upper, bool check_errors, const Tensor& L, const Tensor& info) {
+  mps::linalg_cholesky_mps_impl(self, upper, check_errors, L, info);
 }
 
 Tensor addbmm_mps(const Tensor& self,

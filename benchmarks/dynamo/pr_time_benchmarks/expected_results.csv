@@ -18,7 +18,7 @@ add_loop_inductor_gpu,compile_time_instruction_count,26240000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,945100000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,977200000,0.015
 
 
 

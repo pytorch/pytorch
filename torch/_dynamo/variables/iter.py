@@ -1,5 +1,20 @@
 # mypy: ignore-errors
 
+"""
+This module provides iterator-related variable tracking functionality for Dynamo.
+It implements variable classes for handling Python iterators and itertools functions
+during symbolic execution and tracing.
+
+The module includes:
+- Base iterator variable classes for tracking iterator state
+- Implementations of built-in iterators (zip, map, filter)
+- Support for itertools functions (product, accumulate, combinations, etc.)
+- Mutation tracking and reconstruction capabilities for iterator operations
+
+These classes integrate with Dynamo's variable tracking system to enable proper
+handling of iterator operations during code transformation and optimization.
+"""
+
 import itertools
 import operator
 import sys

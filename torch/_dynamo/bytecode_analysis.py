@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for analyzing and optimizing Python bytecode.
+Key functionality includes:
+- Dead code elimination
+- Jump instruction optimization
+- Stack size analysis and verification
+- Live variable analysis
+- Line number propagation and cleanup
+- Exception table handling for Python 3.11+
+
+The utilities in this module are used to analyze and transform bytecode
+for better performance while maintaining correct semantics.
+"""
+
 import bisect
 import dataclasses
 import dis

@@ -1,4 +1,21 @@
 # mypy: allow-untyped-defs
+
+"""
+Provides functionality for compiling PyTorch's autograd (automatic differentiation) system.
+
+This module implements compiled autograd, which traces and optimizes backward pass
+computations at runtime. The key components are:
+
+- AutogradCompilerInstance: Traces and compiles autograd graphs using FX
+- Context managers (_enable/_disable): Control when compiled autograd is active
+- Utility functions: Support graph manipulation, tensor operations, and hooks
+
+Compiled autograd can significantly improve backward pass performance by removing
+Python overhead and enabling additional optimizations. It works by capturing
+backward computations into an FX graph that can be compiled and optimized,
+while maintaining the same semantics as eager mode autograd.
+"""
+
 import contextlib
 import functools
 import itertools

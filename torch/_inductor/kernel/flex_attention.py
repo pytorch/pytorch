@@ -684,9 +684,16 @@ def _use_flex_decoding(query, kernel_options):
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
     )
+    non_zero_length = V.graph.sizevars.evaluate_expr(sympy.Gt(query.get_size()[-2], 0))
     static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
     static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
-    return not force_flex and short_query_length and static_batch and static_num_heads
+    return (
+        not force_flex
+        and short_query_length
+        and static_batch
+        and static_num_heads
+        and non_zero_length
+    )
 
 
 _h100_default_config = {
@@ -1247,6 +1254,13 @@ def flex_attention(
     assert V.graph.sizevars.evaluate_expr(
         sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_q, 0)
+    ), "Query length must be greater than 0"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_kv, 0)
+    ), "Key length must be greater than 0"
+
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
