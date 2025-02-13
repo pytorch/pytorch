@@ -1643,14 +1643,29 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
+            compile_command = {
+                "aot_mode": graph.aot_mode,
+                "device_type": device_type,
+                "use_absolute_path": use_absolute_path,
+                "use_mmap_weights": use_mmap_weights,
+                "vec_isa": picked_vec_isa,
+            }
             object_build_options = CppTorchDeviceOptions(
-                vec_isa=picked_vec_isa,
-                device_type=device_type,
-                aot_mode=graph.aot_mode,
+                **compile_command,  # type: ignore[arg-type]
                 compile_only=True,
-                use_absolute_path=use_absolute_path,
-                use_mmap_weights=use_mmap_weights,
             )
+
+            # potentially, precompile the AOT header for this device
+            if config.aot_inductor.precompile_headers:
+                header_file = _get_cpp_wrapper_header(
+                    device_type, aot_mode=graph.aot_mode
+                )
+                object_build_options.precompiled_header = _precompile_header(
+                    header_file,
+                    cpp_command,
+                    **compile_command,
+                )
+
             object_builder = CppBuilder(
                 name=str(cpp_path_operator.stem),
                 sources=cpp_path,
@@ -1939,6 +1954,92 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
+# Precompiled headers are persistent past program runtime, but associated with one
+# specific compiler version and set of flags.  We explicitly use default_cache_dir here
+# because these headers need to be global, rather than ignored by fresh_inductor_cache.
+_HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
+_HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
+
+
+@functools.lru_cache(None)
+def _precompile_header(
+    header: str,
+    hashable_cmd_line: str,
+    **compile_command: Any,
+) -> str:
+    # Get the preprocessed output from the header file to be precompiled.  This allows
+    # us to properly invalidate the file cache when any header dependency changes.
+    with tempfile.NamedTemporaryFile(buffering=0, suffix=".h") as preprocessing_header:
+        preprocessing_header.write(f"#include <{header}>\n".encode())
+        preprocessor = CppBuilder(
+            name=preprocessing_header.name,
+            sources=preprocessing_header.name,
+            BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
+        )
+        preprocessor.build()
+
+        def _get_file_checksum(filename: str) -> str:
+            """Reading the whole preprocessed header in for hashing is very expensive,
+            but calling a fast hashing utility in a subprocess is cheap."""
+            if _IS_WINDOWS:
+                cmd_output = subprocess.run(
+                    ["certutil", "-hashfile", filename, "SHA512"],
+                    capture_output=True,
+                    text=True,
+                )
+                return cmd_output.stdout.splitlines()[1]
+
+            cmd_output = subprocess.run(
+                ["sha512sum", filename], capture_output=True, text=True
+            )
+            return cmd_output.stdout.split()[0]
+
+        # hash, then cleanup, the preprocessor output file
+        preprocessor_file_name = preprocessor.get_target_file_path()
+        preprocessor_hash = _get_file_checksum(preprocessor_file_name)
+        os.unlink(preprocessor_file_name)
+
+    header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
+    header_hash, header_full_path = write(
+        content=f"#include <{header}>\n",
+        extension="h",
+        extra=(
+            hashable_cmd_line
+            + preprocessor_hash
+            + get_compiler_version_info(header_build_option.get_compiler())
+        ),
+        specified_dir=_HEADER_DIR,
+    )
+    cpp_builder = CppBuilder(
+        name=header_full_path,
+        sources=header_full_path,
+        BuildOption=header_build_option,
+    )
+    # _worker_compile_cpp will automatically ignore any compilation whose result already
+    # exists, so this is always safe.
+    os.makedirs(_HEADER_LOCK_DIR, exist_ok=True)
+    _worker_compile_cpp(
+        os.path.join(_HEADER_LOCK_DIR, f"{header_hash}.lock"),
+        cpp_builder,
+        header_full_path,
+        cpp_builder.get_target_file_path(),
+    )
+
+    return header_full_path
+
+
+def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
+    """Given a device type (and optionally whether we're in AOT Inductor mode), returns
+    the path to the cpp_wrapper header file to be precompiled."""
+    base_device = device.split(":")[0]
+    is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
+    return (
+        "torch/csrc/inductor/"
+        f"{'aoti_include' if aot_mode else 'cpp_wrapper'}/"
+        f"{'array_ref' if is_array_ref else base_device}.h"
+    )
+
+
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
@@ -1973,6 +2074,14 @@ class CppCodeCache:
             raise
 
     @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """
+        Given a device type, returns the path to a CPP header file to be precompiled.
+        Currently, this is only utilized by the cpp_wrapper classes.
+        """
+        return None
+
+    @classmethod
     def load_async(
         cls,
         source_code: str,
@@ -1989,9 +2098,8 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        command_gen = CppBuilder(
-            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
-        )
+        cpp_build_option = CppTorchDeviceOptions(**compile_command)
+        command_gen = CppBuilder(name="o", sources="i", BuildOption=cpp_build_option)
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
         # So we need get a command_line which contains isa related parameter as a part of hash key.
@@ -2013,7 +2121,16 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(**compile_command)
+            # if requested, pre-compile any headers
+            if config.cpp_cache_precompile_headers and (
+                header_file := cls._get_uncompiled_header(device_type)
+            ):
+                cpp_build_option.precompiled_header = _precompile_header(
+                    header_file,
+                    vec_isa_cmd,
+                    **compile_command,
+                )
+
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2324,6 +2441,14 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
+
+    @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """
+        Given a device type, returns the path to a CPP header file to be precompiled.
+        Currently, this is only utilized by the cpp_wrapper classes.
+        """
+        return _get_cpp_wrapper_header(device)
 
 
 @clear_on_fresh_inductor_cache
