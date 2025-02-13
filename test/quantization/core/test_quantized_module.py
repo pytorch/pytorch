@@ -968,6 +968,41 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self._test_dropout_serialization(_get_model, data1, data2)
 
 
+    def test_batch_norm1d_2dinput(self):
+        """Tests the correctness of the batchnorm1d module for a 2d input.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4), dtype=torch.float)
+        float_mod = torch.nn.BatchNorm1d(4)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.BatchNorm1d(4)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         msg="BatchNorm1d module API failed")
+        
+    def test_batch_norm1d_3dinput(self):
+        """Tests the correctness of the batchnorm1d module for a 3d input.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4, 6), dtype=torch.float)
+        float_mod = torch.nn.BatchNorm1d(4)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.BatchNorm1d(4)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         msg="BatchNorm1d module API failed")
 
     def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
@@ -1022,6 +1057,32 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         ref2 = mq2(data2)
 
         self.assertTrue(torch.allclose(ref1, ref2))
+
+    def test_batch_norm1d_2dinput_serialization(self):
+        data1 = torch.randn(2, 4)
+        data2 = torch.randn(2, 4)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm1d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
+
+    def test_batch_norm1d_3dinput_serialization(self):
+        data1 = torch.randn(2, 4, 6)
+        data2 = torch.randn(2, 4, 6)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm1d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
 
     def test_batch_norm2d_serialization(self):
         data1 = torch.randn(2, 4, 6, 8)
