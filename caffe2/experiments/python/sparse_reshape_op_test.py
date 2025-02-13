@@ -102,3 +102,5 @@ class TestSparseMatrixReshapeOp(TestCase):
         Y = workspace.FetchBlob('Y')
         np.testing.assert_allclose(A_sparse.reshape(M, K).dot(B), Y,
                                    rtol=1e-4)
+
+# Automated edit: [Edited] Add docstring to improve documentation
