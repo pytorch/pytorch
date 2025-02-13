@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo.test_case
 from torch._C._dynamo.eval_frame import set_eval_frame
+from torch._dynamo.types import ConvertFrameReturn, GuardedCode, wrap_guarded_code
 from torch._guards import CompileId
 
 
@@ -92,18 +93,22 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
         def callback1(frame, cache_entry, frame_state):
             if frame.f_code in code_map1:
                 transformed_code = code_map1[frame.f_code]
-                return torch._dynamo.types.GuardedCode(
-                    transformed_code, empty_guard_manager, CompileId(None, 0, 0)
+                return wrap_guarded_code(
+                    GuardedCode(
+                        transformed_code, empty_guard_manager, CompileId(None, 0, 0)
+                    )
                 )
-            return None
+            return ConvertFrameReturn()
 
         def callback2(frame, cache_entry, frame_state):
             if frame.f_code in code_map2:
                 transformed_code = code_map2[frame.f_code]
-                return torch._dynamo.types.GuardedCode(
-                    transformed_code, empty_guard_manager, CompileId(None, 0, 0)
+                return wrap_guarded_code(
+                    GuardedCode(
+                        transformed_code, empty_guard_manager, CompileId(None, 0, 0)
+                    )
                 )
-            return None
+            return ConvertFrameReturn()
 
         for _ in [callback1, callback2]:
             torch._dynamo.reset()

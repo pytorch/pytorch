@@ -1,9 +1,8 @@
 #pragma once
-#include <Python.h>
 #include <stdbool.h>
 
 #include <torch/csrc/dynamo/extra_state.h>
-#include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/utils/python_compat.h>
 #ifdef __cplusplus
 
 extern "C" {
@@ -20,8 +19,18 @@ PyObject* torch_c_dynamo_eval_frame_init(void);
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 #endif // IS_PYTHON_3_11_PLUS
 
-extern PyObject* skip_code_recursive_flag;
-extern PyObject* cache_limit_hit_flag;
+// We need to be able to return the _PyInterpreterFrame to python so create
+// a python binding for it
+
+typedef struct THPPyInterpreterFrame {
+  PyObject_HEAD
+  THP_EVAL_API_FRAME_OBJECT* frame; // Borrowed reference
+  PyObject* locals;
+} THPPyInterpreterFrame;
+
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame);
+
 extern bool is_skip_guard_eval_unsafe;
 
 void clear_old_frame_if_python_312_plus(
@@ -43,13 +52,6 @@ PyObject* dynamo_eval_custom_code(
     PyCodeObject* code,
     const char* trace_annotation,
     int throw_flag);
-
-PyObject* dynamo_call_callback(
-    PyObject* callable,
-    THP_EVAL_API_FRAME_OBJECT* _frame,
-    FrameLocalsMapping* locals,
-    CacheEntry* cache_entry,
-    FrameState* frame_state);
 
 #ifdef __cplusplus
 
