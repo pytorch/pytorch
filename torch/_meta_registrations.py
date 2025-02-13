@@ -5719,9 +5719,7 @@ def meta__scaled_dot_product_efficient_attention(
         """Please see: https://github.com/pytorch/pytorch/issues/146848
         longsumexp last dim should be seq length
         """
-        logsumexp_dim = (
-            M if compute_log_sumexp else 0
-        )
+        logsumexp_dim = M if compute_log_sumexp else 0
     else:
         logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
 
