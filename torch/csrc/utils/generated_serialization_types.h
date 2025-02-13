@@ -267,6 +267,7 @@ class SymExprHint {
 
   void set_as_int(int64_t def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_INT;
   }
 
   const bool& get_as_bool() const {
@@ -275,6 +276,7 @@ class SymExprHint {
 
   void set_as_bool(bool def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_BOOL;
   }
 
   const F64& get_as_float() const {
@@ -283,6 +285,7 @@ class SymExprHint {
 
   void set_as_float(F64 def) {
     variant_.emplace<3>(std::move(def));
+    tag_ = Tag::AS_FLOAT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymExprHint& nlohmann_json_t) {
@@ -371,6 +374,7 @@ class SymInt {
 
   void set_as_expr(SymExpr def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_EXPR;
   }
 
   const int64_t& get_as_int() const {
@@ -379,6 +383,7 @@ class SymInt {
 
   void set_as_int(int64_t def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_INT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymInt& nlohmann_json_t) {
@@ -431,6 +436,7 @@ class SymFloat {
 
   void set_as_expr(SymExpr def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_EXPR;
   }
 
   const F64& get_as_float() const {
@@ -439,6 +445,7 @@ class SymFloat {
 
   void set_as_float(F64 def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_FLOAT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymFloat& nlohmann_json_t) {
@@ -491,6 +498,7 @@ class SymBool {
 
   void set_as_expr(SymExpr def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_EXPR;
   }
 
   const bool& get_as_bool() const {
@@ -499,6 +507,7 @@ class SymBool {
 
   void set_as_bool(bool def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_BOOL;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymBool& nlohmann_json_t) {
@@ -623,6 +632,7 @@ class SymIntArgument {
 
   void set_as_name(std::string def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_NAME;
   }
 
   const int64_t& get_as_int() const {
@@ -631,6 +641,7 @@ class SymIntArgument {
 
   void set_as_int(int64_t def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_INT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymIntArgument& nlohmann_json_t) {
@@ -683,6 +694,7 @@ class SymFloatArgument {
 
   void set_as_name(std::string def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_NAME;
   }
 
   const F64& get_as_float() const {
@@ -691,6 +703,7 @@ class SymFloatArgument {
 
   void set_as_float(F64 def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_FLOAT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymFloatArgument& nlohmann_json_t) {
@@ -743,6 +756,7 @@ class SymBoolArgument {
 
   void set_as_name(std::string def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_NAME;
   }
 
   const bool& get_as_bool() const {
@@ -751,6 +765,7 @@ class SymBoolArgument {
 
   void set_as_bool(bool def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_BOOL;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const SymBoolArgument& nlohmann_json_t) {
@@ -839,6 +854,7 @@ class OptionalTensorArgument {
 
   void set_as_tensor(TensorArgument def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_TENSOR;
   }
 
   const bool& get_as_none() const {
@@ -847,6 +863,7 @@ class OptionalTensorArgument {
 
   void set_as_none(bool def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_NONE;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const OptionalTensorArgument& nlohmann_json_t) {
@@ -953,6 +970,7 @@ class Argument {
 
   void set_as_none(bool def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_NONE;
   }
 
   const TensorArgument& get_as_tensor() const {
@@ -961,6 +979,7 @@ class Argument {
 
   void set_as_tensor(TensorArgument def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_TENSOR;
   }
 
   const std::vector<TensorArgument>& get_as_tensors() const {
@@ -969,6 +988,7 @@ class Argument {
 
   void set_as_tensors(std::vector<TensorArgument> def) {
     variant_.emplace<3>(std::move(def));
+    tag_ = Tag::AS_TENSORS;
   }
 
   const int64_t& get_as_int() const {
@@ -977,6 +997,7 @@ class Argument {
 
   void set_as_int(int64_t def) {
     variant_.emplace<4>(std::move(def));
+    tag_ = Tag::AS_INT;
   }
 
   const std::vector<int64_t>& get_as_ints() const {
@@ -985,6 +1006,7 @@ class Argument {
 
   void set_as_ints(std::vector<int64_t> def) {
     variant_.emplace<5>(std::move(def));
+    tag_ = Tag::AS_INTS;
   }
 
   const F64& get_as_float() const {
@@ -993,6 +1015,7 @@ class Argument {
 
   void set_as_float(F64 def) {
     variant_.emplace<6>(std::move(def));
+    tag_ = Tag::AS_FLOAT;
   }
 
   const std::vector<F64>& get_as_floats() const {
@@ -1001,6 +1024,7 @@ class Argument {
 
   void set_as_floats(std::vector<F64> def) {
     variant_.emplace<7>(std::move(def));
+    tag_ = Tag::AS_FLOATS;
   }
 
   const std::string& get_as_string() const {
@@ -1009,6 +1033,7 @@ class Argument {
 
   void set_as_string(std::string def) {
     variant_.emplace<8>(std::move(def));
+    tag_ = Tag::AS_STRING;
   }
 
   const std::vector<std::string>& get_as_strings() const {
@@ -1017,6 +1042,7 @@ class Argument {
 
   void set_as_strings(std::vector<std::string> def) {
     variant_.emplace<9>(std::move(def));
+    tag_ = Tag::AS_STRINGS;
   }
 
   const SymIntArgument& get_as_sym_int() const {
@@ -1025,6 +1051,7 @@ class Argument {
 
   void set_as_sym_int(SymIntArgument def) {
     variant_.emplace<10>(std::move(def));
+    tag_ = Tag::AS_SYM_INT;
   }
 
   const std::vector<SymIntArgument>& get_as_sym_ints() const {
@@ -1033,6 +1060,7 @@ class Argument {
 
   void set_as_sym_ints(std::vector<SymIntArgument> def) {
     variant_.emplace<11>(std::move(def));
+    tag_ = Tag::AS_SYM_INTS;
   }
 
   const ScalarType& get_as_scalar_type() const {
@@ -1041,6 +1069,7 @@ class Argument {
 
   void set_as_scalar_type(ScalarType def) {
     variant_.emplace<12>(std::move(def));
+    tag_ = Tag::AS_SCALAR_TYPE;
   }
 
   const MemoryFormat& get_as_memory_format() const {
@@ -1049,6 +1078,7 @@ class Argument {
 
   void set_as_memory_format(MemoryFormat def) {
     variant_.emplace<13>(std::move(def));
+    tag_ = Tag::AS_MEMORY_FORMAT;
   }
 
   const Layout& get_as_layout() const {
@@ -1057,6 +1087,7 @@ class Argument {
 
   void set_as_layout(Layout def) {
     variant_.emplace<14>(std::move(def));
+    tag_ = Tag::AS_LAYOUT;
   }
 
   const Device& get_as_device() const {
@@ -1065,6 +1096,7 @@ class Argument {
 
   void set_as_device(Device def) {
     variant_.emplace<15>(std::move(def));
+    tag_ = Tag::AS_DEVICE;
   }
 
   const bool& get_as_bool() const {
@@ -1073,6 +1105,7 @@ class Argument {
 
   void set_as_bool(bool def) {
     variant_.emplace<16>(std::move(def));
+    tag_ = Tag::AS_BOOL;
   }
 
   const std::vector<bool>& get_as_bools() const {
@@ -1081,6 +1114,7 @@ class Argument {
 
   void set_as_bools(std::vector<bool> def) {
     variant_.emplace<17>(std::move(def));
+    tag_ = Tag::AS_BOOLS;
   }
 
   const SymBoolArgument& get_as_sym_bool() const {
@@ -1089,6 +1123,7 @@ class Argument {
 
   void set_as_sym_bool(SymBoolArgument def) {
     variant_.emplace<18>(std::move(def));
+    tag_ = Tag::AS_SYM_BOOL;
   }
 
   const std::vector<SymBoolArgument>& get_as_sym_bools() const {
@@ -1097,6 +1132,7 @@ class Argument {
 
   void set_as_sym_bools(std::vector<SymBoolArgument> def) {
     variant_.emplace<19>(std::move(def));
+    tag_ = Tag::AS_SYM_BOOLS;
   }
 
   const GraphArgument& get_as_graph() const {
@@ -1105,6 +1141,7 @@ class Argument {
 
   void set_as_graph(GraphArgument def) {
     variant_.emplace<20>(std::move(def));
+    tag_ = Tag::AS_GRAPH;
   }
 
   const std::vector<OptionalTensorArgument>& get_as_optional_tensors() const {
@@ -1113,6 +1150,7 @@ class Argument {
 
   void set_as_optional_tensors(std::vector<OptionalTensorArgument> def) {
     variant_.emplace<21>(std::move(def));
+    tag_ = Tag::AS_OPTIONAL_TENSORS;
   }
 
   const CustomObjArgument& get_as_custom_obj() const {
@@ -1121,6 +1159,7 @@ class Argument {
 
   void set_as_custom_obj(CustomObjArgument def) {
     variant_.emplace<22>(std::move(def));
+    tag_ = Tag::AS_CUSTOM_OBJ;
   }
 
   const std::string& get_as_operator() const {
@@ -1129,6 +1168,7 @@ class Argument {
 
   void set_as_operator(std::string def) {
     variant_.emplace<23>(std::move(def));
+    tag_ = Tag::AS_OPERATOR;
   }
 
   const SymFloatArgument& get_as_sym_float() const {
@@ -1137,6 +1177,7 @@ class Argument {
 
   void set_as_sym_float(SymFloatArgument def) {
     variant_.emplace<24>(std::move(def));
+    tag_ = Tag::AS_SYM_FLOAT;
   }
 
   const std::vector<SymFloatArgument>& get_as_sym_floats() const {
@@ -1145,6 +1186,7 @@ class Argument {
 
   void set_as_sym_floats(std::vector<SymFloatArgument> def) {
     variant_.emplace<25>(std::move(def));
+    tag_ = Tag::AS_SYM_FLOATS;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const Argument& nlohmann_json_t) {
@@ -1602,6 +1644,7 @@ class ConstantValue {
 
   void set_as_none(bool def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::AS_NONE;
   }
 
   const int64_t& get_as_int() const {
@@ -1610,6 +1653,7 @@ class ConstantValue {
 
   void set_as_int(int64_t def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::AS_INT;
   }
 
   const F64& get_as_float() const {
@@ -1618,6 +1662,7 @@ class ConstantValue {
 
   void set_as_float(F64 def) {
     variant_.emplace<3>(std::move(def));
+    tag_ = Tag::AS_FLOAT;
   }
 
   const std::string& get_as_string() const {
@@ -1626,6 +1671,7 @@ class ConstantValue {
 
   void set_as_string(std::string def) {
     variant_.emplace<4>(std::move(def));
+    tag_ = Tag::AS_STRING;
   }
 
   const bool& get_as_bool() const {
@@ -1634,6 +1680,7 @@ class ConstantValue {
 
   void set_as_bool(bool def) {
     variant_.emplace<5>(std::move(def));
+    tag_ = Tag::AS_BOOL;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const ConstantValue& nlohmann_json_t) {
@@ -1875,6 +1922,7 @@ class InputSpec {
 
   void set_user_input(UserInputSpec def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::USER_INPUT;
   }
 
   const InputToParameterSpec& get_parameter() const {
@@ -1883,6 +1931,7 @@ class InputSpec {
 
   void set_parameter(InputToParameterSpec def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::PARAMETER;
   }
 
   const InputToBufferSpec& get_buffer() const {
@@ -1891,6 +1940,7 @@ class InputSpec {
 
   void set_buffer(InputToBufferSpec def) {
     variant_.emplace<3>(std::move(def));
+    tag_ = Tag::BUFFER;
   }
 
   const InputToTensorConstantSpec& get_tensor_constant() const {
@@ -1899,6 +1949,7 @@ class InputSpec {
 
   void set_tensor_constant(InputToTensorConstantSpec def) {
     variant_.emplace<4>(std::move(def));
+    tag_ = Tag::TENSOR_CONSTANT;
   }
 
   const InputToCustomObjSpec& get_custom_obj() const {
@@ -1907,6 +1958,7 @@ class InputSpec {
 
   void set_custom_obj(InputToCustomObjSpec def) {
     variant_.emplace<5>(std::move(def));
+    tag_ = Tag::CUSTOM_OBJ;
   }
 
   const InputTokenSpec& get_token() const {
@@ -1915,6 +1967,7 @@ class InputSpec {
 
   void set_token(InputTokenSpec def) {
     variant_.emplace<6>(std::move(def));
+    tag_ = Tag::TOKEN;
   }
 
   const InputToConstantInputSpec& get_constant_input() const {
@@ -1923,6 +1976,7 @@ class InputSpec {
 
   void set_constant_input(InputToConstantInputSpec def) {
     variant_.emplace<7>(std::move(def));
+    tag_ = Tag::CONSTANT_INPUT;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const InputSpec& nlohmann_json_t) {
@@ -2182,6 +2236,7 @@ class OutputSpec {
 
   void set_user_output(UserOutputSpec def) {
     variant_.emplace<1>(std::move(def));
+    tag_ = Tag::USER_OUTPUT;
   }
 
   const LossOutputSpec& get_loss_output() const {
@@ -2190,6 +2245,7 @@ class OutputSpec {
 
   void set_loss_output(LossOutputSpec def) {
     variant_.emplace<2>(std::move(def));
+    tag_ = Tag::LOSS_OUTPUT;
   }
 
   const BufferMutationSpec& get_buffer_mutation() const {
@@ -2198,6 +2254,7 @@ class OutputSpec {
 
   void set_buffer_mutation(BufferMutationSpec def) {
     variant_.emplace<3>(std::move(def));
+    tag_ = Tag::BUFFER_MUTATION;
   }
 
   const GradientToParameterSpec& get_gradient_to_parameter() const {
@@ -2206,6 +2263,7 @@ class OutputSpec {
 
   void set_gradient_to_parameter(GradientToParameterSpec def) {
     variant_.emplace<4>(std::move(def));
+    tag_ = Tag::GRADIENT_TO_PARAMETER;
   }
 
   const GradientToUserInputSpec& get_gradient_to_user_input() const {
@@ -2214,6 +2272,7 @@ class OutputSpec {
 
   void set_gradient_to_user_input(GradientToUserInputSpec def) {
     variant_.emplace<5>(std::move(def));
+    tag_ = Tag::GRADIENT_TO_USER_INPUT;
   }
 
   const UserInputMutationSpec& get_user_input_mutation() const {
@@ -2222,6 +2281,7 @@ class OutputSpec {
 
   void set_user_input_mutation(UserInputMutationSpec def) {
     variant_.emplace<6>(std::move(def));
+    tag_ = Tag::USER_INPUT_MUTATION;
   }
 
   const OutputTokenSpec& get_token() const {
@@ -2230,6 +2290,7 @@ class OutputSpec {
 
   void set_token(OutputTokenSpec def) {
     variant_.emplace<7>(std::move(def));
+    tag_ = Tag::TOKEN;
   }
 
   friend void to_json(nlohmann::json& nlohmann_json_j, const OutputSpec& nlohmann_json_t) {
