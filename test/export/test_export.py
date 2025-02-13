@@ -521,6 +521,22 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    def test_bincount(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                weights = torch.linspace(0, 1, steps=5)
+                bc = x.bincount(weights)
+                return bc
+
+        model = M()
+        ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
+        print(ep)
+        inp = torch.randint(0, 8, (5,), dtype=torch.int64)
+        self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
     def test_symint_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
