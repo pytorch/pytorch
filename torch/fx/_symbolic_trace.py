@@ -381,11 +381,6 @@ class Tracer(TracerBase):
             for n_, p_ in self.root.named_modules():
                 if a is p_:
                     return self.create_node("get_attr", n_, (), {})
-        # For NamedTuple instances that appear literally as args, we emit
-        # a node to construct the NamedTuple and use that Node as the argument.
-        if isinstance(a, tuple) and hasattr(a, "_fields"):
-            args = tuple(self.create_arg(elem) for elem in a)
-            return self.create_node("call_function", a.__class__, args, {})
 
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
