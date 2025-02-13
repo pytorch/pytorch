@@ -732,6 +732,18 @@ class AutogradCompilerInstance:
                 if field in node.meta:
                     del node.meta[field]
 
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "compiled_autograd_graph_pre_reordering",
+                "encoding": "string",
+            },
+            payload_fn=lambda: GraphModule(
+                self.fx_tracer.root,
+                self.fx_tracer.graph,
+                f"CompiledAutograd{self.id}PreReordering",
+            ).print_readable(print_output=False),
+        )
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
