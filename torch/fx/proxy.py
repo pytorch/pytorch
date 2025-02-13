@@ -142,9 +142,8 @@ class TracerBase:
     # Mapping of node name to module scope
     node_name_to_scope: dict[str, tuple[str, type]]
 
-    # Decides whether we represent `NamedTuple` instances into `call_function`
-    # nodes in the IR, or inline them directly as instance arguments to the user
-    # nodes.
+    # Decides whether we represent `NamedTuple` instances as `call_function`
+    # nodes, or inline them directly as instance arguments to the user nodes.
     _proxy_named_tuple: bool
 
     def __init__(self):
@@ -303,7 +302,7 @@ class TracerBase:
             return a.__fx_create_arg__(self)
         # aggregates
         elif isinstance(a, tuple):
-            if hasattr(a, "_fields"): # Handle `NamedTuple`
+            if hasattr(a, "_fields"):  # Handle `NamedTuple`
                 if self._proxy_named_tuple:
                     args = tuple(self.create_arg(elem) for elem in a)
                     return self.create_node("call_function", a.__class__, args, {})

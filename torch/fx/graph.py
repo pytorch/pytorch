@@ -361,7 +361,9 @@ class CodeGen:
             f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
         )
 
-    def generate_output(self, output_args: Argument, arg_repr: Callable[Any, str]) -> str:
+    def generate_output(
+        self, output_args: Argument, arg_repr: Callable[[Any], str]
+    ) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
         Note: The returned statement should not be indented.
@@ -455,9 +457,13 @@ class CodeGen:
 
             typename = _type_repr(o)
 
-            if hasattr(o, "__origin__"):
-                # This is a generic type, e.g. typing.List[torch.Tensor]
-                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+            if origin_type := getattr(o, "__origin__", None):
+                # list[...], typing.List[...], TensorType[...]
+
+                if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
+                    # This is a generic pre-PEP585 type, e.g. typing.List[torch.Tensor]
+                    origin_type = _origin_type_map.get(origin_type, origin_type)
+
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
                 if hasattr(o, "__args__"):
@@ -880,9 +886,11 @@ class _PyTreeCodeGen(CodeGen):
     {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
-    def generate_output(self, output_args, arg_repr: Callable[Any, str]):
+    def generate_output(self, output_args, arg_repr: Callable[[Any], str]):
         if self.pytree_info and self.pytree_info.out_spec:
-            return f"return pytree.tree_unflatten({arg_repr(output_args)}, self._out_spec)"
+            return (
+                f"return pytree.tree_unflatten({arg_repr(output_args)}, self._out_spec)"
+            )
         else:
             return super().generate_output(output_args, arg_repr)
 

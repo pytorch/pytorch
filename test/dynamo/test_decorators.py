@@ -205,8 +205,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
-    def test_allow_in_graph_dataclass(self):
-        class MyOutput(NamedTuple):
+    def test_allow_in_graph_named_tuple(self):
+        class Pair(NamedTuple):
             foo: Any
             bar: Any
 
@@ -215,30 +215,26 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return dc.bar + 1
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
         @torch.compile(fullgraph=True, backend=backend)
         def func(d):
-            inner = MyOutput(foo=d, bar=d+1)
-            outer = MyOutput(foo=inner, bar=d+2)
+            inner = Pair(foo=d, bar=d + 1)
+            outer = Pair(foo=inner, bar=d + 2)
             return trace_me(outer)
 
         func(torch.randn(10))
+        graph = backend.graphs[0].graph
 
-        gm_str = backend.graphs[0].print_readable(print_output=False)
-        self.assertExpectedInline(
-            torch._dynamo.testing.normalize_gm(gm_str),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_d_: "f32[10]"):
-        l_d_ = L_d_
+        # Make sure we don't call the named tuple constructor.
+        for node in graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, Pair)
 
-        add: "f32[10]" = l_d_ + 1
-
-        add_1: "f32[10]" = l_d_ + 2
-
-        trace_me: "f32[10]" = dynamo_test_decorators_trace_me(dynamo_test_decorators_MyOutput(dynamo_test_decorators_MyOutput(l_d_, add), add_1));  l_d_ = add = add_1 = None
-        return (trace_me,)
-""",  # NOQA: B950
-        )
+        # Make sure named tuple instances are used directly as inputs.
+        out_arg = graph.output_node().args[0]
+        trace_me_arg = out_arg[0].args[0]
+        self.assertTrue(type(trace_me_arg), Pair)
+        self.assertTrue(type(trace_me_arg.foo), Pair)
 
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
