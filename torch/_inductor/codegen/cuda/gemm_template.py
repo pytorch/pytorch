@@ -1161,7 +1161,13 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.get_size()[1] == W.get_size()[0]
+        if X.dim() != W.dim():
+            return False
+        if X.dim() == 2:
+            return X.get_size()[1] == W.get_size()[0]
+        if X.dim() == 3:
+            # for bmm
+            return X.get_size()[2] == W.get_size()[1]
 
     def _alignment_match(
         self,

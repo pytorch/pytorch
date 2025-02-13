@@ -513,7 +513,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    if len(choices) == 0:
+
+    if (len(choices) == 0 
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning(
             "No choices for integer GEMM avaialbe using configured backends, using ATen backend as fallback"
         )
@@ -653,7 +657,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     add_aten_fallback = False
-    if len(choices) == 0:
+    if (len(choices) == 0 
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         add_aten_fallback = True
 

@@ -26,6 +26,7 @@ from .mm_common import (
     mm_configs,
     mm_options,
 )
+from .. import config as inductor_config
 
 
 log = logging.getLogger(__name__)
@@ -195,7 +196,10 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0:
+    if (len(choices) == 0 
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         choices.append(aten_bmm.bind((mat1, mat2), layout))
 
