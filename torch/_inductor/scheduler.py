@@ -3904,6 +3904,9 @@ class Scheduler:
         if isinstance(node.node, ir.DeviceCopy):
             return True
 
+        if isinstance(node.node, ir.Conditional):
+            return True
+
         return False
 
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
@@ -3995,41 +3998,40 @@ class Scheduler:
                 else self._codegen(self.nodes)
             )
 
-    def _codegen_partitions(self) -> None:
-        partitions, inputs, outputs = self.graph_partition()
+    def _codegen_partition_wrapper(self, partition: List[BaseSchedulerNode], input_names: List[str], output_nodes: List[ir.IRNode]) -> None:
+        parent_wrapper_code = (
+            V.graph.wrapper_code
+        )
+        graph_partition_id = next(self._graph_partition_counter)
 
-        for partition, input, output in zip(partitions, inputs, outputs):
+        with V.graph.set_current_wrapper_code():
+            V.graph.init_wrapper_code(
+                is_subgraph=True,
+                subgraph_name=f"partition_{graph_partition_id}",
+                parent_wrapper_code=parent_wrapper_code,
+                input_names=input_names,
+                output_nodes=output_nodes,
+            )
+            self._codegen(partition)
+            partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
+
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.codegen_partition_call(
+            graph_partition_id, input_names, output_nodes
+        )
+
+    def _codegen_partitions(self) -> None:
+        partitions, input_names, output_nodes = self.graph_partition()
+
+        for partition, input_name, output_node in zip(partitions, input_names, output_nodes):
             assert (
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
-            parent_wrapper_code = (
-                V.graph.wrapper_code
-            )  # TODO: use V.set_graph_handler instead
-            graph_partition_id = next(self._graph_partition_counter)
 
-            with V.graph.set_current_wrapper_code():
-                V.graph.init_wrapper_code(
-                    is_subgraph=True,
-                    subgraph_name=f"partition_{graph_partition_id}",
-                    parent_wrapper_code=parent_wrapper_code,
-                    input_names=list(input),
-                    output_nodes=list(output),
-                )
+            if len(partition) > 1:
+                self._codegen_partition_wrapper(partition, list(input_name), output_node)
+            else:
                 self._codegen(partition)
-                partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
-
-            V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
-            V.graph.wrapper_code.codegen_partition_call(
-                graph_partition_id, input, output
-            )
-
-            # Done1: a) codegen for signature like `def subgraph1(arg0):`, and b) codegen
-            #           for input arguments  like `arg0, arg1 = args`.codegen for signature
-            #           like `def subgraph1(arg0):`. This is done in write_prefix().
-            # Done2: codegen for output arguments like `return out0, out1`
-            # Done3: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
-            #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
-            #           This is done in codegen_partition_call().
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.codegen_subgraph_lists(num_partitions)
