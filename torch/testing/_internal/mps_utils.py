@@ -529,6 +529,7 @@ XFAILLIST_GRAD = {
 
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
 """Ops which do not have support for complex dtypes and are expected to fail"""
+"""Only applies to MacOS14+, all complex ops are unsupported on earlier MacOS versions"""
 COMPLEX_XFAILLIST = {
     "__rpow__": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "_unsafe_masked_index_put_accumulate": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -881,5 +882,13 @@ def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
                                 dtypes=skip.dtypes,
                             )
                             op.decorators = op.decorators + (decorator,)
+
+        if MACOS_VERSION < 14.0:
+            # Skip complex dtypes before MacOS14
+            decorator = DecorateInfo(
+                unittest.skip("Complex dtypes not supported prior to MacOS14"),
+                dtypes=COMPLEX_DTYPES,
+            )
+            op.decorators = op.decorators + (decorator,)
 
     return op_db
