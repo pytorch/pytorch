@@ -1038,6 +1038,7 @@ class InstructionTranslatorBase(
             return False
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
+        counters["dynamo_step_count"]["total"] += 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
