@@ -169,3 +169,6 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+def call_cpp_hook(i):
+    torch._C._dynamo.compiled_autograd.call_cpp_hook(i)

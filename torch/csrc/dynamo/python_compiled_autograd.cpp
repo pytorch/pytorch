@@ -54,8 +54,18 @@ using c10::SymInt;
 
 // lives only for 1 invocation
 struct RuntimeState {
+  static RuntimeState* get() {
+    static RuntimeState _state;
+    return &_state;
+  }
+
+  void clear() {
+    cpp_hooks.clear();
+    next_id = 0;
+  }
   // populated by compiled_args
-  py::list cpp_hooks;
+  // py::list cpp_hooks;
+  std::vector<std::function<void()>> cpp_hooks;
   size_t next_id = 0;
 };
 
@@ -583,12 +593,28 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* call_cpp_hook(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  int idx = -1;
+  if (!PyArg_ParseTuple(args, "i", &idx)) {
+    throw_python_error();
+  }
+  TORCH_INTERNAL_ASSERT(idx != -1);
+
+  std::cout << "executing call_cpp_hook["<< idx <<"]" << std::endl;
+  RuntimeState::get()->cpp_hooks[idx]();
+
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
+    {"call_cpp_hook", call_cpp_hook, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -880,10 +906,11 @@ static CacheNode* _compiled_autograd_impl(
 
   if (!compiler_call.cpp_hooks.empty()) {
     TORCH_INTERNAL_ASSERT(rstate->cpp_hooks.empty());
-    for (auto& hook : compiler_call.cpp_hooks) {
-      auto pyhook = py::cpp_function(hook);
-      rstate->cpp_hooks.append(std::move(pyhook));
-    }
+    // for (auto& hook : compiler_call.cpp_hooks) {
+    //   // auto pyhook = py::cpp_function(hook);
+    //   // rstate->cpp_hooks.append(std::move(pyhook));
+    // }
+    rstate->cpp_hooks = std::move(compiler_call.cpp_hooks);
     compiler_call.cpp_hooks.clear();
   }
 
@@ -1134,7 +1161,8 @@ static variable_list compiled_autograd(
   THPObjectPtr sizes;
   THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
-  RuntimeState state;
+  auto* rstate = RuntimeState::get();
+  rstate->clear();
   CacheNode* cache = _compiled_autograd_impl(
       graph_root,
       graph_task,
@@ -1144,7 +1172,7 @@ static variable_list compiled_autograd(
       &sizes,
       &ivalue_args,
       &hooks,
-      &state);
+      rstate);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
@@ -1153,10 +1181,11 @@ static variable_list compiled_autograd(
       sizes.get(),
       ivalue_args.get(),
       hooks.get(),
-      state.cpp_hooks.ptr(),
+      Py_None,
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  rstate->clear();
   return outputs;
 }
 

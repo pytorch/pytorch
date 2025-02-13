@@ -1341,6 +1341,7 @@ auto Engine::execute(
     for (const auto& cb : current_graph_task->final_callbacks_) {
       cb();
     }
+    std::cout << "done running callbacks" << std::endl;
     return res;
   }
 

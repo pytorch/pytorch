@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
+    call_cpp_hook,
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -592,18 +593,27 @@ class AutogradCompilerInstance:
 
     def cpp_post_hook(self, outputs, inputs, hook_id):
         assert self.cpp_hooks_proxy is not None
-        hook = self.cpp_hooks_proxy[hook_id]  # type: ignore[index]
+        # hook = self.cpp_hooks_proxy[hook_id]  # type: ignore[index]
         print(f"registering call to cpp_hook {hook_id}")
 
-        proxies = self.proxy_call_hook(
-            hook,
-            outputs,
-            inputs,
-            hook_type="cpp_post_hook",
+        # proxies = self.proxy_call_hook(
+        #     hook,
+        #     outputs,
+        #     inputs,
+        #     hook_type="cpp_post_hook",
+        # )
+
+        self.fx_tracer.create_proxy(
+            "call_function",
+            call_cpp_hook,
+            (
+                hook_id,
+            ),
+            {},
         )
-        with disable_proxy_modes_tracing():
-            outputs = [maybe_clone(x) for x in outputs]
-            self.bind_objects_to_proxies(outputs, proxies)
+        # with disable_proxy_modes_tracing():
+        #     outputs = [maybe_clone(x) for x in outputs]
+        #     self.bind_objects_to_proxies(outputs, proxies)
         return outputs
 
     def post_acc_grad_hook(self, input, hook_id):
@@ -760,7 +770,7 @@ class AutogradCompilerInstance:
         # ```
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
-        self.dce()
+        # self.dce()
 
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
@@ -801,7 +811,7 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        return runtime_wrapper, graph # self.compiler_fn(graph)
+        return runtime_wrapper, self.compiler_fn(graph)
 
     def rename_aot_dispatcher_nodes(self):
         """

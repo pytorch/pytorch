@@ -1009,7 +1009,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   std::cout << std::endl;
   bucket.future_work = run_comm_hook(grad_bucket);
   // remove wait
-  bucket.future_work->wait();
+  // bucket.future_work->wait();
 }
 
 std::vector<at::Tensor> Reducer::get_variables_for_bucket(
@@ -1684,12 +1684,14 @@ void Reducer::finalize_backward() {
     }
   }
 
+  std::cout << "collecting futures" << std::endl;
   if (installed_futures_ != std::nullopt) {
     std::cout << "collecting installed futures" << std::endl;
     c10::collectAll(*installed_futures_)->wait();
     installed_futures_ = std::nullopt;
   }
 
+  std::cout << "a" << std::endl;
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     std::cout << "dynamic_graph_find_unused() || static_graph_first_iteration()" << std::endl;
@@ -1704,6 +1706,7 @@ void Reducer::finalize_backward() {
     }
   }
 
+  std::cout << "b" << std::endl;
   if (dynamic_graph_find_unused()) {
     std::cout << "find unused" << std::endl;
     // Reset unused parameter accounting.
@@ -1712,12 +1715,14 @@ void Reducer::finalize_backward() {
     local_used_map_reduced_ = false;
   }
 
+  std::cout << "c" << std::endl;
   if (should_collect_runtime_stats()) {
     std::cout << "collect runtime stats" << std::endl;
     record_backward_comm_end_time();
   }
 
   sparse_metadata_.reset();
+  std::cout << "done" << std::endl;
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -2048,6 +2053,7 @@ int Reducer::get_ddp_runtime_logging_sample_rate() {
 }
 
 bool Reducer::should_collect_runtime_stats() {
+  return false;
   if (num_iterations_ > 0 &&
       (num_iterations_ <= 10 ||
        num_iterations_ % get_ddp_runtime_logging_sample_rate() == 0)) {

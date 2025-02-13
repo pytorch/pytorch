@@ -508,10 +508,6 @@ class CompiledNodeArgs {
     for (auto& i : fn->pre_hooks()) {
       i->compiled_args(*this);
     }
-
-    if (fn->post_hooks().size() > 0) {
-      std::cout << "collecting post hooks from " << fn->name() << std::endl;
-    }
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
@@ -557,7 +553,6 @@ class CompiledNodeArgs {
 
   void add_cpp_post_hook(std::function<void()>&& obj) {
     auto fn_id = _compiler.emplace_cpp_hook(std::move(obj));
-    std::cout << "collecting cpp post hook: " << fn_id << std::endl;
     collect_size(fn_id);
     _node_call.cpp_post_hooks.emplace_back(fn_id);
   }
