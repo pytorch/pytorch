@@ -4,7 +4,6 @@ import _codecs
 import io
 import os
 import sys
-import tempfile
 import unittest
 from typing import Union
 from unittest.mock import patch
@@ -357,7 +356,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # TODO(FFFrog): Comment this because openreg.device is missing
         # Uncomment this after improving openreg
-
         # cpu_storage = torch.empty(4, 4).storage()
         # openreg_storage = torch.serialization.default_restore_location(
         #     cpu_storage, "openreg:0"
@@ -371,22 +369,24 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.module.custom_set_backend_meta(y)
         self.assertTrue(self.module.check_backend_meta(y))
 
-        self.module.custom_serialization_registry()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "data.pt")
-            torch.save(y, path)
-            z1 = torch.load(path)
-            # loads correctly onto the openreg backend device
-            self.assertTrue(z1.is_openreg)
-            # loads BackendMeta data correctly
-            self.assertTrue(self.module.check_backend_meta(z1))
+        # TODO(FFFrog): Comment this because openreg.device is missing
+        # Uncomment this after improving openreg
+        # self.module.custom_serialization_registry()
+        # with tempfile.TemporaryDirectory() as tmpdir:
+        # path = os.path.join(tmpdir, "data.pt")
+        # torch.save(y, path)
+        # z1 = torch.load(path)
+        # loads correctly onto the openreg backend device
+        # self.assertTrue(z1.is_openreg)
+        # loads BackendMeta data correctly
+        # self.assertTrue(self.module.check_backend_meta(z1))
 
-            # cross-backend
-            z2 = torch.load(path, map_location="cpu")
-            # loads correctly onto the cpu backend device
-            self.assertFalse(z2.is_openreg)
-            # loads BackendMeta data correctly
-            self.assertFalse(self.module.check_backend_meta(z2))
+        # cross-backend
+        # z2 = torch.load(path, map_location="cpu")
+        # loads correctly onto the cpu backend device
+        # self.assertFalse(z2.is_openreg)
+        # loads BackendMeta data correctly
+        # self.assertFalse(self.module.check_backend_meta(z2))
 
     def test_open_device_storage_resize(self):
         cpu_tensor = torch.randn([8])
