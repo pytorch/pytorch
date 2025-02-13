@@ -73,6 +73,8 @@
 #include <ATen/ops/softplus_native.h>
 #include <ATen/ops/softshrink_backward_native.h>
 #include <ATen/ops/softshrink_native.h>
+#include <ATen/ops/swiglu.h>
+#include <ATen/ops/swiglu_native.h>
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
@@ -836,5 +838,23 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
 
 DEFINE_DISPATCH(GeluKernel);
 DEFINE_DISPATCH(GeluBackwardKernel);
+
+Tensor swiglu_symint(const Tensor& input, c10::SymInt dim) {
+  if (dim < 0) {
+    dim += input.dim();
+  }
+  TORCH_CHECK(input.size(dim.expect_int()) % 2 == 0,
+      "swiglu input size on dim ",
+      dim,
+      "should be an even number, which is ",
+      input.size(dim.expect_int()));
+  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
+      "swiglu expected floating dtype for input, got ",
+      input.scalar_type());
+  std::vector<Tensor> chunks = input.chunk(2, /*output_channels=*/dim.expect_int());
+  Tensor result = chunks[0] * chunks[1].sigmoid();
+
+  return result;
+}
 
 }  // namespace at::native
