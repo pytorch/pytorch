@@ -30,6 +30,42 @@ struct zeta_functor {
   }
 };
 
+struct nextafter_functor {
+#if __METAL_VERSION__ < 310
+  template <typename U>
+  struct bit_type {};
+  template <>
+  struct bit_type<float> {
+    using type = int;
+  };
+  template <>
+  struct bit_type<half> {
+    using type = short;
+  };
+#endif
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+#if __METAL_VERSION__ >= 310
+    return static_cast<T>(::metal::nextafter(a, b));
+#else
+    using U = typename bit_type<T>::type;
+    if (a == b) {
+      return a;
+    }
+    if (::metal::isunordered(a, b)) {
+      return NAN;
+    }
+    if (a == 0) {
+      constexpr auto eps = as_type<T>(static_cast<U>(1));
+      return b > 0 ? eps : -eps;
+    }
+    auto bits = as_type<U>(a);
+    (a > 0) ^ (a > b) ? bits++ : bits--;
+    return as_type<T>(bits);
+#endif
+  }
+};
+
 template <typename T, typename F>
 kernel void binary_indexing(
     constant void* input_ [[buffer(0)]],
@@ -100,18 +136,22 @@ kernel void copysign_integral(
       constant uint3* offsets [[buffer(3)]],             \
       uint tid [[thread_position_in_grid]]);
 
+REGISTER_BINARY_INDEXING_OP(copysign, float);
+REGISTER_BINARY_INDEXING_OP(copysign, half);
 REGISTER_BINARY_INDEXING_OP(fmax, float);
 REGISTER_BINARY_INDEXING_OP(fmax, half);
 REGISTER_BINARY_INDEXING_OP(fmin, float);
 REGISTER_BINARY_INDEXING_OP(fmin, half);
-REGISTER_BINARY_INDEXING_OP(copysign, float);
-REGISTER_BINARY_INDEXING_OP(copysign, half);
+REGISTER_BINARY_INDEXING_OP(nextafter, float);
+REGISTER_BINARY_INDEXING_OP(nextafter, half);
 REGISTER_BINARY_INDEXING_OP(zeta, float);
 REGISTER_BINARY_INDEXING_OP(zeta, half);
+
 #if __METAL_VERSION__ >= 310
+REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
 REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
 REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
-REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
+REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
 REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
 #endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
@@ -121,6 +161,7 @@ REGISTER_COPYSIGN_INTEGRAL_OP(char);
 REGISTER_COPYSIGN_INTEGRAL_OP(uchar);
 REGISTER_COPYSIGN_INTEGRAL_OP(bool);
 
+// Complex binary functions
 template <typename T>
 kernel void polar(
     constant void* abs_ [[buffer(0)]],
@@ -154,49 +195,6 @@ kernel void complex_mul(
 
 REGISTER_BINARY_OP(complex_mul, float);
 REGISTER_BINARY_OP(complex_mul, half);
-
-template <typename T, typename U>
-kernel void nextafter_kernel(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  auto out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  auto input = *(constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  auto other = *(constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-#if __METAL_VERSION__ >= 310
-  *out = static_cast<T>(nextafter(input, other));
-#else
-  if (input == other) {
-    *out = input;
-  } else if (isnan(input) || isnan(other)) {
-    *out = NAN;
-  } else if (input == 0) {
-    constexpr auto one = as_type<T>(static_cast<U>(1));
-    *out = other > 0 ? one : -one;
-  } else {
-    U bits = as_type<U>(input);
-    (input > 0) ^ (input > other) ? bits++ : bits--;
-    *out = as_type<T>(bits);
-  }
-#endif
-}
-
-#define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)                      \
-  template [[host_name("nextafter_kernel_" #DTYPE)]] kernel void \
-  nextafter_kernel<DTYPE, UTYPE>(                                \
-      constant void* input,                                      \
-      constant void* other,                                      \
-      device void* out,                                          \
-      constant uint3* offsets,                                   \
-      uint tid)
-
-REGISTER_NEXTAFTER_OP(float, uint);
-REGISTER_NEXTAFTER_OP(half, ushort);
-#if __METAL_VERSION__ >= 310
-REGISTER_NEXTAFTER_OP(bfloat, ushort);
-#endif
 
 template <typename T>
 kernel void complex_kernel(
