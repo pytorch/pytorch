@@ -6,7 +6,11 @@ import torch
 from torch.types import Storage
 
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "gds_register_buffer",
+    "gds_deregister_buffer",
+    "GdsFile",
+]
 
 
 def _dummy_fn(name: str) -> Callable:
@@ -31,7 +35,7 @@ if not hasattr(torch._C, "_gds_register_buffer"):
     torch._C.__dict__["_gds_save_storage"] = _dummy_fn("_gds_save_storage")
 
 
-def _gds_register_buffer(s: Storage) -> None:
+def gds_register_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
@@ -40,7 +44,7 @@ def _gds_register_buffer(s: Storage) -> None:
     torch._C._gds_register_buffer(s)
 
 
-def _gds_deregister_buffer(s: Storage) -> None:
+def gds_deregister_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
@@ -49,7 +53,7 @@ def _gds_deregister_buffer(s: Storage) -> None:
     torch._C._gds_deregister_buffer(s)
 
 
-class _GdsFile:
+class GdsFile:
     r"""Wrapper around cuFile.
 
     cuFile is a file-like interface to the GPUDirect Storage (GDS) API.

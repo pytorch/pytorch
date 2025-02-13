@@ -209,3 +209,17 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
 .. py:module:: torch.cuda.random
 .. py:module:: torch.cuda.sparse
 .. py:module:: torch.cuda.streams
+
+
+GPUDirect Storage (prototype)
+----------------------------
+
+.. currentmodule:: torch.cuda.gds
+
+    .. autosummary::
+        :toctree: generated
+        :nosignatures:
+
+    gds_register_buffer
+    gds_deregister_buffer
+    GdsFile
