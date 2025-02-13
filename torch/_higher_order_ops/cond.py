@@ -268,57 +268,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
-    for i in range(0, len(flat_true_outs)):
-        true_out = flat_true_outs[i]
-        false_out = flat_false_outs[i]
-
-        # Note that we need skip the check for requires_grad because we're after
-        # after autograd key during tracing, so the rquires_grad attribute of the tensors
-        # are no longer. See Note [invariants for node meta 'val']
-        def _same_meta_except_requires_grad(true_out, false_out):
-            if true_out is None and false_out is None:
-                return True
-            elif true_out is None or false_out is None:
-                # Consider the following case:
-                # def true_fn(x, y):
-                #   return x * y
-                #
-                # def false_fn(x, y):
-                #   return x.sin()
-                #
-                # We'll get the following graphs for backward:
-                # def backward_true_fn(x, y, grad_out):
-                #  return grad_out * y, grad_out * x
-                #
-                # def backward_false_fn(x, y, grad_out):
-                #  retrun grad_out, None
-                #
-                # This suggests that when we make_fx into the backward graph,
-                # the output graph would produce outputs with metadata, this is undesirable.
-                #
-                # Ideally, we should provide an optional type to indicate that one of the branches might
-                # return None. But we'll just let it pass for now and let downstream/runtime handle.
-                #
-                # Note that this corner case should **only** happen when user want to trace backward graph because
-                # if it's foward, dynamo will error.
-                return True
-            true_meta = true_out.meta.get("tensor_meta", None)
-            false_meta = false_out.meta.get("tensor_meta", None)
-            return (
-                true_meta.shape == false_meta.shape
-                and true_meta.dtype == false_meta.dtype
-                and true_meta.stride == false_meta.stride
-            )
-
-        """
-        if not _same_meta_except_requires_grad(true_out, false_out):
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected each tensor to have same metadata but got:"
-                f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
-                f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
-            )
-        """
-
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
     false_name = f"false_graph_{i}"
@@ -459,6 +408,7 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         ):
             merged_size.append(s0)
         else:
+            assert mode.shape_env is not None
             merged_size.append(mode.shape_env.create_unbacked_symint())
             # TODO: setup value range
 
