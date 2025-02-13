@@ -19,7 +19,7 @@ except ImportError:
 import torch
 import torch._inductor.codecache
 import torch.version
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
@@ -74,9 +74,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     def tearDown(self):
@@ -130,28 +130,68 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_precompile(self):
+    def test_cutlass_backend_subproc_mm(self):
         """
-        Make sure autotuning mm in sub processes work without crashes.
+        Test autotune_in_subproc works for mm.
+
+        Note that shape like M, N, K = 100, 100, 10 would get filtered out due to
+        alignment mismatch.
         """
 
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
-                "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 4,
+                "autotune_fallback_to_aten": False,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-            Y = mm(a, b)
+            Y_compiled = torch.compile(torch.mm)(a, b)
+            Y = torch.mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("shape_combo", (0, 1, 2, 3))
+    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+        """
+        Test autotune_in_subproc works for addmm.
+        """
+
+        M, N, K = 4096, 2048, 25728
+
+        a = torch.randn(M, K).cuda().half()
+        b = torch.randn(K, N).cuda().half()
+
+        x_shapes = [
+            (M, N),
+            (M, 1),
+            (1, N),
+            (M,),
+            (K,),
+        ]
+
+        x_shape = x_shapes[shape_combo]
+        x = torch.randn(x_shape).cuda().half()
+
+        alpha = 2.0
+        beta = 0.4
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 4,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
+            Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -477,7 +517,7 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
-    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
+    # @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,CUTLASS"))
