@@ -731,15 +731,19 @@ class OpInfo:
     dtypes: _dispatch_dtypes = None
 
     # the following dtypesIf... options override the dtypes value on their respective device types
+    # I.e. instead of writing multiple `dtypesIfCUDA`, `dtypesIfROCM`, etc one can simply define a dict
+    # dtypesIf = { 'cuda': (torch.float, torch.double), 'rocm': (torch.half, torch.bfloat16) }
     dtypesIf: dict[str, _dispatch_dtypes] = field(default_factory=dict)
 
     def __getattribute__(self, name: str) -> Any:
         if name.startswith("dtypesIf") and name != "dtypesIf":
+            # TODO: Warn if used
             dev_name = name.removeprefix("dtypesIf").lower()
             return self.dtypesIf.get(dev_name)
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        # TODO: After migration, start adding warnings here
         if name.startswith("dtypesIf") and name != "dtypesIf":
             assert isinstance(value, (_dispatch_dtypes, type(None)))
             dev_name = name.removeprefix("dtypesIf").lower()
@@ -1006,9 +1010,9 @@ class OpInfo:
                 self.dtypesIf[dev_type] = self.dtypes
 
         # Inherit from CUDA
-        for dev_dtype in ["rocm", "xpu"]:
+        for dev_type in ["rocm", "xpu"]:
             if self.dtypesIf.get(dev_type) is None:
-                self.dtypesIf[dev_type] = self.dtypeIf["cuda"]
+                self.dtypesIf[dev_type] = self.dtypesIf["cuda"]
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
