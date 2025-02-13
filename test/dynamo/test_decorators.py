@@ -584,7 +584,7 @@ This error is most likely due to a call to `mark_traceable`-ed function, where o
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <class 'dynamo.test_decorators.DecoratorTests.test_mark_traceable_nested_custom_class_error.<locals>.Point'>, please use one of the following to register the type with pytree:
+Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <class '__main__.DecoratorTests.test_mark_traceable_nested_custom_class_error.<locals>.Point'>, please use one of the following to register the type with pytree:
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
             self.assertIn(msg, str(e))
