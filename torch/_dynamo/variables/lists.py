@@ -3,12 +3,10 @@
 import collections
 import inspect
 import operator
-import types
 from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._guards import Source
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -18,7 +16,6 @@ from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
-    istype,
     iter_contains,
     Lit,
     namedtuple_fields,
@@ -477,6 +474,16 @@ class ListVariable(CommonListMethodsVariable):
             self.items[:] = [x for x, *_ in sorted_items_with_keys]
             return ConstantVariable.create(None)
 
+        if name == "__init__" and self.is_mutable():
+            assert not kwargs
+            if len(args) == 0:
+                return ConstantVariable.create(None)
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                (arg,) = args
+                tx.output.side_effects.mutation(self)
+                self.items[:] = arg.force_unpack_var_sequence(tx)
+                return ConstantVariable.create(None)
+
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
@@ -495,58 +502,6 @@ class ListVariable(CommonListMethodsVariable):
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
-
-
-class FxImmutableListVariable(ListVariable):
-    def __init__(self, items, **kwargs) -> None:
-        super().__init__(items, **kwargs)
-        self.mutable_methods = {
-            "__delitem__",
-            "__iadd__",
-            "__imul__",
-            "__setitem__",
-            "append",
-            "clear",
-            "extend",
-            "insert",
-            "pop",
-            "remove",
-            "reverse",
-            "sort",
-        }
-
-    def python_type(self):
-        return torch.fx.immutable_collections.immutable_list
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # load torch.fx.immutable_collections.immutable_list
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(torch.fx.immutable_collections),
-                    codegen.create_load_attr("immutable_list"),
-                ]
-            )
-        )
-
-        # Construct the list
-        super().reconstruct(codegen)
-
-        # Construct the immutable_list
-        codegen.extend_output(create_call_function(1, False))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name in self.mutable_methods:
-            # immutable fx list raises NotImplementedError
-            raise_observed_exception(NotImplementedError, tx)
-
-        return super().call_method(tx, name, args, kwargs)
 
 
 class DequeVariable(CommonListMethodsVariable):
@@ -1098,127 +1053,3 @@ class ListIteratorVariable(IteratorVariable):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
-
-
-class RestrictedListSubclassVariable(ListVariable):
-    """
-    This is a special case of UserDefinedObjectVariable where:
-        1) The user subclasses list
-        2) None of the list methods are overriden, merely some new methods are added
-
-    In these cases, we can prevent graph breaks by not using the general
-    UserDefinedObjectVariable machinery and instead treating it like
-    a ListVariable.
-    """
-
-    _nonvar_fields = {"user_cls", "user_cls_source", *ListVariable._nonvar_fields}
-    _allowed_names = {
-        "__call__",
-        "__module__",
-        "__dict__",
-        "__doc__",
-        "__name__",
-        "__qualname__",
-    }
-    _disallowed_names = {
-        "__getattribute__",
-        "__getattr__",
-        "__setattr__",
-    }
-
-    @classmethod
-    def _is_non_conflicting_subclass(
-        cls,
-        user_cls: type,
-        python_cls: type,
-    ):
-        """Ensures user_cls inherits from python_cls (e.g. list) and does not override any methods on python_cls"""
-        if (
-            not istype(user_cls, type)
-            or user_cls.__bases__ != (python_cls,)
-            or user_cls.__mro__ != (user_cls, python_cls, object)
-        ):
-            return False  # not subclass
-        return not any(
-            hasattr(python_cls, name) or name in cls._disallowed_names
-            for name in set(user_cls.__dict__.keys()) - cls._allowed_names
-        )
-
-    @classmethod
-    def is_matching_cls(cls, user_cls: type):
-        return cls._is_non_conflicting_subclass(user_cls, list)
-
-    def __init__(
-        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
-    ) -> None:
-        super().__init__(items=items, **kwargs)
-        self.user_cls = user_cls
-        self.user_cls_source = user_cls_source
-        assert istype(user_cls, type)
-        assert isinstance(user_cls_source, Source)
-
-    def debug_repr(self):
-        # The constructor is safe as no methods, including __init__, are
-        # allowed to be overridden
-        # NB: This is guaranteed to print like a list, as __repr__ cannot be
-        # overridden, this is... well, it's OK I guess (consistent with
-        # eager), but it could be misleading.  You will have to query type
-        # instead for details.
-        return repr(self.user_cls([Lit(x.debug_repr()) for x in self.items]))
-
-    def python_type(self):
-        return self.user_cls
-
-    def as_proxy(self):
-        return [x.as_proxy() for x in self.items]
-
-    def as_python_constant(self):
-        raise NotImplementedError
-
-    def is_python_constant(self):
-        return False
-
-    @property
-    def value(self):
-        raise AttributeError("value")
-
-    def modified(self, items, **kwargs):
-        return type(self)(
-            items,
-            user_cls=self.user_cls,
-            user_cls_source=self.user_cls_source,
-            **kwargs,
-        )
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.user_cls_source))
-        super().reconstruct(codegen)
-        codegen.extend_output(create_call_function(1, False))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name in self.user_cls.__dict__:
-            method = self.user_cls.__dict__[name]
-            if isinstance(method, types.FunctionType):
-                # inline the method
-                source = AttrSource(self.user_cls_source, name)
-                return UserMethodVariable(method, self, source=source).call_function(
-                    tx, args, kwargs
-                )
-            unimplemented(
-                f"RestrictedListSubclassVariable method {self.user_cls.__name__}.{name}"
-            )
-        return super().call_method(tx, name, args, kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        return self.call_method(tx, "__call__", args, kwargs)
