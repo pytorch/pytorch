@@ -1,5 +1,6 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
+import dataclasses
 import inspect
 import operator
 import types
@@ -126,7 +127,9 @@ def _type_repr(obj: object) -> str:
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    if isinstance(obj, type):
+    # Extension: If we don't ignore GenericAlias then `list[int]` will print
+    # simply "list".
+    if isinstance(obj, type) and not isinstance(obj, types.GenericAlias):
         if obj.__module__ == "builtins":
             return obj.__qualname__
         return f"{obj.__module__}.{obj.__qualname__}"
@@ -920,5 +923,11 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
+    elif dataclasses.is_dataclass(a):
+        kwargs = {
+            field.name: map_aggregate(getattr(a, field.name), fn)
+            for field in dataclasses.fields(a)
+        }
+        return a.__class__(**kwargs)
     else:
         return fn(a)
