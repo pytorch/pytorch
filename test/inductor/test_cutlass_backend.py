@@ -1056,3 +1056,5 @@ if __name__ == "__main__":
     # Set env to make it work in CI.
     if HAS_CUDA and HAS_CPU and is_big_gpu():
         run_tests()
+
+test2
