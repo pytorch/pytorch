@@ -15,6 +15,7 @@ import subprocess
 import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
+from typing_extensions import TypeVarTuple, Unpack
 from unittest.mock import patch
 
 import torch
@@ -45,6 +46,8 @@ log = logging.getLogger(__name__)
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+
+Ts = TypeVarTuple("Ts")
 
 
 @functools.lru_cache(None)
@@ -108,7 +111,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
 
     def get_fake_func(name: str) -> Callable[..., int]:
-        def func1(*args: Any) -> int:
+        def func1(*args: Unpack[Ts]) -> int:
             return 0
 
         func1.__name__ = name
@@ -362,7 +365,7 @@ class DebugContext:
         self,
         filename: str,
         write_mode: str = "w",
-        *args: Any,
+        *args: Unpack[Ts],
         **kwargs: Any,
     ) -> IO[Any]:
         assert self._path
@@ -373,7 +376,7 @@ class DebugContext:
         self,
         filename: str,
         write_mode: str = "w",
-        *args: Any,
+        *args: Unpack[Ts],
         **kwargs: Any,
     ) -> Iterator[IO[Any]]:
         assert self._path
@@ -470,7 +473,7 @@ class DebugContext:
                 return None
         else:
 
-            def ignored(*args: Any, **kwargs: Any) -> None:
+            def ignored(*args: Unpack[Ts], **kwargs: Any) -> None:
                 pass
 
             return ignored
@@ -794,7 +797,7 @@ def create_node_mapping(
         return empty_return
 
 
-def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
+def save_args_for_compile_fx_inner(*args: Unpack[Ts], **kwargs: Any) -> None:
     """
     This function is used to save arguments for a compile_fx_inner function call
     to the file system.  Later on one can replay the compile_fx_inner call
