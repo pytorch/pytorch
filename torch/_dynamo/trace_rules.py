@@ -2996,6 +2996,12 @@ def _disallowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _mark_traceable_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
@@ -3098,6 +3104,11 @@ def _maybe_init_lazy_module(obj: object) -> None:
 def is_callable_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
+
+
+def is_mark_traceable_callable(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _mark_traceable_callable_ids
 
 
 def is_callable_disallowed(obj) -> bool:
