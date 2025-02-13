@@ -31,7 +31,9 @@ goto end
 :libtorch
 echo "install and test libtorch"
 
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do tar -xf "%%i" -C tmp
+tar --version 
+
+for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:\=/%" *-latest.zip') do tar -xf "%%i" -C tmp
 if ERRORLEVEL 1 exit /b 1
 
 pushd tmp\libtorch
