@@ -1638,6 +1638,7 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_exception_context_with_yield_inside_generator(self):
         # Check that the context is also available from inside the generator
         # with yield, as opposed to outside.
