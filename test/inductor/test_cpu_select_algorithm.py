@@ -24,10 +24,13 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_MACOS,
     parametrize,
     skipIfWindows,
     TEST_MKL,
+    TEST_MKLDNN_BF16,
+    xfailIfAarch64,
 )
 
 
@@ -921,6 +924,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
+    # Issue for Aarch64 non-bf16 failure https://github.com/pytorch/pytorch/issues/147104
+    @unittest.skipIf(
+        IS_ARM64 and not TEST_MKLDNN_BF16, "Test fails on non-bf16 hw supported Aarch64"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -1008,6 +1015,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+    # xfail on Aarch64 due to https://github.com/pytorch/pytorch/issues/146915
+    @xfailIfAarch64
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -1365,6 +1374,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
+    # xfail on Aarch64 due to https://github.com/pytorch/pytorch/issues/146914
+    @xfailIfAarch64
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
