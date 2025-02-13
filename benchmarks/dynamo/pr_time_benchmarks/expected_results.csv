@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,10885050
 
 
 
-update_hint_regression,compile_time_instruction_count,1744000000,0.02
+update_hint_regression,compile_time_instruction_count,1785000000,0.02
 
 
 
