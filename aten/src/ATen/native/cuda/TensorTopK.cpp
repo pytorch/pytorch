@@ -35,11 +35,7 @@ void topk_out_with_sort(
 bool disable_sort_for_topk();
 bool should_use_sort(const Tensor& self, int64_t dim) {
 #if defined(USE_ROCM)
-  size_t n_multidims = 0; // number of dimensions with dimensionality more than one
-  for(int s: self.sizes()) {
-    n_multidims += (s > 1);
-  }
-  return (n_multidims == 1 && self.numel()>=10000); // based on the experiments in https://github.com/pytorch/pytorch/pull/146387
+  return (self.numel() == self.sizes(dim) && self.numel()>=10000); // based on the experiments in https://github.com/pytorch/pytorch/pull/146387
 #else
   if (disable_sort_for_topk()) return false;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
