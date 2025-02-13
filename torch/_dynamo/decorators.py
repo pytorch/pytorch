@@ -1,5 +1,10 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+
+"""
+This module provides decorators and utilities for controlling TorchDynamo's behavior during compilation.
+"""
+
 import functools
 import inspect
 import sys
@@ -167,8 +172,7 @@ def mark_traceable(fn):
        inputs.
 
     NOTE: like `allow_in_graph`, aliasing information is neither preserved
-    between inputs themselves, nor between inputs and outputs (when backend like
-    `aot_autograd` traces through the `flat_apply` op).
+    between inputs themselves, nor between inputs and outputs.
     """
     assert callable(fn), "mark_traceable expects a callable"
     if id(fn) not in trace_rules._mark_traceable_callable_ids:
