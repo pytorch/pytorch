@@ -31,7 +31,7 @@ goto end
 :libtorch
 echo "install and test libtorch"
 
-tar --version 
+if not exist tmp mkdir tmp
 
 for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do C:\Windows\System32\tar.exe -xf "%%i" -C tmp
 if ERRORLEVEL 1 exit /b 1
