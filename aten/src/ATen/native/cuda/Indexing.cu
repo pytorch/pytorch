@@ -182,6 +182,71 @@ __global__ void indexing_backward_kernel_rocm(
 }
 #endif
 
+#ifdef USE_ROCM
+#define VIRTUAL_WARP_SIZE 32
+template <typename scalar_t>
+__global__ void indexing_backward_kernel_stride_1(
+  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
+  using opmath_t = at::opmath_type<scalar_t>;
+
+  int fullWarpLaneIdx = threadIdx.x % C10_WARP_SIZE;
+  int warpIdx = fullWarpLaneIdx / VIRTUAL_WARP_SIZE;
+  int laneIdx = fullWarpLaneIdx - warpIdx * VIRTUAL_WARP_SIZE;
+  int warp_multiplier = C10_WARP_SIZE / VIRTUAL_WARP_SIZE;
+
+  // Number of values processed by each thread (grain size)
+  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z) {
+    int64_t idx = blockIdx.x * blockDim.y * warp_multiplier + threadIdx.y * warp_multiplier + warpIdx;
+    int64_t crnt_sorted_idx = sorted_indices[idx];
+
+    if ((idx < numel) &&
+        (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
+    {
+      // Determine the number of duplicates in advance
+      int64_t num_duplicates = 1;
+      while (((idx + num_duplicates) < numel) && (sorted_indices[idx + num_duplicates] == crnt_sorted_idx)) {
+        num_duplicates++;
+      }
+
+      // Continue computing weights
+      const int64_t weight_row = crnt_sorted_idx * stride + z * stride_before;
+      int64_t grad_row = 0;
+      const opmath_t scale = (opmath_t)1.0;
+
+      if (!accumulate) {
+        if (laneIdx == 0) {
+          grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
+          grad_weight[weight_row] =
+            static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row]) * scale);
+        }
+      } else {
+        opmath_t gradient = (opmath_t)0.0;
+
+        int64_t num_warp_passes = num_duplicates / VIRTUAL_WARP_SIZE;
+        for (int64_t i = 0; i < num_warp_passes; ++i) {
+            grad_row = ((int64_t) indices[idx + i * VIRTUAL_WARP_SIZE + laneIdx]) * stride + z * numel * stride;
+            gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
+        }
+
+        WARP_SYNC();
+        for (int offset = VIRTUAL_WARP_SIZE / 2; offset > 0; offset /= 2) {
+          gradient += WARP_SHFL_DOWN(gradient, offset);
+        }
+
+        if (laneIdx == 0) {
+          for (int64_t i = num_warp_passes * VIRTUAL_WARP_SIZE; i < num_duplicates; ++i) {
+            grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
+            gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
+          }
+
+          grad_weight[weight_row] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row]) + gradient);
+        }
+      }
+    }
+  }
+}
+#else
 template <typename scalar_t>
 __global__ void indexing_backward_kernel_stride_1(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -237,6 +302,7 @@ __global__ void indexing_backward_kernel_stride_1(
     }
   }
 }
+#endif
 
 template <typename scalar_t>
 __global__ void indexing_backward_kernel_small_stride(
@@ -563,13 +629,21 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
 
 
       if (sliceSize == 1) {
+#ifdef USE_ROCM
+        // Adapt grid size to smaller virtual warp size:
+        dim3 new_grid(ceil_div(num_indices, (int64_t) (indices_per_block * (warp_size / VIRTUAL_WARP_SIZE))), grid.y, grid.z);
+#endif
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
         AT_DISPATCH_V2(
           expandedValue.scalar_type(),
           "indexing_backward_kernel_stride_1",
           AT_WRAP([&] {
+#ifdef USE_ROCM
+            indexing_backward_kernel_stride_1<scalar_t><<<new_grid, block, 0, stream>>>(
+#else
             indexing_backward_kernel_stride_1<scalar_t><<<grid, block, 0, stream>>>(
+#endif
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
