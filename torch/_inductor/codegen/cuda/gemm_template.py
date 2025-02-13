@@ -762,9 +762,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             op.tile_description.math_instruction.opcode_class
             == cutlass_lib.OpcodeClass.Simt
         ):
+            log.debug("Filtered out due to SIMT kernel: %s", op.configuration_name())
             return None
 
         if op.gemm_kind not in self._get_supported_ops():
+            log.debug(
+                "Filtered out due to unsupported GEMM kind %s: %s",
+                op.gemm_kind,
+                op.configuration_name(),
+            )
             return None
 
         X = self.input_nodes[0]
@@ -772,6 +778,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Filter ops according to the shape match.
         if not self._shape_match(op):
+            log.debug("Filtered out due to shape mismatch: %s", op.configuration_name())
             return None
 
         # Filter ops by dtypes.
@@ -788,6 +795,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 accumulator_torch_dtype, op.accumulator_type()
             )
         ):
+            log.debug("Filtered out due to dtype mismatch: %s", op.configuration_name())
             return None
 
         # Filter ops by input layouts.
@@ -795,10 +803,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             self.layout_match(X.get_layout(), op.A.layout)
             and self.layout_match(W.get_layout(), op.B.layout)
         ):
+            log.debug(
+                "Filtered out due to layout mismatch: %s", op.configuration_name()
+            )
             return None
 
         # Filter ops by alignment.
         if not self._alignment_match(op):
+            log.debug(
+                "Filtered out due to alignment mismatch: %s", op.configuration_name()
+            )
             return None
 
         # Update op.
@@ -813,6 +827,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             and self.set_alignment(W.get_layout(), op.B)
             and self.set_alignment(self.output_node.get_layout(), op.D)
         ):
+            log.debug(
+                "Filtered out due to alignment setting failure: %s",
+                op.configuration_name(),
+            )
             return None
 
         # Set epilogue.
@@ -822,15 +840,25 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             if not re.search(
                 inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
             ):
+                log.debug(
+                    "Filtered out due to allowlist regex: %s", op.configuration_name()
+                )
                 return None
         if inductor_cuda_config.cutlass_op_denylist_regex is not None:
             if re.search(
                 inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
             ):
+                log.debug(
+                    "Filtered out due to denylist regex: %s", op.configuration_name()
+                )
                 return None
 
         # Set bias layout and alignment.
         if not self._set_bias_layout_and_alignment(op):
+            log.debug(
+                "Filtered out due to bias layout and alignment setting failure: %s",
+                op.configuration_name(),
+            )
             return None
 
         return op
