@@ -681,7 +681,6 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
-                    "codegen/cpp_prefix.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1816,37 +1815,6 @@ class AotCodeCompiler:
         return output_so
 
 
-# Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
-# Why? importing from cpp.py invokes codecache.pick_vec_isa(), which takes out a lock.
-# Cycle goes:
-# - CppCodeCache.load()
-# - pick_vec_isa()
-# - valid_vec_isa_list()
-# - VecISA.__bool__() <-- takes out a lock
-# - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
-@clear_on_fresh_inductor_cache
-@functools.lru_cache
-def cpp_prefix_path() -> str:
-    path = Path(__file__).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return normalize_path_separator(filename)
-
-
-def cpp_prefix() -> str:
-    filename = cpp_prefix_path()
-    if config.is_fbcode():
-        # We need relative paths, since we bundle up
-        # everything that we compile into a folder for remote compilation.
-        return f'#include "{os.path.basename(filename)}"'
-    else:
-        return f'#include "{filename}"'
-
-
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
 def compile_file(
@@ -1865,9 +1833,6 @@ def _compile_file(
     ]
     try:
         if config.is_fbcode():
-            # Need to copy our header into the same folder as the sourcecode.
-            header_path = cpp_prefix_path()
-            header_name = os.path.basename(header_path)
             output_name = os.path.basename(output_path)
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
@@ -1875,7 +1840,6 @@ def _compile_file(
             torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
-                shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                 shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))

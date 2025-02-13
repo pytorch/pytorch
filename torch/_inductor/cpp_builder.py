@@ -1258,13 +1258,6 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
-    if aot_mode:
-        if config.is_fbcode():
-            from torch._inductor.codecache import cpp_prefix_path
-
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
-
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 

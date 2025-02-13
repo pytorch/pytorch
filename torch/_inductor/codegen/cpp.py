@@ -22,7 +22,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
-from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
@@ -5111,7 +5111,7 @@ class KernelGroup:
         ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writeline(codecache.cpp_prefix())
+        code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
         kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name
