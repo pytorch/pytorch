@@ -2226,7 +2226,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_var = self.cse.generate(load_buffer, line, dtype=dtype)
             if indexing.mask_vars:
                 zero = 0.0 if dtype.is_floating_point else 0
-                other_val = self._load_other if self._load_other else zero
+                other_val = (
+                    constant_repr(self._load_other) if self._load_other else zero
+                )
                 line = f"tl.where({indexing.mask_str}, {result_var}, {other_val})"
                 result_var = self.cse.generate(load_buffer, line, dtype=dtype)
 
