@@ -207,6 +207,8 @@ These APIs can be used in versions greater than or equal to CUDA 12.6. In order 
 ensure that their system is appropriately configured to use GPUDirect Storage per the
 `GPUDirect Storage documentation <https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html>`_.
 
+See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use these.
+
 .. currentmodule:: torch.cuda.gds
 .. autosummary::
     :toctree: generated
