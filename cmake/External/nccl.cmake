@@ -39,7 +39,7 @@ if(NOT __NCCL_INCLUDED)
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
-      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
+      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
