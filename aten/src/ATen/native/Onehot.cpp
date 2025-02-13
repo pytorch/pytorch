@@ -14,6 +14,20 @@
 
 namespace at::native {
 
+namespace {
+
+void check_num_classes(const at::Tensor& self, int64_t num_classes) {
+    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
+        self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
+        TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+    } else {
+        // for cuda, assert that num_classes is at least 1
+        TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
+    }
+}
+
+}
+
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
 
@@ -22,7 +36,9 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
         // functional version that torch.compiles better and works with dynamic shapes
         if (num_classes == -1) {
-          num_classes = self.max().item().toLong() + 1;
+            num_classes = self.max().item().toLong() + 1;
+        } else {
+            check_num_classes(self, num_classes);
         }
         at::Tensor index = at::arange(num_classes, self.options());
         return at::eq(self.unsqueeze(-1), index).to(kLong);
@@ -50,14 +66,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
-            self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
-          // rely on device asserts from scatter to avoid sync here
-          TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
-        } else {
-            //for cuda, assert that num_classes is at least 1
-            TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
-        }
+        check_num_classes(self, num_classes);
     }
 
     shape.push_back(num_classes);
