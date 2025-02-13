@@ -7290,8 +7290,8 @@ class Conditional(ExternKernel):
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
         for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
-            assert to.get_size() == fo.get_size(), (i, to, fo)
-            assert to.get_stride() == fo.get_stride(), (i, to, fo)
+            #assert to.get_size() == fo.get_size(), (i, to, fo)
+            #assert to.get_stride() == fo.get_stride(), (i, to, fo)
             assert to.get_device() == fo.get_device(), (i, to, fo)
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
@@ -7322,8 +7322,7 @@ class Conditional(ExternKernel):
                 conditional,
                 [(list, i)],
             )
-            # as the true and false outputs are equivalent,
-            # we can use either of them here as a "template"
+            # TODO: read this out of the fake tensor
             for i, output in enumerate(true_outputs)
         ]
 

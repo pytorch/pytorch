@@ -40,7 +40,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 from .utils import _from_fun, create_fw_bw_graph
@@ -308,12 +307,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 and true_meta.stride == false_meta.stride
             )
 
+        """
         if not _same_meta_except_requires_grad(true_out, false_out):
             raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
             )
+        """
 
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
@@ -454,24 +455,40 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
+    merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        if true_out is None or false_out is None:
-            if true_out is None and false_out is None:
-                continue
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected both branches to return None:"
-                f"\n  {true_fn.__name__} returns {true_out}"
-                f"\n  {false_fn.__name__} returns {false_out}"
-            )
-        true_meta = _extract_tensor_metadata(true_out)
-        false_meta = _extract_tensor_metadata(false_out)
-        if true_meta != false_meta:
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected each tensor to have same metadata but got:"
-                f"\n  {true_fn.__name__} returns {true_meta}"
-                f"\n  {false_fn.__name__} returns {false_meta}"
-            )
-    return true_outs
+        merged_outs.append(_merge_tensors(true_out, false_out, mode))
+    return merged_outs
+
+
+def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
+    torch._check(a.dtype == b.dtype)
+    torch._check(a.device == b.device)
+    torch._check(a.dim() == b.dim())
+
+    merged_size = []
+    for s0, s1 in zip(a.size(), b.size()):
+        # TODO: use the symint eq by expr class after rebase
+        if type(s0) is int and type(s1) is int and s0 == s1:
+            merged_size.append(s0)
+        elif (
+            isinstance(s0, torch.SymInt)
+            and isinstance(s1, torch.SymInt)
+            and s0.node.expr == s1.node.expr
+        ):
+            merged_size.append(s0)
+        else:
+            merged_size.append(mode.shape_env.create_unbacked_symint())
+            # TODO: setup value range
+
+    torch._check(a.stride() == b.stride())  # TODO: relax this
+
+    # NYI
+    assert not a.is_quantized
+    assert not b.is_quantized
+
+    with mode:
+        return torch.empty(merged_size, dtype=a.dtype, device=a.device)
 
 
 @cond_op.py_functionalize_impl
