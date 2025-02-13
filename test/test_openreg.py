@@ -1,14 +1,24 @@
 # Owner(s): ["module: cpp"]
 
 import os
+import unittest
 
 import psutil
 import pytorch_openreg  # noqa: F401
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_XPU,
+    TestCase,
+)
 
 
+@unittest.skipIf(IS_ARM64, "Does not work on arm")
+@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
@@ -70,6 +80,7 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.type, "openreg")
         self.assertEqual(generator.device.index, 1)
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
         self.assertFalse(cpu_a.is_pinned())
@@ -78,6 +89,7 @@ class TestOpenReg(TestCase):
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_rewrapped_storage(self):
         pinned_a = torch.randn(10).pin_memory()
         rewrapped_a = torch.tensor((), dtype=torch.float32).set_(
@@ -89,17 +101,20 @@ class TestOpenReg(TestCase):
         self.assertTrue(rewrapped_a.is_pinned())
         self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
 
+    @skipIfTorchDynamo()
     def test_stream_synchronize(self):
         stream = torch.Stream(device="openreg:1")
         stream.synchronize()
         self.assertEqual(True, stream.query())
 
+    @skipIfTorchDynamo()
     def test_stream_wait_stream(self):
         stream_1 = torch.Stream(device="openreg:0")
         stream_2 = torch.Stream(device="openreg:1")
         # Does not crash!
         stream_2.wait_stream(stream_1)
 
+    @skipIfTorchDynamo()
     def test_record_event(self):
         stream = torch.Stream(device="openreg:1")
         event1 = stream.record_event()
@@ -108,6 +123,7 @@ class TestOpenReg(TestCase):
         self.assertNotEqual(0, event2.event_id)
         self.assertNotEqual(event1.event_id, event2.event_id)
 
+    @skipIfTorchDynamo()
     def test_event_elapsed_time(self):
         stream = torch.Stream(device="openreg:1")
         e1 = torch.Event(device="openreg:1", enable_timing=True)
@@ -121,12 +137,14 @@ class TestOpenReg(TestCase):
         ms = e1.elapsed_time(e2)
         self.assertTrue(ms > 0)
 
+    @skipIfTorchDynamo()
     def test_stream_wait_event(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
         e = s1.record_event()
         s2.wait_event(e)
 
+    @skipIfTorchDynamo()
     def test_event_wait_stream(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
