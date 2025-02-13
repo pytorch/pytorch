@@ -223,6 +223,7 @@
 
 import os
 import sys
+import platform
 
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -1032,6 +1033,21 @@ def configure_extension_build():
             return ["-Wl,-rpath,@loader_path/" + path]
         elif IS_WINDOWS:
             return []
+        elif platform.system() == 'AIX':
+            try:
+                aix_ld_flags = os.environ['LDFLAGS']
+                install_rpath = ""
+                if "blibpath" in aix_ld_flags:
+                    start_pos = aix_ld_flags.find('-blibpath:')
+                    start_pos += len('-blibpath:')
+                    end_pos = aix_ld_flags.find(' ', start_pos)
+                    if end_pos == -1:
+                        install_rpath = aix_ld_flags[start_pos:bpath:]
+                    else:
+                        install_rpath = aix_ld_flags[start_pos:end_pos]
+                return ["-Wl,-blibpath:" + install_rpath + path]
+            except:
+                return ["-Wl,-blibpath:" + path]
         else:
             return ["-Wl,-rpath,$ORIGIN/" + path]
 
@@ -1389,6 +1405,7 @@ def main():
                 "lib/libtorch_python.so",
                 "lib/libtorch_python.dylib",
                 "lib/libtorch_python.dll",
+                "lib/libtorch_python.a",
             ]
         )
     if not BUILD_PYTHON_ONLY:
@@ -1398,6 +1415,7 @@ def main():
                 "lib/*.dylib*",
                 "lib/*.dll",
                 "lib/*.lib",
+                "lib/*.a",
             ]
         )
         aotriton_image_path = os.path.join(lib_path, "aotriton.images")

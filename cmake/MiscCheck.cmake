@@ -76,7 +76,7 @@ cmake_pop_check_state()
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
 check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
-if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY} AND NOT AIX)
   set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
 endif()
