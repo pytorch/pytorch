@@ -7,6 +7,8 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
 #include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_graph.hpp>
+#include <oneapi/dnnl/dnnl_graph_sycl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <oneapi/dnnl/dnnl_version.h>
 
@@ -95,5 +97,34 @@ dnnl::memory dnnl_memory_from_host_scalar(
   dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
   return mem;
 }
+
+struct PartitionCache {
+  std::unordered_map<std::bitset<32>, dnnl::graph::partition> partition_map_{};
+
+  // The first 8 bits are reserved
+  // bit 0: is int8
+  // bit 1: is uint8
+  // bit 2: fp16(0) / bf16(1)
+  // bit 3: is fp32
+  // bit 4: is sdp pattern
+  // bit 5-7: N/A
+  // The rest of the bits depend upon the arguments provided
+  // However, down the line, we might have different bitsets for different
+  // patterns
+  dnnl::graph::partition& insert_partition_cache(
+      std::bitset<32>& patternID,
+      dnnl::graph::partition& p) {
+    partition_map_[patternID] = std::move(p);
+    return partition_map_[patternID];
+  }
+  std::optional<std::reference_wrapper<dnnl::graph::partition>> find_partition(
+      std::bitset<32>& patternID) {
+    auto iter = partition_map_.find(patternID);
+    if (iter != partition_map_.end()) {
+      return iter->second;
+    }
+    return std::nullopt;
+  }
+};
 
 } // namespace at::native::onednn

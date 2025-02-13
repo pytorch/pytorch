@@ -39,7 +39,7 @@ def build_ArmComputeLibrary() -> None:
             "clone",
             "https://github.com/ARM-software/ComputeLibrary.git",
             "-b",
-            "v24.09",
+            "v24.12",
             "--depth",
             "1",
             "--shallow-submodules",
