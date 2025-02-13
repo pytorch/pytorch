@@ -314,9 +314,14 @@ struct BlockPrefixCallbackOp
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
 __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem, int iters_per_cta) {
-  if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
-  d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
-  d_out += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  int64_t offset = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
+  int64_t remaining =  nelem - offset;
+  if (remaining <= 0) {
+    return;
+  }
+
+  d_in += offset;
+  d_out += offset;
 
   using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
 
@@ -341,6 +346,11 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // load agg and reduce my starting value
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
+  // if there are fewer threads than previous values to be read,
+  // read another value
+  if (threadIdx.x + blockDim.x < blockIdx.x) {
+    agg_data += agg[threadIdx.x + blockDim.x];
+  }
   T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
   __syncthreads();
   BlockPrefixCallbackOp prefix_op(aggregate);
@@ -349,7 +359,6 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // Per-thread tile data
   T data[ITEMS_PER_THREAD];
 
-  int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   for (int i=0; i<iters_per_cta; i++){
   // Load items into a blocked arrangement
     if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
@@ -399,8 +408,12 @@ struct TransformFunctor {
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, bool nonzero, typename T, typename aggT>
 __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int iters_per_cta){
-    if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
-    d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
+    int64_t offset = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
+    int64_t remaining = nelem - offset;
+    if (remaining <= 0) {
+      return;
+    }
+    d_in += offset;
 
     using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<aggT, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
     using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<aggT, BLOCK_THREADS>;
@@ -412,7 +425,6 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     } temp_storage;
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
-    int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
     TransformFunctor<T, aggT, nonzero> transform_functor;
     auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
@@ -466,7 +478,7 @@ constexpr int block_threads(){
 
 template<typename scalar_t, typename ScanOpT>
 inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * output, ScanOpT scan_op, int64_t num_items) {
-  static_assert(std::is_same<ScanOpT, std::plus<scalar_t>>::value, "");
+  static_assert(std::is_same_v<ScanOpT, std::plus<scalar_t>>, "");
   constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
   constexpr int ITEMS_PER_THREAD = 16;
   auto grid_size = (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
@@ -474,6 +486,8 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = std::min(num_sms, grid_size);
+  // simple reduction in scan kernel handles at most 2 items per thread
+  TORCH_INTERNAL_ASSERT(2 * BLOCK_THREADS >= grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
   calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, false>

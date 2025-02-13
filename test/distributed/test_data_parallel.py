@@ -791,8 +791,8 @@ class TestDataParallel(TestCase):
                                 ),
                                 named_msg,
                             )
-                            for j, ((param_name, p), p_dp) in enumerate(
-                                zip(m_child.named_parameters(), m_dp_child.parameters())
+                            for (param_name, p), p_dp in zip(
+                                m_child.named_parameters(), m_dp_child.parameters()
                             ):
                                 named_msg = (
                                     layer_name + "." + param_name + " " + iter_msg

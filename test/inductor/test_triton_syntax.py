@@ -41,7 +41,7 @@ class TestTritonSyntacticallyValid(TestCase):
         model = nn.Sequential(
             nn.Linear(16, 16, bias=False),
             nn.Linear(16, 32, bias=False),
-        ).cuda(device=torch.device(GPU_TYPE))
+        ).to(device=torch.device(GPU_TYPE))
 
         loss = model(torch.randn(4, 16, device=torch.device(GPU_TYPE))).sum()
         loss.backward()

@@ -489,7 +489,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, actual)
 
     # Needs larger cache size since we recompile for each op
-    @patch.object(torch._dynamo.config, "cache_size_limit", 48)
+    @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
@@ -620,7 +620,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
 
     def test_register_hook(self):
         import functools
@@ -641,7 +641,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4, requires_grad=True)
 
         with torch.device("cpu"):
-            out = torch.compile(mod, fullgraph=True)(x)
+            torch.compile(mod, fullgraph=True)(x)
 
 
 if __name__ == "__main__":

@@ -82,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,22
+detectron2_fcos_r_50_fpn,pass,20
 
 
 
@@ -106,11 +106,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,5
+doctr_det_predictor,pass,4
 
 
 
-doctr_reco_predictor,pass,4
+doctr_reco_predictor,pass,1
 
 
 
@@ -166,6 +166,10 @@ hf_Reformer,pass,5
 
 
 
+hf_Roberta_base,pass,0
+
+
+
 hf_T5,pass,0
 
 
@@ -214,6 +218,10 @@ maml_omniglot,pass,0
 
 
 
+microbench_unbacked_tolist_sum,pass,1
+
+
+
 mnasnet1_0,pass,0
 
 
@@ -230,7 +238,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,5
+moco,pass,7
 
 
 
@@ -303,6 +311,10 @@ resnext50_32x4d,pass,0
 
 
 sam,pass,0
+
+
+
+sam_fast,model_fail_to_load,0
 
 
 

@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -26,9 +26,9 @@ class CUDATemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -90,9 +90,7 @@ class CUDATemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
-        )
+        V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
@@ -108,7 +106,7 @@ class CUDATemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[List[IRNode]] = None,
+            epilogue_nodes: Optional[list[IRNode]] = None,
         ):
             kernel = CUDATemplateKernel(
                 kernel_name="KERNEL_NAME",
@@ -222,7 +220,7 @@ class CUTLASSTemplate(CUDATemplate):
 
     def cute_int(self, int_str: str, var_name: str) -> str:
         res = ""
-        if int_str in {"1", "1L"}:
+        if int_str in ("1", "1L"):
             res = "cute::Int<1>{}"
         else:
             res = int_str

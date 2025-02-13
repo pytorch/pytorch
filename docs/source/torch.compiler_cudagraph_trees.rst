@@ -13,7 +13,7 @@ For a longer background on CUDAGraphs, read `accelerating pytorch with CUDAGraph
 
 CUDA Graphs can give large speedups, especially for models with high CPU overhead or small compute. There are a number of limitations from requiring the same kernels to be run with the same arguments and dependencies, and memory addresses.
 
-- Control Flow is not possible
+- Arbitrary Control Flow is not possible (However, control flow expressed via torch.cond() and torch.while_loop() can be captured in a CUDA Graph. See :ref:`Data Dependent Control Flow<graph-data-dependent-control-flow>`.)
 - Kernels which trigger host to device syncs (such as .item()) errors
 - All input arguments to kernels are fixed to what they were recorded
 - CUDA Memory addresses are fixed, however the values of the memory at those addresses can change
@@ -284,7 +284,7 @@ Let’s say we are benchmarking running inference with the following code:
         y = torch.matmul(x, x)
         return y
 
-    x = torch.randn(10, 10)
+    x = torch.randn(10, 10, device="cuda")
     y1 = my_model(x)
     y2 = my_model(x)
     print(y1)

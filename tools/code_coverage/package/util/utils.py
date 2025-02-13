@@ -24,7 +24,7 @@ def convert_time(seconds: float) -> str:
     minutes = seconds // 60
     seconds %= 60
 
-    return "%d:%02d:%02d" % (hour, minutes, seconds)
+    return f"{hour:d}:{minutes:02d}:{seconds:02d}"
 
 
 def print_time(message: str, start_time: float, summary_time: bool = False) -> None:

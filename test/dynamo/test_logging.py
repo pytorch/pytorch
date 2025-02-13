@@ -37,10 +37,32 @@ requires_distributed = functools.partial(
 
 
 def munge_shape_guards(s: str) -> str:
-    def munge(s):
-        return re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s)
+    SHAPE_GUARD = (
+        "SYMBOLIC_SHAPE_GUARD"
+        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
+        else "LAMBDA_GUARD"
+    )
+    SHAPE_GUARD_REGEX = (
+        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD"
+        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
+        else r"\+- LAMBDA_GUARD"
+    )
 
-    return "\n".join([munge(l) for l in s.splitlines() if "LAMBDA_GUARD" in l])
+    def munge(s):
+        return re.sub(
+            SHAPE_GUARD_REGEX,
+            "+- __SHAPE_GUARD__",
+            re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s),
+        )
+
+    lines = [munge(l) for l in s.splitlines() if SHAPE_GUARD in l]
+
+    if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
+        # Since we can have multiple guard accessors for one guard, the shape guard
+        # printing will have duplicates. We remove duplicates whie preserving order.
+        lines = list(dict.fromkeys(lines))
+
+    return "\n".join(lines)
 
 
 def example_fn(a):
@@ -166,7 +188,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 22, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 25, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
 
     @make_logging_test()
@@ -487,7 +509,7 @@ LoweringException: AssertionError:
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import torch.distributed as dist
 import logging
@@ -669,10 +691,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- LAMBDA_GUARD: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- LAMBDA_GUARD: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -687,8 +709,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
-+- LAMBDA_GUARD: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -706,9 +728,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
-+- LAMBDA_GUARD: 3 <= L['y'].size()[0]  # torch._check(x.size(0) > 5)  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['y'].size()[0] <= 14  # torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
++- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -796,7 +817,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
-            stdout, stderr = self.run_process_no_exception(
+            _, stderr = self.run_process_no_exception(
                 """\
 import torch
 @torch.compile(backend="eager")
@@ -822,6 +843,8 @@ fn(torch.randn(5))
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
         # Test program
         @torch.compile()
         def foo():
@@ -865,6 +888,7 @@ exclusions = {
     "overlap",
     "aot_graphs",
     "aot_graphs_effects",
+    "pre_grad_graphs",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",

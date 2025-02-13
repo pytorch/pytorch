@@ -1065,6 +1065,7 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
+   export.programming_model
    export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir
@@ -1140,6 +1141,7 @@ API Reference
 .. autoclass:: torch.export.graph_signature.CustomObjArgument
 
 .. py:module:: torch.export.dynamic_shapes
+.. py:module:: torch.export.custom_ops
 
 .. automodule:: torch.export.unflatten
     :members:

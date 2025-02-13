@@ -3348,8 +3348,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.const_data_ptr<float>();
         auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-        fbgemm::TensorQuantizationParams qparams;
+        fbgemm::TensorQuantizationParams qparams{};
         qparams.scale = scale;
         qparams.zero_point = zero_point;
         qparams.precision = CHAR_BIT * sizeof(underlying_t);

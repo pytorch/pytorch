@@ -4,7 +4,7 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -331,9 +331,9 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
-        backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
-            "_compiled_autograd_should_lift", True
-        )
+        backward_fn._bw_module = None  # type: ignore[attr-defined]
+        if getattr(cls, "_lazy_backward_info", None):
+            backward_fn._bw_module = cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -389,7 +389,7 @@ class _SingleLevelFunction(
         )
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:
@@ -722,7 +722,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: List[Optional[torch.Tensor]] = []
+        res: list[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):

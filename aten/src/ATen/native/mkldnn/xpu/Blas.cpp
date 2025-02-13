@@ -471,11 +471,13 @@ TORCH_IMPL_FUNC(addmm_out_xpu)
 
 TORCH_IMPL_FUNC(mm_out_xpu)
 (const Tensor& self, const Tensor& mat2, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   xpu::mm_out(self, mat2, const_cast<Tensor&>(result));
 }
 
 TORCH_IMPL_FUNC(bmm_out_xpu)
 (const Tensor& self, const Tensor& batch2, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   xpu::bmm_out(self, batch2, const_cast<Tensor&>(result));
 }
 
@@ -500,7 +502,13 @@ TORCH_IMPL_FUNC(baddbmm_out_xpu)
  const Scalar& alpha,
  const Tensor& result) {
   xpu::baddbmm_out(
-      self, batch1, batch2, beta, alpha, const_cast<Tensor&>(result));
+      self,
+      batch1,
+      batch2,
+      beta,
+      alpha,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<Tensor&>(result));
 }
 
 TORCH_IMPL_FUNC(addmv_out_xpu)
@@ -510,6 +518,7 @@ TORCH_IMPL_FUNC(addmv_out_xpu)
  const Scalar& beta,
  const Scalar& alpha,
  const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
 
@@ -519,7 +528,6 @@ Tensor _weight_int4pack_mm_xpu(
     int64_t qGroupSize,
     const Tensor& qScale,
     const Tensor& qZeros) {
-
   auto M = A.size(0); // M
   auto N = B.size(0); // N1=LCM(N, K)
   TORCH_CHECK(
@@ -560,5 +568,4 @@ Tensor _weight_int4pack_mm_xpu(
 
   return C;
 }
-
 } // namespace at::native
