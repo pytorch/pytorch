@@ -4886,6 +4886,15 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
+                    outer_size = functools.reduce(lambda x, y: x * y, cpp_kernel_proxy.ranges[:node.outer_loop_fusion_depth])
+                    inner_size = cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
+                    if isinstance(outer_size, sympy.Integer) and isinstance(inner_size, sympy.Integer) and outer_size * 300 < inner_size:
+                        for removed_buffer in scope.removed_buffers:
+                            # Restore the removed buffers by this context before
+                            # fallback to codegen without using Local Buffer
+                            V.graph.removed_buffers.remove(removed_buffer)
+                        return False
+
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
@@ -5337,18 +5346,18 @@ class LoopNest:
         max_depth = 0
         start_depth = 0
         is_reduction = self.loops[0].is_reduction
-        sizes = sympy.Integer(1)
+        size = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            sizes = sizes * loop.size
+            size = size * loop.size
             max_depth += 1
 
         if (
             max_depth < len(self.loops)
-            and isinstance(sizes, sympy.Integer)
+            and isinstance(size, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
-            and sizes * 100 < self.loops[max_depth].size
+            and size * 300 < self.loops[max_depth].size
         ):
             start_depth = max_depth
             max_depth = 1
