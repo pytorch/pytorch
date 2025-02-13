@@ -3373,6 +3373,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             return result
 
+    def update_parent_exn_vt_stack(self, parent):
+        # TODO(anijain2305) - This works but we should probably have a
+        # global/central data structure for the exception stack.
+        # Prior to this, the parent stack would be extended with all exceptions from
+        # the child frame. We don't need to append everything as the parent interpreter
+        # can only match the topmost exception from the child. i.e.
+        #
+        #     def foo():
+        #         try:
+        #             raise ValueError
+        #         except ValueError as e:
+        #             raise TypeError from e
+        #
+        #     def bar():
+        #         try:
+        #             foo()
+        #         except TypeError:
+        #             # it is impossible for `bar` to match on the first `ValueError`
+        #             # raised by `foo`
+        #             pass
+        #
+        # For a test case, check test_exceptions::test_raise_match
+        parent.exn_vt_stack = self.exn_vt_stack
+
     @staticmethod
     def build_inline_tracer(
         parent,
@@ -3479,9 +3503,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
-            # TODO(anijain2305) - This works but we should probably have a
-            # global/central data structure for the exception stack.
-            parent.exn_vt_stack.extend(self.exn_vt_stack)
+            self.update_parent_exn_vt_stack(self.parent)
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
@@ -3560,6 +3582,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.funcvar = funcvar
         self.parent = parent
+        # Propagate any exception on the parent stack
+        self.exn_vt_stack = list(parent.exn_vt_stack)
         self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
