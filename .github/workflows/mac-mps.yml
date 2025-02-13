@@ -40,7 +40,7 @@ jobs:
     needs: macos-py3-arm64-build
     with:
       sync-tag: macos-py3-arm64-mps-test
-      build-environment: macos-py3-arm64
+      build-environment: macos-py3-arm64-mps
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
