@@ -173,6 +173,7 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
+        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
