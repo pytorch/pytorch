@@ -1063,14 +1063,13 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
   TORCH_CHECK(input.scalar_type() == at::ScalarType::Float, "linalg.cholesky: Input tensor must be float32");
   TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
   TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
-
-  if (input.numel() == 0 || out.numel() == 0) {
-    out.zero_();
-    return;
-  }
   auto input_sizes = input.sizes();
   resize_output(out, input_sizes);
   resize_output(info, {input_sizes.begin(), input_sizes.end() - 2});
+  if (input.numel() == 0) {
+    info.zero_();
+    return;
+  }
   out.copy_(input);
 
   int64_t ndim = out.dim();
