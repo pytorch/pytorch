@@ -53,6 +53,7 @@ class DebugPrinterManager:
     def __init__(
         self,
         debug_printer_level,
+        use_array_ref: bool,
         args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
@@ -60,6 +61,7 @@ class DebugPrinterManager:
         kernel_type=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
+        self.use_array_ref = use_array_ref
         if args_to_print_or_save is None:
             args_to_print_or_save = []
         self.args_to_print_or_save = args_to_print_or_save
@@ -155,12 +157,15 @@ class DebugPrinterManager:
             ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
-            args_to_print_or_save_cpp = [
-                f"copy_arrayref_tensor_to_tensor({arg})"
+            self.args_to_print_or_save = [
+                (
+                    f"copy_arrayref_tensor_to_tensor({arg})"
+                    if self.use_array_ref
+                    else arg
+                )
                 for arg in args_to_print_or_save
                 if arg.startswith(("buf", "arg"))
             ]
-            self.args_to_print_or_save = args_to_print_or_save_cpp
         else:
             self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
@@ -230,9 +235,8 @@ class DebugPrinterManager:
         ):
             if V.graph.cpp_wrapper:
                 V.graph.wrapper_code.writeline(
-                    f'printf("[ {launch_prefix}: {kernel_name} ]");'
+                    f'printf("[ {launch_prefix}: {kernel_name} ]\\n");'
                 )
-                V.graph.wrapper_code.writeline('printf("\\n");')
             return
 
         if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
@@ -263,7 +267,7 @@ class DebugPrinterManager:
                     ),
                 ):
                     V.graph.wrapper_code.writeline(
-                        f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\n");'
+                        f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\\\n");'
                     )
                 else:
                     if arg_signatures is None and self.kernel_type == "cpp" or "extern":
