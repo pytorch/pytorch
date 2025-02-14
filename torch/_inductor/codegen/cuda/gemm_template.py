@@ -6,8 +6,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
-from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
-
 from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import (
@@ -739,6 +737,30 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
         return new_op
 
+    def _dtype_match(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
+        X = self.input_nodes[0]
+        W = self.input_nodes[1]
+
+        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
+            [X.get_dtype(), W.get_dtype()],
+        )
+        if not (
+            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
+            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
+            and cutlass_utils.dtype_match(
+                self.output_node.get_layout().dtype, op.C.element
+            )
+            and cutlass_utils.dtype_match(
+                accumulator_torch_dtype, op.accumulator_type()
+            )
+        ):
+            return False
+
+        return True
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -752,16 +774,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         Takes memory layout, dtype and support for EVT operations into account,
         and filters potentially problematic ops.
 
-        Returns None if the op is not suitable, otherwise returns the op to be used.
-
-        The return op might be mutated. However, the configuration name should stay the same.
-        This means DataType of a, b, acc, c, d, and the layouts of a and b cannot change.
-
-        TODO: figure out how alignment should be handled.
+        Returns None if the op is not suitable, otherwise returns the op to be used, which might
+        have been mutated.
         """
 
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         if (
@@ -778,39 +796,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Filter ops according to the shape match.
         if not self._shape_match(op):
-            log.debug("Skipping due to shape mismatch. op: %s", op.configuration_name())
             return None
 
-        # Filter ops by dtypes. need to check A, B, acc, C (if exists), D
-        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
-            [X.get_dtype(), W.get_dtype()],
-        )
-        if not (
-            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
-            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
-            and cutlass_utils.dtype_match(
-                accumulator_torch_dtype, op.accumulator_type()
-            )
-        ):
-            return None
-        assert try_import_cutlass()
-        from cutlass_library.library import DataType  # type: ignore[import]
-
-        if op.C.element == DataType.void:
-            # expect no bias
-            if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
-                return None
-        else:
-            # expect bias, need to check dtype
-            if not (
-                len(self.input_nodes) >= 3
-                and self.input_nodes[2] is not None
-                and cutlass_utils.dtype_match(W.get_dtype(), op.C.element)
-            ):
-                return None
-        if not cutlass_utils.dtype_match(
-            self.output_node.get_layout().dtype, op.D.element
-        ):
+        # Filter ops by dtypes.
+        if not self._dtype_match(op):
             return None
 
         # Filter ops by input layouts.
@@ -1223,6 +1212,54 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             status = self.set_alignment(Bias.get_layout(), op.C)
             if not status:
                 return False
+        return True
+
+    def _dtype_match(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
+        """
+        For CUTLASS 3, we want to keep the configuration name the same.
+        This means DataType of a, b, acc, c, d, and the layouts of a and b
+        cannot change.
+        """
+
+        assert cutlass_utils.try_import_cutlass()
+        from cutlass_library.library import DataType  # type: ignore[import]
+
+        X = self.input_nodes[0]
+        W = self.input_nodes[1]
+
+        # Filter ops by dtypes. need to check A, B, acc, C (if exists), D
+        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
+            [X.get_dtype(), W.get_dtype()],
+        )
+        if not (
+            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
+            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
+            and cutlass_utils.dtype_match(
+                accumulator_torch_dtype, op.accumulator_type()
+            )
+        ):
+            return False
+
+        if op.C.element == DataType.void:
+            # expect no bias
+            if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
+                return False
+        else:
+            # expect bias, need to check dtype
+            if not (
+                len(self.input_nodes) >= 3
+                and self.input_nodes[2] is not None
+                and cutlass_utils.dtype_match(W.get_dtype(), op.C.element)
+            ):
+                return False
+        if not cutlass_utils.dtype_match(
+            self.output_node.get_layout().dtype, op.D.element
+        ):
+            return False
+
         return True
 
     def _define_gemm_instance(
