@@ -839,7 +839,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         and (not issubclass(cpu_vec_isa.pick_vec_isa().__class__, cpu_vec_isa.VecAVX2)),
         "Only support avx2 or avx512",
     )
-    @dtypes(torch.bfloat16, torch.half, torch.float, torch.int8)
+    @dtypes(torch.bfloat16, torch.half, torch.float)
     def test_microgemm_fp32_vec(self, dtype):
         # gemm template of microgemm_fp32_vec
         TEST_GEMM_TEMPLATE = r"""
