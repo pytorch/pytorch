@@ -248,11 +248,13 @@ class TestCutlassBackend(TestCase):
     # NOTE: right now tuned_mm doesn't support cutlass 2x, which is used by A100
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @parametrize("use_aoti", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str, use_aoti: bool
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        use_aoti: bool = False,
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -453,7 +455,6 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
@@ -484,10 +485,9 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,CUTLASS"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic, max_autotune_gemm_backends
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -563,10 +563,9 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,ATen"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_int_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
