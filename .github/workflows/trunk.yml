@@ -76,6 +76,37 @@ jobs:
         ]}
     secrets: inherit
 
+  libtorch-linux-focal-cuda12_6-py3_10-gcc9-debug-build:
+    name: libtorch-linux-focal-cuda12.6-py3.10-gcc9-debug
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: libtorch-linux-focal-cuda12.6-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9
+      build-generates-artifacts: false
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "linux.4xlarge"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+    secrets: inherit
+
+  # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
+  linux-focal-cuda12_6-py3_10-gcc9-no-ops-build:
+    name: linux-focal-cuda12.6-py3.10-gcc9-no-ops
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-no-ops
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+    secrets: inherit
+
   macos-py3-arm64-build:
     if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
