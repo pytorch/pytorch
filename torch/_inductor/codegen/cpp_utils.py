@@ -80,6 +80,7 @@ DTYPE_TO_ATEN = {
 }
 
 DEVICE_TO_ATEN = {
+    "meta": "at::kMeta",
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
@@ -273,6 +274,7 @@ def rewrite_index_for_function(
 ):
     # Local buffer at the inner dimensions
     snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
+    assert snode is not None
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -547,7 +549,7 @@ def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
 
 
 def get_gemm_template_output_and_compute_dtype(input_dtype):
-    if input_dtype == torch.uint8:
+    if input_dtype in [torch.uint8, torch.int8]:
         return (torch.int32, torch.int32)
     else:
         return (torch.float32, torch.float32)
