@@ -46,7 +46,7 @@ PT_EXPORT {{kernel_call_signature}} {
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw, swizzle,
+  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
@@ -120,7 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
-  arguments.scheduler.max_swizzle_size = {{swizzle}};
+  arguments.scheduler.max_swizzle_size = swizzle;
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -980,7 +980,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
-            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -1256,7 +1255,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
-        swizzle: int,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
@@ -1302,7 +1300,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             M="M",
             N="N",
             epilogue_args=epilogue_args,
-            swizzle=swizzle,
         )
         assert epilogue_template is not None
 

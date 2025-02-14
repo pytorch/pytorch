@@ -1783,7 +1783,16 @@ class AlgorithmSelectorCache(PersistentCache):
             start_times: dict[concurrent.futures.Future[Any], float] = {}
             elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
 
+            # Some choices only differ in runtime arguments, so we
+            # skip a choice if it has the same hash as a previously seen choice
+            seen_choices = set()
             for c in choices:
+                # Skip choices which we have already issued a precompile
+                if c.hash_key() in seen_choices:
+                    continue
+                else:
+                    seen_choices.add(c.hash_key())
+
                 if hasattr(c, "precompile"):
                     triton_cuda_choice = isinstance(
                         c, TritonTemplateCaller
@@ -1996,6 +2005,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
         ) -> float:
+            print("benchmarking", choice.name, choice.description)
             is_extern = isinstance(choice, ExternKernelCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
