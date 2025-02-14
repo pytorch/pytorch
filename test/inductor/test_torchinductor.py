@@ -2015,6 +2015,8 @@ class CommonTemplate:
             include_complex=False,
             include_half=False,
         ):
+            if not self.is_dtype_supported(dtype):
+                continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
             inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
