@@ -393,13 +393,15 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
     @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
-        method_name = obj.__name__
 
-        # TODO(anijain2305) - Add support for more builtin methods
-        # Supports tuple.__new__ and frozenset({....}).__contains__
-        return (method_self is tuple and method_name == "__new__") or (
-            type(method_self) is frozenset and method_name == "__contains__"
-        )
+        if method_self is None:
+            # Its a function
+            return False
+
+        type_self = type(method_self)
+
+        if hasattr(type_self, "__module__") and type_self.__module__ == "builtins":
+            return True
 
     def call_function(
         self,
