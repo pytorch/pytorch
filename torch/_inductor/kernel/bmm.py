@@ -4,7 +4,7 @@ import logging
 import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
-from .. import config as inductor_config, ir, lowering as L
+from .. import ir, lowering as L
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -25,6 +25,7 @@ from .mm_common import (
     mm_args,
     mm_configs,
     mm_options,
+    should_fallback_to_aten,
 )
 
 
@@ -195,12 +196,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
