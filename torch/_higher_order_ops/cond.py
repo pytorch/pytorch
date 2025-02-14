@@ -394,6 +394,12 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
 
 def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
+    from torch.fx.experimental.symbolic_shapes import (
+        _nested_int_aware_sort,
+        SymIntEqByExpr,
+    )
+    from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
     if a is None or b is None:
         assert a is None and b is None, (a, b)
         return None
@@ -427,13 +433,7 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
     merged_size: list[Union[int, torch.SymInt]] = []
     for s0, s1 in zip(a.size(), b.size()):
         # TODO: use the symint eq by expr class after rebase
-        if type(s0) is int and type(s1) is int and s0 == s1:
-            merged_size.append(s0)
-        elif (
-            isinstance(s0, torch.SymInt)
-            and isinstance(s1, torch.SymInt)
-            and s0.node.expr == s1.node.expr
-        ):
+        if SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
             merged_size.append(s0)
         else:
 
@@ -444,13 +444,9 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
                         return s
                     assert mode.shape_env is not None
                     vrange = bound_sympy(s.node.expr, mode.shape_env.var_to_range)
-                    ret = vrange.lower if lower_bound else vrange.upper
-                    print(s, vrange, vrange.lower, lower_bound, ret)
-                    return ret
+                    return vrange.lower if lower_bound else vrange.upper
 
                 return _bound(min(s0, s1), True), _bound(max(s0, s1), False)
-
-            from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
             assert mode.shape_env is not None
             new_size = mode.shape_env.create_unbacked_symint()
@@ -483,8 +479,6 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         ex_stride: tuple[int, ...],
         merged_size: list[Union[int, torch.SymInt]],
     ) -> list[Union[int, torch.SymInt]]:
-        from torch.fx.experimental.symbolic_shapes import _nested_int_aware_sort
-
         stride_li: list[tuple[Union[int, torch.SymInt], int]] = [
             (val, -i) for i, val in enumerate(ex_stride)
         ]
