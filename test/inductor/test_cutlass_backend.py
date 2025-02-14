@@ -77,9 +77,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     def tearDown(self):
@@ -1029,7 +1029,7 @@ class TestCutlassBackend(TestCase):
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
