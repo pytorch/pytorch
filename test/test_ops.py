@@ -170,7 +170,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("lu_solve"),
     xfail("lu_unpack"),
     xfail("matmul"),
-    xfail("mean"),
     xfail("mm"),
     xfail("mode"),
     xfail("msort"),
