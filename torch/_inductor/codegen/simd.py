@@ -2043,11 +2043,20 @@ class SIMDScheduling(BaseScheduling):
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
         indirect_broadcast = False
-        for read in node.read_writes.reads:
-            if read.indirect_broadcast:
-                # If we have an indirect broadcast, we can't tile the kernel.
-                # return default_tiling
-                indirect_broadcast = True
+        indirect_dims = []
+        other_dims = []
+        
+        if len(node_schedule) == 1:
+            for index, read in enumerate(node_schedule[0].read_writes.reads):
+                if hasattr(read, 'indirect_broadcast') and read.indirect_broadcast:
+                    indirect_broadcast = True
+                    indirect_dims.append(index)
+            if indirect_broadcast and len(node_schedule) == 1:
+                indirect_dims.sort(key=lambda d: V.graph.sizevars.size_hint(node_schedule[0]._body.sizes[0][d]))
+                other_dims = [d for d in range(len(node_schedule[0]._body.sizes[0])) if d not in indirect_dims]
+                new_order = indirect_dims + other_dims
+                if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
+                    node_schedule[0].apply_new_loop_order(new_order)
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling or indirect_broadcast:
