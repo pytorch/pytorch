@@ -5090,22 +5090,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return x0, x1, x2
 
         inps = (
-            [
+            (
                 {"data": torch.randn(4, 4)},
                 torch.randn(4, 4),
                 torch.randn(6, 4),
-            ],
+            ),
             {
                 "a": torch.randn(8, 4),
                 "b": torch.randn(9, 6),
             },
         )
         dynamic_shapes = {
-            "x": [
+            "x": (
                 {"data": (Dim("dx00"), Dim("dx01"))},
                 (Dim("dx10"), Dim("dx11")),
                 (Dim("dx20"), Dim("dx21")),
-            ],
+            ),
             "y": {
                 "a": (Dim("dya0"), Dim("dya1")),
                 "b": (Dim("dyb0"), Dim("dyb1")),
@@ -5984,7 +5984,7 @@ def forward(self, x):
                 a = x.item()
                 torch._check(a >= 4)
                 torch._check(a <= 7)
-                return torch.empty((a, 4))
+                return torch.randn((a, 4))
 
         f = Module()
         ep = export(f, (torch.tensor([5]),))
@@ -6012,9 +6012,9 @@ def forward(self, x):
                 a = x.item()
                 torch._check(a >= 4)
                 torch._check(a <= 7)
-                empty = torch.empty((a, 4))
+                randn = torch.randn((a, 4))
 
-                return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+                return torch.cat((randn.transpose(0, 1), torch.zeros(6, a)), 0)
 
         f = Module()
         ep = export(f, (torch.tensor([6]),))
