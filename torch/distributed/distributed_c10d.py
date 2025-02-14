@@ -5365,8 +5365,7 @@ def _find_or_create_pg_by_ranks_and_tag(
 def _get_group_tag(pg: ProcessGroup) -> str:
     """Return the tag associated with ``pg``."""
     tag = _world.pg_to_tag[pg]
-    if tag.startswith("user:"):
-        tag = tag[5:]
+    tag = tag.removeprefix("user:")
     return tag
 
 
