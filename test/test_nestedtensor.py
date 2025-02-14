@@ -7021,13 +7021,17 @@ torch.cuda.synchronize()
             (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
         )
         offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
-        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16).transpose(
+            1, 2
+        )
 
         values_meta = torch.randn(
             (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
         )
         offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
-        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt_meta = convert_jagged_to_nested_tensor(
+            values_meta, offsets_meta, max_length=16
+        ).transpose(1, 2)
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
 
