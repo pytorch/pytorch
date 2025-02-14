@@ -441,10 +441,10 @@ class CPythonTestBaseExitStack:
             finally:
                 raise exc
 
-        exc1 = Exception(1)
-        exc2 = Exception(2)
-        exc3 = Exception(3)
-        exc4 = Exception(4)
+        exc1 = AttributeError(1)
+        exc2 = BytesWarning(2)
+        exc3 = ConnectionError(3)
+        exc4 = DeprecationWarning(4)
 
         # The contextmanager already fixes the context, so prior to the
         # fix, ExitStack would try to fix it *again* and get into an
