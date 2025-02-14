@@ -1,25 +1,26 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
-from typing import Set
 
 import torch
 import torch._custom_ops
 from torch._C import DispatchKey
+from torch._higher_order_ops.flat_apply import (
+    ConstantFunction,
+    flat_apply,
+    to_graphable,
+)
 from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-from torch.utils import _pytree as pytree
-
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     PreDispatchTorchFunctionMode,
+    ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
-from torch._higher_order_ops.flat_apply import to_graphable, flat_apply, ConstantFunction
 
 
 class ExportTracepoint(HigherOrderOperator):
@@ -133,13 +134,15 @@ def _mark_constructor_exportable_experimental(constructor_subclass):
         assert is_traceable_wrapper_subclass_type(type(args[0]))
         constructor_subclass(*args, **kwargs)
         if torch._C._is_torch_function_mode_enabled():
-            torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+            torch_function_mode_stack = (
+                torch.overrides._get_current_function_mode_stack()
+            )
             for mode in torch_function_mode_stack:
                 if isinstance(mode, PreDispatchTorchFunctionMode):
                     tracer = mode.tracer
                     flat_proxy_args = []
                     subclass = args[0]
-                    
+
                     flat_args, in_spec = to_graphable((tuple(args[1:]), kwargs))
 
                     qualname = tracer.get_fresh_qualname(constructor_subclass.__name__)
@@ -149,11 +152,13 @@ def _mark_constructor_exportable_experimental(constructor_subclass):
                     for arg in flat_args:
                         if isinstance(arg, torch.Tensor):
                             proxy = get_proxy_slot(arg, tracer).proxy
-                            flat_proxy_args.append(proxy) 
+                            flat_proxy_args.append(proxy)
                         else:
                             flat_proxy_args.append(arg)
 
-                    _, func_spec = torch.utils._pytree.tree_flatten(ConstantFunction(type(subclass)))
+                    _, func_spec = torch.utils._pytree.tree_flatten(
+                        ConstantFunction(type(subclass))
+                    )
                     qualname = tracer.get_fresh_qualname(type(subclass).__name__)
                     setattr(tracer.root, qualname, func_spec)
                     func_spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
@@ -167,5 +172,6 @@ def _mark_constructor_exportable_experimental(constructor_subclass):
                     track_tensor_tree(
                         args[0], inner_proxy, constant=None, tracer=tracer
                     )
-        #return out
+        # return out
+
     return wrapper

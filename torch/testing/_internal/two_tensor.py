@@ -2,8 +2,8 @@
 
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import return_and_correct_aliasing
 from torch._export.wrappers import _mark_constructor_exportable_experimental
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
@@ -36,7 +36,7 @@ class TwoTensor(torch.Tensor):
         assert a.stride() == b.stride()
         assert a.storage_offset() == b.storage_offset()
         return out
-    
+
     @_mark_constructor_exportable_experimental
     def __init__(self, a, b, outer_size=None, outer_stride=None):
         self.a = a

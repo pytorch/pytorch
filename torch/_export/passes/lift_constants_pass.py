@@ -167,7 +167,10 @@ def lift_constants_pass(
     for node in gm.graph.nodes:
         if node.op == "get_attr":
             constant_val = _get_attr(gm, node.target)
-            if not isinstance(constant_val, torch.utils._pytree.TreeSpec) and constant_val in lifted_objs:
+            if (
+                not isinstance(constant_val, torch.utils._pytree.TreeSpec)
+                and constant_val in lifted_objs
+            ):
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
                 # node.
