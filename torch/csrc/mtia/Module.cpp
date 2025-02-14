@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
-#include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
@@ -79,6 +78,14 @@ void initModule(PyObject* module) {
   m.def("_mtia_memorySnapshot", []() {
     PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
     return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceCount", []() {
+    return at::detail::getMTIAHooks().deviceCount();
+  });
+
+  m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
+    at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
   });
 }
 

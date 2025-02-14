@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable
 
 import torch
 import torch.ao.nn.qat as nnqat
@@ -142,7 +142,7 @@ class DetectorBase(ABC):
         self.detector_config_info = None
 
     @abstractmethod
-    def determine_observer_insert_points(self, model) -> Dict:
+    def determine_observer_insert_points(self, model) -> dict:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -156,7 +156,7 @@ class DetectorBase(ABC):
         r"""Returns the name of the current detector"""
 
     @abstractmethod
-    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+    def get_qconfig_info(self, model) -> dict[str, DetectorQConfigInfo]:
         r"""Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -205,7 +205,7 @@ class DetectorBase(ABC):
             )
 
     @abstractmethod
-    def generate_detector_report(self, model) -> tuple[str, Dict[str, Any]]:
+    def generate_detector_report(self, model) -> tuple[str, dict[str, Any]]:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -234,7 +234,7 @@ class PerChannelDetector(DetectorBase):
     PER_CHAN_USED_KEY = "per_channel_quantization_used"
 
     # Default map for representing supported per channel quantization modules for different backends
-    DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
+    DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: dict[str, set[Any]] = {
         "fbgemm": {
             nn.Linear,
             nn.Conv1d,
@@ -296,7 +296,7 @@ class PerChannelDetector(DetectorBase):
         r"""returns the string name of this detector"""
         return "per_channel_detector"
 
-    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+    def get_qconfig_info(self, model) -> dict[str, DetectorQConfigInfo]:
         r"""Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -323,7 +323,7 @@ class PerChannelDetector(DetectorBase):
 
         return module_fqn_to_detector_qconfig_info
 
-    def determine_observer_insert_points(self, model: nn.Module) -> Dict:
+    def determine_observer_insert_points(self, model: nn.Module) -> dict:
         r"""
         There is no observers inserted for the PerChannelDetector.
 
@@ -344,7 +344,7 @@ class PerChannelDetector(DetectorBase):
         Returns dictionary mapping fqns to if per_channel quantization is possible
         """
         # create dict we will return
-        per_channel_info: Dict = {}
+        per_channel_info: dict = {}
 
         # get the fully qualified name and check if in list of modules to include and list of modules to ignore
         for fqn, module in model.named_modules():
@@ -393,7 +393,7 @@ class PerChannelDetector(DetectorBase):
 
         return per_channel_info
 
-    def generate_detector_report(self, model: nn.Module) -> tuple[str, Dict[str, Any]]:
+    def generate_detector_report(self, model: nn.Module) -> tuple[str, dict[str, Any]]:
         r"""Checks if any Linear or Conv layers in the model utilize per_channel quantization.
         Only Linear and Conv layers can use per_channel as of now so only these two are currently checked.
 
@@ -492,11 +492,11 @@ class DynamicStaticDetector(DetectorBase):
 
         # set tolerance level and initialize a set to keep track of useful fqn locations
         self.tolerance = tolerance
-        self.useful_observer_fqns: Set[str] = set()
+        self.useful_observer_fqns: set[str] = set()
 
     def determine_observer_insert_points(
         self, prepared_fx_model: GraphModule
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         r"""
         Determines where observers need to be inserted for the Dynamic vs Static detector.
         For this detector, we want to place observers on either side of linear layers in the model.
@@ -518,7 +518,7 @@ class DynamicStaticDetector(DetectorBase):
         obs_ctr = ModelReportObserver
 
         # return dict
-        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+        obs_fqn_to_info: dict[str, dict[str, Any]] = {}
 
         for fqn, module in prepared_fx_model.named_modules():
             # make sure module is supported
@@ -552,7 +552,7 @@ class DynamicStaticDetector(DetectorBase):
         r"""returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
-    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+    def get_qconfig_info(self, model) -> dict[str, DetectorQConfigInfo]:
         r"""Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -611,7 +611,7 @@ class DynamicStaticDetector(DetectorBase):
             )
             return supported and has_obs
 
-    def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
+    def _generate_dict_info(self, model: GraphModule) -> dict[str, Any]:
         r"""
         Helper function for generate_detector_report that does the generation of the dictionary.
         This process is done as specified in generate_detector_report documentation
@@ -686,7 +686,7 @@ class DynamicStaticDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any]]:
         r"""
         Determines whether dynamic or static quantization is more appropriate for a given module.
 
@@ -839,7 +839,7 @@ class InputWeightEqualizationDetector(DetectorBase):
     * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    SUPPORTED_MODULES: Set[Callable] = {
+    SUPPORTED_MODULES: set[Callable] = {
         nn.Linear,
         nn.Conv1d,
         nn.Conv2d,
@@ -905,7 +905,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
             return is_supported_type and has_obs
 
-    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+    def get_qconfig_info(self, model) -> dict[str, DetectorQConfigInfo]:
         r"""Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -915,18 +915,18 @@ class InputWeightEqualizationDetector(DetectorBase):
         """
         # run the helper function to populate the dictionary
         # find the range of inputs
-        input_values: Dict[str, Dict] = self._extract_input_info(model)
+        input_values: dict[str, dict] = self._extract_input_info(model)
 
         # find the range of weights
-        weight_values: Dict[str, Dict] = self._extract_weight_info(model)
+        weight_values: dict[str, dict] = self._extract_weight_info(model)
 
         # calculate per_channel comparison statistic s_c
-        comp_stats: Dict[str, torch.Tensor] = self._generate_comparison_values(
+        comp_stats: dict[str, torch.Tensor] = self._generate_comparison_values(
             input_values, weight_values
         )
 
         # generate the return dictionary
-        input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(
+        input_weight_equalization_info: dict[str, dict] = self._generate_dict_info(
             input_values, weight_values, comp_stats
         )
 
@@ -948,7 +948,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def determine_observer_insert_points(
         self, prepared_fx_model: GraphModule
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
         For this detector, we want to place observers in front of supported layers.
 
@@ -970,7 +970,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         obs_ctr = ModelReportObserver
 
         # return dict
-        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+        obs_fqn_to_info: dict[str, dict[str, Any]] = {}
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
@@ -994,7 +994,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         r"""Returns the name of this detector"""
         return "input_weight_equalization_detector"
 
-    def _extract_input_info(self, model: GraphModule) -> Dict[str, Dict]:
+    def _extract_input_info(self, model: GraphModule) -> dict[str, dict]:
         r"""
         Takes in a calibrated GraphModule and then finds the relevant observers.
         It then extracts the input information for each observer returns it
@@ -1010,7 +1010,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         """
 
         # return dictionary mapping observer fqns to desired info
-        input_info: Dict[str, Dict] = {}
+        input_info: dict[str, dict] = {}
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
@@ -1027,7 +1027,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         return input_info
 
-    def _extract_weight_info(self, model: GraphModule) -> Dict[str, Dict]:
+    def _extract_weight_info(self, model: GraphModule) -> dict[str, dict]:
         r"""
         Takes in a calibrated GraphModule and then finds the relevant observers.
         It then extracts the weight information for each layer an observer is attached to.
@@ -1042,7 +1042,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             "global_min" : maps to the global min recorded
         """
         # return dictionary mapping observer fqns to desired info
-        weight_info: Dict[str, Dict] = {}
+        weight_info: dict[str, dict] = {}
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
@@ -1081,7 +1081,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         return weight_info
 
     def _calculate_range_ratio(
-        self, info_dict: Dict, info_str: str, module_fqn: str
+        self, info_dict: dict, info_str: str, module_fqn: str
     ) -> torch.Tensor:
         r"""
         Takes in an info dict and calculates the s_c matrix.
@@ -1121,8 +1121,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         return ratio
 
     def _generate_comparison_values(
-        self, input_info: Dict, weight_info: Dict
-    ) -> Dict[str, torch.Tensor]:
+        self, input_info: dict, weight_info: dict
+    ) -> dict[str, torch.Tensor]:
         r"""
         Takes in the information on the min and max values of the inputs and weights and:
             Calculates the comp stat for each channel: s_c = sqrt(w_c/W)/sqrt(i_c/I)
@@ -1135,7 +1135,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             Each value is a different s_c value for a different channel
         """
         # create return dictionary for each observer
-        module_fqn_to_channel: Dict[str, torch.Tensor] = {}
+        module_fqn_to_channel: dict[str, torch.Tensor] = {}
 
         # for each module (both passed in dicts should have same keys)
         for module_fqn in input_info:
@@ -1175,8 +1175,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         return module_fqn_to_channel
 
     def _generate_dict_info(
-        self, input_info: Dict, weight_info: Dict, comp_stats: Dict
-    ) -> Dict[str, Dict]:
+        self, input_info: dict, weight_info: dict, comp_stats: dict
+    ) -> dict[str, dict]:
         r"""
         Helper function for generate_detector_report that does the generation of the dictionary.
         This process is done as specified in generate_detector_report documentation
@@ -1195,14 +1195,14 @@ class InputWeightEqualizationDetector(DetectorBase):
             the weight channel range info
         """
         # store modules input weight equalization info
-        input_weight_equalization_info: Dict[str, Dict] = {}
+        input_weight_equalization_info: dict[str, dict] = {}
 
         # for each module we add separate set of suggestions
         for module_fqn in input_info:
             # get relevant info for this module
-            mod_input_info: Dict = input_info[module_fqn]
-            mod_weight_info: Dict = weight_info[module_fqn]
-            mod_comp_stat: Dict = comp_stats[module_fqn]
+            mod_input_info: dict = input_info[module_fqn]
+            mod_weight_info: dict = weight_info[module_fqn]
+            mod_comp_stat: dict = comp_stats[module_fqn]
 
             # decide if each channel should have input weight equalization or not
             channel_rec_vals: list = []
@@ -1233,7 +1233,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any]]:
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
@@ -1256,18 +1256,18 @@ class InputWeightEqualizationDetector(DetectorBase):
         """
 
         # find the range of inputs
-        input_values: Dict[str, Dict] = self._extract_input_info(model)
+        input_values: dict[str, dict] = self._extract_input_info(model)
 
         # find the range of weights
-        weight_values: Dict[str, Dict] = self._extract_weight_info(model)
+        weight_values: dict[str, dict] = self._extract_weight_info(model)
 
         # calculate per_channel comparison statistic s_c
-        comp_stats: Dict[str, torch.Tensor] = self._generate_comparison_values(
+        comp_stats: dict[str, torch.Tensor] = self._generate_comparison_values(
             input_values, weight_values
         )
 
         # generate the return dictionary
-        input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(
+        input_weight_equalization_info: dict[str, dict] = self._generate_dict_info(
             input_values, weight_values, comp_stats
         )
 
@@ -1299,7 +1299,7 @@ class InputWeightEqualizationDetector(DetectorBase):
                 module_fqn, self.ch_axis
             )
 
-            mod_info: Dict[str, Any] = input_weight_equalization_info[module_fqn]
+            mod_info: dict[str, Any] = input_weight_equalization_info[module_fqn]
 
             # gather info on how many channels would benefit from input weight and
             recommendation_per_channel: torch.Tensor = mod_info[self.RECOMMENDED_KEY]
@@ -1444,7 +1444,7 @@ class OutlierDetector(DetectorBase):
         num_children = len(list(module.children()))
         return num_children == 0 and not _is_activation_post_process(module)
 
-    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+    def get_qconfig_info(self, model) -> dict[str, DetectorQConfigInfo]:
         r"""Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -1469,7 +1469,7 @@ class OutlierDetector(DetectorBase):
 
     def determine_observer_insert_points(
         self, prepared_fx_model: GraphModule
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Outlier Detector.
 
         For this detector, we want to place observers in front of supported layers.
@@ -1490,7 +1490,7 @@ class OutlierDetector(DetectorBase):
         obs_ctr = ModelReportObserver
 
         # return dict
-        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+        obs_fqn_to_info: dict[str, dict[str, Any]] = {}
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
@@ -1517,7 +1517,7 @@ class OutlierDetector(DetectorBase):
         percentile_ratios: torch.Tensor,
         counted_batches: torch.Tensor,
         total_batches: int,
-    ) -> Dict[str, List[bool]]:
+    ) -> dict[str, list[bool]]:
         r"""
         Gives info on whether the percentile ratios calculated would be considered outliers
         Also gives information on whether the collected data is statistically significant to make this claim
@@ -1532,14 +1532,14 @@ class OutlierDetector(DetectorBase):
             "is_sufficient_batches": if o_r was >= fraction_batches_used_threshold:
                 where o_r = counted_batches / total_batches
         """
-        outlier_dict: Dict[str, List[bool]] = {
+        outlier_dict: dict[str, list[bool]] = {
             self.OUTLIER_KEY: [],
             self.IS_SUFFICIENT_BATCHES_KEY: [],
         }
 
         # get both as flattened lists for easy mapping
-        ratios_list: List = percentile_ratios.tolist()
-        num_batches_list: List = counted_batches.tolist()
+        ratios_list: list = percentile_ratios.tolist()
+        num_batches_list: list = counted_batches.tolist()
 
         # calculate whether channels were statistically significant
         significant_size = [
@@ -1555,7 +1555,7 @@ class OutlierDetector(DetectorBase):
         # return the dictionary with the two lists
         return outlier_dict
 
-    def _generate_info_dict(self, model: GraphModule) -> Dict[str, Dict]:
+    def _generate_info_dict(self, model: GraphModule) -> dict[str, dict]:
         r"""
         Helper function for generate_detector_report that does the generation of the dictionary.
         This process is done as specified in generate_detector_report documentation
@@ -1575,7 +1575,7 @@ class OutlierDetector(DetectorBase):
             the per channel max values
         """
         # return dictionary mapping observer fqns to desired info
-        info_dict: Dict[str, Dict] = {}
+        info_dict: dict[str, dict] = {}
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
@@ -1631,7 +1631,7 @@ class OutlierDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any]]:
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
@@ -1677,7 +1677,7 @@ class OutlierDetector(DetectorBase):
         # compile the suggestion string
         for module_fqn in info_dict:
             # get module specific info
-            mod_info: Dict[str, Any] = info_dict[module_fqn]
+            mod_info: dict[str, Any] = info_dict[module_fqn]
             # check to see if we already added high level model desc
             added_model_desc = False
             # look at each individual channel and add a suggestion

@@ -1,8 +1,30 @@
 # mypy: ignore-errors
 
+"""
+This module implements variable tracking for PyTorch optimizers during Dynamo tracing.
+
+The OptimizerVariable class provides specialized handling for optimizer instances by:
+- Optimizing the tracing of expensive optimizer initialization
+- Managing optimizer state and parameter group tracking
+- Handling tensor sources and guards for optimizer state tensors
+- Supporting CUDA graph execution through static tensor address management
+- Providing special handling for parameter gradients and optimizer state tensors
+
+Key features include:
+- Efficient initialization tracing via _init_group optimization
+- Automatic marking of optimizer state tensors as static for CUDA graphs
+- Proper source tracking for parameter groups, gradients, and state tensors
+- Guard installation for optimizer state structure
+- Support for both CPU and GPU tensor handling
+- Cleanup of static tensor references via finalizers
+
+The module integrates with Dynamo's broader tracing system while providing
+optimizer-specific optimizations and safety guarantees.
+"""
+
 import logging
 import weakref
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
@@ -84,8 +106,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
@@ -293,7 +315,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
-            if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
+            # Note: to avoid spam logs only warn if perf hint artifact is enabled
+            # (NB: artifacts are only enabled at the debug or warning level)
+            if not all_static and perf_hint_log.isEnabledFor(logging.DEBUG):
                 non_static_grads = [src.name() for src in non_static_grads]
                 perf_hint_log.warning(
                     (

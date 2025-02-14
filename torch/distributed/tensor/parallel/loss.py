@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-from typing import cast, Dict, Optional
+from typing import cast, Optional
 
 import torch
 import torch._prims_common as utils
@@ -108,7 +108,7 @@ def _cast_to_dtensor(
 def _propagate_tensor_meta(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
@@ -154,7 +154,7 @@ def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
 def _log_softmax_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
     dim = cast(int, args[1])
@@ -185,7 +185,7 @@ def _log_softmax_handler(
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
     input_dtype = cast(torch.dtype, args[3])
@@ -270,7 +270,7 @@ def _nll_loss_forward(
 def _nll_loss_forward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
     target = args[1]
@@ -414,7 +414,7 @@ def _nll_loss_and_log_softmax_backward(
 def _nll_loss_backward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
     x = cast(DTensor, args[1])

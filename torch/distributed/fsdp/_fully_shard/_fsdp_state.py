@@ -2,7 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -40,7 +41,7 @@ class FSDPStateContext:
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree
-        self.all_states: List[FSDPState] = []
+        self.all_states: list[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
@@ -73,9 +74,9 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._states_to_forward_prefetch: List[FSDPState] = []
-        self._states_to_backward_prefetch: List[FSDPState] = []
-        self._modules_to_run_forward: Set[nn.Module] = set()
+        self._states_to_forward_prefetch: list[FSDPState] = []
+        self._states_to_backward_prefetch: list[FSDPState] = []
+        self._modules_to_run_forward: set[nn.Module] = set()
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -108,8 +109,8 @@ class FSDPState(_State):
             self._post_forward_hook_handle = hook_handle
 
     def _root_pre_forward(
-        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
@@ -126,7 +127,7 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu", "xpu"]:
+            if self._device.type in ["cuda", "hpu", "xpu", "mtia"]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -150,7 +151,7 @@ class FSDPState(_State):
             )
         detect_compiled_autograd()
         root_module = self._modules[0]
-        visited_states: Set[FSDPState] = set()
+        visited_states: set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
             if (state := _get_module_fsdp_state(module)) is None:
                 continue
@@ -188,8 +189,8 @@ class FSDPState(_State):
         """Sets module and parameter FQN attributes for debugging."""
         assert self._is_root
         root_module = self._modules[0]
-        param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
-        module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
+        param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
+        module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
         for state in self._state_ctx.all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
@@ -211,8 +212,8 @@ class FSDPState(_State):
 
     @disable_if_config_true
     def _pre_forward(
-        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -343,7 +344,7 @@ def _register_group_forward_hooks(
     modules: Sequence[nn.Module],
     pre_hook: Callable,
     post_hook: Callable,
-    modules_to_run: Set[nn.Module],
+    modules_to_run: set[nn.Module],
 ):
     """
     Registers group forward pre and post-hooks. The pre-hook runs upon the

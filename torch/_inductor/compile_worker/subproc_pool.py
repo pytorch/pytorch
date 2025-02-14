@@ -13,7 +13,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum
-from typing import Any, BinaryIO, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -43,7 +43,7 @@ def _unpack_msg(data: bytes) -> tuple[int, int]:
 msg_bytes = len(_pack_msg(0, 0))
 
 
-def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
+def _send_msg(write_pipe: IO[bytes], job_id: int, job_data: bytes = b"") -> None:
     length = len(job_data)
     write_pipe.write(_pack_msg(job_id, length))
     if length > 0:
@@ -51,7 +51,7 @@ def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: BinaryIO) -> tuple[int, bytes]:
+def _recv_msg(read_pipe: IO[bytes]) -> tuple[int, bytes]:
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data
@@ -158,7 +158,7 @@ class SubprocPool:
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
-        self.pending_futures: Dict[int, Future[Any]] = {}
+        self.pending_futures: dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
@@ -255,8 +255,8 @@ class SubprocMain:
         pickler: SubprocPickler,
         kind: SubprocKind,
         nprocs: int,
-        read_pipe: BinaryIO,
-        write_pipe: BinaryIO,
+        read_pipe: IO[bytes],
+        write_pipe: IO[bytes],
     ) -> None:
         self.pickler = pickler
         self.kind = kind
