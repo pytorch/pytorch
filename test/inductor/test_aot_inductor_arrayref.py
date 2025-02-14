@@ -71,6 +71,11 @@ CPU_TEST_FAILURES = {
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
     "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
