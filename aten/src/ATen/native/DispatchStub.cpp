@@ -8,6 +8,7 @@
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 

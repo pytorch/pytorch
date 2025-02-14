@@ -1,20 +1,9 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
+from collections.abc import Sequence
 from functools import wraps
-from typing import (
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    overload,
-    Protocol,
-    Sequence,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Callable, Generic, Optional, overload, Protocol, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
@@ -66,7 +55,7 @@ def contract() -> (
 
 @overload
 def contract(
-    state_cls: Type[_TState],
+    state_cls: type[_TState],
 ) -> Callable[
     [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
     _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
@@ -75,7 +64,7 @@ def contract(
 
 
 def contract(
-    state_cls: Type = _State,
+    state_cls: type = _State,
 ) -> Callable[
     [
         Callable[
@@ -153,21 +142,21 @@ def contract(
             # `func` is allowed to return different module instances than the
             # input modules as long as FQNs are preserved following the input
             # module order
-            all_orig_named_params: List[Dict[str, nn.Parameter]] = []
-            all_orig_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_orig_named_modules: List[Dict[str, nn.Module]] = []
+            all_orig_named_params: list[dict[str, nn.Parameter]] = []
+            all_orig_named_buffers: list[dict[str, torch.Tensor]] = []
+            all_orig_named_modules: list[dict[str, nn.Module]] = []
 
             for module in modules:
-                default_all_state: Dict[Callable, _State] = OrderedDict()
-                default_registry: Dict[str, RegistryItem] = OrderedDict()
-                all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                default_all_state: dict[Callable, _State] = OrderedDict()
+                default_registry: dict[str, RegistryItem] = OrderedDict()
+                all_state: dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     STATE_KEY, default_all_state
                 )
                 if not isinstance(all_state, dict):
                     raise AssertionError(
                         f"Distributed composable API states corrupted: {all_state}"
                     )
-                registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                registry: dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     REGISTRY_KEY, default_registry
                 )
                 if not isinstance(registry, dict):
@@ -195,9 +184,9 @@ def contract(
             else:
                 updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
 
-            all_new_named_params: List[Dict[str, nn.Parameter]] = []
-            all_new_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_new_named_modules: List[Dict[str, nn.Module]] = []
+            all_new_named_params: list[dict[str, nn.Parameter]] = []
+            all_new_named_buffers: list[dict[str, torch.Tensor]] = []
+            all_new_named_modules: list[dict[str, nn.Module]] = []
             for module in updated_modules:
                 all_new_named_params.append(OrderedDict(module.named_parameters()))
                 all_new_named_buffers.append(OrderedDict(module.named_buffers()))
@@ -212,7 +201,7 @@ def contract(
                     f"Outputs: {num_new_modules} modules"
                 )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
+            def check_fqn(orig_fqns: list[str], new_fqns: list[str], check_key: str):
                 if orig_fqns == new_fqns:
                     return
 
@@ -280,7 +269,7 @@ def contract(
     return inner
 
 
-def _get_registry(module: nn.Module) -> Optional[Dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this
