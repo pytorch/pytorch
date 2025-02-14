@@ -1732,6 +1732,41 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
     return decorator
 
 
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(fn)
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+    ) -> None:
+        def dummy(fn: Callable[..., Any]) -> None:
+            fn(self)
+
+        actual = CompileCounter()
+
+        dummy(fn)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn(fn)
+        reset()
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+        )
+
+    return test_fn
+
+
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
