@@ -1,5 +1,20 @@
 # mypy: ignore-errors
 
+"""
+This module provides iterator-related variable tracking functionality for Dynamo.
+It implements variable classes for handling Python iterators and itertools functions
+during symbolic execution and tracing.
+
+The module includes:
+- Base iterator variable classes for tracking iterator state
+- Implementations of built-in iterators (zip, map, filter)
+- Support for itertools functions (product, accumulate, combinations, etc.)
+- Mutation tracking and reconstruction capabilities for iterator operations
+
+These classes integrate with Dynamo's variable tracking system to enable proper
+handling of iterator operations during code transformation and optimization.
+"""
+
 import itertools
 import operator
 import sys
@@ -138,19 +153,20 @@ class ItertoolsVariable(VariableTracker):
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                keyfunc = (
-                    (
-                        lambda x: (
-                            retrieve_const_key(
-                                kwargs.get("key").call_function(tx, [x], {})
-                            )
-                        )
-                    )
-                    if "key" in kwargs
-                    else None
-                )
             else:
                 unimplemented("Unsupported arguments for itertools.groupby")
+
+            if "key" in kwargs:
+
+                def keyfunc(x):
+                    return retrieve_const_key(
+                        kwargs.get("key").call_function(tx, [x], {})
+                    )
+
+            else:
+
+                def keyfunc(x):
+                    return retrieve_const_key(x)
 
             result = []
             try:

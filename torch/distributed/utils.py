@@ -1,18 +1,9 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import traceback
-from typing import (
-    Any,
-    Callable,
-    Container,
-    Dict,
-    List,
-    Optional,
-    OrderedDict,
-    overload,
-    Set,
-    TypeVar,
-)
+from collections import OrderedDict
+from collections.abc import Container
+from typing import Any, Callable, Optional, overload, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -43,8 +34,8 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str,
         kwarg keys. The second tuple element gives the kwarg keys.
         The second tuple element's length is at most the first tuple element's length.
     """
-    kwarg_keys: List[str] = []
-    flat_args: List[Any] = list(args)
+    kwarg_keys: list[str] = []
+    flat_args: list[Any] = list(args)
     for k, v in kwargs.items():
         kwarg_keys.append(k)
         flat_args.append(v)
@@ -75,7 +66,7 @@ def _cast_forward_inputs(
 
 def _unpack_kwargs(
     flat_args: tuple[Any, ...], kwarg_keys: tuple[str, ...]
-) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -94,7 +85,7 @@ T = TypeVar("T", torch.Tensor, PackedSequence)
 @overload
 def _recursive_to(
     inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> List[S]:
+) -> list[S]:
     ...
 
 
@@ -264,10 +255,10 @@ def _apply_to_tensors(fn, container):
 
 def _to_kwargs(
     inputs: tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    kwargs: Optional[dict[str, Any]],
     target_device: torch.device,
     use_side_stream_for_tensor_copies: bool,
-) -> tuple[tuple[Any, ...], tuple[Dict[str, Any], ...]]:
+) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:
     moved_inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
@@ -287,7 +278,7 @@ def _to_kwargs(
 
 def _verify_param_shape_across_processes(
     process_group: dist.ProcessGroup,
-    tensors: List[torch.Tensor],
+    tensors: list[torch.Tensor],
     logger: Optional["dist.Logger"] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
@@ -309,7 +300,7 @@ def _sync_module_states(
     parameter shapes are consistent before running the synchronization. This can
     be checked with ``_verify_param_shape_across_processes``.
     """
-    module_states: List[torch.Tensor] = []
+    module_states: list[torch.Tensor] = []
     for name, param in module.named_parameters():
         if name not in params_and_buffers_to_ignore:
             module_states.append(param.detach())
@@ -324,7 +315,7 @@ def _sync_module_states(
 
 def _sync_params_and_buffers(
     process_group: dist.ProcessGroup,
-    module_states: List[torch.Tensor],
+    module_states: list[torch.Tensor],
     broadcast_bucket_size: int,
     src: int,
 ) -> None:
@@ -336,7 +327,7 @@ def _sync_params_and_buffers(
 
 
 def _replace_by_prefix(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     old_prefix: str,
     new_prefix: str,
 ) -> None:
@@ -363,15 +354,15 @@ def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
     return tensor.untyped_storage().data_ptr() > 0
 
 
-def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
+def _get_root_modules(modules: list[nn.Module]) -> list[nn.Module]:
     """
     Returns the modules in ``modules`` that are root modules (i.e.
     parent-less) with respect to the set ``modules``. In other words, these
     are the modules in ``modules`` that are the not child of any other
     module in ``modules``.
     """
-    root_modules: List[nn.Module] = []
-    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {
+    root_modules: list[nn.Module] = []
+    module_to_modules: dict[nn.Module, set[nn.Module]] = {
         module: set(module.modules()) for module in modules
     }
     for candidate_module in modules:

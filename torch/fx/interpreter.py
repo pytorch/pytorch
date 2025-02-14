@@ -173,6 +173,8 @@ class Interpreter:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
+                    if isinstance(self.module, GraphModule):
+                        msg += f"\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}\n"
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):

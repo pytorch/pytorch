@@ -130,7 +130,19 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 SETUPTOOLS_PINNED_VERSION="=46.0.0"
 PYYAML_PINNED_VERSION="=5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
+CONDA_ENV_CREATE_FLAGS=""
+RENAME_WHEEL=true
 case $desired_python in
+    3.13t)
+        echo "Using 3.13 deps"
+        SETUPTOOLS_PINNED_VERSION=">=68.0.0"
+        PYYAML_PINNED_VERSION=">=6.0.1"
+        NUMPY_PINNED_VERSION="=2.1.0"
+        CONDA_ENV_CREATE_FLAGS="python-freethreading"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+        desired_python="3.13"
+        RENAME_WHEEL=false
+        ;;
     3.13)
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=68.0.0"
@@ -169,18 +181,15 @@ esac
 
 # Install into a fresh env
 tmp_env_name="wheel_py$python_nodot"
-conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python"
+conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
 source activate "$tmp_env_name"
 
-pip install -q "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests
-retry pip install -qr "${pytorch_rootdir}/requirements.txt" || true
-# TODO : Remove me later (but in the interim, use Anaconda cmake, to find Anaconda installed OpenMP)
-retry pip uninstall -y cmake
-retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -yq  llvm-openmp=14.0.6 cmake ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
+pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
+retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
+retry brew install libomp
 
-# For USE_DISTRIBUTED=1 on macOS, need libuv and pkg-config to find libuv.
+# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
-retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -yq libuv pkg-config
 
 if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
     export CMAKE_OSX_ARCHITECTURES=arm64
@@ -222,10 +231,13 @@ echo "The wheel is in $(find $whl_tmp_dir -name '*.whl')"
 wheel_filename_gen=$(find $whl_tmp_dir -name '*.whl' | head -n1 | xargs -I {} basename {})
 popd
 
-if [[ -z "$BUILD_PYTHONLESS" ]]; then
+if [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == true  ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
+elif [[ $RENAME_WHEEL == false ]]; then
+    echo "Copying Wheel file: $wheel_filename_gen to $PYTORCH_FINAL_PACKAGE_DIR"
+    cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
 else
     pushd "$pytorch_rootdir"
 
