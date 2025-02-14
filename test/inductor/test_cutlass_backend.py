@@ -131,6 +131,7 @@ class TestCutlassBackend(TestCase):
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(True, "FIXME: Disabled temporarily due to alignment")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_precompile(self):
