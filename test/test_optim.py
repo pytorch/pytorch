@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -1099,7 +1098,6 @@ class TestOptimRenewed(TestCase):
             p.grad = torch.rand_like(p)
         optimizer.step()
 
-    @onlyNativeDeviceTypes
     @largeTensorTest("64GB")
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
