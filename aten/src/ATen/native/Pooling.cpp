@@ -7,6 +7,10 @@
 #include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -113,6 +117,45 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   return std::make_tuple(output, indices);
 }
 
+#if AT_MKLDNN_ENABLED()
+bool use_mkldnn_maxpool(const Tensor& input, IntArrayRef dilation, bool is_3d) {
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (input.numel() <= 1) {
+    return false;
+  }
+  if (input.dim() != (is_3d ? 5 : 4)) {
+    return false;
+  }
+  // mkldnn_max_pool does not support dilation case
+  if (!std::all_of(dilation.cbegin(), dilation.cend(), [](int64_t i) {
+        return 1 == i;
+      })) {
+    return false;
+  }
+  if (!((GradMode::is_enabled() && input.requires_grad()) ||
+        input._fw_grad(/*level */ 0).defined())) {
+    bool is_channels_last = is_3d
+        ? (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d)
+        : (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+    if (is_3d) {
+      return input.device().is_cpu() && is_channels_last &&
+          (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+           (input.scalar_type() == kFloat));
+    } else {
+      return input.device().is_cpu() &&
+          (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+           ((input.scalar_type() == kFloat) && is_channels_last));
+    }
+  }
+
+  return false;
+}
+#endif
+
 Tensor avg_pool1d(
     const Tensor& self,
     IntArrayRef kernel_size,
@@ -164,7 +207,8 @@ Tensor max_pool2d(
 
 #if AT_MKLDNN_ENABLED()
 #if !defined(C10_MOBILE)
-  if (!((GradMode::is_enabled() && self.requires_grad()) || self._fw_grad(/*level */ 0).defined())) {
+  // Use mkldnn_max_pool2d to get better performance
+  if (use_mkldnn_maxpool(self, dilation, /*is_3d*/ false)) {
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
@@ -191,6 +235,8 @@ Tensor max_pool3d(
     return at::mkldnn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+
+  // TODO Add mkldnn_max_pool3d pass to get better performance
   auto output_and_indices = at::max_pool3d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);
