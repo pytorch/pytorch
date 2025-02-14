@@ -151,7 +151,7 @@ def upload_to_s3(
     key: str,
     docs: list[dict[str, Any]],
 ) -> None:
-    print(f"Writing {len(docs)} documents to S3")
+    print(f"Writing {len(docs)} documents to S3 {bucket_name}/{key}")
     body = io.StringIO()
     for doc in docs:
         json.dump(doc, body)
@@ -165,7 +165,7 @@ def upload_to_s3(
         ContentEncoding="gzip",
         ContentType="application/json",
     )
-    print("Done!")
+    print(f"Done! Finish writing document to S3 {bucket_name}/{key} ")
 
 
 def read_from_s3(

@@ -1849,45 +1849,31 @@ def _compile_file(
         os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
     ]
     try:
-        if config.is_fbcode():
-            # Need to copy our header into the same folder as the sourcecode.
-            header_path = cpp_prefix_path()
-            header_name = os.path.basename(header_path)
-            output_name = os.path.basename(output_path)
-            # When we build remotely, we need to make sure to carefully copy any files
-            # that are required during the compilation process into our build directly.
-            # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(_TORCH_PATH, "include")
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                # Copy everything to tmp compilation folder
-                shutil.copy(header_path, os.path.join(tmp_dir, header_name))
-                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
-                for p, f in zip(input_paths, input_files):
-                    shutil.copy(p, os.path.join(tmp_dir, f))
-                dest_include_path = os.path.join(tmp_dir, "include")
-                shutil.copytree(torch_includes_path, dest_include_path)
-                # Run the build
-                output_file_path = _run_build_command(cmd, tmp_dir, output_name)
-                # Copy output from the build
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                shutil.copy(output_file_path, output_path)
-        else:
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        assert config.is_fbcode(), "compile_file() is only used in fbcode"
+        # Need to copy our header into the same folder as the sourcecode.
+        header_path = cpp_prefix_path()
+        header_name = os.path.basename(header_path)
+        output_name = os.path.basename(output_path)
+        # When we build remotely, we need to make sure to carefully copy any files
+        # that are required during the compilation process into our build directly.
+        # This is where all of the ATen/c10/Torch includes come from.
+        torch_includes_path = os.path.join(_TORCH_PATH, "include")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Copy everything to tmp compilation folder
+            shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+            shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
+            for p, f in zip(input_paths, input_files):
+                shutil.copy(p, os.path.join(tmp_dir, f))
+            dest_include_path = os.path.join(tmp_dir, "include")
+            shutil.copytree(torch_includes_path, dest_include_path)
+            # Run the build
+            output_file_path = _run_build_command(cmd, tmp_dir, output_name)
+            # Copy output from the build
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            shutil.copy(output_file_path, output_path)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
-        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
-        if openmp_problem and sys.platform == "darwin":
-            instruction = (
-                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
-                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
-                "that has builtin OpenMP support;\n"
-                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
-                "(3) install libomp via brew: `brew install libomp`;\n"
-                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
-                " with `include/omp.h` under it."
-            )
-            output += instruction
         raise exc.CppCompileError(cmd, output) from e
 
 
