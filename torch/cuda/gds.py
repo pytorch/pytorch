@@ -38,7 +38,7 @@ if not hasattr(torch._C, "_gds_register_buffer"):
 def gds_register_buffer(s: Storage) -> None:
     """Registers a storage on a CUDA device as a cufile buffer.
 
-    .. Example::
+    Example::
 
         >>> # xdoctest: +SKIP("gds filesystem requirements")
         >>> src = torch.randn(1024, device="cuda")
@@ -54,7 +54,7 @@ def gds_register_buffer(s: Storage) -> None:
 def gds_deregister_buffer(s: Storage) -> None:
     """Deregisters a previously registered storage on a CUDA device as a cufile buffer.
 
-    .. Example::
+    Example::
 
         >>> # xdoctest: +SKIP("gds filesystem requirements")
         >>> src = torch.randn(1024, device="cuda")
@@ -81,7 +81,7 @@ class GdsFile:
         flags (int): Flags to pass to ``os.open`` when opening the file. ``os.O_DIRECT`` will
             be added automatically.
 
-    .. Example::
+    Example::
 
         >>> # xdoctest: +SKIP("gds filesystem requirements")
         >>> src1 = torch.randn(1024, device="cuda")
