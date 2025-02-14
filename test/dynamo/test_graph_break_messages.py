@@ -452,6 +452,12 @@ Attempted to call function marked as skipped
             f(x)
         self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
+
+        def post_munge(s):
+            return re.sub(
+                r"`mylib(_v\d+)?.PyCapsule.foobar`", "`mylib.PyCapsule.foobart`", s
+            )
+
         self.assertExpectedInline(
             first_graph_break,
             """\

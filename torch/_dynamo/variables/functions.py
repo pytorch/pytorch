@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
+from typing_extensions import Never
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -1215,11 +1215,11 @@ class SkipFunctionVariable(VariableTracker):
                     explanation = (
                         f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{self.value.__qualname__}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
-                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
                     hints = [
                         "If it is a Python builtin, please file an issue on GitHub "
-                        "so the PyTorch team can add support for it and see the next case for a workaround. ",
+                        "so the PyTorch team can add support for it and see the next case for a workaround.",
                         "If it is a third-party C/C++ Python extension, please "
                         "either wrap it into a PyTorch-understood custom operator "
                         "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
