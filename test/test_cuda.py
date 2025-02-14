@@ -672,6 +672,13 @@ class TestCuda(TestCase):
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
+
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=False
@@ -3511,7 +3518,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"

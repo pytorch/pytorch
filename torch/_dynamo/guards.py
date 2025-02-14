@@ -1,5 +1,22 @@
 # mypy: allow-untyped-defs
 
+"""
+Core guard system for Dynamo that detects when compiled code needs to be recompiled due to
+changes in program state. Guards are conditions that must remain true for previously-compiled
+code to be valid for reuse.
+
+This module provides the infrastructure for creating, managing and checking guards, including:
+- Guard creation and composition
+- Guard state management and invalidation
+- Guard checking and failure handling
+- Utilities for guard optimization and debugging
+- Integration with Dynamo's compilation caching
+
+The guard system is critical for Dynamo's ability to efficiently reuse compiled code while
+maintaining correctness by detecting when recompilation is necessary due to changes in
+program state, tensor properties, or control flow.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -91,6 +108,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    ListGetItemSource,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -1084,6 +1102,14 @@ class GuardBuilder(GuardBuilderBase):
 
             out = base_guard_manager.indexed_manager(
                 idx=source.idx,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ListGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.list_getitem_manager(
+                key=source.index,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

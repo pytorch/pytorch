@@ -1,3 +1,18 @@
+"""Testing utilities and infrastructure for Dynamo.
+
+This module provides a comprehensive set of testing utilities including:
+- Test result collection and validation
+- Graph manipulation and comparison tools
+- Test case management and execution helpers
+- Specialized test decorators for different Python versions and features
+- RNG state management
+- Compilation counting and monitoring
+- Debug utilities for bytecode transformation
+
+The utilities in this module are used across Dynamo's test suite to ensure
+consistent testing patterns and proper test isolation.
+"""
+
 import contextlib
 import dis
 import functools
