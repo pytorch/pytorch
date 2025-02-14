@@ -246,6 +246,7 @@ def set_logs(
     compiled_autograd_verbose: bool = False,
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
+    autotuning: bool = False,
     graph_region_expansion: bool = False,
 ):
     """
@@ -426,6 +427,9 @@ def set_logs(
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
+        autotuning (:class:`bool`):
+            Autotuning choice logs, such as kernel source, perf, and tuning parameters. Default: ``False``
+
         graph_region_expansion (:class:`bool`):
             Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
 
@@ -528,6 +532,7 @@ def set_logs(
         compiled_autograd_verbose=compiled_autograd_verbose,
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
+        autotuning=autotuning,
         graph_region_expansion=graph_region_expansion,
     )
 
