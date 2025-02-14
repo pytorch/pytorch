@@ -65,6 +65,11 @@ jobs:
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
 
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+
       - name: Clean up leftover processes on non-ephemeral Windows runner
         uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
