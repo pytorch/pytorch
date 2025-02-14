@@ -24,8 +24,8 @@ class InvokeQuantTest(torch._higher_order_ops.BaseHOP):
     def __init__(self):
         super().__init__("invoke_quant_test")
 
-    def __call__(self, subgraph, operands, *, scheme):
-        return super().__call__(subgraph, operands, scheme=scheme)
+    def __call__(self, subgraph, *operands, scheme):
+        return super().__call__(subgraph, *operands, scheme=scheme)
 
 
 invoke_quant_test = InvokeQuantTest()
@@ -45,7 +45,7 @@ class BaseHOPTest(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=backend)
         def f(x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
         out = f(x, y)
         self.assertEqual(out, inner(x, y))
@@ -60,7 +60,7 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         subgraph_0 = self.subgraph_0
-        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, (l_x_, l_y_), scheme = 'nf4');  subgraph_0 = l_x_ = l_y_ = None
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_x_, l_y_, scheme = 'nf4');  subgraph_0 = l_x_ = l_y_ = None
         getitem: "f32[3, 3]" = invoke_quant_test[0];  invoke_quant_test = None
         return (getitem,)
 
@@ -85,7 +85,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def f(x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
         out = f(x, y)
         result = torch.autograd.grad(out, x, y)
@@ -100,7 +100,7 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
         subgraph0 = self.subgraph0
-        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph0, (primals_1, primals_2), scheme = 'nf4');  subgraph0 = None
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph0, primals_1, primals_2, scheme = 'nf4');  subgraph0 = None
         getitem: "f32[3, 3]" = invoke_quant_test[0];  invoke_quant_test = None
         return (getitem, primals_1, primals_2)
 
@@ -120,7 +120,7 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", tangents_1: "f32[3, 3]"):
         subgraph1 = self.subgraph1
-        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, (primals_1, primals_2, tangents_1), scheme = 'nf4');  subgraph1 = primals_1 = primals_2 = tangents_1 = None
+        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, primals_1, primals_2, tangents_1, scheme = 'nf4');  subgraph1 = primals_1 = primals_2 = tangents_1 = None
         getitem_1: "f32[3, 3]" = invoke_quant_test_1[0]
         getitem_2: "f32[3, 3]" = invoke_quant_test_1[1];  invoke_quant_test_1 = None
         return (getitem_1, getitem_2)
@@ -157,7 +157,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(inner, x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
         with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
             f(inner, x, y)
@@ -173,13 +173,13 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3, 3)
 
         with self.assertRaisesRegex(RuntimeError, "torch.fx.GraphModule"):
-            invoke_quant_test(inner, (x, y), scheme="nf4")
+            invoke_quant_test(inner, x, y, scheme="nf4")
 
         from functorch import make_fx
 
         result = make_fx(inner)(x, y)
         # smoke test
-        invoke_quant_test(result, (x, y), scheme="nf4")
+        invoke_quant_test(result, x, y, scheme="nf4")
 
 
 if __name__ == "__main__":
