@@ -401,6 +401,28 @@ def get_submodule_folders():
         ]
 
 
+def read_nccl_pin() -> str:
+    nccl_file = "nccl-cu12.txt"
+    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv(
+        "CUDA_VERSION", ""
+    ).startswith("11"):
+        nccl_file = "nccl-cu11.txt"
+    nccl_pin_path = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", nccl_file)
+    with open(nccl_pin_path) as f:
+        return f.read().strip()
+
+
+def checkout_nccl():
+    release_tag = read_nccl_pin()
+    report(f"-- Checkout nccl release tag: {release_tag}")
+    nccl_basedir = os.path.join(third_party_path, "nccl")
+    subprocess.check_call(
+        ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+        cwd=third_party_path,
+    )
+    subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
+
+
 def check_submodules():
     def check_for_files(folder, files):
         if not any(os.path.exists(os.path.join(folder, f)) for f in files):
@@ -419,16 +441,16 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -484,7 +506,7 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
+    checkout_nccl()
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
