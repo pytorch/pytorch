@@ -303,7 +303,8 @@ sycl::event deconvolution_backward_data(
           _dilation,
           _padding,
           _padding,
-          deconv_fwd_pd);
+          deconv_fwd_pd,
+          pattr);
 
   // create memory
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
