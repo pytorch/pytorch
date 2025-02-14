@@ -82,15 +82,20 @@ try:
             class amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
+                    paths = ["libamd_smi.so"]
+                    if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
+                        paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    self.paths: List[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
                     if name and Path(name).name == "libamd_smi.so":
-                        try:
-                            return self.original_CDLL("libamd_smi.so", *args, **kwargs)
-                        except OSError:
-                            pass
+                        for path in self.paths:
+                            try:
+                                return self.original_CDLL(path, *args, **kwargs)
+                            except OSError:
+                                pass
                     return self.original_CDLL(name, *args, **kwargs)  # type: ignore[arg-type]
 
                 def __enter__(self) -> None:
