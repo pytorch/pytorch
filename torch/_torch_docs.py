@@ -10665,7 +10665,7 @@ Keyword args:
 Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
-    1.0
+    tensor(1.)
     >>> a = torch.tensor([[1, 2], [3., float("nan")]])
     >>> torch.nansum(a)
     tensor(6.)
