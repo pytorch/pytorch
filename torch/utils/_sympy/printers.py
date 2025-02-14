@@ -469,3 +469,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_BooleanFalse(self, expr: sympy.Expr) -> str:
         return "false"
+
+    def _print_Infinity(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::infinity()"
+
+    def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
+        return f"-{self._print_Infinity(expr)}"
