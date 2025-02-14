@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._C._dynamo.guards import assert_size_stride
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -31,7 +30,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 if TEST_SCIPY:
     import scipy.ndimage
     import scipy.signal
@@ -1256,13 +1255,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         weight = weight.to(memory_format=torch.channels_last)
         out = torch.conv2d(input, weight, None, (2, 2), (0, 0), (1, 1), 1)
 
-        if dtype is torch.float64:
-            # Like most conv backend, xpu does not support float64 for chanel last conv.
-            # input NHWC, output NCHW
-            assert_size_stride(out, (2, 512, 7, 7), (25088, 49, 7, 1))
-        else:
-            # input NHWC, output NHWC
-            assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
+        # input NHWC, output NHWC
+        assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
 
 
 instantiate_device_type_tests(

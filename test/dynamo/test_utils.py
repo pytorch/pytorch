@@ -269,6 +269,7 @@ class TestDynamoTimed(TestCase):
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -350,6 +351,7 @@ class TestDynamoTimed(TestCase):
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -390,6 +392,7 @@ class TestInductorConfigParsingForLogging(TestCase):
 
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertTrue(isinstance(inductor_config_json, str))
+        self.assertIn('trace"', inductor_config_json)
 
     @mock.patch("torch._dynamo.utils.torch._inductor.config")
     def test_inductor_config_parsing_non_conforming_items(self, mocked_inductor_config):
