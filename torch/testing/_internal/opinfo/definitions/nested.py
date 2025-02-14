@@ -150,6 +150,7 @@ extra_op_data = {
     "narrow_copy": ExtraOpData(dim_args=[["dim"]]),
     "nn.functional.cosine_similarity": ExtraOpData(dim_args=[["dim"]]),
     "nn.functional.glu": ExtraOpData(dim_args=[["dim"]]),
+    "nn.functional.swiglu": ExtraOpData(dim_args=[["dim"]]),
     "permute": ExtraOpData(is_view=True, dim_args=[["dims..."]]),
     "positive": ExtraOpData(is_view=True),
     "prod": ExtraOpData(dim_args=[["dim"]]),
