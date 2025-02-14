@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
+from torch._higher_order_ops.flat_apply import to_graphable, flat_apply, ConstantFunction
 
 
 class ExportTracepoint(HigherOrderOperator):
@@ -136,27 +137,32 @@ def _mark_constructor_exportable_experimental(constructor_subclass):
             for mode in torch_function_mode_stack:
                 if isinstance(mode, PreDispatchTorchFunctionMode):
                     tracer = mode.tracer
-                    proxy_args = []
-                    for arg in args[1:]:
+                    flat_proxy_args = []
+                    subclass = args[0]
+                    
+                    flat_args, in_spec = to_graphable((tuple(args[1:]), kwargs))
+
+                    qualname = tracer.get_fresh_qualname(constructor_subclass.__name__)
+                    setattr(tracer.root, qualname, in_spec)
+                    spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
+
+                    for arg in flat_args:
                         if isinstance(arg, torch.Tensor):
                             proxy = get_proxy_slot(arg, tracer).proxy
-                            proxy_args.append(proxy) 
+                            flat_proxy_args.append(proxy) 
                         else:
-                            proxy_args.append(arg)
+                            flat_proxy_args.append(arg)
 
-                    proxy_kwargs = {}
-                    for k, v in kwargs.items():
-                        if isinstance(v, torch.Tensor):
-                            proxy = get_proxy_slot(v, tracer).proxy
-                            proxy_kwargs[k] = proxy
-                        else:
-                            proxy_kwargs[k] = v
-                           
+                    _, func_spec = torch.utils._pytree.tree_flatten(ConstantFunction(type(subclass)))
+                    qualname = tracer.get_fresh_qualname(type(subclass).__name__)
+                    setattr(tracer.root, qualname, func_spec)
+                    func_spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
+
                     inner_proxy = tracer.create_proxy(
                         "call_function",
-                        type(args[0]),  # input tensor
-                        tuple(proxy_args),
-                        proxy_kwargs,
+                        flat_apply,
+                        (func_spec_proxy, spec_proxy, *flat_proxy_args),
+                        {},
                     )
                     track_tensor_tree(
                         args[0], inner_proxy, constant=None, tracer=tracer

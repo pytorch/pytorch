@@ -11032,12 +11032,16 @@ graph():
 graph():
     %b_buffer : [num_users=1] = placeholder[target=b_buffer]
     %x : [num_users=1] = placeholder[target=x]
-    %two_tensor : [num_users=2] = call_function[target=torch.testing._internal.two_tensor.TwoTensor](args = (%x, %x), kwargs = {})
-    %getattr_8 : [num_users=1] = call_function[target=builtins.getattr](args = (%two_tensor, b), kwargs = {})
-    %two_tensor_1 : [num_users=2] = call_function[target=torch.testing._internal.two_tensor.TwoTensor](args = (%getattr_8, %two_tensor), kwargs = {})
-    %getattr_18 : [num_users=1] = call_function[target=builtins.getattr](args = (%two_tensor_1, b), kwargs = {})
+    %__init__0 : [num_users=1] = get_attr[target=__init__0]
+    %two_tensor0 : [num_users=1] = get_attr[target=TwoTensor0]
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%two_tensor0, %__init__0, %x, %x), kwargs = {})
+    %getattr_8 : [num_users=1] = call_function[target=builtins.getattr](args = (%flat_apply, b), kwargs = {})
+    %__init__1 : [num_users=1] = get_attr[target=__init__1]
+    %two_tensor1 : [num_users=1] = get_attr[target=TwoTensor1]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%two_tensor1, %__init__1, %getattr_8, %flat_apply), kwargs = {})
+    %getattr_18 : [num_users=1] = call_function[target=builtins.getattr](args = (%flat_apply_1, b), kwargs = {})
     %getattr_24 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_18, b), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%two_tensor_1, %b_buffer), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_24, %add), kwargs = {})
     %getattr_25 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, b), kwargs = {})
     %getattr_30 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_25, a), kwargs = {})
@@ -11058,9 +11062,9 @@ graph():
     %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
-    return (add_4,)"""
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
+    return (add_1,)"""
         )
 
     def test_cse_for_symint(self):
