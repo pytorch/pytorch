@@ -55,16 +55,11 @@ def generate_faked_module_methods():
     def is_available():
         return True
 
-    def current_device():
-        return 0
-
     torch.openreg.device_count = device_count
     torch.openreg.get_rng_state = get_rng_state
     torch.openreg.set_rng_state = set_rng_state
     torch.openreg.is_available = is_available
-    torch.openreg.current_device = current_device
     torch.openreg._lazy_init = lambda: None
-    torch.openreg.is_initialized = lambda: True
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
