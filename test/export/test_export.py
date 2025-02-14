@@ -11056,12 +11056,12 @@ graph():
     %b_buffer : [num_users=1] = placeholder[target=b_buffer]
     %x : [num_users=1] = placeholder[target=x]
     %__init__0 : [num_users=1] = get_attr[target=__init__0]
-    %two_tensor0 : [num_users=1] = get_attr[target=TwoTensor0]
-    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%two_tensor0, %__init__0, %x, %x), kwargs = {})
+    %twotensor0 : [num_users=1] = get_attr[target=twotensor0]
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor0, %__init__0, %x, %x), kwargs = {})
     %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
     %__init__1 : [num_users=1] = get_attr[target=__init__1]
-    %two_tensor1 : [num_users=1] = get_attr[target=TwoTensor1]
-    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%two_tensor1, %__init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
+    %twotensor1 : [num_users=1] = get_attr[target=twotensor1]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor1, %__init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
     %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
     %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
@@ -11085,9 +11085,9 @@ graph():
     %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
-    return (add_1,)""",
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)""",
         )
 
     def test_cse_for_symint(self):
