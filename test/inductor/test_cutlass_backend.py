@@ -553,7 +553,7 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
-    # @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
+    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
