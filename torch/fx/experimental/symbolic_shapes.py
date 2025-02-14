@@ -2425,9 +2425,13 @@ class DimConstraints:
             base, divisor = self.rewrite_with_congruences(
                 s, base
             ), self.rewrite_with_congruences(s, divisor)
-            return base.xreplace(self._var_to_val) % divisor.xreplace(
+            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(
                 self._var_to_val
             )
+            congruence = (base - mod_reduced) % divisor
+            if congruence != 0:
+                self._congruences[s].add(congruence)
+            return mod_reduced
 
         def floor_div_handler(*args: sympy.Expr) -> sympy.Expr:
             # Suppose that we have an expression of the form b // d with free variable s.
