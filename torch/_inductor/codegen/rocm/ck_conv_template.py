@@ -11,8 +11,6 @@ try:
 except ImportError:
     ck4inductor = None
 
-
-
 if ck4inductor is not None:
     from ck4inductor.grouped_conv_fwd.gen_instances import (  # type: ignore[import]
         gen_conv_ops_library,
@@ -144,8 +142,6 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         const auto cde_element_op = PassThrough {};
 
         auto copy = [](auto& x, auto& y) { ck::ranges::copy(x, y.begin()); };
-
-        // Ultimate Version
 
         copy(in_g_n_c_wis_desc.GetLengths(), a_g_n_c_wis_lengths);
         copy(in_g_n_c_wis_desc.GetStrides(), a_g_n_c_wis_strides);
