@@ -2,11 +2,12 @@
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses.base import BaseTensorSubclass
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
-class TwoTensor(torch.Tensor):
+class TwoTensor(BaseTensorSubclass):
     @staticmethod
     def __new__(cls, a, b, outer_size=None, outer_stride=None):
         if outer_size is None:
@@ -61,14 +62,9 @@ class TwoTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if kwargs is None:
             kwargs = {}
-        args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
-        args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
+        out_a = cls.func_args_kwargs_attr(func, args, kwargs, "a")
+        out_b = cls.func_args_kwargs_attr(func, args, kwargs, "b")
 
-        kwargs_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, kwargs)
-        kwargs_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, kwargs)
-
-        out_a = func(*args_a, **kwargs_a)
-        out_b = func(*args_b, **kwargs_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that
@@ -78,15 +74,8 @@ class TwoTensor(torch.Tensor):
             for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
-        from torch._higher_order_ops.cond import cond_op
 
-        if func is cond_op:
-            return out
-        else:
-            return return_and_correct_aliasing(func, args, kwargs, out)
-
-    def get_elem_a(self):
-        return self.a
+        return cls._return(func, args, kwargs, out)
 
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
