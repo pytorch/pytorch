@@ -121,6 +121,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -372,20 +373,6 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return x
-    buffer = torch.as_strided(
-        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-    return out
-
-
 def check_model(
     self: TestCase,
     model,
@@ -409,7 +396,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+    ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -422,7 +409,7 @@ def check_model(
             # Eager model may fail if the dtype is not supported
             eager_result = None
 
-        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
         expect_dtypes = [
             x.dtype if isinstance(x, torch.Tensor) else None
             for x in pytree.tree_leaves(eager_result)
@@ -625,7 +612,7 @@ def check_model_gpu(
 
     if copy_to_gpu:
         example_inputs = tuple(
-            clone_preserve_strides(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
         )
 
     check_model(
@@ -11901,7 +11888,7 @@ class CommonTemplate:
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         x = torch.ones(4, dtype=torch.float16, device=self.device)
         ref = fn(x)
@@ -11914,7 +11901,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
@@ -11926,7 +11913,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int32)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
