@@ -1075,10 +1075,7 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
 
   int64_t ndim = out.dim();
   int64_t N = out.size(-1);
-  int64_t B = 1;
-  for (int64_t i = 0; i < ndim - 2; i++) {
-    B *= out.size(i);
-  }
+  int64_t B = c10::multiply_integers(input_sizes.begin(), input_sizes.end() - 2);
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
