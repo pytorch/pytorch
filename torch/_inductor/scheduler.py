@@ -2822,10 +2822,6 @@ class Scheduler:
                 return False
 
             def benchmark_when_ready() -> bool:
-                from torch._inductor.runtime.triton_heuristics import (
-                    NoTritonConfigsError,
-                )
-
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
@@ -2835,7 +2831,16 @@ class Scheduler:
                     try:
                         if future is not None:
                             future.result()
-                    except (NoTritonConfigsError, CompilationError):
+
+                    # Ideally we would more narrowly catch Exceptions here but
+                    # triton  will unpredictably error with valid prologue fusions
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                str(e),
+                            )
                         continue
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
@@ -3470,7 +3475,7 @@ class Scheduler:
             and not prologue_node.can_codegen_in_low_precision()
         ):
             why(
-                "prologue fusion must be computed in fp32 for low precision template is not profitable"
+                "prologue fusion that must be upcast to fp32 not profitable for low precision templates"
             )
             return False
 
