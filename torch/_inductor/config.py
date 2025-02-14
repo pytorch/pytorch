@@ -1187,7 +1187,7 @@ class aot_inductor:
     repro_level: int = int(os.environ.get("AOTINDUCTOR_REPRO_LEVEL", 2))
 
     # Dictionary of presets that can be passed in
-    presets: dict[str, Any] = {}
+    presets: dict[str, Any] = {"relu_nan_to_num": True}
 
     # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
     # should be run with this flag both on and off to make sure we have coverage.
