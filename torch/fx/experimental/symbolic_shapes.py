@@ -5903,7 +5903,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
-        expr_sym_node: Optional[SymNode] = None,
+        expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5949,7 +5949,7 @@ class ShapeEnv:
             metadata_fn=lambda: {
                 "expr": repr(expr),
                 "unhinted_expr": repr(unhinted_expr),
-                "expr_id": id(expr_sym_node),
+                "expr_id": expr_sym_node_id,
                 "stack": structured.from_traceback(
                     CapturedTraceback.extract(skip=1).summary()
                 ),
@@ -6572,9 +6572,9 @@ class ShapeEnv:
         hint: Optional[Union[int, bool, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
@@ -6582,8 +6582,8 @@ class ShapeEnv:
                 hint,
                 fx_node,
                 size_oblivious,
+                expr_sym_node_id,
                 forcing_spec=forcing_spec,
-                expr_sym_node=expr_sym_node,
             )
         except Exception:
             self.log.warning(
@@ -6601,9 +6601,9 @@ class ShapeEnv:
         hint: Optional[Union[bool, int, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -6770,7 +6770,6 @@ class ShapeEnv:
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
-                                "expr_node_id": id(expr_sym_node),
                             },
                         )
                         dtrace_structured(
@@ -6778,7 +6777,7 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
+                                "expr_node_id": expr_sym_node_id,
                                 "user_stack": structured.get_user_stack(3),
                                 "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
@@ -6798,7 +6797,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
-                            expr_sym_node=expr_sym_node,
+                            expr_sym_node_id=expr_sym_node_id,
                         )
                 else:
                     expr = new_expr
