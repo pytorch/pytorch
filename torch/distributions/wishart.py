@@ -79,8 +79,8 @@ class Wishart(ExponentialFamily):
         covariance_matrix: Optional[Tensor] = None,
         precision_matrix: Optional[Tensor] = None,
         scale_tril: Optional[Tensor] = None,
-        validate_args=None,
-    ):
+        validate_args: Optional[bool] = None,
+    ) -> None:
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
             precision_matrix is not None
         ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
