@@ -344,7 +344,9 @@ class TestOptimRenewed(TestCase):
             optimizer_r = optim_cls([weight, bias], **kwargs)
 
             try:
-                kwargs["lr"] = torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
+                kwargs["lr"] = (
+                    torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
+                )
                 optimizer = optim_cls([weight_c, bias_c], **kwargs)
             except ValueError as e:
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")

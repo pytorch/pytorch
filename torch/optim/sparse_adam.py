@@ -68,6 +68,18 @@ class SparseAdam(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        def _to_scalar_as_needed(lr, params):
+            def _needs_0dim(lr):
+                if lr.is_cpu and not params[0].is_cpu:
+                    return True
+                else:
+                    return lr.dim() > 1
+
+            if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
+                lr = lr.squeeze()
+
+            return lr
+
         for group in self.param_groups:
             params_with_grad: list[Tensor] = []
             grads: list[Tensor] = []
@@ -117,7 +129,7 @@ class SparseAdam(Optimizer):
                 eps=group["eps"],
                 beta1=beta1,
                 beta2=beta2,
-                lr=group["lr"],
+                lr=_to_scalar_as_needed(group["lr"], group["params"]),
                 maximize=maximize,
             )
 

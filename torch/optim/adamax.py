@@ -15,6 +15,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -239,6 +240,8 @@ def _single_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
+    lr = _to_scalar(lr)
+
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -328,6 +331,15 @@ def _multi_tensor_adamax(
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    def _needs_0dim(lr):
+        if capturable:
+            return not lr.is_cpu
+        else:
+            return False
+
+    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
+        lr = lr.squeeze()
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_infs, state_steps]  # type: ignore[list-item]
