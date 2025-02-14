@@ -177,21 +177,18 @@ static void avg_pool3d_out_frame(
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t i, j, ti;
-
       /* local pointers. */
       const scalar_t *ip = input_p + k * itime * iwidth * iheight;
       scalar_t *op = output_p + k * otime * owidth * oheight;
-      for (i = 0; i < otime * oheight * owidth; ++i)
+      for (int64_t i = 0; i < otime * oheight * owidth; ++i)
         *(op + i) = 0;
 
       /* loop over output */
-      for (ti = 0; ti < otime; ti++)
+      for (int64_t ti = 0; ti < otime; ti++)
       {
-        for (i = 0; i < oheight; i++)
+        for (int64_t i = 0; i < oheight; i++)
         {
-          for (j = 0; j < owidth; j++)
+          for (int64_t j = 0; j < owidth; j++)
           {
             /* compute pool range. */
             int64_t tstart = ti * dT - padT;
@@ -226,14 +223,11 @@ static void avg_pool3d_out_frame(
 
             /* compute local sum: */
             scalar_t sum = 0.0;
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t x, y, z;
-
-            for (z = tstart; z < tend; z++)
+            for (int64_t z = tstart; z < tend; z++)
             {
-              for (y = hstart; y < hend; y++)
+              for (int64_t y = hstart; y < hend; y++)
               {
-                for (x = wstart; x < wend; x++)
+                for (int64_t x = wstart; x < wend; x++)
                 {
                   sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
                 }

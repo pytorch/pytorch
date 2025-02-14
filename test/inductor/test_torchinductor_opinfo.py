@@ -41,7 +41,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_XPU,
+    maybe_skip_size_asserts,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -267,7 +273,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    "linalg.eigvals": {f32, f64},
+    "linalg.eigvals": {f64},
     # Double and complex datatype matmul is not supported in oneDNN
     "__rmatmul__": {f64},
     ("addmm", "decomposed"): {f64},
@@ -282,7 +288,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
     "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
@@ -1104,7 +1109,9 @@ class TestInductorOpInfo(TestCase):
                         {"assert_equal": False},
                     ),
                 )
-            return ((contextlib.nullcontext, {}),)
+
+            ctx = functools.partial(maybe_skip_size_asserts, op)
+            return ((ctx, {}),)
 
         try:
 
