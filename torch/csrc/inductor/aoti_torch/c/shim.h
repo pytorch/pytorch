@@ -44,8 +44,16 @@
 // to symbol clashes at link time if libtorch is included in a DLL and binary
 // that depends on the DLL. As a short term fix, we don't export the symbols.
 // In the long term, this will need to be addressed when Windows is supported.
-// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#ifdef OVRSOURCE
+// Do not export AOTI on Windows for internal builds
 #define AOTI_TORCH_EXPORT
+#else /* OVRSOURCE */
+#ifdef EXPORT_AOTI_FUNCTIONS
+#define AOTI_TORCH_EXPORT __declspec(dllexport)
+#else
+#define AOTI_TORCH_EXPORT __declspec(dllimport)
+#endif
+#endif /* OVRSOURCE */
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -96,6 +104,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
@@ -201,6 +210,9 @@ aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
     c10::complex<float> value,
     AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
+    c10::complex<double> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -292,6 +304,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     int32_t device_index,
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_as_strided(
+    AtenTensorHandle self,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
@@ -716,5 +734,12 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
 
 #endif // AOTI_TORCH_SHIM

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
-from typing import cast, List, Optional, TYPE_CHECKING, Union
+from typing import cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -53,7 +53,7 @@ class ChunkShardingSpec(ShardingSpec):
     ShardingDim = Union[int, str]
 
     dim: ShardingDim
-    placements: List[Union[torch.distributed._remote_device, str]]
+    placements: list[Union[torch.distributed._remote_device, str]]
 
     def __post_init__(self):
         self._verify_dim(self.dim)
@@ -134,7 +134,7 @@ class ChunkShardingSpec(ShardingSpec):
         local_metadata = None
 
         tensors_to_scatter = cast(
-            List[Optional[torch.Tensor]],
+            list[Optional[torch.Tensor]],
             [None] * dist.get_world_size(process_group),
         )
 
@@ -162,7 +162,9 @@ class ChunkShardingSpec(ShardingSpec):
                         narrowed_tensor.detach().clone().resize_(scatter_shape)
                     )
                 else:
-                    tensor_to_scatter = narrowed_tensor.detach().clone().contiguous()
+                    tensor_to_scatter = narrowed_tensor.detach().clone(
+                        memory_format=torch.contiguous_format
+                    )
 
                 tensors_to_scatter[
                     dist.get_group_rank(process_group, remote_global_rank)
@@ -193,7 +195,7 @@ class ChunkShardingSpec(ShardingSpec):
                 process_group, src_for_scatter
             )
 
-        tensors_to_scatter_: Optional[List[torch.Tensor]] = None
+        tensors_to_scatter_: Optional[list[torch.Tensor]] = None
         if current_rank == src_rank:
             tensors_to_scatter_ = []
             for t in tensors_to_scatter:

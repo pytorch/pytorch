@@ -272,7 +272,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 
 template <typename T>
 bool check_both_nan([[maybe_unused]] T x, [[maybe_unused]] T y) {
-    if constexpr (std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>) {
+    if constexpr (std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>) {
         return std::isnan(x) && std::isnan(y);
     }
     return false;
@@ -422,7 +422,7 @@ std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || at::vec::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -568,7 +568,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -591,7 +591,7 @@ struct ValueGen
 };
 
 template <typename T>
-using reduced_fp_to_float_t = std::conditional_t<std::is_reduced_floating_point_v<T>, float, T>;
+using reduced_fp_to_float_t = std::conditional_t<c10::is_reduced_floating_point_v<T>, float, T>;
 
 template <typename T>
 struct ValueGen<T, true, false>

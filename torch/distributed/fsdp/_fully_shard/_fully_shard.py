@@ -1,18 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    NoReturn,
-    Optional,
-    Type,
-    Union,
-)
+from collections.abc import Iterable
+from typing import Any, Callable, cast, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -42,20 +32,21 @@ __all__ = [
 ]
 
 
-cls_to_fsdp_cls: Dict[Type, Type] = {}
+cls_to_fsdp_cls: dict[type, type] = {}
 
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)  # type: ignore[operator]
+@contract(state_cls=FSDPState)
 def fully_shard(
-    module: Union[nn.Module, List[nn.Module]],
+    module: Union[nn.Module, list[nn.Module]],
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
     shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -141,6 +132,8 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
+            don't want to shard with FSDP.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -169,8 +162,9 @@ def fully_shard(
     state = fully_shard.state(modules[0])
     state.init(modules, device, mp_policy)
 
-    managed_modules = _get_managed_modules(modules)
-    params, buffers = _get_managed_states(managed_modules)
+    managed_modules = _get_managed_modules(modules, ignored_params)
+    params, buffers = _get_managed_states(managed_modules, ignored_params)
+
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
@@ -331,7 +325,7 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
-    def set_modules_to_forward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_forward_prefetch(self, modules: list["FSDPModule"]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in forward. The prefetching runs after this
@@ -351,7 +345,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_modules_to_backward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_backward_prefetch(self, modules: list["FSDPModule"]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in backward. This overrides the default backward
