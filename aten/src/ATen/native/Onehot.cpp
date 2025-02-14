@@ -16,10 +16,10 @@ namespace at::native {
 
 namespace {
 
-void check_num_classes(const at::Tensor& self, int64_t num_classes) {
-    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
+void check_num_classes(const at::Tensor& self, int64_t num_classes, std::optional<int64_t> self_max_value = std::nullopt) {
+    if (self_max_value.has_value() && self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
         self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
-        TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+        TORCH_CHECK(num_classes > self_max_value.value(), "Class values must be smaller than num_classes.");
     } else {
         // for cuda, assert that num_classes is at least 1
         TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
@@ -66,7 +66,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        check_num_classes(self, num_classes);
+        check_num_classes(self, num_classes, std::optional<int64_t>(self.max().item().toLong()));
     }
 
     shape.push_back(num_classes);

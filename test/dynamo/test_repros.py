@@ -2187,9 +2187,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f(x, y):
             return torch.nn.functional.one_hot(x, y)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Class values must be smaller than num_classes"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "num_classes should be positive"):
             f(torch.arange(0, 5) % 3, 0)
 
     def test_sort_out(self):
