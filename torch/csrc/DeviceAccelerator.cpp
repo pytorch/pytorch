@@ -13,11 +13,6 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_deviceCount", []() {
     auto device_type = at::accelerator::getAccelerator(false);
-    // Register fork handler for device initialization to detect bad forks.
-    // Avoid invoking `maybe_initialize_device` here, as it may throw an
-    // exception (possibly raised by globalContext().lazyInitDevice) if the
-    // device is unavailable.
-    torch::utils::maybe_register_fork_handler_for_device_init(device_type);
     return at::accelerator::deviceCount();
   });
 
