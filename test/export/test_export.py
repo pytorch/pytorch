@@ -6416,6 +6416,9 @@ def forward(self, b_a_buffer, x):
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
+    # TODO: need combine_mode='pointwise' here in order to avoid,
+    # but 'pointwise does not support lifted arguments yet supported in inductor
+    @unittest.expectedFailure
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):
         class M(torch.nn.Module):
@@ -6429,7 +6432,6 @@ def forward(self, b_a_buffer, x):
                 return (x + y) * self.buffer
 
             def forward(self, x):
-                # TODO: need combine_mode='generic' here as lifted arguments are not yet supported in inductor
                 return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
 
         inp = torch.ones(3, 10, 2, device=torch.device("cuda"))

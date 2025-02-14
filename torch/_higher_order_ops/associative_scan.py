@@ -355,8 +355,6 @@ def trace_associative_scan(
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
 ):
-    # from torch._inductor.utils import is_pointwise_use
-
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *additional_inputs)

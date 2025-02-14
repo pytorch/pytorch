@@ -1324,9 +1324,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from torch._inductor.utils import is_pointwise_use
 
-        # Create GraphModule from speculated subgraph
-        gm = torch.fx.GraphModule(torch.nn.Module(), combine_graph)
-
         with tx.fake_mode:
             xs_fake = [
                 first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
@@ -1338,10 +1335,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             sub_args_fake = xs_fake + additional_fake
 
-            # TODO: Set this correctly
             pre_dispatch = False
 
-            fx = _maybe_fake_tracing(gm, sub_args_fake, pre_dispatch=pre_dispatch)
+            combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+
+            fx = _maybe_fake_tracing(
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
+            )
 
             for node in fx.graph.nodes:
                 # Check that the combine_fn is pointwise, if combine_mode='pointwise'
@@ -1353,13 +1353,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     )
 
             if _has_potential_branch_input_mutation(
-                gm, sub_args_fake, pre_dispatch=pre_dispatch
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
             ):
                 raise RuntimeError(
                     "Combine_fn might be modifying the input!"
                 )  # noqa: F541
             if _has_potential_branch_input_alias(
-                gm, sub_args_fake, pre_dispatch=pre_dispatch
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
             ):
                 raise RuntimeError(
                     "Combine_fn might be aliasing the input!"
@@ -1381,7 +1381,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "combine_fn_output",
         )
 
-        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
         )
