@@ -3907,6 +3907,9 @@ class Scheduler:
         if isinstance(node.node, ir.Conditional):
             return True
 
+        if getattr(node.node, "unbacked_bindings", None):
+            return True
+
         return False
 
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
