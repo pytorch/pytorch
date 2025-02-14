@@ -195,3 +195,11 @@ def maybe_skip_size_asserts(op):
         return torch._inductor.config.patch(size_asserts=False)
     else:
         return contextlib.nullcontext()
+
+
+def get_func_call() -> str:
+    return "void inductor_entry_impl(" if torch._inductor.config.cpp_wrapper else "def call("
+
+
+def get_kernel_launch() -> str:
+    return "launchKernel(" if torch._inductor.config.cpp_wrapper else ".run("
