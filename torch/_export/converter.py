@@ -68,6 +68,10 @@ def _trace_and_get_graph_from_model(model, args):
             "something weird is happening in your model!"
         )
 
+    # Handle DTensors during the export process
+    if any(isinstance(arg, torch.distributed._tensor.api.DTensor) for arg in args):
+        trace_graph = _handle_dtensor(trace_graph, args)
+
     return trace_graph, torch_out
 
 

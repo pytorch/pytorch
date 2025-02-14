@@ -142,10 +142,22 @@ def aot_compile(
             restore_fqn=False,
         )
 
+    # Handle DTensors during the export process
+    if any(isinstance(arg, torch.distributed._tensor.api.DTensor) for arg in args):
+        gm = _handle_dtensor(gm, args, kwargs)
+
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
     return so_path
+
+def _handle_dtensor(gm, args, kwargs):
+    """
+    Handle DTensors during the export process.
+    """
+    # Implement the logic to handle DTensors here
+    # This is a placeholder function and should be updated with the actual implementation
+    return gm
 
 def aot_load(so_path: str, device: str) -> Callable:
     """
