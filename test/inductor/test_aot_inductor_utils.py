@@ -103,7 +103,7 @@ class AOTIRunnerUtil:
     def legacy_load(device, so_path):
         # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
         if IS_FBCODE:
-            runner = AOTIRunnerUtil.load_runner(device, so_path)
+            runner = AOTIRunnerUtil.legacy_load_runner(device, so_path)
 
             def optimized(*args, **kwargs):
                 call_spec = runner.get_call_spec()
