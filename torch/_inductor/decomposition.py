@@ -119,6 +119,9 @@ decomps_to_exclude = [
     aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
+if torch.xpu.is_available():
+    decomps_to_exclude.append(aten.embedding_dense_backward)
+
 remove_decompositions(decompositions, decomps_to_exclude)
 
 
