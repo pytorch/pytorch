@@ -21,8 +21,6 @@ FOR %%v IN (%DESIRED_PYTHON%) DO (
 )
 endlocal
 
-set USE_STATIC_MKL=1
-
 :: Install libuv
 conda install -y -q -c conda-forge libuv=1.39
 set libuv_ROOT=%CONDA_HOME%\Library
