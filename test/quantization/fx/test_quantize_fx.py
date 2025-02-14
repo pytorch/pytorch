@@ -204,7 +204,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -4751,7 +4751,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 super().__init__()
                 self.lstm = nn.LSTM(50, 50, 1)
 
-            def forward(self, inputs: torch.Tensor, state: List[torch.Tensor]):
+            def forward(self, inputs: torch.Tensor, state: list[torch.Tensor]):
                 h = state[0]
                 c = state[1]
                 return self.lstm(inputs, (h, c))
@@ -5938,7 +5938,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        all_qconfigs: List[Tuple[QConfig, str]] = [
+        all_qconfigs: list[tuple[QConfig, str]] = [
             (get_default_qconfig("qnnpack", version=0), "default_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=0), "default_qat_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=1), "default_qat_qnnpack_qconfig_v1"),
