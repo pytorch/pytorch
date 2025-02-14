@@ -1529,7 +1529,7 @@ class Reduction(Loops):
         split: _IntLike,
         block_size: _IntLike,
         default: Union[_NumLike, Sequence[_NumLike]],
-        input_node: Optional[ir.TensorBox] = None,
+        input_node: Optional[IRNode] = None,
     ) -> Callable[..., object]:
         dense_index = None
         if input_node:
@@ -1538,8 +1538,8 @@ class Reduction(Loops):
             as_storage_and_layout(input_node)
         if input_node and input_node.maybe_get_stride():
             try:
-                dense_dim = input_node.maybe_get_stride().index(1)
-                if dense_dim != len(input_node.maybe_get_stride()) - 1:
+                dense_dim = input_node.get_stride().index(1)
+                if dense_dim != len(input_node.get_stride()) - 1:
                     dense_index = dense_dim
             except ValueError:
                 pass
@@ -1677,7 +1677,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-        input_node: Optional[TensorBox] = None,
+        input_node: Optional[IRNode] = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2865,6 +2865,7 @@ class View(GenericView):
             and len(new_size) == 1
         )
         if reordering_dense_dim:
+            assert dense_dim is not None  # mypy
             old_dim = stack_old.pop(dense_dim)
             stack_old.append(old_dim)
 
