@@ -1920,7 +1920,8 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         # If job name isn't available, use build environment as a backup
         job_name = os.environ.get("BUILD_ENVIRONMENT")
     else:
-        job_name = job_name.split(" / (")[0]
+        print(job_name.split(" / test ("))
+        job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
