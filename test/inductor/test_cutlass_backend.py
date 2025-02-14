@@ -364,18 +364,28 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_regular_mm_streamk(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+    @parametrize(
+        "allowlist",
+        [
+            "stream_k",
+            "pingpong",
+            "warpspecialized",
+            "tma",
+        ],
+    )
+    def test_max_autotune_cutlass_backend_speciality_ops(
+        self,
+        dynamic: bool = False,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        allowlist: str = "stream_k",
     ):
         """
-        Make sure autotuning mm in sub processes work without crashes.
+        Testing speciality ops like stream_k, pingpong, warpspecialized, tma
+        using the allowlist regex
         """
 
         def mm(a, b):
             return a @ b
-
-        a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
@@ -383,7 +393,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cuda.cutlass_op_allowlist_regex": allowlist,
                 "autotune_fallback_to_aten": False,
             }
         ):
@@ -407,7 +417,7 @@ class TestCutlassBackend(TestCase):
                 Y = mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
                 # matmuls involved. Many small addition differences add up.
-                torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
+                torch.testing.assert_close(Y_compiled, Y, atol=0.0001, rtol=0.01)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
