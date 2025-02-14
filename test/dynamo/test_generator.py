@@ -1617,7 +1617,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
     # changed the tests a little bit to run them inside dynamo
     # + replaced all self.assert* calls to plain assert statements
 
-    @unittest.expectedFailure
     def test_exception_context_with_yield(self):
         def f():
             try:
@@ -1639,7 +1638,7 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-    @unittest.expectedFailure
+    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_exception_context_with_yield_inside_generator(self):
         # Check that the context is also available from inside the generator
         # with yield, as opposed to outside.
@@ -1669,7 +1668,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-    @unittest.expectedFailure
     def test_exception_context_with_yield_from(self):
         def f():
             yield
