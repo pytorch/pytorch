@@ -2051,6 +2051,29 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_weight_prune(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 128, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(2, 32).to(torch.bfloat16)
+        mod = M().eval().to(torch.bfloat16)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_weight_prune"], 1)
+
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
