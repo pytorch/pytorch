@@ -1,4 +1,5 @@
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 
@@ -71,6 +72,15 @@ struct nextafter_functor {
     (a > 0) ^ (a > b) ? bits++ : bits--;
     return as_type<T>(bits);
 #endif
+  }
+};
+
+struct polar_functor {
+  template <typename U>
+  using ret_type = c10::metal::vec2type_t<U>;
+  template <typename T>
+  inline ret_type<T> operator()(const T a, const T b) {
+    return ret_type<T>(a * cos(b), a * sin(b));
   }
 };
 
@@ -153,22 +163,8 @@ REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
 #endif
 
 // Complex binary functions
-template <typename T>
-kernel void polar(
-    constant void* abs_ [[buffer(0)]],
-    constant void* angle_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* angle = (constant T*)((constant uint8_t*)angle_ + offsets[tid].z);
-  constant T* abs = (constant T*)((constant uint8_t*)abs_ + offsets[tid].y);
-  out[0] = abs[0] * cos(angle[0]);
-  out[1] = abs[0] * sin(angle[0]);
-}
-
-REGISTER_BINARY_OP(polar, float);
-REGISTER_BINARY_OP(polar, half);
+REGISTER_BINARY_INDEXING_OP(polar, float);
+REGISTER_BINARY_INDEXING_OP(polar, half);
 
 template <typename T>
 kernel void complex_mul(
