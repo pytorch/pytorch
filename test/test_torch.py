@@ -1963,6 +1963,7 @@ else:
 
     # Ensures that median throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
+    @skipIfTorchInductor("Error messages change")
     def test_nondeterministic_alert_median(self, device, dtype):
         def test_func(call_type):
             S = 10
