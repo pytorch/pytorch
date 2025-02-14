@@ -432,7 +432,6 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
     """
     merged_size: list[Union[int, torch.SymInt]] = []
     for s0, s1 in zip(a.size(), b.size()):
-        # TODO: use the symint eq by expr class after rebase
         if SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
             merged_size.append(s0)
         else:
