@@ -10,15 +10,17 @@ import torch.optim as optim
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_full_params
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, get_full_params
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -47,7 +49,6 @@ class Model(nn.Module):
             nn.AdaptiveAvgPool2d(output_size=(1, 1)),
             nn.Flatten(),
         )
-        self.device = torch.cuda.current_device()
         self.head = nn.Linear(64, 10)
         if with_fsdp and freeze_after_wrap_fsdp:
             self.fsdp_wrap(fsdp_kwargs)
@@ -56,6 +57,7 @@ class Model(nn.Module):
         )
 
     def fsdp_wrap(self, fsdp_kwargs):
+        fsdp_kwargs = {"device_id": device_type}
         self.trunk = FSDP(self.trunk, **fsdp_kwargs)
         self.head = FSDP(self.head, **fsdp_kwargs)
 
@@ -90,6 +92,7 @@ class NestedTrunkModel(nn.Module):
         )
 
     def fsdp_wrap(self, fsdp_kwargs):
+        fsdp_kwargs = {"device_id": device_type}
         for name, child in self.trunk.named_children():
             wrapped_child = FSDP(child, **fsdp_kwargs)
             setattr(self.trunk, name, wrapped_child)
@@ -145,15 +148,15 @@ class TestFreezingWeights(FSDPTest):
         forward_prefetch,
     ):
         torch.manual_seed(0)
-        batch = torch.randn(size=(2, 3, 224, 224)).cuda()
+        batch = torch.randn(size=(2, 3, 224, 224)).to(device_type)
 
         fsdp_kwargs = {
-            "device_id": self.rank,
             "forward_prefetch": forward_prefetch,
+            "device_id": device_type,
         }
 
         ddp_kwargs = {
-            "device_ids": [self.rank],
+            "device_ids": [device_type],
             "find_unused_parameters": True if disable_autograd else False,
         }
 
@@ -164,7 +167,7 @@ class TestFreezingWeights(FSDPTest):
             disable_autograd,
             fsdp_kwargs,
         )
-        model = model.cuda()
+        model = model.to(device_type)
 
         # freezing the trunk using requires_grad.
         if freezing_method == FreezingMethod.RequiresGrad:
@@ -178,7 +181,7 @@ class TestFreezingWeights(FSDPTest):
         else:
             model = DistributedDataParallel(model, **ddp_kwargs)
 
-        target = torch.tensor([0, 1], dtype=torch.long).cuda()
+        target = torch.tensor([0, 1], dtype=torch.long).to(device_type)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
@@ -245,7 +248,7 @@ class TestFreezingWeights(FSDPTest):
                 self.assertEqual(ddp_param.requires_grad, fsdp_param.requires_grad)
 
 
-instantiate_parametrized_tests(TestFreezingWeights)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestFreezingWeights, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
