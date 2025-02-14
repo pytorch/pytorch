@@ -523,11 +523,21 @@ class CodeGen:
             elif dataclasses.is_dataclass(arg):
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
-                kwargs = ", ".join(
-                    f"{field.name}={_get_repr(getattr(arg, field.name))}"
-                    for field in dataclasses.fields(arg)
+                args = []
+                kwargs = {}
+                for field in dataclasses.fields(arg):
+                    if field.init:
+                        field_arg = getattr(arg, field.name)
+                        if getattr(field, "kw_only", False):
+                            kwargs[field.name] = field_arg
+                        else:
+                            args.append(field_arg)
+                args_str = ", ".join(f"{_get_repr(a)}" for a in args)
+                kwargs_str = ", ".join(
+                    f"{name}={_get_repr(a)}" for name, a in kwargs.items()
                 )
-                return f"{global_name}({kwargs})"
+                all_args_str = ", ".join([args_str, kwargs_str])
+                return f"{global_name}({all_args_str})"
             elif isinstance(
                 arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
             ):

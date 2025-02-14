@@ -924,10 +924,15 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
             map_aggregate(a.step, fn),
         )
     elif dataclasses.is_dataclass(a):
-        kwargs = {
-            field.name: map_aggregate(getattr(a, field.name), fn)
-            for field in dataclasses.fields(a)
-        }
-        return a.__class__(**kwargs)
+        args = []
+        kwargs = {}
+        for field in dataclasses.fields(a):
+            if field.init:
+                field_arg = map_aggregate(getattr(a, field.name), fn)
+                if getattr(field, "kw_only", False):
+                    kwargs[field.name] = field_arg
+                else:
+                    args.append(field_arg)
+        return type(a)(*args, **kwargs)
     else:
         return fn(a)
