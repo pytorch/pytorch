@@ -12,7 +12,6 @@ import torch.multiprocessing as mp
 
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
-    NO_MULTIPROCESSING_SPAWN,
     run_tests,
     TestCase,
     parametrize,
@@ -212,9 +211,6 @@ class _TestMultiProcessing:
             self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
 
-@unittest.skipIf(
-    NO_MULTIPROCESSING_SPAWN,
-    "Disabled for environments that don't support the spawn start method")
 class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
