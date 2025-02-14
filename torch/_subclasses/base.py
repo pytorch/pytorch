@@ -5,11 +5,18 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
-class BaseTensorSubclassMeta(type):
+class BaseTensorSubclassMeta(torch._C._TensorMeta):
     def __new__(meta, name, bases, attrs):
         breakpoint()
-        return type.__new__(meta, name, bases, attrs)
+        if "TORCH_DISPATCH_TABLE" in attrs:
+            pass
+        
+        if "INNER_TENSORS" in attrs:
+            pass
+        
+        # ...
 
+        return super().__new__(meta, name, bases, attrs)
 
 class BaseTensorSubclass(torch.Tensor, metaclass=BaseTensorSubclassMeta):
 
@@ -76,18 +83,3 @@ class BaseTensorSubclass(torch.Tensor, metaclass=BaseTensorSubclassMeta):
             return cls.torch_function_epilogue(
                 func, types, args, kwargs, func(*args, **kwargs)
             )
-
-    # TODO: classmethod.__get_inner_tensors__ ?
-    # to produce __tensor_flatten__ and __tensor_unflatten__ ?
-
-    def __tensor_flatten__(self):
-        return ["a", "b"], None
-
-    @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
-        a, b = inner_tensors["a"], inner_tensors["b"]
-        if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
-        return TwoTensor(a, b, outer_size, outer_stride)
