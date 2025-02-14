@@ -383,8 +383,8 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
             raise RuntimeError(
-                "Unmatched output spec from cond() branches: "
-                "true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+                "Unmatched output spec from torch.cond branches: "
+                f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
             )
 
     merged_outs = []
@@ -394,11 +394,37 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
 
 def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
-    torch._check(a.dtype == b.dtype)
-    torch._check(a.device == b.device)
-    torch._check(a.dim() == b.dim())
+    if a is None or b is None:
+        assert a is None and b is None, (a, b)
+        return None
+    torch._check(
+        a.dtype == b.dtype,
+        lambda: "When merging two branches' output in torch.cond, "
+        f"expected same dtype but got {a.dtype} and {b.dtype}",
+    )
+    torch._check(
+        a.device == b.device,
+        lambda: "When merging two branches' output in torch.cond, "
+        f"expected same device but got {a.device} and {b.device}",
+    )
+    torch._check(
+        a.dim() == b.dim(),
+        lambda: "When merging two branches' output in torch.cond, "
+        f"expected same dim but got {a.dim()} and {b.dim()}",
+    )
 
-    merged_size = []
+    """
+    Step 1: create unbacked symints for sizes that are different
+    along the same axis. For example:
+        a.size is [s0, 4, s0, 5, 4, 5]
+        b.size is [s1, 4, s2, 8, 4, 7]
+        merged_size will be [u0, 4, u1, u2, 4, u3], where
+        u0 has range [min(s0, s1), max(s0, s1)]
+        u1 has range [min(s0, s2), max(s0, s2)]
+        u2 has range [5, 8]
+        u3 has range [5, 7]
+    """
+    merged_size: list[Union[int, torch.SymInt]] = []
     for s0, s1 in zip(a.size(), b.size()):
         # TODO: use the symint eq by expr class after rebase
         if type(s0) is int and type(s1) is int and s0 == s1:
@@ -418,9 +444,11 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
                         return s
                     assert mode.shape_env is not None
                     vrange = bound_sympy(s.node.expr, mode.shape_env.var_to_range)
-                    return vrange.lower if lower_bound else vrange.upper
+                    ret = vrange.lower if lower_bound else vrange.upper
+                    print(s, vrange, vrange.lower, lower_bound, ret)
+                    return ret
 
-                return _bound(min(s0, s1), False), _bound(max(s0, s1), True)
+                return _bound(min(s0, s1), True), _bound(max(s0, s1), False)
 
             from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
@@ -431,18 +459,85 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
             )
             merged_size.append(new_size)
 
-    torch._check(a.stride() == b.stride())  # TODO: relax this
+    """
+    Step 2: Since tensor stride is a accumulative muliplication of the sizes (a permutated
+        ascending sequence), given a tensor size, stride and merged_size, we  can re-map the
+        stride of the tensor given merged_size.
+
+        Without loss of generality, suppose we have a tenosr with:
+            size [3, 4, 3, 5, 4, 5],
+            stride (1200, 300, 1, 12, 3, 60),
+            merged_size [3, 4, 3, u0, 4, u0], where we bound 5 to u0.
+        The following code visit the strides in the ascending order: 1, 3, 12, 60, 300, 1200.
+        In each step, it checks whether the current stride is bounded or not and take the new
+        value if it has. It also generates the next candidate by bounding stride[i] * size[i]
+        to stride[i] * merged_size[i]. Concretely:
+        1. In 1st iteration, we bound 1 to 1, and set candidates[3] = 3
+        2. In 2nd iteration, we bound 3 to 3, and set candiates[12] = 12
+        3. In 3rd iteration, we bound 12 to 12, and set candidates[60] = 12 * u0
+        4. In 4th iteration, we bound 60 to 12 * u0, and set candidates[300] = 12 * u0 * u0
+    """
+
+    def _bound_stride(
+        ex_size: torch.Size,
+        ex_stride: tuple[int, ...],
+        merged_size: list[Union[int, torch.SymInt]],
+    ) -> list[Union[int, torch.SymInt]]:
+        from torch.fx.experimental.symbolic_shapes import _nested_int_aware_sort
+
+        stride_li: list[tuple[Union[int, torch.SymInt], int]] = [
+            (val, -i) for i, val in enumerate(ex_stride)
+        ]
+        stride_li.sort(key=_nested_int_aware_sort)
+        candidates: dict[Any, Union[int, torch.SymInt]] = {}
+
+        def _maybe_expr(s: Union[int, torch.SymInt]):
+            if isinstance(s, int):
+                return s
+            return s.node.expr
+
+        bounded_strides: list[Union[int, torch.SymInt]] = [None] * len(ex_stride)  # type: ignore[list-item]
+        for val, neg_i in stride_li:
+            i = -neg_i
+            if _maybe_expr(val) in candidates:
+                bounded_strides[i] = candidates[_maybe_expr(val)]
+            else:
+                bounded_strides[i] = val
+            candidates[_maybe_expr(val * ex_size[i])] = (
+                bounded_strides[i] * merged_size[i]
+            )
+        assert all(
+            a is not None for a in bounded_strides
+        ), f"not all strides are bounded {bounded_strides}"
+        return bounded_strides
+
+    a_stride: list[Union[int, torch.SymInt]] = _bound_stride(
+        a.size(), a.stride(), merged_size
+    )
+    b_stride: list[Union[int, torch.SymInt]] = _bound_stride(
+        b.size(), b.stride(), merged_size
+    )
+    """
+    Step 3: Check the newly bounded strides of the two tensors are the same. If not, we will raise an error.
+    """
+    torch._check(
+        a_stride == b_stride,
+        lambda: f"Error when merging two branches output's strides. True branch size {a.size()} vs False branch size {b.size()},"
+        f" merged output size: {merged_size}. Merged True stride {a_stride} vs Mmrged False stride {b_stride}. ",
+    )
 
     # NYI
     assert not a.is_quantized
     assert not b.is_quantized
 
     with mode:
-        return torch.empty(merged_size, dtype=a.dtype, device=a.device)
+        return torch.empty_strided(
+            merged_size, a_stride, dtype=a.dtype, device=a.device
+        )
 
 
 @cond_op.py_functionalize_impl
-def cond_func(ctx, pred, true_fn, false_fn, inputs):
+def cond_func(ctx, pred, true_fn, false_fn, inputs):  #
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():

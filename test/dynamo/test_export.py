@@ -1903,8 +1903,15 @@ def forward(self, x):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
+    getitem_3 = cond[0]
+    sym_size_int = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int >= 2
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
+    le_1 = sym_size_int <= 2;  sym_size_int = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 2 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
     getitem_2 = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem_2], self._out_spec)""",
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",  # noqa: B950
             )
             self.assertExpectedInline(
                 out_graph.cond_true_0.code.strip(),
@@ -1922,12 +1929,8 @@ def forward(self, l_x_):
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
     return (getitem,)""",
             )
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Expected true_fn_output and false_fn_output to have same metadata but found",
-            ):
-                # True branch and false branch return tensors of different shape
-                torch._dynamo.export(mod)(torch.randn(3, 2))
+            # We could successfully export branches that return different sizes
+            torch._dynamo.export(mod)(torch.randn(3, 2))
 
             # We specialize into one of the branches since predicate is a python boolean.
             test_x = torch.randn(3, 2)
@@ -3334,8 +3337,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3354,8 +3357,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
