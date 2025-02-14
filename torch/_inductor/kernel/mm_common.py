@@ -218,17 +218,6 @@ int8_mm_kernel_configs = [
     {"config": (256, 128, 128, 3, 8), "cond": True},
 ]
 
-# Mixed precision kernel configs for small sizes of m for mm's like (16, 8192) x (8192, 8192).
-mixed_mm_kernel_configs_small_m = [
-    {"config": (16, 128, 256, 3, 4), "cond": True},
-    {"config": (16, 128, 256, 5, 8), "cond": True},
-]
-
-mixed_mm_kernel_configs = (
-    mm_kernel_configs + mixed_mm_kernel_configs_small_m
-    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-    else mm_kernel_configs
-)
 
 persistent_mm_kernel_configs = [
     {"config": (128, 256, 64, 3, 8), "cond": True},
@@ -367,11 +356,6 @@ int8_platform_configs = tuple(
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
-mixed_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in mixed_mm_kernel_configs
-    if config["cond"]
-)
 persistent_mm_platform_configs = tuple(
     cast(tuple[int, int, int, int, int], config["config"])
     for config in persistent_mm_kernel_configs
@@ -393,7 +377,6 @@ if torch.version.hip and torch.cuda.is_available():
     mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
     extra_mm_platform_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
     int8_platform_configs = build_rocm_gemm_configs(int8_platform_configs)
-    mixed_mm_platform_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
     scaled_mm_platform_configs = build_rocm_gemm_configs(scaled_mm_platform_configs)
 
 mm_configs = functools.partial(
@@ -409,11 +392,6 @@ extra_mm_configs = functools.partial(
 int8_mm_configs = functools.partial(
     filtered_configs,
     configs=int8_platform_configs,
-)
-
-mixed_mm_configs = functools.partial(
-    filtered_configs,
-    configs=mixed_mm_platform_configs,
 )
 
 persistent_mm_configs = functools.partial(
@@ -454,7 +432,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     Common options to matmul triton templates.
     """
@@ -472,7 +450,6 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
