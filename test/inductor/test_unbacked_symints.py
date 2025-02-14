@@ -385,9 +385,6 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
     def test_issue_143498(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest("CPU Failure")
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
