@@ -105,4 +105,8 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         [0],
         tensor_meta=bias_tensor_meta,
     )
+    # TODO: actually the output_mask is not respected here, we should
+    # set the corresponding spec to `None` if the output_mask is not `False`
+    # for a certain output Tensor. This also applies to the conv handler
+    # in torch/distributed/tensor/_tp_conv.py
     return OutputSharding([grad_input_spec, grad_weight_spec, grad_bias_spec])

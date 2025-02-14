@@ -41,6 +41,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._guards import CompileContext, CompileId
+from torch._inductor import lowering
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -120,6 +121,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -371,20 +373,6 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return x
-    buffer = torch.as_strided(
-        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-    return out
-
-
 def check_model(
     self: TestCase,
     model,
@@ -408,7 +396,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+    ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -421,7 +409,7 @@ def check_model(
             # Eager model may fail if the dtype is not supported
             eager_result = None
 
-        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
         expect_dtypes = [
             x.dtype if isinstance(x, torch.Tensor) else None
             for x in pytree.tree_leaves(eager_result)
@@ -624,7 +612,7 @@ def check_model_gpu(
 
     if copy_to_gpu:
         example_inputs = tuple(
-            clone_preserve_strides(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
         )
 
     check_model(
@@ -901,6 +889,11 @@ class skip_if_cpp_wrapper:
             return fn(test_self)
 
         return wrapper
+
+
+def is_dynamic_shape_enabled():
+    # What's the best way to decide this?
+    return not torch._dynamo.config.assume_static_by_default
 
 
 @instantiate_parametrized_tests
@@ -5844,6 +5837,8 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    # Disable size_asserts for this test due to https://github.com/pytorch/pytorch/issues/145963
+    @config.patch(size_asserts=os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS") == "1")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
@@ -11893,7 +11888,7 @@ class CommonTemplate:
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         x = torch.ones(4, dtype=torch.float16, device=self.device)
         ref = fn(x)
@@ -11906,7 +11901,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
@@ -11918,7 +11913,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int32)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
@@ -12430,10 +12425,40 @@ class CommonTemplate:
         reset_rng_state()
         ref = f(image_latent)
         opt_f = torch.compile(f)
+
+        code = run_and_get_triton_code(opt_f, image_latent)
         reset_rng_state()
         act = opt_f(image_latent)
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+        if is_dynamic_shape_enabled():
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, s1, s2, s2., .3\*s1\*s2\*s2, s1\*s2\*s2, 1, s1\*s2, s1.."  # noqa: B950
+        else:
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
+        FileCheck().check_regex(size_assert_pattern).run(code)
+
+    @lowering.force_fallback(aten.sort.default)
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "Inductor does not generate size/stride asserts for cpp_wrapper",
+    )
+    def test_size_asserts_for_multi_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x.sort()
+
+        x = torch.randn(16, 32, device=self.device)
+        code = run_and_get_triton_code(f, x)
+
+        if is_dynamic_shape_enabled():
+            FileCheck().check("assert_size_stride(buf1, (s0, s1), (s1, 1))").check(
+                "assert_size_stride(buf2, (s0, s1), (s1, 1))"
+            ).run(code)
+        else:
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            ).run(code)
 
     @requires_cuda
     @config.patch(use_fast_math=True)
