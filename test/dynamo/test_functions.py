@@ -1921,6 +1921,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b / c
 
     @make_test
+    def test_slice_eq(a, b):
+        tmp1 = [a + 1, b + 2]
+        s = slice(1, 2)
+        if isinstance(s, slice) and s == slice(None):
+            return tmp1[s] * 2
+        return tmp1[s] * 3
+
+    @make_test
     def test_namedtuple(a, b):
         mytuple = collections.namedtuple("mytuple", ["x", "y", "xy"])
         tmp = mytuple(a, b, a + b)
