@@ -394,7 +394,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
 
-        if method_self is None:
+        if method_self is None or inspect.ismodule(method_self):
             # Its a function
             return False
 
