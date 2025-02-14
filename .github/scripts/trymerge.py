@@ -2179,7 +2179,9 @@ def merge(
         )
         ignore_current_checks_info = failing
 
-    post_starting_merge_comment(repo, pr, explainer, dry_run, ignore_current_checks_info)
+    post_starting_merge_comment(
+        repo, pr, explainer, dry_run, ignore_current_checks_info=ignore_current_checks_info
+    )
 
     start_time = time.time()
     last_exception = ""
