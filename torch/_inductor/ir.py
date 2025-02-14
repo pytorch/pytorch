@@ -5832,7 +5832,7 @@ class UserDefinedTritonKernel(ExternKernel):
         else:
             constexpr_indices = []
             for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if triton_meta['signature'][kwarg] == "constexpr":
+                if triton_meta["signature"][kwarg] == "constexpr":
                     constexpr_indices.append(idx)
 
         # Call to kernel

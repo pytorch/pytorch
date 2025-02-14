@@ -14,7 +14,12 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import IRNode, TensorBox
-from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES, triton_version_uses_attrs_dict
+from ..utils import (
+    DeferredLineBase,
+    get_gpu_type,
+    GPU_ALIGN_BYTES,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -550,7 +555,11 @@ class CppWrapperGpu(CppWrapperCpu):
             )
             kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
             if triton_version_uses_attrs_dict():
-                arg_signatures = [val for key, val in triton_meta["signature"].items() if val != 'constexpr']
+                arg_signatures = [
+                    val
+                    for key, val in triton_meta["signature"].items()
+                    if val != "constexpr"
+                ]
             else:
                 # args with value 1 are added into equal_to_1 and constants
                 # in triton_meta (in the Python codegen) which makes them
@@ -565,7 +574,9 @@ class CppWrapperGpu(CppWrapperCpu):
                     call_args = [
                         arg for i, arg in enumerate(call_args) if i not in equal_to_1
                     ]
-                    arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+                    arg_types = [
+                        t for i, t in enumerate(arg_types) if i not in equal_to_1
+                    ]
                     # extract the arg signatures from triton_meta
                     arg_signatures = triton_meta["signature"].values()
                     arg_signatures = [
