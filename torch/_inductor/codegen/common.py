@@ -556,7 +556,7 @@ def check_dtype(
     backend = get_current_backend()
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
-    elif backend == "cpp":
+    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
         is_vec = isinstance(var, CppCSEVariable) and var.is_vec
