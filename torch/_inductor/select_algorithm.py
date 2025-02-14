@@ -2005,7 +2005,6 @@ class AlgorithmSelectorCache(PersistentCache):
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
         ) -> float:
-            print("benchmarking", choice.name, choice.description)
             is_extern = isinstance(choice, ExternKernelCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
