@@ -1759,7 +1759,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -1995,7 +1994,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2292,7 +2290,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(x, w)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x, w),
             )
@@ -2349,7 +2346,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 x,
             )
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x,),
             )

@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import types
+from typing import Any, Optional, Union
 
 import torch
 import torch._export
@@ -120,7 +121,7 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def legacy_run(
-        device,
+        device: str,
         model,
         example_inputs,
         options=None,
@@ -139,10 +140,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def compile(
-        model,
-        example_inputs,
-        inductor_configs=None,
-        dynamic_shapes=None,
+        model: Union[torch.nn.Module, types.FunctionType],
+        example_inputs: list[torch.Tensor],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
         if not isinstance(model, torch.nn.Module):
             # This should really be the default behavior of torch.export.export
@@ -160,10 +161,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run(
-        model,
-        example_inputs,
-        inductor_configs=None,
-        dynamic_shapes=None,
+        model: Union[torch.nn.Module, types.FunctionType],
+        example_inputs: list[torch.Tensor],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -176,10 +177,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run_multiple(
-        model,
-        list_example_inputs,
-        inductor_configs=None,
-        dynamic_shapes=None,
+        model: Union[torch.nn.Module, types.FunctionType],
+        list_example_inputs: list[list[torch.Tensor]],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
