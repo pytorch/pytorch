@@ -461,17 +461,17 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
 
     """
     Step 2: Since tensor stride is a accumulative muliplication of the sizes (a permutated
-        ascending sequence), given a tensor size, stride and merged_size, we  can re-map the
-        stride of the tensor given merged_size.
+        ascending sequence), given a tensor size, stride and merged_size, we can re-map the
+        stride of the tensor using merged_size.
 
         Without loss of generality, suppose we have a tenosr with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
             merged_size [3, 4, 3, u0, 4, u0], where we bound 5 to u0.
         The following code visit the strides in the ascending order: 1, 3, 12, 60, 300, 1200.
-        In each step, it checks whether the current stride is bounded or not and take the new
-        value if it has. It also generates the next candidate by bounding stride[i] * size[i]
-        to stride[i] * merged_size[i]. Concretely:
+        In each step, it checks whether the current stride is bounded or not and bound old stride
+        to new value. It also generates the next candidate by bounding stride[i] * size[i]
+        to bounded_stride * merged_size[i]. Concretely:
         1. In 1st iteration, we bound 1 to 1, and set candidates[3] = 3
         2. In 2nd iteration, we bound 3 to 3, and set candiates[12] = 12
         3. In 3rd iteration, we bound 12 to 12, and set candidates[60] = 12 * u0
@@ -537,7 +537,7 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
 
 
 @cond_op.py_functionalize_impl
-def cond_func(ctx, pred, true_fn, false_fn, inputs):  #
+def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
