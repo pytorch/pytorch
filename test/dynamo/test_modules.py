@@ -12,7 +12,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -602,7 +602,7 @@ class LazyMLP(torch.nn.Module):
 
 
 class MyInput(NamedTuple):
-    x: Dict[str, Dict[str, torch.Tensor]]
+    x: dict[str, dict[str, torch.Tensor]]
     y: torch.Tensor
 
 
@@ -2311,7 +2311,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2358,7 +2358,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2407,7 +2407,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
 
         def new_forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 2
 
@@ -2426,7 +2426,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2764,6 +2764,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         run()
         self.assertTrue(models[0].abc)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -3262,6 +3263,54 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         # Check that we have recompiled twice, which leads to 3 frames
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_branch_on_nn_module_custom_len(self):
+        class Cache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.key_cache = []
+                self.len_invoked = 0
+
+            def __len__(self):
+                self.len_invoked += 1
+                return len(self.key_cache)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            cache = Cache()
+            if cache:
+                return x + 1, cache
+            return x + 2, cache
+
+        x = torch.ones(1)
+        res, cache = f(x)
+        self.assertEqual(res, x + 2)
+        # Make sure Dynamo actually traced the method.
+        self.assertEqual(cache.len_invoked, 1)
+
+    def test_branch_on_nn_module_custom_bool(self):
+        class Cache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.key_cache = [0]
+                self.bool_invoked = 0
+
+            def __bool__(self):
+                self.bool_invoked += 1
+                return len(self.key_cache)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            cache = Cache()
+            if cache:
+                return x + 1, cache
+            return x + 2, cache
+
+        x = torch.ones(1)
+        res, cache = f(x)
+        self.assertEqual(res, x + 1)
+        # Make sure Dynamo actually traced the method.
+        self.assertEqual(cache.bool_invoked, 1)
 
 
 devices = ["cuda", "hpu"]
