@@ -10120,20 +10120,22 @@ def ___make_guard_fn():
     def test_frozen_dataclass_field_without_init(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
-            x: torch.Tensor
+            ns: typing.Tuple[int, ...]
             a: int = dataclasses.field(init=False)
             b: int = dataclasses.field(default=42, init=False)
 
             def __post_init__(self):
-                object.__setattr__(self, "n", self.x.shape[0])
+                object.__setattr__(self, "a", len(self.ns))
 
         @allow_in_graph
-        def inner_fn(dc):
-            return (dc.x + dc.n) * dc.b
+        def inner_fn(x, dc):
+            for n in dc.ns:
+                x = x + n
+            return (x + dc.a) * dc.b
 
         def fn(x):
-            dc = TestDataClass(x)
-            return inner_fn(dc)
+            dc = TestDataClass((2, 3))
+            return inner_fn(x, dc)
 
         fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
         inps = (torch.ones(2, 3),)
