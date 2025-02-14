@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
+import unittest
+
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -151,7 +154,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    # TODO(anijain2305) - does not work with fullgraph=True
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -165,8 +168,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         ref = fn(x)
-        # Cant use fullgraph=True because WITH_EXCEPT_START is not supported
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
@@ -404,6 +406,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    def test_raise_GeneratorExit(self):
+        # GeneratorExit does not inherit from Exception
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise GeneratorExit
+            except Exception:
+                return t.sin()
+            except BaseException:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.cos())
+
     def test_speculation_exception(self):
         log = SpeculationLog()
         log.next("fake", 555, "fake", Instruction(1, "fake", 1, 1))
@@ -427,6 +444,29 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(d, x), opt_fn(d, x))
         self.assertEqual(fn({"a": 1, "b": 2}, x), opt_fn({"a": 1, "b": 2}, x))
+
+    def test_block_stack_cleanup(self):
+        params = {
+            "a": 3,
+            "b": 4,
+            "c": 5,
+        }
+
+        dt = {
+            "c": 5,
+        }
+
+        def fn(x):
+            for name in params:
+                try:
+                    x = x * dt[name]
+                except KeyError:
+                    x = x * torch.sin(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":

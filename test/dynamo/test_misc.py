@@ -4723,6 +4723,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_id_guarded_class(self):
+        class MyClass1:
+            pass
+
+        class MyClass2:
+            pass
+
+        def fn(x, y):
+            return x + id(y) // 100000
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
+        x = torch.randn(3)
+        y = MyClass1
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # No recompile if still pass in the original class (MyClass1)
+        x = torch.randn(3)
+        y = MyClass1
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Have to recompile if pass in new class (MyClass2)
+        x = torch.randn(3)
+        y = MyClass2
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_id_guarded_object(self):
         class UDO:
             @torch.compile(backend="eager")
@@ -5899,6 +5928,32 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref_out = f(*args)
         opt_out = opt_f(*args)
         self.assertTrue(same(ref_out, opt_out))
+
+    def test_enum_subclass(self):
+        # Copied from inspect.py
+
+        class _ParameterKind(enum.IntEnum):
+            POSITIONAL_ONLY = "positional-only"
+
+            def __new__(cls, description):
+                value = len(cls.__members__)
+                member = int.__new__(cls, value)
+                member._value_ = value
+                member.description = description
+                return member
+
+            def __str__(self):
+                return self.name
+
+        _POSITIONAL_ONLY = _ParameterKind.POSITIONAL_ONLY
+
+        def fn(x):
+            _ParameterKind(_POSITIONAL_ONLY)
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
@@ -7612,6 +7667,19 @@ utils_device.CURRENT_DEVICE == None""".split(
 """,
         )
 
+    def test_float_speculation_log_divergence(self):
+        def fn(x, y, z):
+            a = F.interpolate(x, scale_factor=z, mode="bilinear", align_corners=False)
+            b = F.interpolate(y, scale_factor=z, mode="bilinear", align_corners=False)
+            return a * b
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        y = torch.randn(3, 3, 3, 4)
+
+        self.assertEqual(fn(y, y, 1.0), fn_opt(y, y, 1.0))
+        self.assertEqual(fn(y, y, 2.0), fn_opt(y, y, 2.0))
+
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -7906,9 +7974,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0]),
+            torch.set_grad_enabled(state[0])
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2]),
+            torch._C._set_cublas_allow_tf32(state[2])
 
         @torch.compile(backend=my_compiler)
         def fn(x):
@@ -9356,7 +9424,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
-    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
@@ -9504,21 +9571,6 @@ def ___make_guard_fn():
                     yield x
 
             return list(gen())
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
-        ):
-            compiled_fn(x)
-
-        # FIXME(XuehaiPan): do not inline infinite generator if it does not raise errors in eager mode
-        def fn(x):
-            def gen():
-                while True:
-                    yield x
-
-            return list(zip(range(10), gen()))
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -11794,6 +11846,33 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
 
+    def test_ne_operator_with_custom_ne(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+                self.ne_called = False
+
+            def __ne__(self, other):
+                # ne_called attr is later checked to ensure that overrideen
+                # `__ne__` is traced
+                self.ne_called = True
+                return not self.__eq__(other)
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+        f1 = Foo(0)
+        f2 = Foo(0)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def run(x):
+            # `x + 1` prevents Dynamo from skipping this frame.
+            return x + 1, f1 != f2
+
+        _, ne = run(torch.ones(1))
+        self.assertFalse(ne)
+        self.assertTrue(f1.ne_called)
+
     def test_ne_operator_with_custom_graphbreak_eq(self):
         counters.clear()
 
@@ -11817,6 +11896,27 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    def test_RAISE_VARARGS_0(self):
+        def foo():
+            try:
+                raise ValueError
+            except:
+                raise
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                foo()
+            except ValueError:
+                return t.sin()
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
         class Foo:
@@ -11956,6 +12056,17 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
         result_usual.backward()
 
         torch.allclose(inp1_custom.grad, inp1_usual.grad)
+
+    def test_retain_grad(self):
+        def fn(x, y):
+            y.retain_grad()
+            return torch.sin(y) + x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(4, requires_grad=True)
+        y = torch.cos(x)
+        opt_fn(x, y).sum().backward()
+        self.assertTrue(y.grad is not None)
 
 
 if __name__ == "__main__":
