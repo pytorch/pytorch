@@ -2,6 +2,7 @@
 import logging
 import math
 import os
+import re
 import sysconfig
 import unittest
 import unittest.mock as mock
@@ -11,6 +12,7 @@ from typing import Callable, Optional
 from torch._inductor.utils import clear_inductor_caches
 from torch.export import Dim
 
+from torch.testing._internal.logging_utils import log_settings
 
 try:
     from test_aot_inductor_utils import AOTIRunnerUtil
@@ -146,9 +148,10 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
+                "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
@@ -1037,6 +1040,43 @@ class TestCutlassBackend(TestCase):
             # Remove temporary files.
             os.remove(cu_file.name)
             os.remove(exe_file.name)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_integration(self):
+        """
+        Test if cutlass backend can be autotune with other backends
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 2,
+                "force_disable_caches": True,
+            }
+        ):
+            with log_settings("+inductor"), self.assertLogs(
+                logger="torch._inductor.codegen.cuda", level=logging.DEBUG
+            ) as test_log:
+                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+                Y = mm(a, b)
+                torch.testing.assert_close(Y_compiled, Y)
+
+            output = "\n".join(record.getMessage() for record in test_log.records)
+
+            match = re.search(
+                r"Got cutlass configs: total number of ops: (\d+)", output
+            )
+            assert match, "Expect to find the cutlass configs log"
+            num_ops = int(match.group(1))
+            self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
 
 if __name__ == "__main__":
