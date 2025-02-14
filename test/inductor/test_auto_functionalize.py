@@ -783,6 +783,72 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     ignore_empty_lines=True,
                 )
 
+    # foo takes x, y both being graph inputs and views of the same shared base but do not overlap.
+    # In this special case functionlization will have none as base for x and y. so they will be assumed
+    # to have unique bases during functionalizations. During inplace, we notice that they both share storage
+    # but because their memory does not overlap we can inplace both. see github issue #139628
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_auto_functionalize_extra5(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x, y):
+                return torch.ops.mylib.foo(x, y)
+
+            base = torch.randn(2, 2)
+            orig_args = [base[0], base[1]]
+
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(f, orig_args)
+            [inductor_args, result2, graph_inductor] = self.run_inductor(f, orig_args)
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_aot,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _y_base_index = 1, _all_bases = [arg1_1, arg0_1])
+        getitem_1: "f32[2][1]cpu" = auto_functionalized_v2[1]
+        getitem_2: "f32[2][1]cpu" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_2);  arg0_1 = getitem_2 = copy_ = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy__1 = None
+        return ()""",  # noqa: B950
+                    ignore_comments=True,
+                    ignore_empty_lines=True,
+                )
+
+            # 2. Run with inductor backend
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_inductor,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg1_1, arg0_1);  foo_default = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy__1 = None
+        return ()""",  # noqa: B950
+                    ignore_comments=True,
+                    ignore_empty_lines=True,
+                )
+
     # foo takes a mutable list with views in addition to other args.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_extra4(self):
