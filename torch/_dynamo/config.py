@@ -1,14 +1,23 @@
 # mypy: allow-untyped-defs
+
+"""
+Configuration module for TorchDynamo compiler and optimization settings.
+
+This module contains various configuration flags and settings that control TorchDynamo's
+behavior, including:
+- Runtime behavior flags (e.g., guard settings, specialization options)
+- Debugging and development options
+- Performance tuning parameters
+- Feature toggles for experimental features
+"""
+
 import getpass
-import inspect
 import os
-import re
 import sys
 import tempfile
 from os.path import abspath, dirname
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
-import torch
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
@@ -52,6 +61,7 @@ skip_code_recursive_on_recompile_limit_hit = True
 # raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
 # you regress guards/specialization.  This works best when recompile_limit = 1.
+# This flag is incompatible with: suppress_errors.
 # [@compile_ignored: runtime_behaviour]
 fail_on_recompile_limit_hit = False
 
@@ -164,6 +174,7 @@ traceable_tensor_subclasses: set[type[Any]] = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
+# This flag is incompatible with: fail_on_recompile_limit_hit.
 suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
@@ -411,11 +422,21 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
+# Use C++ guard manger for symbolic shapes
+enable_cpp_symbolic_shape_guards = False
+
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing generator functions lazily. If False, Dynamo will exhaust
+# generators upon first execution. And if True, the generator will be accessed lazily
+enable_faithful_generator_behavior = True
+
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+)
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
@@ -508,16 +529,17 @@ ignore_logger_methods: set[Callable[..., Any]] = set()
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
-    "stride",
-    "requires_grad",
-    "storage_offset",
     "layout",
-    "data",
+    "is_neg",
+    "is_conj",
+    "is_pinned",
 ]
 
-_autograd_backward_strict_mode_banned_ops.extend(
-    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
-)
+_autograd_backward_strict_mode_conditional_banned_ops = [
+    "stride",
+    "storage_offset",
+    "is_contiguous",
+]
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (
@@ -568,8 +590,10 @@ enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") 
 # will typically cause cache misses.  We continuously update the profile,
 # so if we only discover something is dynamic on the second run, we will update
 # the profile for subsequent runs.
-automatic_dynamic_local_pgo: bool = (
-    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
+automatic_dynamic_local_pgo: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_automatic_dynamic_pgo",
+    env_name_force="TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO",
+    default=True,
 )
 
 # Like above, but using remote cache
