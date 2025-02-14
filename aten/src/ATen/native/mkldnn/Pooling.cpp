@@ -212,9 +212,12 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  bool is_channels_last = input.is_mkldnn() ? false :
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  const ideep::tensor& x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  auto memory_format = input.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast3d || memory_format == at::MemoryFormat::ChannelsLast;
+
+  auto input_t = input.is_mkldnn() ? input : input.contiguous(memory_format);
+
+  const ideep::tensor& x = itensor_from_tensor(input_t, /*from_const_data_ptr*/true);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -223,7 +226,7 @@ static Tensor _mkldnn_pooling(
     // on the right side to match behavior. Adjust output size
     // accordingly.
     const std::vector<int64_t> output_sizes_ceil = pool_output_sizes(
-        input.sizes(),
+        input_t.sizes(),
         kernel_size_vec,
         stride_vec,
         padding_vec,
@@ -235,7 +238,7 @@ static Tensor _mkldnn_pooling(
     bool all_equal = false;
     while (!all_equal) {
       output_sizes = pool_output_sizes(
-          input.sizes(),
+          input_t.sizes(),
           kernel_size_vec,
           stride_vec,
           padding_vec,
@@ -244,7 +247,7 @@ static Tensor _mkldnn_pooling(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (const auto i : c10::irange(2, input.sizes().size())) {
+      for (const auto i : c10::irange(2, input_t.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -253,7 +256,7 @@ static Tensor _mkldnn_pooling(
     }
   } else {
     output_sizes = pool_output_sizes(
-        input.sizes(),
+        input_t.sizes(),
         kernel_size_vec,
         stride_vec,
         padding_vec,
@@ -267,14 +270,14 @@ static Tensor _mkldnn_pooling(
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
   // can reduce the memory use.
   if (ideep::algorithm::pooling_max == algo
-      && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
+      && !((input_t.requires_grad() && at::GradMode::is_enabled()) || input_t._fw_grad(/*level */ 0).defined())) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
 
   if (is_channels_last) {
     auto output = at::empty(
         output_sizes,
-        input.options().memory_format(input.suggest_memory_format()));
+        input_t.options().memory_format(input_t.suggest_memory_format()));
     ideep::tensor y =
         itensor_view_from_dense(output, /*from_const_data_ptr*/ true);
     ideep::pooling_forward::compute(
@@ -300,16 +303,16 @@ static Tensor _mkldnn_pooling(
         {padding_vec_r.cbegin(), padding_vec_r.cend()},
         algo,
         aprop_kind);
-    if (input.is_mkldnn()) {
+    if (input_t.is_mkldnn()) {
       return new_with_itensor_mkldnn(
           std::move(y),
-          optTypeMetaToScalarType(input.options().dtype_opt()),
-          input.options().device_opt());
+          optTypeMetaToScalarType(input_t.options().dtype_opt()),
+          input_t.options().device_opt());
     } else {
       return mkldnn_to_dense(new_with_itensor_mkldnn(
           std::move(y),
-          optTypeMetaToScalarType(input.options().dtype_opt()),
-          input.options().device_opt()));
+          optTypeMetaToScalarType(input_t.options().dtype_opt()),
+          input_t.options().device_opt()));
     }
   }
 }
