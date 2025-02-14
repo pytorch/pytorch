@@ -37,6 +37,7 @@ std::atomic<int> sighupCount(0);
 std::atomic<int> hookedUpCount(0);
 
 void handleSignal(int signal) {
+  // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (signal) {
     // TODO: what if the previous handler uses sa_sigaction?
     case SIGHUP:
@@ -111,8 +112,6 @@ FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),
       fatalSignalName("<UNKNOWN>"),
-      writingCond(),
-      writingMutex(),
       signalReceived(false) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)

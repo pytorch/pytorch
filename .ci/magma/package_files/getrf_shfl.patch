@@ -1,0 +1,15 @@
+diff --git a/src/zgetrf_batched.cpp b/src/zgetrf_batched.cpp
+index 24a65a90..884d9352 100644
+--- a/src/zgetrf_batched.cpp
++++ b/src/zgetrf_batched.cpp
+@@ -116,7 +116,9 @@ magma_zgetrf_batched(
+             return magma_zgetrf_batched_smallsq_noshfl( m, dA_array, ldda, ipiv_array, info_array, batchCount, queue );
+         }
+         else{
+-            return magma_zgetrf_batched_smallsq_shfl( m, dA_array, ldda, ipiv_array, info_array, batchCount, queue );
++            // magma_cgetrf_batched_smallsq_shfl is broken, therefore let's call noshfl version for arch < 700
++            // return magma_zgetrf_batched_smallsq_shfl( m, dA_array, ldda, ipiv_array, info_array, batchCount, queue );
++            return magma_zgetrf_batched_smallsq_noshfl( m, dA_array, ldda, ipiv_array, info_array, batchCount, queue );
+         }
+         #else
+         return magma_zgetrf_batched_smallsq_noshfl( m, dA_array, ldda, ipiv_array, info_array, batchCount, queue );

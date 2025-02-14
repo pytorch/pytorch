@@ -103,7 +103,7 @@ import inspect
 import itertools
 import re
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.hub import tqdm
@@ -233,8 +233,7 @@ def dump():
     for op_key in sorted(_operation_device_version_data, key=sort_key):
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        for key in sorted(op_data):
-            data_part.append(f"        {key}: {op_data[key]},")
+        data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
@@ -938,7 +937,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     dump()
 
 
-_operation_device_version_data: Dict[Any, Dict] = {
+_operation_device_version_data: dict[Any, dict] = {
     # Warning: the data in between the BEGIN/END DATA comment lines
     # below is generated. It can be updated either manually or via
     # calling dump function defined above.

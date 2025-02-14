@@ -28,13 +28,11 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
-#include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
@@ -153,7 +151,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     // TODO: consider factoring this out
-    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
     if (!tuple) throw python_error();
     for (size_t i = 0; i != strides.size(); i++) {
       PyObject* s = torch::toPyObject(strides[i]);
@@ -1063,14 +1061,13 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  ScalarType scalar_type;
   Device device = self_.device();
   if (is_dtype) {
-    scalar_type = r.scalartype(0);
+    auto scalar_type = r.scalartype(0);
     return THPVariable_Wrap(dispatch_to(self_, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   }
   at::TensorOptions options = torch::utils::options_from_string(type_name);
-  scalar_type = at::typeMetaToScalarType(options.dtype());
+  auto scalar_type = at::typeMetaToScalarType(options.dtype());
   auto device_type = options.device().type();
   if (device_type != device.type()) {
     device = at::Device(device_type);

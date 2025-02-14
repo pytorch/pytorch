@@ -1,4 +1,29 @@
 # mypy: allow-untyped-defs
+
+"""
+Core module responsible for converting Python bytecode into TorchDynamo's symbolic execution format.
+
+This module implements the bytecode-level tracing system that allows TorchDynamo to analyze
+and transform Python code. It converts Python bytecode instructions into a symbolic format
+that tracks the flow of tensors and other values through the program.
+
+Key components:
+- InstructionTranslatorBase: Base class for converting bytecode to symbolic execution
+- InstructionTranslator: Main translator for function bytecode
+- InliningInstructionTranslator: Handles inlining of called functions
+- SpeculationLog: Manages state for speculative execution and rollback
+
+The symbolic conversion process handles:
+- Control flow (loops, conditionals, etc.)
+- Function inlining and call stack management
+- Tracking of program values and side effects
+- Graph breaks and resumption points
+- Exception handling and stack frame management
+
+This is a core part of TorchDynamo's tracing system that enables ahead-of-time
+optimization of PyTorch programs.
+"""
+
 import collections
 import collections.abc
 import contextlib
@@ -19,12 +44,15 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Optional, Union
 from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.fx.experimental.symbolic_shapes import guard_bool
+from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -54,9 +82,10 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    GetItemSource,
+    DictGetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalCellSource,
     LocalSource,
     Source,
 )
@@ -70,7 +99,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -82,6 +111,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -97,13 +128,14 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
-    ClosureVariable,
+    CellVariable,
+    ExceptionVariable,
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.nn_module import NNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -122,7 +154,7 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
-compare_op_handlers: Dict[str, Any] = {
+compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
 handle_contains = BuiltinVariable(operator.contains).call_function
@@ -136,6 +168,16 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
+
+
+@functools.cache
+def _import_module(name: str) -> types.ModuleType:
+    """
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
+    """
+    return importlib.import_module(name)
 
 
 @dataclasses.dataclass
@@ -169,7 +211,7 @@ class SpeculationLog:
     a graph break.
     """
 
-    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
+    entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
 
     def restart(self):
@@ -198,11 +240,13 @@ class SpeculationLog:
                 f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
                 f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
             )
-        assert (
+        if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), f"""
+        ):
+            raise SpeculationLogDivergence(
+                f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
 - Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
 - Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
@@ -220,15 +264,21 @@ do this for graph breaks, you will infinite loop).
 
 Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
 """
+            )
         self.index += 1
         return entry
 
 
 @dataclasses.dataclass
 class LocalState:
-    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: dict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=dict
     )
+
+    def render(self) -> str:
+        return "\n".join(
+            f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
+        )
 
 
 # Mutable box that is shared across restarts
@@ -236,7 +286,30 @@ class LocalState:
 class DistributedState:
     compile_pg: Any
     local_state: LocalState
-    all_states: Optional[List[LocalState]] = None
+    all_states: Optional[list[LocalState]] = None
+
+
+class TensorifyState:
+    # These are the set of string symfloats names (eg. "zf0") that we collect
+    # from the tensorify_python_scalars.py joint fx pass to inform us about
+    # which float inputs we should specialize when we restart analysis.
+    force_specializations: set[str] = set()
+
+    @classmethod
+    def specialize(cls, index: str) -> None:
+        cls.force_specializations.add(index)
+
+    @classmethod
+    def should_specialize(cls, index: str) -> bool:
+        return index in cls.force_specializations
+
+    @classmethod
+    def clear(cls) -> None:
+        cls.force_specializations.clear()
+
+    @classmethod
+    def empty(cls) -> bool:
+        return len(cls.force_specializations) == 0
 
 
 @functools.lru_cache(None)
@@ -244,12 +317,40 @@ def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
 
+@contextlib.contextmanager
+def save_and_restart_speculation_log(tx: "InstructionTranslatorBase"):
+    # When reconstructing a generator after a graph break, we advance it until
+    # it is fully exhausted. This process adds new entries to the speculation
+    # log that were not previously observed. Without temporarily clearing the
+    # speculation log, this could lead to a divergence error.
+
+    entries = tx.speculation_log.entries
+    index = tx.speculation_log.index
+    try:
+        tx.speculation_log.entries = []
+        tx.speculation_log.index = 0
+        yield
+    finally:
+        tx.speculation_log.entries = entries
+        tx.speculation_log.index = index
+
+
+@contextlib.contextmanager
+def temporarely_allow_writes_to_output_graph(tx: "InstructionTranslatorBase"):
+    try:
+        tmp = tx.output.should_exit
+        tx.output.should_exit = False
+        yield
+    finally:
+        tx.output.should_exit = tmp
+
+
 @dataclasses.dataclass
 class BlockStackEntry:
     # Current instruction that pushes something to block_stack
     inst: Instruction
     target: Instruction
-    stack_index: Optional[int] = None
+    stack_index: int
     with_context: Optional[
         Union[ContextWrappingVariable, GenericContextWrappingVariable]
     ] = None
@@ -276,8 +377,19 @@ class BlockStackEntry:
             return self.with_context.exit(tx)
 
 
+class SpeculationLogDivergence(AssertionError):
+    pass
+
+
 class ReturnValueOp(Exception):
     pass
+
+
+class YieldValueOp(Exception):
+    """
+    Signal to the symbolic tracer to stop and return control flow to the
+    caller
+    """
 
 
 def stack_op(fn: typing.Callable[..., object]):
@@ -320,12 +432,8 @@ def _detect_and_normalize_assert_statement(
     current_instruction_pointer = self.instruction_pointer
     inst = self.instructions[current_instruction_pointer]
     # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
-    if sys.version_info < (3, 9):
-        if inst.opname != "LOAD_GLOBAL" or inst.argval != "AssertionError":
-            return False
-    else:
-        if inst.opname != "LOAD_ASSERTION_ERROR":
-            return False
+    if inst.opname != "LOAD_ASSERTION_ERROR":
+        return False
 
     current_instruction_pointer += 1
 
@@ -409,7 +517,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
             user_stack_trace,
-            exc_info=exc_info,
         )
     else:
         # This log line MUST not contain the string "Graph break in user code",
@@ -522,6 +629,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             return
 
         if value.is_python_constant():
+            # ConstDictVariable is optimized to be very lazy about insertion of
+            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
+            # here.
+            if isinstance(value, ConstDictVariable) and value.source:
+                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
@@ -533,12 +645,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
-            if truth_fn(mod):
-                if push:
-                    self.push(value)
-                self.jump(inst)
-        elif isinstance(value, UnspecializedNNModuleVariable):
-            mod = value.value
             if truth_fn(mod):
                 if push:
                     self.push(value)
@@ -589,7 +695,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
-                eval_result = value.evaluate_expr(self.output)
+                # if the user is branching on a SymBool, guard on it
+                # if the user has code like:
+                #    if size:
+                #        ...
+                # then they are just testing truthiness: guard that the expr != 0
+                if isinstance(value.sym_num, torch.SymBool):
+                    eval_result = value.evaluate_expr(self.output)
+                else:
+                    eval_result = guard_bool(value.sym_num != 0)
             except exc.UserError as e:
                 if self.should_compile_partial_graph():
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
@@ -612,11 +726,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                # TODO link the torch.cond doc later
                 raise exc.UserError(
                     exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                     "Dynamic control flow is not supported at the moment. Please use "
-                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    "torch.cond to explicitly capture the control flow.",
                     case_name="cond_operands",
                 )
 
@@ -673,7 +786,7 @@ def break_graph_if_unsupported(*, push):
         ):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
-            cleanup: List[Instruction] = []
+            cleanup: list[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 # Don't exit any modes we have entered,
@@ -760,22 +873,22 @@ class InstructionTranslatorBase(
     metaclass=BytecodeDistpatchTableMeta,
 ):
     output: OutputGraph
-    symbolic_locals: Dict[str, VariableTracker]
-    symbolic_globals: Dict[str, VariableTracker]
+    symbolic_locals: dict[str, VariableTracker]
+    symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
-    stack: List[VariableTracker]
+    stack: list[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    block_stack: List[BlockStackEntry]
+    block_stack: list[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
-    prefix_insts: List[Instruction]
+    prefix_insts: list[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    dispatch_table: List[Any]
-    exn_vt_stack: List[VariableTracker]
+    dispatch_table: list[Any]
+    exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
@@ -842,108 +955,19 @@ class InstructionTranslatorBase(
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
+        # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
-        # implicit use by super()
-        # reads = reads | {"__class__"}
-        # output variables?
-        reads = reads | set(self.freevars())
-
-        # First we prune the non-cell local vars, this allows us to prune more
-        # cell local vars later on (e.g., if we manage to prune a
-        # `NestedUserFunctionVariable` that makes use of some cell locals).
-        cellvars = set(self.cellvars())
         self.symbolic_locals = {
-            k: v for k, v in self.symbolic_locals.items() if k in cellvars or k in reads
+            k: v for k, v in self.symbolic_locals.items() if k in reads
         }
-
-        # Then we prune the side effects, which might enable us to prune more
-        # cellvars afterwards.
+        # "Garbage collect the heap".
         self.output.side_effects.prune_dead_object_new(self)
-
-        # Then we prune the cell locals.
-        #
-        # Note that we keep certain cell locals, because the current mechanism
-        # for codegen closure initialization for nested function creation is:
-        # 1. `NestedUserFunctionVariable` codegen assumes its closure has been
-        #    initialized properly by its creator, i.e., the tuple of cells will
-        #    be populated with correct content before the function is used.
-        # 2. `OutputGraph::compile_subgraph`, we populate the tuple of cells
-        #    _after_ emitting the `MAKE_FUNCTION` bytecode, via `STORE_DEREF`;
-        #    these `STORE_DEREF` are generated partly based on the current
-        #    `symbolic_locals`.
-        # As a result, we must be careful not to prune the cell locals that'll
-        # allow `OutputGraph` to generate the proper `STORE_DEREF`.
-        #
-        # On the other hand, we do want to prune away the truly dead ones, e.g.,
-        # say after we invoke a nested function, and the function is never used
-        # again. So here we do some conservative pruning, by tracing from a
-        # series of must-live root variables -- for any reachable cell, it must
-        # be kept alive.
-        #
-        # TODO(#137123) there are extra complexities due to side-effects (e.g.,
-        # the nested function leaking out into backward hook or globals). We
-        # could probably improve the variable tracing here to include the
-        # relevant variables in `output.side_effects`.
-        if self.output.side_effects.is_empty():
-            cellvars_that_must_live = set()
-            visited = set()
-
-            def visit(var: VariableTracker):
-                if var in visited:
-                    return
-                visited.add(var)
-
-                # Avoid realizing the lazy variable which could end up adding a
-                # graph input which isn't needed, this is sound because there's
-                # there doesn't seem to be a way to go from a
-                # `LazyVariableTracker` to `ClosureVariable`. TODO is this
-                # really true in general?
-                if isinstance(var, LazyVariableTracker):
-                    return
-
-                # We need to do this explicitly to walk the entire use chain,
-                # e.g., from a `ClosureVariable` to its underlying
-                # `NestedUserFunctionVariable`, rather than just stopping at the
-                # `ClosureVariable` with a name.
-                if isinstance(var, ClosureVariable):
-                    cellvars_that_must_live.add(var.name)
-
-                    # We only recur if the closure variable has been initialized.
-                    actual_var = self.symbolic_locals.get(var.name, None)
-                    if actual_var is not None:
-                        VariableTracker.visit(visit, actual_var)
-
-            # Populate `cellvars_that_must_live`
-            #
-            # NOTE: Don't trace from the cell locals which aren't explicitly
-            # read anymore; if they are indirectly used, they will be reached by
-            # other roots. These initially excluded cells are the ones that will
-            # hopefully be pruned.
-            local_roots = [
-                var
-                for name, var in self.symbolic_locals.items()
-                if name not in cellvars or name in reads
-            ]
-            VariableTracker.visit(
-                visit, (local_roots, self.stack, self.output.backward_state)
-            )
-            # Manually release the self-referential nested function, which
-            # captures `self.symbolic_locals` and affects parts of PT test/logic
-            # that are sensitive to when certain objects get released.
-            del visit
-
-            # Only keep locals that will be read, or are cellvars that must live.
-            self.symbolic_locals = {
-                k: v
-                for k, v in self.symbolic_locals.items()
-                if k in reads or k in cellvars_that_must_live
-            }
 
     def call_function(
         self,
         fn: VariableTracker,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ):
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
@@ -961,11 +985,22 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
+    def inline_generator_function(self, fn, args, kwargs):
+        """
+        Redirect the call to the generator "call_function"
+        """
+        if not isinstance(fn, LocalGeneratorFunctionVariable):
+            fn = LocalGeneratorFunctionVariable(fn)
+        return fn.call_function(self, args, kwargs)
+
     def inline_user_function_return(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
         """
-        return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
+            return self.inline_generator_function(fn, args, kwargs)
+        else:
+            return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -1026,10 +1061,12 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
-        except ReturnValueOp:
+        except (ReturnValueOp, YieldValueOp):
             return False
         except Unsupported:
             if self.current_speculation is None:
@@ -1114,11 +1151,25 @@ class InstructionTranslatorBase(
                 self.output.push_tx(self)
                 while self.step():
                     pass
+            except TensorifyScalarRestartAnalysis:
+                raise
             except BackendCompilerFailed:
+                raise
+            except RuntimeError as e:
+                if hasattr(e, "msg") and "data-dependent" in e.msg:
+                    print(
+                        "\n"
+                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                        file=sys.stderr,
+                    )
+
                 raise
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+
                 raise
             finally:
                 self.output.pop_tx()
@@ -1130,50 +1181,35 @@ class InstructionTranslatorBase(
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
-    def push(self, val: Optional[VariableTracker], name: Any = None):
+    def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
-        if sys.version_info >= (3, 13):
-            self.name_stack.append(name)
-            assert len(self.stack) == len(self.name_stack)
 
-    def push_many(self, vals: List[VariableTracker]):
+    def push_many(self, vals: list[VariableTracker]):
         for val in vals:
             self.push(val)
 
     def pop(self) -> VariableTracker:
-        if sys.version_info >= (3, 13):
-            assert len(self.stack) == len(self.name_stack)
-            self.name_stack.pop()
         return self.stack.pop()
 
-    def popn(self, n: int) -> List[VariableTracker]:
+    def popn(self, n: int) -> list[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
-    def _load_closure(self, name):
-        return ClosureVariable(name=name)
-
-    def _load_fast(self, name):
+    def LOAD_FAST(self, inst):
+        name = inst.argval
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self.symbolic_locals[name].unwrap(), name=name)
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
-            if sys.version_info >= (3, 13) and name in self.cell_and_freevars():
-                # 3.13 merged LOAD_CLOSURE into LOAD_FAST
-                # If we fail to LOAD_FAST, then we probably should have done LOAD_CLOSURE.
-                # Closure variable creation is actually done in SET_FUNCTION_ATTRIBUTE,
-                # but we'll do it again here so that we don't need to push a dummy variable.
-                # We shouldn't actually be doing anything with this variable anyway.
-                self.push(self._load_closure(name), name=name)
-            elif name.startswith("."):
+            if name.startswith("."):
                 try:
                     # This happens in dict/list comprehensions
                     new_name = name.replace(".", "implicit")
-                    self.push(self.symbolic_locals[new_name], name=new_name)
+                    self.push(self.symbolic_locals[new_name])
                 except KeyError:
                     unimplemented("undefined LOAD_FAST (implicit)")
             else:
@@ -1183,34 +1219,35 @@ class InstructionTranslatorBase(
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
-    def LOAD_FAST(self, inst):
-        self._load_fast(inst.argval)
-
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
+        cell = self.symbolic_locals[inst.argval]
+        contents_var = self.output.side_effects.load_cell(cell)
+        self.push(contents_var)
 
         if self.exec_recorder and inst.argval in self.f_locals:
             self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
 
-        if inst.argval not in self.symbolic_locals:
-            unimplemented(f"undefined LOAD_DEREF {inst.argval}")
-        self.push(self.symbolic_locals[inst.argval])
-
-    def _store_fast(self, name):
+    def STORE_FAST(self, inst):
+        name = inst.argval
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
 
-    def STORE_FAST(self, inst):
-        self._store_fast(inst.argval)
-
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
 
-    STORE_DEREF = STORE_FAST
+    def STORE_DEREF(self, inst):  # type: ignore[override]
+        assert inst.argval in self.cell_and_freevars()
+        cell = self.symbolic_locals[inst.argval]
+        val = self.pop()
+        self.output.side_effects.store_cell(cell, val)
 
-    def LOAD_CLOSURE(self, inst):
-        self.push(self._load_closure(inst.argval))
+        assert isinstance(cell, CellVariable)  # tame mypy
+        if cell.local_name is not None:
+            val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
+
+    LOAD_CLOSURE = LOAD_FAST
 
     def _load_const(self, inst):
         i = inst.arg
@@ -1250,7 +1287,7 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
@@ -1273,6 +1310,9 @@ class InstructionTranslatorBase(
             unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
+    # Cache note: This cache only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do.
+    @cache_method
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
@@ -1283,7 +1323,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = importlib.import_module(module_name)
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
@@ -1385,14 +1425,14 @@ class InstructionTranslatorBase(
 
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
-            raise NameError(f"name '{argval}' is not defined")
+            raise Unsupported(f"name '{argval}' is not defined")
         val = self.f_builtins[argval]
 
         if callable(val):
             builtins_source = GlobalSource(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
-            var_source = GetItemSource(builtins_source, argval)
+            var_source = DictGetItemSource(builtins_source, argval)
             self.push(VariableTracker.build(self, val, var_source))
         else:
             assert is_builtin_constant(val)
@@ -1414,11 +1454,11 @@ class InstructionTranslatorBase(
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -1427,7 +1467,7 @@ class InstructionTranslatorBase(
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1502,6 +1542,14 @@ class InstructionTranslatorBase(
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
 
+        # Handle https://peps.python.org/pep-0479/
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
 
@@ -1514,7 +1562,12 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
-            unimplemented("re-raise")
+            # duplicate the top of the stack and re-raise it
+            if sys.version_info < (3, 11):
+                unimplemented("re-raise")
+            assert isinstance(self.stack[-1], ExceptionVariable)
+            self.stack.append(self.stack[-1])
+            self._raise_exception_variable(inst)
         elif inst.arg == 1:
             self._raise_exception_variable(inst)
         else:
@@ -1525,11 +1578,45 @@ class InstructionTranslatorBase(
                 self._raise_exception_variable(inst)
             unimplemented("raise ... from ...")
 
+    def CLEANUP_THROW(self, inst):
+        # https://github.com/python/cpython/pull/96010
+        tos = self.stack[-1]
+        assert isinstance(tos, ExceptionVariable)
+        if tos.exc_type is StopIteration:
+            unimplemented("CLEANUP_THROW with StopIteration")
+        else:
+            self.RERAISE(inst)
+
     def RERAISE(self, inst):
         if sys.version_info >= (3, 11):
             # RERAISE is currently supported in a narrow case of `raise ... from None`
             self._raise_exception_variable(inst)
         unimplemented("RERAISE")
+
+    def WITH_EXCEPT_START(self, inst):
+        if sys.version_info >= (3, 11):
+            # At the top of the stack are 4 values:
+            #    - TOP = exc_info()
+            #    - SECOND = previous exception
+            #    - THIRD: lasti of exception in exc_info()
+            #    - FOURTH: the context.__exit__ bound method
+            #    We call FOURTH(type(TOP), TOP, GetTraceback(TOP)).
+            #    Then we push the __exit__ return value.
+            assert len(self.stack) >= 4
+            fn = self.stack[-4]
+            val = self.stack[-1]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
+        else:
+            assert len(self.stack) >= 7
+            fn = self.stack[-7]
+            val = self.stack[-4]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
+
+        self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -1590,10 +1677,17 @@ class InstructionTranslatorBase(
                         f"Current TOS is {block_stack_entry.inst}"
                     )
 
+                # 1) pop values from the stack until it matches the stack depth
+                # for the handler
+                while len(self.stack) > block_stack_entry.stack_index:
+                    self.pop()
+
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                 except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
-                self.block_stack.append(BlockStackEntry(except_handler_inst, None))
+                self.block_stack.append(
+                    BlockStackEntry(except_handler_inst, None, len(self.stack))
+                )
 
                 # Push old exception
                 if len(self.exn_vt_stack) >= 2:
@@ -1932,18 +2026,15 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        result = obj.call_method(self, "__setitem__", [key, val], {})
+        obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
         obj, key = self.popn(2)
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        name_tuple = None
-        if sys.version_info >= (3, 13):
-            name_tuple = tuple(self.name_stack[-inst.argval :])
         items = self.popn(inst.argval)
-        self.push(TupleVariable(items), name=name_tuple)
+        self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
@@ -1951,13 +2042,13 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
-        self.push(ListVariable(items, mutable_local=MutableLocal()))
+        self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
     def BUILD_SET(self, inst):
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
-        new_set = SetVariable(items, mutable_local=MutableLocal())
+        new_set = SetVariable(items, mutation_type=ValueMutationNew())
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
@@ -1968,7 +2059,7 @@ class InstructionTranslatorBase(
                 items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
-        self.push(cls(items, mutable_local=MutableLocal()))
+        self.push(cls(items, mutation_type=ValueMutationNew()))
 
     def BUILD_TUPLE_UNPACK(self, inst):
         self.BUILD_LIST_UNPACK(inst, cls=TupleVariable)
@@ -1978,7 +2069,7 @@ class InstructionTranslatorBase(
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(ConstDictVariable(d, mutable_local=MutableLocal()))
+        self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1991,7 +2082,7 @@ class InstructionTranslatorBase(
         self.push(
             ConstDictVariable(
                 result,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -2009,7 +2100,7 @@ class InstructionTranslatorBase(
         self.push(
             ConstDictVariable(
                 dict(zip(keys, values)),
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -2025,7 +2116,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         return obj.call_method(self, "add", [v], {})
 
     def SET_UPDATE(self, inst):
@@ -2033,7 +2124,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "update", [v], {})
 
     def LIST_APPEND(self, inst):
@@ -2041,13 +2132,12 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         self.output.side_effects.mutation(obj)
         obj.items.append(v)
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
-        old_stack = list(self.stack)
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -2081,7 +2171,6 @@ class InstructionTranslatorBase(
                 kwdefaults,
                 annotations,
                 closure,
-                closure_scope=self,
             )
         )
 
@@ -2164,6 +2253,15 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
+    def _convert_value(self, value, flag):
+        if flag == 1:
+            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 2:
+            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 3:
+            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+        return value
+
     def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
@@ -2177,12 +2275,8 @@ class InstructionTranslatorBase(
             )
             self.push(value)
             return
-        if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+
+        value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -2198,9 +2292,9 @@ class InstructionTranslatorBase(
         return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst):
-        format_string_parts: List[str] = []
-        args: List[VariableTracker] = []
-        kwargs: Dict[str, VariableTracker] = {}
+        format_string_parts: list[str] = []
+        args: list[VariableTracker] = []
+        kwargs: dict[str, VariableTracker] = {}
         for part in self.popn(inst.arg):
             if isinstance(part, ConstantVariable):
                 format_string_parts.append("{}")
@@ -2243,18 +2337,30 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "extend", [v], {})
 
     def LIST_TO_TUPLE(self, inst):
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
+
+    def STOPITERATION_ERROR(self, inst):
+        # wrap the generator body in a try: ... except StopIteration: ... which
+        # converts the StopIteration into a RuntimeError
+        # https://peps.python.org/pep-0479/
+        # https://github.com/python/cpython/pull/99006
+        # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
+        val = self.stack[-1]
+        assert isinstance(val, ExceptionVariable)
+        if val.exc_type is StopIteration:
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "update", [v], {})
 
     DICT_UPDATE = DICT_MERGE
@@ -2477,7 +2583,7 @@ class InstructionTranslatorBase(
                     BlockStackEntry(inst, target, len(self.stack), ctx)
                 )
             else:
-                self.block_stack.append(BlockStackEntry(inst, target))
+                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
         self.push(exit)
         self.push(ctx.enter(self))
@@ -2533,7 +2639,10 @@ class InstructionTranslatorBase(
             self._load_attr(inst)
 
     def CALL_INTRINSIC_1(self, inst):
-        if inst.argval == 5:
+        if inst.argval == 3:
+            # INTRINSIC_STOPITERATION_ERROR
+            self.STOPITERATION_ERROR(inst)
+        elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
@@ -2568,22 +2677,10 @@ class InstructionTranslatorBase(
         flags = inst.arg
         fn = self.pop()
         assert isinstance(fn, NestedUserFunctionVariable)
-        attr_names = self.name_stack[-1]
         attr = self.pop()
 
         if flags & 0x08:
-            # 3.13 merged LOAD_CLOSURE into LOAD_FAST, so we won't know if a given LOAD_FAST
-            # is meant to load a closure variable or not. Our workaround is to maintain a stack
-            # of LOAD_FAST variable names and tuples (self.name_stack). So if we are indeed
-            # constructing a closure tuple, we can use self.name_stack to construct the closure
-            # variables here.
-            assert isinstance(attr_names, tuple) and all(
-                isinstance(name, str) for name in attr_names
-            )
-            fn.closure = TupleVariable(
-                [self._load_closure(name) for name in attr_names]
-            )
-            fn.closure_scope = self
+            fn.closure = attr
         elif flags & 0x04:
             fn.annotations = attr
         elif flags & 0x02:
@@ -2592,6 +2689,9 @@ class InstructionTranslatorBase(
             fn.defaults = attr
 
         self.push(fn)
+
+    def CONVERT_VALUE(self, inst):
+        self.push(self._convert_value(self.pop(), inst.argval))
 
     def FORMAT_SIMPLE(self, inst):
         self._format_value(ConstantVariable.create(""), 0)
@@ -2639,12 +2739,6 @@ class InstructionTranslatorBase(
     def fake_mode(self):
         return self.output.tracing_context.fake_mode
 
-    def find_symbolic_locals_name(self, tensor_variable):
-        for key, value in self.symbolic_locals.items():
-            if value is tensor_variable:
-                return key
-        return None
-
     @contextlib.contextmanager
     def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
         """
@@ -2670,19 +2764,21 @@ class InstructionTranslatorBase(
     def __init__(
         self,
         output: OutputGraph,
-        instructions: List[Instruction],
-        f_locals: Dict[str, Any],
-        f_globals: Dict[str, Any],
-        f_builtins: Dict[str, Any],
-        code_options: Dict[str, Any],
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        instructions: list[Instruction],
+        f_locals: dict[str, Any],
+        f_globals: dict[str, Any],
+        f_builtins: dict[str, Any],
+        code_options: dict[str, Any],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
+        # This determines whether to use the execution recorder.
+        closure: Optional[tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2694,8 +2790,6 @@ class InstructionTranslatorBase(
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
-        # stack of variable names for tracking 3.13 closures
-        self.name_stack: list[Any] = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
@@ -2708,28 +2802,28 @@ class InstructionTranslatorBase(
         self.exn_vt_stack = []
 
         # Properties of the input/output code
-        self.instructions: List[Instruction] = instructions
-        self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: Dict[
+        self.instructions: list[Instruction] = instructions
+        self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
+        self.f_locals: dict[
             str, Any
         ] = f_locals  # needed for recording accessed locals for replay
-        self.f_globals: Dict[str, Any] = f_globals
-        self.f_builtins: Dict[str, Any] = f_builtins
-        self.code_options: Dict[str, Any] = code_options
+        self.f_globals: dict[str, Any] = f_globals
+        self.f_builtins: dict[str, Any] = f_builtins
+        self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        if config.replay_record_enabled:
+        if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code, code_options=code_options
+                code=f_code, closure=closure, code_options=code_options
             )
         else:
             self.exec_recorder = None
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
-        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
-        self.num_calls: Dict[str, int] = {}
+        self.nn_module_stack: dict[str, tuple[str, type[Any]]] = {}
+        self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
         self.one_graph = False
@@ -2753,16 +2847,13 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: List[Optional[VariableTracker]] = [None] * len(
+        self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_ids: Set[int]
-    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
-
     @staticmethod
     def current_tx() -> "InstructionTranslator":
         return tls.current_tx
@@ -2778,18 +2869,18 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def __init__(
         self,
-        instructions: List[Instruction],
+        instructions: list[Instruction],
         f_code,
         f_locals,
         f_globals,
         f_builtins,
+        closure,
         torch_function_mode_stack,
         code_options,
         compiler_fn,
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_ids: Set[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2815,6 +2906,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
+            closure=closure,
             code_options=code_options,
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
@@ -2834,43 +2926,90 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_ids = mutated_closure_cell_ids
-            self.contents_var_to_mutated_cell = {}
             if self.export:
                 assert (
                     self.one_graph
                 ), "Export without one graph - something has gone wrong."
 
-            vars = list(code_options["co_varnames"])
-            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
-            vars.extend(cells_and_freevars)
-            cells_and_freevars_set = set(cells_and_freevars)
+            self.symbolic_locals = {}
+            # Populate `symbolic_locals` with non-cell variables.
+            cell_and_freevars: set[str] = set(self.cell_and_freevars())
+            for name, value in f_locals.items():
+                if name not in cell_and_freevars:
+                    var = LazyVariableTracker.create(
+                        value, LocalSource(name, is_input=True)
+                    )
+                    self.symbolic_locals[name] = var
 
-            self.symbolic_locals = {
-                k: variables.LazyVariableTracker.create(
-                    f_locals[k],
-                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+            # Populate `symbolic_locals` with cells created by this frame,
+            # effectively implementing the `MAKE_CELL` instructions.
+            side_effects = self.output.side_effects
+            for name in self.cellvars():
+                if name in f_locals:
+                    # This models cells that are also function inputs.
+                    value = f_locals[name]
+                    # NOTE: root frame inputs that are captured by a nested
+                    # function become special cell objects -- they exist in
+                    # `f_locals` as contents of the cells, rather than the cells
+                    # objects themselves.
+                    #
+                    # In Dynamo, we choose to represent such input cell objects
+                    # as newly created (rather than pre-existing) cell objects,
+                    # because
+                    #
+                    # 1. The reason for representing a pre-existing cell object
+                    # is to emit guard or codegen mutations. However, local
+                    # cells should never be used for guards. Moreover, at this
+                    # point these input cell objects should've never been
+                    # accessed by anyone else, since Dynamo intercepts the frame
+                    # right after its evaluation starts, i.e., right after these
+                    # cell objects are created. So they should have no external
+                    # reference, meaning no mutation needs to be propagated.
+                    #
+                    # 2. This conveniently allows codegen to prune away
+                    # mutations to these cells, unless they escape the frame.
+                    contents_source = LocalSource(
+                        name, is_input=True, is_derefed_cell_contents=True
+                    )
+                    contents_var: VariableTracker = LazyVariableTracker.create(
+                        value, contents_source
+                    )
+                    cell_var = side_effects.track_cell_new()
+                    side_effects.store_cell(cell_var, contents_var)
+                else:
+                    cell_var = side_effects.track_cell_new()
+                cell_var.local_name = name
+                self.symbolic_locals[name] = cell_var
+
+            # Populate `symbolic_locals` with cells captured by this frame,
+            # effectively implementing the `COPY_FREE_VARS` instruction.
+            for name, cell in zip(self.freevars(), closure):
+                cell_source = LocalCellSource(name)
+                contents_source = LocalSource(name, is_derefed_cell_contents=True)
+                try:
+                    contents_var = LazyVariableTracker.create(
+                        cell.cell_contents, contents_source
+                    )
+                except ValueError:
+                    # Cell has not yet been assigned
+                    contents_var = variables.DeletedVariable()
+                cell_var = side_effects.track_cell_existing(
+                    cell_source, cell, contents_var
                 )
-                for k in vars
-                if k in f_locals
-            }
+                cell_var.local_name = name
+                self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
             )
 
-            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
+            self.debug_locals: list[tuple[VariableTracker, list[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
                 )
-
-            self._freevars_ids = {}
-            for name in self.code_options["co_freevars"]:
-                if name in f_locals:
-                    self._freevars_ids[name] = id(f_locals[name])
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -2907,17 +3046,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def run(self):
         super().run()
-
-    def match_nested_cell(self, name, cell):
-        """Match a cell in this method to one in a function we are inlining"""
-        try:
-            value = cell.cell_contents
-        except ValueError:
-            return None
-        # TODO(jansel): check the id of the cell rather than the contents
-        if id(value) != self._freevars_ids.get(name):
-            return None
-        return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
         if sys.version_info >= (3, 11):
@@ -2998,7 +3126,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         # prologue of the resume function
 
         # sorted list of indices of nulls on the stack
-        null_idxes: List[int] = []
+        null_idxes: list[int] = []
         if sys.version_info >= (3, 11):
             # find indices of NullVariables
             for i, var in enumerate(self.stack):
@@ -3068,14 +3196,30 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
-    def _return(self, inst):
+    def replace_tos_if_return_is_generator(self):
         if (
-            self.output.count_calls() == 0
+            len(self.stack)
+            and (tos := self.stack[-1])
+            and isinstance(tos, LocalGeneratorObjectVariable)
+        ):
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
+            )
+
+    def _return(self, inst):
+        self.replace_tos_if_return_is_generator()
+
+        if (
+            not config.allow_empty_graphs
+            and self.output.count_calls() == 0
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
+            and not self.one_graph
         ):
             raise exc.SkipFrame("because no content in function call")
+
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
@@ -3116,12 +3260,13 @@ if sys.version_info >= (3, 11):
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
-    symbolic_result: Optional[TensorVariable]
+    symbolic_result: Optional[VariableTracker]
 
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            return cls.inline_call_(parent, func, args, kwargs)
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            return tracer.inline_call_()
 
     @staticmethod
     def check_inlineable(func):
@@ -3156,19 +3301,27 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return result
 
     @staticmethod
-    def inline_call_(
-        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    def build_inline_tracer(
+        parent,
+        func: VariableTracker,
+        args: list[VariableTracker],
+        kwargs,
     ):
         if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                LocalGeneratorFunctionVariable,
+                LocalGeneratorObjectVariable,
+            ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False
         try:
-            sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
+            sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
@@ -3180,17 +3333,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
             )
 
-        for v in itertools.chain(sub_locals.values(), closure_cells.values()):
+        for v in itertools.chain(sub_locals.values()):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
         code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
-            args
-            and isinstance(
-                args[0],
-                (variables.CustomizedDictVariable, variables.UserDefinedObjectVariable),
-            )
+            args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
             unimplemented(f"inline {code.co_name}")
 
@@ -3230,31 +3379,36 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                closure_cells,
                 func,
             )
         else:
+            # need the line below to make MyPy happy
+            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                closure_cells,
                 func,
             )
+        return tracer
+
+    def inline_call_(self):
+        parent = self.parent
+        code = self.f_code
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
-            strict_ctx = tracer.strict_translation_mode(parent.strict_checks_fn)
+            strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
         try:
             with strict_ctx:
-                tracer.run()
+                self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             # TODO(anijain2305) - This works but we should probably have a
             # global/central data structure for the exception stack.
-            parent.exn_vt_stack.extend(tracer.exn_vt_stack)
+            parent.exn_vt_stack.extend(self.exn_vt_stack)
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
@@ -3262,38 +3416,51 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
-        assert tracer.symbolic_result is not None
-        func.export_freevars(parent, tracer)
+        assert self.symbolic_result is not None
 
-        if tracer.f_globals is parent.f_globals:
+        if self.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
-            parent.symbolic_globals.update(tracer.symbolic_globals)
+            parent.symbolic_globals.update(self.symbolic_globals)
 
-        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
+        parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
 
-        if is_generator(code):
-            assert isinstance(tracer, InliningGeneratorInstructionTranslator)
-            assert tracer.symbolic_result.as_python_constant() is None
-            return ListIteratorVariable(
-                tracer.generated_items,
-                mutable_local=MutableLocal(),
-            )
+        if config.enable_faithful_generator_behavior or (
+            isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.is_generator_from_ctx_manager
+        ):
+            if (
+                is_generator(code)
+                and isinstance(self, InliningGeneratorInstructionTranslator)
+                and self.generator_exhausted
+            ):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                # When the generator returns None, we raise StopIteration
+                exc.raise_observed_exception(StopIteration, self)
+            else:
+                return self.symbolic_result
         else:
-            return tracer.symbolic_result
+            if is_generator(code):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                assert self.symbolic_result.as_python_constant() is None
+                return ListIteratorVariable(
+                    self.generated_items,
+                    mutation_type=ValueMutationNew(),
+                )
+            else:
+                return self.symbolic_result
 
     def __init__(
         self,
         parent: InstructionTranslatorBase,
         code: types.CodeType,
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
-        closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
@@ -3318,9 +3485,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             speculation_log=parent.speculation_log,
             distributed_state=parent.distributed_state,
         )
+        self.funcvar = funcvar
         self.parent = parent
+        self.num_calls = parent.num_calls
         self.symbolic_result = None
-        self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
 
@@ -3330,65 +3498,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())
-
-    def STORE_DEREF(self, inst):  # type: ignore[override]
-        if inst.argval in self.closure_cells:
-            cell = self.closure_cells[inst.argval]
-            val = self.pop()
-            if isinstance(cell, ClosureVariable):
-                if not self.output.is_root_tracer():
-                    unimplemented(
-                        "HigherOrderOperator: Mutating a variable not in the current scope (ClosureVariable)"
-                    )
-                self.output.root_tx.symbolic_locals[cell.name] = val
-            else:
-                self.output.side_effects.store_cell(cell, val)
-        else:
-            maybe_cell = self.symbolic_locals.get(inst.argval)
-            if isinstance(
-                maybe_cell,
-                variables.NewCellVariable,
-            ):
-                self.output.side_effects.store_cell(
-                    self.symbolic_locals[inst.argval], self.pop()
-                )
-            else:
-                root_tx = self.output.root_tx
-                if (
-                    maybe_cell is not None
-                    and maybe_cell in root_tx.contents_var_to_mutated_cell
-                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    not in root_tx.mutated_closure_cell_ids
-                ):
-                    self.output.root_tx.mutated_closure_cell_ids.add(
-                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    )
-                    raise exc.UnspecializeRestartAnalysis
-                unimplemented("write to __closure__ while inlining")
-
-    def LOAD_DEREF(self, inst):
-        if inst.argval in self.closure_cells:
-            cell = self.closure_cells[inst.argval]
-            if isinstance(cell, ClosureVariable):
-                self.push(self.output.root_tx.symbolic_locals[cell.name])
-            else:
-                self.push(self.output.side_effects.load_cell(cell))
-        else:
-            maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
-            if isinstance(maybe_sym_local, variables.NewCellVariable):
-                self.push(self.output.side_effects.load_cell(maybe_sym_local))
-            else:
-                super().LOAD_DEREF(inst)
-
-    def _load_closure(self, name):
-        assert name in self.cell_and_freevars()
-        if name in self.closure_cells:
-            return self.closure_cells[name]
-        else:
-            # We model unmodified cells captured by `UserFunctionVariable` as
-            # their contents, in `self.symbolic_locals`. See
-            # `UserFunctionVariable::bind_args`.
-            return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
@@ -3413,7 +3522,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if "torch_package" in module_name:
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
@@ -3423,11 +3532,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
-            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+            global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
     def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
             name = inst.argval
@@ -3444,32 +3555,45 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
-    generated_items: List[VariableTracker]
+    generated_items: list[VariableTracker]
+    # Flag wether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
+        self.generator_exhausted = False
+        self.is_generator_from_ctx_manager = False
 
     def YIELD_VALUE(self, inst: Instruction):
-        self.generated_items.append(self.pop())
+        top = self.pop()
+        self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
-            unimplemented(
+            raise exc.InfiniteGeneratorError(
                 "Too many yield values in generator. Maybe you are inlining an infinite generator. "
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
+        if (
+            config.enable_faithful_generator_behavior
+            or self.is_generator_from_ctx_manager
+        ):
+            self.symbolic_result = top
+            # Stop tracing
+            raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]
@@ -3477,6 +3601,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
+
+    def RETURN_VALUE(self, inst):
+        self.generator_exhausted = True
+        return super().RETURN_VALUE(inst)
+
+    def RETURN_CONST(self, inst):
+        self.generator_exhausted = True
+        return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2
@@ -3500,10 +3632,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             self.push(ConstantVariable.create(ex.value))
         else:
-            self.push(val)
-            # Add the value to yield into generated_items and replace the top of the stack with None
-            self.YIELD_VALUE(inst)
-
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (
                 isinstance(self.instruction_pointer, int)
@@ -3511,11 +3639,15 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             )
             self.instruction_pointer -= 1
 
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
+
     def SEND(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable) or (
+        if isinstance(tos, (ListIteratorVariable, LocalGeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):

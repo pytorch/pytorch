@@ -227,6 +227,7 @@ struct TORCH_API Type {
     SingletonOrSharedTypePtr(SingletonOrSharedTypePtr&&) noexcept = default;
     SingletonOrSharedTypePtr& operator=(const SingletonOrSharedTypePtr&) = default;
     SingletonOrSharedTypePtr& operator=(SingletonOrSharedTypePtr&&) noexcept = default;
+    ~SingletonOrSharedTypePtr() = default;
 
     T* get() const {
       return repr_.isSharedAndNonNull() ? repr_.shared_.repr_.get() : static_cast<T*>(repr_.rawRepr().first);

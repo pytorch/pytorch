@@ -19,18 +19,17 @@
 #endif
 
 #include <array>
-#include <functional>
 #include <tuple>
 #include <vector>
 
 namespace at::native {
 
 template <typename T>
-void check_group_norm_inputs(
+static void check_group_norm_inputs(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
-    T C,
+    const T& C,
     int64_t num_groups) {
   TORCH_CHECK(
       num_groups > 0,
@@ -237,8 +236,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
       /*training=*/true,
       /*momentum=*/0,
       eps);
-  at::Tensor out = std::get<0>(outputs);
-  out = out.view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   std::vector<int64_t> affine_param_shape(input.dim(), 1);
   affine_param_shape[1] = C;
   if (weight.defined() && bias.defined()) {
@@ -253,6 +251,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   // This follows the same behavior as the CPU and CUDA kernels.
   at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
-  return std::make_tuple(out, mean, rstd);
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rstd));
 }
 } // namespace at::native

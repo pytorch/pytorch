@@ -94,7 +94,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
 
 namespace torch {
 
-bool should_allow_numbers_as_tensors(const std::string& name);
+TORCH_PYTHON_API bool should_allow_numbers_as_tensors(const std::string& name);
 
 enum class ParameterType {
   TENSOR,
@@ -281,11 +281,11 @@ struct PythonArgs {
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
   inline std::optional<std::string> stringOptional(int i);
-  inline c10::string_view stringView(int i);
-  inline c10::string_view stringViewWithDefault(
+  inline std::string_view stringView(int i);
+  inline std::string_view stringViewWithDefault(
       int i,
-      const c10::string_view default_str);
-  inline std::optional<c10::string_view> stringViewOptional(int i);
+      const std::string_view default_str);
+  inline std::optional<std::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
@@ -511,7 +511,8 @@ inline PyObject* toPyObject(const c10::SymInt& symint) {
     return r;
   } else {
     auto m = symint.maybe_as_int();
-    return THPUtils_packInt64(*m);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return THPUtils_packInt64(m.value());
   }
 }
 
@@ -702,7 +703,12 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackDouble(obj);
+      if (torch::is_symfloat(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymFloat>(py::handle(obj))
+                       .guard_float(__FILE__, __LINE__);
+      } else {
+        res[idx] = THPUtils_unpackDouble(obj);
+      }
     } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
@@ -807,6 +813,7 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 inline at::Device deviceFromLong(int64_t device_index) {
   TORCH_CHECK(device_index >= 0, "Device index must not be negative");
   return at::Device(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       at::getAccelerator(true).value(),
       static_cast<c10::DeviceIndex>(device_index));
 }
@@ -930,19 +937,19 @@ inline std::optional<std::string> PythonArgs::stringOptional(int i) {
   return THPUtils_unpackString(args[i]);
 }
 
-inline c10::string_view PythonArgs::stringView(int i) {
+inline std::string_view PythonArgs::stringView(int i) {
   return stringViewWithDefault(i, signature.params[i].default_string);
 }
 
-inline c10::string_view PythonArgs::stringViewWithDefault(
+inline std::string_view PythonArgs::stringViewWithDefault(
     int i,
-    const c10::string_view default_str) {
+    const std::string_view default_str) {
   if (!args[i])
     return default_str;
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<std::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackStringView(args[i]);
@@ -1061,9 +1068,9 @@ inline c10::complex<double> PythonArgs::toComplex(int i) {
 
 inline c10::complex<double> PythonArgs::toComplexWithDefault(
     int i,
-    c10::complex<double> default_value) {
+    c10::complex<double> default_complex) {
   if (!args[i])
-    return default_value;
+    return default_complex;
   return toComplex(i);
 }
 

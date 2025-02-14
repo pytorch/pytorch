@@ -104,7 +104,7 @@ class MemoryBudgetTest(TestCase):
         def call():
             return f(x, ws)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        _, eager_flops = get_mem_and_flops(call)
         for budget in range(0, 11):
             mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
             if budget <= 5:
@@ -133,16 +133,8 @@ class MemoryBudgetTest(TestCase):
 
         def make_weights(w_shapes):
             ws = []
-            for idx, dim in enumerate(w_shapes):
+            for dim in w_shapes:
                 ws.append(torch.randn(512, dim * 512, requires_grad=True))
-            return ws
-
-        def make_weights_chain(w_shapes):
-            ws = []
-            for idx, _ in enumerate(w_shapes):
-                old_dim = 512 if idx == 0 else w_shapes[idx - 1] * 512
-                new_dim = w_shapes[idx] * 512
-                ws.append(torch.randn(old_dim, new_dim, requires_grad=True))
             return ws
 
         weight_configs = [
@@ -186,7 +178,7 @@ class MemoryBudgetTest(TestCase):
             def call():
                 return f(x, ws)
 
-            eager_mem, eager_flops = get_mem_and_flops(call)
+            eager_mem, _ = get_mem_and_flops(call)
             total_mem = sum(weight_shapes)
             self.assertEqual(eager_mem, sum(weight_shapes))
             for mem_achieved in exact_solves:
@@ -302,7 +294,7 @@ class MemoryBudgetTest(TestCase):
         def call():
             return f(x, ws)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        _, eager_flops = get_mem_and_flops(call)
         mem, flops = get_mem_and_flops(call, memory_budget=0.2)
         # We start saving the matmuls
         self.assertEqual(mem, 2)

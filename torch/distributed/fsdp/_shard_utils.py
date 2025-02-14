@@ -99,7 +99,7 @@ def _create_chunk_dtensor(
     corresponding chunk as the local tensor to create a DTensor.
     """
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    tensor = tensor.clone().detach()
+    tensor = tensor.detach().clone()
 
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]

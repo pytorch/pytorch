@@ -439,20 +439,19 @@ def get_pip_packages(run_lambda, patterns=None):
     if patterns is None:
         patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
-    # People generally have `pip` as `pip` or `pip3`
-    # But here it is invoked as `python -mpip`
-    def run_with_pip(pip):
-        out = run_and_read_all(run_lambda, pip + ["list", "--format=freeze"])
-        return "\n".join(
-            line
-            for line in out.splitlines()
-            if any(name in line for name in patterns)
-        )
-
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
-    out = run_with_pip([sys.executable, '-mpip'])
 
-    return pip_version, out
+    os.environ['PIP_DISABLE_PIP_VERSION_CHECK'] = '1'
+    # People generally have pip as `pip` or `pip3`
+    # But here it is invoked as `python -mpip`
+    out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    filtered_out = '\n'.join(
+        line
+        for line in out.splitlines()
+        if any(name in line for name in patterns)
+    )
+
+    return pip_version, filtered_out
 
 
 def get_cachingallocator_config():

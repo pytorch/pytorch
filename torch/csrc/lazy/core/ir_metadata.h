@@ -38,6 +38,10 @@ struct TORCH_API MetaData {
 struct TORCH_API ScopePusher {
   explicit ScopePusher(const std::string& name);
   ~ScopePusher();
+  ScopePusher(ScopePusher&& other) = delete;
+  ScopePusher(const ScopePusher&) = delete;
+  ScopePusher& operator=(const ScopePusher&) = delete;
+  ScopePusher& operator=(ScopePusher&&) = delete;
 
   static void ResetScopes();
 };

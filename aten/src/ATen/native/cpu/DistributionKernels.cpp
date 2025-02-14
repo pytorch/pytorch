@@ -18,7 +18,8 @@
 #include <limits>
 #include <type_traits>
 
-#if AT_MKL_ENABLED()
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if AT_MKL_ENABLED() && defined(FBCODE_CAFFE2)
 #include <mkl.h>
 #include <cpuinfo.h>
 #endif
@@ -36,7 +37,8 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-#if !AT_MKL_ENABLED()
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if !AT_MKL_ENABLED() || (AT_MKL_ENABLED() && !defined(FBCODE_CAFFE2))
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
@@ -104,7 +106,8 @@ static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, 
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
-#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2) || 1)
 void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
@@ -235,16 +238,16 @@ static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, std::opti
 
 } // namespace (anonymous)
 
-REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
-REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
-REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
-REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
-REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
-REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-REGISTER_DISPATCH(normal_stub, &normal_kernel);
-REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
-REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
-REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
-REGISTER_DISPATCH(random_stub, &random_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel)
+REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel)
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel)
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel)
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel)
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel)
+REGISTER_DISPATCH(normal_stub, &normal_kernel)
+REGISTER_DISPATCH(uniform_stub, &uniform_kernel)
+REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel)
+REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel)
+REGISTER_DISPATCH(random_stub, &random_kernel)
 
 } // namespace at::native

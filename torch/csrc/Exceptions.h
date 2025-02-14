@@ -74,6 +74,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
@@ -339,7 +340,7 @@ struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
   // unused-variable warnings at usage sites of this class
   // NOLINTNEXTLINE(modernize-use-equals-default)
-  noop_gil_scoped_release(){};
+  noop_gil_scoped_release() {}
 };
 
 template <bool release_gil>

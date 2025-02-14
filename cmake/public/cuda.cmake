@@ -29,8 +29,8 @@ endif()
 find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
-    "Caffe2: CUDA cannot be found. Depending on whether you are building "
-    "Caffe2 or a Caffe2 dependent library, the next warning / error will "
+    "PyTorch: CUDA cannot be found. Depending on whether you are building "
+    "PyTorch or a PyTorch dependent library, the next warning / error will "
     "give you more info.")
   set(CAFFE2_USE_CUDA OFF)
   return()
@@ -42,7 +42,7 @@ set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
 # Must be done before CUDA language is enabled, see
 # https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
+  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 endif()
 enable_language(CUDA)
 if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
@@ -66,9 +66,9 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
 endif()
 
-message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
-message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
-message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
+message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
+message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
+message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
 if(CUDA_VERSION VERSION_LESS 11.0)
   message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
 endif()
@@ -103,9 +103,9 @@ if(CUDA_FOUND)
       COMPILE_OUTPUT_VARIABLE output_var
       )
     if(NOT compile_result)
-      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+      message(FATAL_ERROR "PyTorch: Couldn't determine version from header: " ${output_var})
     endif()
-    message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
+    message(STATUS "PyTorch: Header version is: " ${cuda_version_from_header})
     if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
       # Force CUDA to be processed for again next time
       # TODO: I'm not sure if this counts as an implementation detail of

@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_
 import inspect
 import contextlib
 import os
+import unittest
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -32,7 +33,10 @@ SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
-IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() in [(7, 2), (8, 7)])
+IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
+                  and torch.cuda.get_device_capability()[1] > 0)
+IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
@@ -114,19 +118,6 @@ def initialize_cuda_context_rng():
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device=f"cuda:{i}")
         __cuda_ctx_rng_initialized = True
-
-
-# Test whether hardware TF32 math mode enabled. It is enabled only on:
-# - CUDA >= 11
-# - arch >= Ampere
-def tf32_is_not_fp32():
-    if not torch.cuda.is_available() or torch.version.cuda is None:
-        return False
-    if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-        return False
-    if int(torch.version.cuda.split('.')[0]) < 11:
-        return False
-    return True
 
 
 @contextlib.contextmanager
@@ -216,7 +207,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         def wrapped(*args, **kwargs):
             for k, v in zip(arg_names, args):
                 kwargs[k] = v
-            cond = tf32_is_not_fp32()
+            cond = torch.cuda.is_tf32_supported()
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
             if 'dtype' in kwargs:
@@ -314,6 +305,10 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
     return _create_scaling_models_optimizers(
         device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
     ) + (data, loss_fn, skip_iter)
+
+
+def xfailIfSM89(func):
+    return func if not IS_SM89 else unittest.expectedFailure(func)
 
 
 # Importing this module should NOT eagerly initialize CUDA

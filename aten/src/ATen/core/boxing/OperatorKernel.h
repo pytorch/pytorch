@@ -24,4 +24,4 @@ struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   ~OperatorKernel() override = default;
 };
 
-}  // namespace c10
+} // namespace c10

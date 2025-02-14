@@ -401,7 +401,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype{};
-  int dtype_size_in_bytes = 0;
+  int64_t dtype_size_in_bytes = 0;
   {
     PyObject* py_typestr = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {

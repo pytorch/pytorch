@@ -1,25 +1,15 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import collections
 import inspect
 import logging
 import weakref
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
+from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
@@ -27,6 +17,32 @@ from . import autograd, utils
 
 device_types_t = Optional[Union[str, Sequence[str]]]
 log = logging.getLogger(__name__)
+
+
+@overload
+def custom_op(
+    name: str,
+    fn: Literal[None] = None,
+    /,
+    *,
+    mutates_args: Union[str, Iterable[str]],
+    device_types: device_types_t = None,
+    schema: Optional[str] = None,
+) -> Callable[[Callable[..., object]], "CustomOpDef"]:
+    ...
+
+
+@overload
+def custom_op(
+    name: str,
+    fn: Callable[..., object],
+    /,
+    *,
+    mutates_args: Union[str, Iterable[str]],
+    device_types: device_types_t = None,
+    schema: Optional[str] = None,
+) -> "CustomOpDef":
+    ...
 
 
 @exposed_in("torch.library")
@@ -38,7 +54,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable:
+) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -126,7 +142,7 @@ def custom_op(
 
     """
 
-    def inner(fn):
+    def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
         if schema is None:
@@ -175,16 +191,18 @@ class CustomOpDef:
 
         self._init_fn = fn
 
-        self._backend_fns: Dict[Union[str, None], Callable] = {}
+        self._backend_fns: dict[Union[str, None], Callable] = {}
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
-        self._torch_dispatch_fns: Dict[type, Callable] = {}
+        self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Optional[Callable] = None
+        self._autocast_cuda_dtype: Optional[_dtype] = None
+        self._autocast_cpu_dtype: Optional[_dtype] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
-        self._disabled_kernel: Set = set()
+        self._disabled_kernel: set = set()
         OPDEFS[self._qualname] = self
 
     @property
@@ -307,43 +325,25 @@ class CustomOpDef:
 
         def inner(fn):
             if device_types is None or isinstance(device_types, str):
-                dtypes: List[Union[str, None]] = [device_types]
+                dtypes: list[Union[str, None]] = [device_types]
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
                 if device_type not in self._backend_fns:
 
                     def backend_impl(*args, **kwargs):
-                        # Checks the assumption that outputs cannot alias
-                        # inputs or other outputs.
-                        storages = {
-                            id(tensor.untyped_storage())
-                            for tensor in iter_tensors(args, kwargs)
-                        }
-
                         result = self._backend_fns[device_type](*args, **kwargs)
 
-                        tuple_result = result
-                        if not isinstance(result, tuple):
-                            tuple_result = (result,)
-                        for tensor in iter_tensors(tuple_result, {}):
-                            key = id(tensor.untyped_storage())
-                            if id(tensor.untyped_storage()) in storages:
-                                fn = self._backend_fns[device_type]
-                                module = inspect.getmodule(fn)
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {module}): "
-                                    f"The output of this custom operator (1) must not "
-                                    f"also be an input to this custom operator and "
-                                    f"(2) may not alias any inputs to this custom operator "
-                                    f"or other returns. "
-                                    f"The most common way to trigger this error is if "
-                                    f"we have y = custom_op(x) and y and x are the same Tensor. "
-                                    f"Please instead return a clone of the offending output "
-                                    f"tensor(s) (e.g. return x.clone()) or refactor the custom "
-                                    f"operator to not return y."
-                                )
-                            storages.add(key)
+                        def get_module():
+                            fn = self._backend_fns[device_type]
+                            return inspect.getmodule(fn)
+
+                        utils.check_aliasing_constraint(
+                            self._name,
+                            utils.iter_tensors(args, kwargs),
+                            result,
+                            get_module,
+                        )
                         return result
 
                     if device_type is None:
@@ -524,6 +524,10 @@ class CustomOpDef:
         not depend on or mutate global state. If you need a non-traceable backward,
         you can make it a separate custom_op that you call inside ``backward_fn``.
 
+        If you need different autograd behavior on different devices, then we
+        recommend creating two different custom operators, one for each device
+        that needs different behavior, and switching between them at runtime.
+
         Examples:
             >>> import torch
             >>> import numpy as np
@@ -583,6 +587,10 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
+        if torch._running_with_deploy():
+            utils.warn_deploy(stacklevel=5)
+            return
+
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -620,19 +628,13 @@ class CustomOpDef:
 
         schema = self._opoverload._schema
         if schema.is_mutable:
+            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
-                for arg, val in utils.zip_schema(schema, args, kwargs):
-                    if not arg.alias_info:
-                        continue
-                    if not arg.alias_info.is_write:
-                        continue
-                    if isinstance(val, Tensor):
-                        torch.autograd.graph.increment_version(val)
-                    elif isinstance(val, (tuple, list)):
-                        for v in val:
-                            if isinstance(v, Tensor):
-                                torch.autograd.graph.increment_version(v)
+                for idx in mutated_idxs:
+                    increment_version(args[idx])
+                for key in mutated_keys:
+                    increment_version(kwargs[key])
                 with _C._AutoDispatchBelowADInplaceOrView():
                     return self._opoverload.redispatch(
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
@@ -765,6 +767,105 @@ class CustomOpDef:
         else:
             return register(func)
 
+    def register_autocast(
+        self,
+        device_type: str,
+        cast_inputs: _dtype,
+    ):
+        r"""Register an autocast dispatch rule for this custom op.
+
+        Valid `device_type` include: "cpu" and "cuda".
+
+        Args:
+            op (str | OpOverload): The operator to register an autocast dispatch rule to.
+            device_type(str):  Device type to use. 'cuda' or 'cpu'.
+                The type is the same as the `type` attribute of a :class:`torch.device`.
+                Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+            cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
+                casts incoming floating-point Tensors to the target dtype (non-floating-point Tensors
+                are not affected), then executes custom op with autocast disabled.
+            lib (Optional[Library]): If provided, the lifetime of this registration
+
+        Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+            >>> import torch
+            >>> from torch import Tensor
+            >>> from torch.library import custom_op
+            >>>
+            >>> # Create a custom op that works on cuda
+            >>> @torch.library.custom_op("mylib::my_sin", mutates_args=())
+            >>> def my_sin(x: Tensor) -> Tensor:
+            >>>     return torch.sin(x)
+            >>>
+            >>> # Register autocast dispatch rule for the cuda device
+            >>> torch.library.register_autocast("mylib::my_sin", "cuda", torch.float16)
+            >>>
+            >>> x = torch.randn(3, dtype=torch.float32, device="cuda")
+            >>> with torch.autocast("cuda", dtype=torch.float16):
+            >>>     y = torch.ops.mylib.my_sin(x)
+            >>> assert y.dtype == torch.float16
+
+        """
+        if not isinstance(device_type, str):
+            raise ValueError(
+                f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+            )
+        if device_type not in ["cpu", "cuda"]:
+            raise ValueError(f"Unknown device type: {device_type}")
+
+        need_register_cuda = self._autocast_cuda_dtype is None
+        need_register_cpu = self._autocast_cpu_dtype is None
+        if device_type == "cuda":
+            self._autocast_cuda_dtype = cast_inputs
+        else:
+            self._autocast_cpu_dtype = cast_inputs
+
+        def kernel(_, *args, **kwargs):
+            assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+            autocast_keyset = torch._C.DispatchKeySet(
+                torch._C.DispatchKey.AutocastCPU
+            ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
+            with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+                return self._opoverload(*_cast(args, device_type, cast_inputs))
+
+        if need_register_cuda and self._autocast_cuda_dtype:
+            self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
+        elif need_register_cpu and self._autocast_cpu_dtype:
+            self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
+
+        return kernel
+
+
+# TODO: Merge this function with torch.amp.autocast_mode._cast, and refactor it
+# into a utility function once custom ops support arbitrary input types.
+def _cast(value, device_type: str, dtype: _dtype):
+    if isinstance(value, torch.Tensor):
+        is_eligible = (
+            value.is_floating_point()
+            and value.device.type == device_type
+            and (value.dtype is not torch.float64)
+        )
+        return value.to(dtype) if is_eligible else value
+    elif isinstance(value, (str, bytes)):
+        return value
+    elif isinstance(value, collections.abc.Iterable):
+        iterable = (_cast(v, device_type, dtype) for v in value)
+        if isinstance(value, (list, tuple)):
+            return type(value)(iterable)
+        else:
+            return iterable
+    else:
+        return value
+
+
+def increment_version(val: Any) -> None:
+    if isinstance(val, Tensor):
+        torch.autograd.graph.increment_version(val)
+    elif isinstance(val, (tuple, list)):
+        for v in val:
+            if isinstance(v, Tensor):
+                torch.autograd.graph.increment_version(v)
+
 
 # NOTE: [Supporting decorator and non-decorator usage]
 #
@@ -789,7 +890,7 @@ class CustomOpDef:
 # decorator.
 
 
-OPDEF_TO_LIB: Dict[str, "torch.library.Library"] = {}
+OPDEF_TO_LIB: dict[str, "torch.library.Library"] = {}
 OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
@@ -805,21 +906,6 @@ def get_library_allowing_overwrite(
     lib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
     OPDEF_TO_LIB[qualname] = lib
     return lib
-
-
-def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
-) -> Iterator[Tensor]:
-    def check(arg):
-        if isinstance(arg, Tensor):
-            yield arg
-        elif allowed_nesting > 0 and isinstance(arg, (tuple, list)):
-            yield from iter_tensors(tuple(arg), {}, allowed_nesting - 1)
-
-    for arg in args:
-        yield from check(arg)
-    for kwarg in kwargs.values():
-        yield from check(kwarg)
 
 
 def _maybe_get_opdef(

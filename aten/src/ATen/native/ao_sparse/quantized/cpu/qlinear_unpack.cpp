@@ -15,8 +15,7 @@
 #include <ATen/ops/from_blob.h>
 #endif
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 int register_linear_params();
 
 #ifdef USE_FBGEMM
@@ -139,4 +138,4 @@ TORCH_LIBRARY_IMPL(sparse, CatchAll, m) {
       TORCH_FN(QLinearUnpackWeightInt8::run));
 }
 }  // namespace
-}}  // namespace ao::sparse
+}  // namespace ao::sparse

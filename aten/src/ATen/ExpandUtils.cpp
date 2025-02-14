@@ -35,7 +35,7 @@ Container infer_size_impl(ArrayType a, ArrayType b) {
         ") at non-singleton dimension ", i);
 
       // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? std::move(sizeB) : std::move(sizeA);
+      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
   }
 
   return expandedSizes;

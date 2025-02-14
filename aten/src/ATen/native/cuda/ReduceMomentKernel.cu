@@ -62,7 +62,7 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
-REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda)
+REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda)
 
 } // namespace at::native

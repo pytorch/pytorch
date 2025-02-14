@@ -54,6 +54,6 @@ void acosh_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(acosh_stub, &acosh_kernel_cuda);
+REGISTER_DISPATCH(acosh_stub, &acosh_kernel_cuda)
 
 } // namespace at::native

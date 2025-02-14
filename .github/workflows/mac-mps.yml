@@ -28,10 +28,11 @@ jobs:
       # than our AWS macos-m1-14 runners
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
+    secrets: inherit
 
   macos-py3-arm64-mps-test:
     name: macos-py3-arm64-mps
@@ -43,3 +44,4 @@ jobs:
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+    secrets: inherit

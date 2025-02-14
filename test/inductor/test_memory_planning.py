@@ -3,13 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_device_type import expectedFailureXPU
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    skipIfRocm,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -59,19 +53,16 @@ class TestMemoryPlanning(TestCase):
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided_"
-            + GPU_TYPE
-            + "(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
+            "pool1 = empty_strided_" + GPU_TYPE + "((4*s0*s1 + align(4*s0*s0), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
-            "buf1 = alloc_from_pool(pool1, align(4*(s0*s0)),"
+            "buf1 = alloc_from_pool(pool1, align(4*s0*s0),"
         ).run(
             code
         )
         self.assertTrue(same(f(*args), result))
 
-    @expectedFailureXPU
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -87,7 +78,6 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         try:
@@ -105,7 +95,7 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_2[] = {24L + (align(12L*s0)), };"
+            "int64_t int_array_2[] = {24L + align(12L*s0), };"
         ).check_next("int64_t int_array_3[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(

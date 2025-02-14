@@ -6,9 +6,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace mkldnn {
+namespace at::native::mkldnn {
 
 const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"none", ideep::attr_t()},
@@ -92,8 +90,6 @@ class MkldnnConvOpContext final : public ConvOpContext {
       const ideep::attr_t& attr);
 };
 
-} // namespace mkldnn
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

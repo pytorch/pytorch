@@ -59,6 +59,6 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
 }
 } // namespace
 
-REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel)
 
 } // namespace at::native

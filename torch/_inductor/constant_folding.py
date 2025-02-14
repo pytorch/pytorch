@@ -1,8 +1,10 @@
 import collections
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.freezing_utils import maybe_set_is_frozen_param
+from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -34,9 +36,9 @@ def replace_node_with_constant(
             qualname = f"_frozen_param{i}"
             if not hasattr(gm, qualname):
                 break
-            i += 1
+            i += 1  # type: ignore[assignment, operator]
 
-        gm._frozen_param_count = i + 1
+        gm._frozen_param_count = i + 1  # type: ignore[assignment, operator]
 
     with g.inserting_before(node):
         if constant is not None:
@@ -47,15 +49,18 @@ def replace_node_with_constant(
         node.replace_all_uses_with(new_input_node)
         new_input_node.meta.update(node.meta)
         g.erase_node(node)
+        new_input_node.name = node.name
 
     if constant is not None:
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
         gm.register_buffer(qualname, constant)
         setattr(gm, qualname, constant)
+        # mark any constants created during freezing
+        maybe_set_is_frozen_param(constant)
 
 
 def is_const_source(
-    node: torch.fx.Node, lifted_constant_names: Optional[List[str]]
+    node: torch.fx.Node, lifted_constant_names: Optional[list[str]]
 ) -> bool:
     return node.op == "get_attr" or node.name in (lifted_constant_names or ())
 
@@ -65,12 +70,12 @@ class ConstantFolder(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         skip_constructors: bool = False,
-        lifted_constant_names: Optional[List[str]] = None,
+        lifted_constant_names: Optional[list[str]] = None,
         skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
     ) -> None:
         super().__init__(gm)
-        self.node_replacements: Dict[torch.fx.Node, Any] = {}
-        self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
+        self.node_replacements: dict[torch.fx.Node, Any] = {}
+        self.replaced_uses: dict[torch.fx.Node, int] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors: bool = skip_constructors
 
@@ -131,6 +136,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.convert_element_type.no_fuse,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
@@ -138,12 +144,12 @@ class ConstantFolder(torch.fx.Interpreter):
             return True
         return False
 
-    def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+    def node_to_last_non_output_use(self) -> dict[torch.fx.Node, list[torch.fx.Node]]:
         last_non_output_use = collections.defaultdict(list)
-        seen_uses = set()
-        output_node = next(iter(reversed(self.module.graph.nodes)))
+        seen_uses = OrderedSet[torch.fx.Node]()
+        output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
-        for node in reversed(self.module.graph.nodes):
+        for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if node.target == "output":
                 continue
 
@@ -217,6 +223,11 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.HigherOrderOperator
+        ):
+            return self.unknown_value
+
         out = self._deduce_value(node)
         if out == self.unknown_value:
             return self.unknown_value
@@ -256,16 +267,16 @@ class ConstantFolder(torch.fx.Interpreter):
         self.node_replacements[node] = tensor
 
     def run(self) -> Any:  # type: ignore[override]
-        env: Dict[torch.fx.Node, Any] = {}
+        env: dict[torch.fx.Node, Any] = {}
         self.insert_placerholder_values(env)
         return super().run(initial_env=env)
 
-    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+    def insert_placerholder_values(self, env: dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             env[n] = self.unknown_value  # type: ignore[assignment]
         if self.lifted_constant_names is None:
             return
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if n.name in (self.lifted_constant_names or ()):
                 env[n] = self.deferred_value
 
@@ -301,7 +312,7 @@ def constant_fold(
 def constant_graph_tag(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[List[str]] = None,
+    lifted_constant_names: Optional[list[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
@@ -329,7 +340,7 @@ def constant_graph_tag(
 def run_and_get_constant_graph(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[List[str]] = None,
+    lifted_constant_names: Optional[list[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> torch.fx.GraphModule:
     """
@@ -359,7 +370,7 @@ def run_and_get_constant_graph(
 
     new_graph = torch.fx.Graph()
 
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     output_nodes = []
     for node in gm.graph.nodes:
         if node.meta[META_TAG] == MODULE_TAG:

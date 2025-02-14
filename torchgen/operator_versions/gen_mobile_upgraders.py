@@ -189,15 +189,14 @@ PER_OPERATOR_UPGRADER_LIST = CodeTemplate(
 
 
 def construct_instruction(instruction_list_from_yaml: list[Any]) -> str:
-    instruction_list_part = []
-    for instruction in instruction_list_from_yaml:
-        instruction_list_part.append(
-            ONE_INSTRUCTION.substitute(
-                operator_name=instruction[0],
-                X=instruction[1],
-                N=instruction[2],
-            )
+    instruction_list_part = [
+        ONE_INSTRUCTION.substitute(
+            operator_name=instruction[0],
+            X=instruction[1],
+            N=instruction[2],
         )
+        for instruction in instruction_list_from_yaml
+    ]
     return INSTRUCTION_LIST.substitute(
         instruction_list="".join(instruction_list_part).lstrip("\n")
     )
@@ -230,24 +229,23 @@ def construct_constants(constants_list_from_yaml: list[Any]) -> str:
 
 
 def construct_operators(operator_list_from_yaml: list[Any]) -> str:
-    operator_list_part = []
-    for operator in operator_list_from_yaml:
-        operator_list_part.append(
-            ONE_OPERATOTR_STRING.substitute(
-                operator_name=operator[0],
-                overload_name=operator[1],
-                num_of_args=operator[2],
-            )
+    operator_list_part = [
+        ONE_OPERATOTR_STRING.substitute(
+            operator_name=operator[0],
+            overload_name=operator[1],
+            num_of_args=operator[2],
         )
+        for operator in operator_list_from_yaml
+    ]
     return OPERATOR_STRING_LIST.substitute(
         operator_string_list="".join(operator_list_part).lstrip("\n")
     )
 
 
 def construct_types(types_tr_list_from_yaml: list[Any]) -> str:
-    types_tr_list_part = []
-    for types_tr in types_tr_list_from_yaml:
-        types_tr_list_part.append(ONE_TYPE.substitute(type_str=types_tr))
+    types_tr_list_part = [
+        ONE_TYPE.substitute(type_str=types_tr) for types_tr in types_tr_list_from_yaml
+    ]
     if len(types_tr_list_part) == 0:
         return TYPE_LIST_EMPTY
     return TYPE_LIST.substitute(type_list="".join(types_tr_list_part).lstrip("\n"))
@@ -319,7 +317,6 @@ def get_upgrader_bytecode_function_to_index_map(
 
 
 def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
-    body_parts = []
     upgrader_bytecode_function_to_index_map = (
         get_upgrader_bytecode_function_to_index_map(upgrader_dict)
     )
@@ -337,7 +334,6 @@ def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
             operator_list_str = ""
             for table_name, contents in bytecode.items():
                 element = ByteCode[table_name]
-                body_string = ""
                 if element is ByteCode.instructions:
                     instruction_list_str = construct_instruction(contents)
                 elif element is ByteCode.constants:
@@ -366,10 +362,8 @@ def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
         operator_version_map=version_map_src,
         upgrader_bytecode="".join(all_upgrader_src_string).lstrip("\n"),
     )
-    body_parts.append(upgrader_file_content)
     print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
     with open(os.path.join(cpp_path, UPGRADER_MOBILE_FILE_NAME), "wb") as out_file:
-        final_output = "".join(body_parts)
         out_file.write(upgrader_file_content.encode("utf-8"))
 
 

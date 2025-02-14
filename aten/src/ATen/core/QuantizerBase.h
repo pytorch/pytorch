@@ -40,7 +40,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ScalarType scalar_type_;
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
-  ~Quantizer() override;
+  ~Quantizer() override = default;
 
   // Copied from torch/csrc/jit/ir/scope.h
   QuantizerPtr intrusive_from_this() {

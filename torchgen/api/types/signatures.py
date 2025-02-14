@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen.api.types.types_base import Binding, CType, Expr
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
     from torchgen.model import (
         BackendIndex,
         FunctionSchema,

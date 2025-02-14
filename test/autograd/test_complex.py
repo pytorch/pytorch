@@ -98,7 +98,7 @@ class TestAutogradComplex(TestCase):
         gradcheck(func, [z])
         func(z).backward()
 
-        z1 = z.clone().detach().requires_grad_(True)
+        z1 = z.detach().clone().requires_grad_(True)
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
 
         self.assertEqual(z.grad, z1.grad)

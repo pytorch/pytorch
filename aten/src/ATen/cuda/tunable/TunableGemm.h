@@ -14,7 +14,6 @@
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
 #endif
-#include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Float8_e4m3fn.h>
@@ -105,7 +104,8 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->c_scale_ptr,
           params->ldc,
           params->c_dtype,
-          params->use_fast_accum);
+          params->use_fast_accum,
+          params->use_rowwise);
       return OK;
     }
 };
@@ -191,7 +191,7 @@ inline const char* TypeName(c10::complex<float> v) {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
+class GemmTunableOp : public TunableOp<GemmParams<T>> {
  public:
   GemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
@@ -216,6 +216,8 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
   }
 
   std::string Signature() override {
@@ -224,7 +226,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer> {
+class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
  public:
   GemmAndBiasTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
@@ -242,6 +244,8 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
   }
 
   std::string Signature() override {
@@ -250,7 +254,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>, StreamTimer> {
+class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>> {
  public:
   GemmStridedBatchedTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
@@ -275,6 +279,8 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
   }
 
   std::string Signature() override {
@@ -283,7 +289,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 };
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
-class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> {
+class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
@@ -293,6 +299,8 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
       this->RegisterOp(std::move(name), std::move(op));
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
   }
 
   std::string Signature() override {

@@ -48,7 +48,7 @@ void cpu_channel_shuffle(
         data_vec.store(output_ptr + d);
       }
       for (; d < image_size; d++) {
-        output_ptr[d] = input_ptr[d];
+        output_ptr[d] = c10::load(&(input_ptr[d]));
       }
 
       // move on to next output index
@@ -111,6 +111,6 @@ void channel_shuffle_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl);
+REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl)
 
 } // at::native

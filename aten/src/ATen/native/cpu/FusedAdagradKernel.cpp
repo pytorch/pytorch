@@ -214,5 +214,5 @@ void fused_adagrad_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_adagrad_stub, &fused_adagrad_kernel);
+REGISTER_DISPATCH(fused_adagrad_stub, &fused_adagrad_kernel)
 } // namespace at::native

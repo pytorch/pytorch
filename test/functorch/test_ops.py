@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -45,18 +46,16 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
-    IS_X86,
     noncontiguous_like,
     parametrize,
     run_tests,
     runOnRocm,
     skipIfRocm,
-    skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
     unMarkDynamoStrictTest,
+    xfailIfS390X,
 )
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
@@ -424,7 +423,6 @@ class TestOperators(TestCase):
                 # Non-contiguous Bugs
                 #
                 # AssertionError: Tensor-likes are not close!
-                xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
                 # RuntimeError: !self.requires_grad() || self.is_contiguous()
@@ -587,11 +585,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )
@@ -758,7 +751,6 @@ class TestOperators(TestCase):
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
                 xfail("as_strided_scatter"),
-                xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -878,9 +870,6 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("linalg.vander", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-            tol2(
-                "linalg.det", "singular", {torch.float32: tol(atol=2e-05, rtol=2e-05)}
-            ),
         ),
     )
     def test_vjpvjp(self, device, dtype, op):
@@ -1039,6 +1028,15 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
+                decorate("linalg.tensorsolve", decorator=xfailIfS390X),
+                decorate("nn.functional.max_pool1d", decorator=xfailIfS390X),
+                decorate("nn.functional.max_unpool2d", decorator=xfailIfS390X),
+                decorate(
+                    "nn.functional.multilabel_margin_loss", decorator=xfailIfS390X
+                ),
             }
         ),
     )
@@ -1178,6 +1176,9 @@ class TestOperators(TestCase):
             xfail("sparse.mm", "reduce"),
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
+            xfail(
+                "unbind_copy"
+            ),  # Batching rule not implemented for aten::unbind_copy.int.
             # ---------------------------------------------------------------------
         }
     )
@@ -1316,6 +1317,9 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
+        xfail(
+            "unbind_copy"
+        ),  # Batching rule not implemented for aten::unbind_copy.int.
         # ----------------------------------------------------------------------
     }
 
@@ -1343,11 +1347,6 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )
@@ -1543,7 +1542,6 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
-                xfail("native_dropout_backward"),
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
@@ -1629,6 +1627,9 @@ class TestOperators(TestCase):
                 xfail("__getitem__", ""),
                 xfail("index_put", ""),
                 xfail("view_as_complex"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("nn.functional.gaussian_nll_loss"),
                 xfail("masked_select"),
                 xfail(
@@ -1923,6 +1924,9 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # required rank 4 tensor to use channels_last format
                 xfail("cdist"),  # Forward AD not implemented and no decomposition
@@ -2168,7 +2172,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
-    @skipIfTorchDynamo("segfaults")
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))

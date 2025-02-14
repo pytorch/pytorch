@@ -292,6 +292,88 @@ auto fixSizeOneDimStrideSDPA(
   }
   return strides;
 }
+
+void alloc_with_matching_layout(
+    const Tensor& q,
+    Tensor& output,
+    const std::vector<int64_t>& shape) {
+  TORCH_INTERNAL_ASSERT(
+      shape.size() == q.sizes().size(),
+      "cuDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
+
+  if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
+    output = at::empty_like(q);
+    return;
+  }
+
+  // get the "fill order," which is just an argsort on the strides
+  std::vector<int> fill_order(shape.size());
+  std::iota(fill_order.begin(), fill_order.end(), 0);
+  const auto q_strides = q.strides();
+  std::stable_sort(
+      fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
+        return q_strides[idx1] < q_strides[idx2];
+      });
+  std::vector<int64_t> ordered_strides(shape.size());
+  int64_t current_stride = 1;
+  for (const int dim_idx : fill_order) {
+    ordered_strides[dim_idx] = current_stride;
+    current_stride *= shape[dim_idx];
+  }
+  output = at::empty(at::IntArrayRef(shape), q.options())
+               .as_strided(
+                   at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
+}
+
+void permute_to_matching_layout(const Tensor& output, Tensor& grad_output) {
+  const int dims = output.sizes().size();
+  std::vector<int64_t> outer_to_inner(dims);
+  std::iota(outer_to_inner.begin(), outer_to_inner.end(), 0);
+  const auto o_strides = output.strides();
+  std::stable_sort(
+      outer_to_inner.begin(),
+      outer_to_inner.end(),
+      [&o_strides](int idx1, int idx2) {
+        return o_strides[idx1] > o_strides[idx2];
+      });
+  std::vector<int64_t> inverse(dims);
+  for (int d = 0; d < dims; d++) {
+    inverse[d] = std::find(outer_to_inner.begin(), outer_to_inner.end(), d) -
+        outer_to_inner.begin();
+  }
+  grad_output = grad_output.permute(at::IntArrayRef(outer_to_inner))
+                    .contiguous()
+                    .permute(at::IntArrayRef(inverse));
+}
+
+bool same_strides(const Tensor& t1, const Tensor& t2) {
+  std::vector<int> t1_strides_no_ones;
+  std::vector<int> t2_strides_no_ones;
+  const auto t1strides = t1.strides();
+  const auto t2strides = t2.strides();
+  const int dim = t1strides.size();
+  if (dim != (int)t2strides.size()) {
+    return false;
+  }
+  const auto t1sizes = t1.sizes();
+  const auto t2sizes = t2.sizes();
+
+  // we are going through strides backward here, but if both are backward it's
+  // comparable
+  for (int i = 0; i < dim; i++) {
+    if (t1sizes[i] > 1) {
+      t1_strides_no_ones.push_back(t1strides[i]);
+    }
+    if (t2sizes[i] > 1) {
+      t2_strides_no_ones.push_back(t2strides[i]);
+    }
+  }
+  return std::equal(
+      t1_strides_no_ones.begin(),
+      t1_strides_no_ones.end(),
+      t2_strides_no_ones.begin(),
+      t2_strides_no_ones.end());
+}
 } // namespace
 
 auto build_graph_and_tensors(
@@ -336,12 +418,18 @@ auto build_graph_and_tensors(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
   auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
@@ -482,12 +570,20 @@ auto build_graph_and_tensors_backward(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
+
   auto Offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
+
   auto O = mha_graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("O")
                                  .set_dim(o.sizes().vec())
@@ -551,9 +647,19 @@ void run_cudnn_SDP_fprop(
     Tensor& o,
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto _dropoutseed = dropoutseed;
+  auto _dropoutoffset = dropoutoffset;
+  // cuDNN dropout bug requires these to be in int64
+  if (dprops->major == 10 && dprops->minor == 0) {
+    _dropoutseed = dropoutseed.to(kLong);
+    _dropoutoffset = dropoutoffset.to(kLong);
+  }
+
   cudnnHandle_t handle = getCudnnHandle();
   if (!o.defined()) {
-    o = at::empty({b, h, s_q, d_v}, q.options());
+    // q is passed to us in BHSD dim order
+    alloc_with_matching_layout(q, o, {b, h, s_q, d_v});
   }
 
   if (return_softmaxstats && !softmaxstats.defined()) {
@@ -602,8 +708,8 @@ void run_cudnn_SDP_fprop(
         attn_bias,
         softmaxstats,
         o,
-        dropoutseed,
-        dropoutoffset,
+        _dropoutseed,
+        _dropoutoffset,
         handle);
   }
   auto [mha_graph, Q, K, V, bias, attn_scale, seed, offset, O, Stats] =
@@ -614,8 +720,8 @@ void run_cudnn_SDP_fprop(
           {K, k.data_ptr()},
           {V, v.data_ptr()},
           {attn_scale, &scaling_factor},
-          {seed, dropoutseed.data_ptr()},
-          {offset, dropoutoffset.data_ptr()},
+          {seed, _dropoutseed.data_ptr()},
+          {offset, _dropoutoffset.data_ptr()},
           {O, o.data_ptr()}};
   if (return_softmaxstats) {
     variant_pack[Stats] = softmaxstats.data_ptr();
@@ -658,35 +764,36 @@ void run_cudnn_SDP_bprop(
       !softmaxstats.numel()) {
     return;
   }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto _dropoutseed = dropoutseed;
+  auto _dropoutoffset = dropoutoffset;
+  // cuDNN dropout bug requires these to be in int64
+  if (dprops->major == 10 && dprops->minor == 0) {
+    _dropoutseed = dropoutseed.to(kLong);
+    _dropoutoffset = dropoutoffset.to(kLong);
+  }
 
   Tensor dO_ = dO;
-  if (!dO.strides()[dO.strides().size() - 1]) {
-    TORCH_WARN(
-        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported."
-        " Materializing a contiguous tensor which will increase memory usage...");
-    dO_ = dO.contiguous();
-  }
-  if ( // handle trivial transposed case with a transposed dim of size 1
-       // see also:  https://github.com/pytorch/pytorch/issues/134001
-      !(dO_.is_contiguous() && o.is_contiguous()) &&
-      !std::equal(
-          o.strides().begin(), o.strides().end(), dO.strides().begin())) {
-    TORCH_WARN(
+// cuDNN < 9.5.1 assumes gradOutput has same strides as Output
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90501
+  if (!same_strides(o, dO)) {
+    TORCH_WARN_ONCE(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
-        "attempting to materialize a grad_output with matching strides...");
-    if (o.is_contiguous()) {
-      dO_ = dO.contiguous();
-    } else {
-      dO_ = dO.transpose(1, 2).contiguous().transpose(1, 2);
-    }
+        "attempting to materialize a grad_output with matching strides."
+        "Consider upgrading cuDNN v9.5.1+ to avoid this warning.");
+    permute_to_matching_layout(o, dO_);
   }
   TORCH_INTERNAL_ASSERT(
-      (dO_.is_contiguous() && o.is_contiguous()) ||
-          std::equal(
-              dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+      same_strides(o, dO_),
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
       "the previous step probably failed to materialize a grad_output "
       "with matching strides...");
+#else
+  const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
+  if (innermost_dO_stride != 1) {
+    permute_to_matching_layout(o, dO_);
+  }
+#endif
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
       b,
@@ -727,8 +834,8 @@ void run_cudnn_SDP_bprop(
         dQ,
         dK,
         dV,
-        dropoutseed,
-        dropoutoffset,
+        _dropoutseed,
+        _dropoutoffset,
         handle);
   }
   auto
@@ -761,8 +868,8 @@ void run_cudnn_SDP_bprop(
                       // pass by value
                       {attn_scale, &scaling_factor}};
   if (dropout_probability != 0.0f) {
-    variant_pack[Seed] = dropoutseed.data_ptr();
-    variant_pack[Offset] = dropoutoffset.data_ptr();
+    variant_pack[Seed] = _dropoutseed.data_ptr();
+    variant_pack[Offset] = _dropoutoffset.data_ptr();
   }
   if (attn_bias.has_value()) {
     variant_pack[bias.value()] = attn_bias.value().data_ptr();

@@ -86,7 +86,7 @@ class TORCH_API HashProvider : public IRVisitor {
     CACHE_GUARD();                               \
     putHash(v, hash_combine(#Name, v->value())); \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT)
 #undef IMM_VISIT
 
   void visit(const CastPtr& v) override;

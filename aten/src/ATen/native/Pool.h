@@ -14,7 +14,7 @@ using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
 using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
 
-DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
+DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel)
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel)
 
 // averge pooling has same signature for forward and backward
@@ -191,6 +191,12 @@ max_pool2d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-3, nOutputPlane);
   check_dim_size(indices, ndim, ndim-2, outputHeight);
   check_dim_size(indices, ndim, ndim-1, outputWidth);
+
+  if (ndim == 4) {
+    const int64_t batchSize = input.size(0);
+    check_dim_size(gradOutput, ndim, 0, batchSize);
+    check_dim_size(indices, ndim, 0, batchSize);
+  }
 }
 
 // AveragePool2d (backward)

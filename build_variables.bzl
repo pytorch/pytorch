@@ -138,6 +138,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/autograd/jit_decomp_interface.cpp",
+    "torch/csrc/dynamo/compiled_autograd.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -684,6 +685,7 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
+    "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
@@ -692,6 +694,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+    "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
     "torch/csrc/distributed/c10d/NanCheck.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
@@ -791,7 +794,11 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
+
+libtorch_xpu_sources = libtorch_python_xpu_sources
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
@@ -843,6 +850,7 @@ libtorch_python_core_sources = [
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
+    "torch/csrc/export/pybind.cpp",
     "torch/csrc/inductor/aoti_package/pybind.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
@@ -974,6 +982,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
+    "aten/src/ATen/detail/HPUHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
@@ -992,6 +1001,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
+    "aten/src/ATen/detail/HPUHooksInterface.h",
     "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",

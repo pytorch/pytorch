@@ -10,8 +10,8 @@ static constexpr size_t kTwoShotThreshBytes = 10 * 1024 * 1024;
 
 static void checkInput(const at::Tensor& input, int deviceIdx) {
   TORCH_CHECK(
-      input.dtype() == at::kBFloat16,
-      "oneShotAllReduce only supports bf16 for now");
+      input.dtype() == at::kBFloat16 || input.dtype() == at::kFloat,
+      "oneShotAllReduce only supports float and bf16 for now");
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
   TORCH_CHECK(

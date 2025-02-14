@@ -320,8 +320,10 @@ Tensor _histc_cuda_template(
       std::nullopt /* layout */,
       DeviceType::CUDA,
       std::nullopt /* pin_memory */);
-  input_t minvalue = min;
-  input_t maxvalue = max;
+  using bounds_t = at::acc_type<input_t, /*is_cuda=*/true>;
+  bounds_t minvalue = min;
+  bounds_t maxvalue = max;
+
   if (min == max && self.numel() > 0) {
     minvalue = *self.min().cpu().const_data_ptr<input_t>();
     maxvalue = *self.max().cpu().const_data_ptr<input_t>();
@@ -330,6 +332,16 @@ Tensor _histc_cuda_template(
     minvalue = minvalue - 1;
     maxvalue = maxvalue + 1;
   }
+
+// Microsoft's STL has a problem with integer overloads of std::fpclassify used
+// by std::isnan and std::isinf, as described here:
+// https://stackoverflow.com/questions/61646166/how-to-resolve-fpclassify-ambiguous-call-to-overloaded-function
+// This macro provides a workaround for this problem.
+#if defined(USE_ROCM) && defined(_MSC_VER)
+#define STL_CAST_BUG(value) static_cast<double>(value)
+#else
+#define STL_CAST_BUG(value) value
+#endif
 
 #if !defined(USE_ROCM)
   TORCH_CHECK(
@@ -342,8 +354,10 @@ Tensor _histc_cuda_template(
       "] is not finite");
 #else
   TORCH_CHECK(
-      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
-        std::isnan(maxvalue)),
+      !(std::isinf(STL_CAST_BUG(minvalue)) ||
+        std::isinf(STL_CAST_BUG(maxvalue)) ||
+        std::isnan(STL_CAST_BUG(minvalue)) ||
+        std::isnan(STL_CAST_BUG(maxvalue))),
       "range of [",
       minvalue,
       ", ",

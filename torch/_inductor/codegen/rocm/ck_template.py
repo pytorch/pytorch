@@ -62,6 +62,7 @@ class CKTemplate(ROCmTemplate):
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
                 using Bilinear = ck::tensor_operation::element_wise::Bilinear;
                 using Scale = ck::tensor_operation::element_wise::Scale;
+                using ScaleAdd = ck::tensor_operation::element_wise::ScaleAdd;
                 using MultiplyMultiply = ck::tensor_operation::element_wise::MultiplyMultiply;
 
                 // see "composable_kernel/include/ck/utility/data_type.hpp"

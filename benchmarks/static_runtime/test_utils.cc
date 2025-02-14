@@ -353,7 +353,7 @@ void testStaticRuntime(
 
           size_t new_managed_bytes =
               memory_planner ? memory_planner->total_managed() : 0;
-          if (check_resize && new_managed_bytes >= 0) {
+          if (check_resize) {
             EXPECT_GE(new_managed_bytes, managed_bytes);
           }
 

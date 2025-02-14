@@ -1,4 +1,8 @@
 #pragma once
+#if defined(__GNUC__) && __GNUC__ == 10 && __GNUC_MINOR__ <= 2 && defined(__ARM_FEATURE_SVE)
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117161
+#pragma GCC optimize("no-tree-vectorize")
+#endif
 
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
@@ -290,6 +294,15 @@ public:
     }
     return ret;
   }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i < size(); i++) {
+      ret = f(ret, values[i]);
+      if (++i < size())
+        ret = f(ret, values[i]);
+    }
+    return ret;
+  }
 #else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
@@ -298,11 +311,25 @@ public:
     }
     return ret;
   }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
+    }
+    return ret;
+  }
 #endif
   Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  T reduce(T (*const f)(const T &)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -401,6 +428,9 @@ public:
   }
   Vectorized<T> asin() const {
     return map(std::asin);
+  }
+  Vectorized<T> asinh() const {
+    return map(std::asinh);
   }
   Vectorized<T> atan() const {
     return map(std::atan);
@@ -577,6 +607,12 @@ public:
       ret[i] = std::pow(values[i], exp[i]);
     }
     return ret;
+  }
+   T reduce_add() const {
+    return reduce([](T x, T y) -> T { return x + y; });
+  }
+  T reduce_max() const {
+    return reduce(std::max);
   }
 private:
   template <typename Op>

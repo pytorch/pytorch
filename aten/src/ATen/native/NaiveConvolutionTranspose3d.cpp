@@ -668,8 +668,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
       output_padding_height,
       1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t n_output_plane;
+  int64_t n_output_plane = 0;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
   } else if (grad_bias.defined()) {
@@ -943,6 +942,6 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
 
-REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu);
+REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu)
 
 } // namespace at::native

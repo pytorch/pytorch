@@ -98,8 +98,7 @@ static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
 
 typedef PyObject* (*getter)(PyObject*, void*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef THPDtype_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPDtype_properties = {
     {"is_floating_point",
      (getter)THPDtype_is_floating_point,
      nullptr,
@@ -110,8 +109,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
     {"itemsize", (getter)THPDtype_itemsize, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPDtype_methods[] = {
+static const std::initializer_list<PyMethodDef> THPDtype_methods = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
     {"to_real", THPDtype_to_real, METH_NOARGS, nullptr},
     {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
@@ -150,9 +148,11 @@ PyTypeObject THPDtypeType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPDtype_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPDtype_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPDtype_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPDtype_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

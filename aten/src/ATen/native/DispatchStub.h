@@ -2,7 +2,6 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Array.h>
 
 #include <atomic>
 #include <utility>
@@ -20,7 +19,7 @@
 //
 // In native/MyKernel.h:
 //   using fn_type = void(*)(const Tensor& x);
-//   DECLARE_DISPATCH(fn_type, stub);
+//   DECLARE_DISPATCH(fn_type, stub)
 //
 // In native/MyKernel.cpp
 //   DEFINE_DISPATCH(stub);

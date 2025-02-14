@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import List
 
 import torch
 from torch import Tensor
@@ -29,11 +28,11 @@ if "decompose_mm_pass" in config.post_grad_fusion_options:
     ].get("max_other_dimention_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
 
 
-def check_device(a: Tensor, b: Tensor) -> bool:
-    return a.is_cuda and b.is_cuda
+def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
+    return (a.device.type == b.device.type) and (b.device.type == device)
 
 
-def realize_inputs(inputs: List[torch.fx.Node]):
+def realize_inputs(inputs: list[torch.fx.Node]):
     for inp in inputs:
         if isinstance(inp, torch.fx.node.Node):
             inp.meta["inductor_realize_to_strides"] = True
@@ -45,11 +44,9 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         mat2 = mat2.meta["val"]
     else:
         return False
-    if not check_device(mat1, mat2):
+    if len(mat1.shape) != 3 or len(mat2.shape) != 3:
         return False
-    else:
-        if len(mat1.shape) != 3 or len(mat2.shape) != 3:
-            return False
+    if check_device(mat1, mat2, device="cuda"):
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
@@ -57,7 +54,11 @@ def should_decompose_bmm(mat1, mat2) -> bool:
             mat1.shape[2] < max_other_dimention_decomposition
         ) + (mat2.shape[2] < max_other_dimention_decomposition) < 2:
             return False
-    return True
+        return True
+    elif check_device(mat1, mat2, device="cpu"):
+        if mat1.shape[0] == 1 and mat2.shape[0] == 1:
+            return True
+    return False
 
 
 def should_decompose_mm(mat1, mat2) -> bool:
@@ -66,13 +67,18 @@ def should_decompose_mm(mat1, mat2) -> bool:
         mat2 = mat2.meta["val"]
     else:
         return False
+    if len(mat1.shape) != 2 or len(mat2.shape) != 2:
+        return False
     return (
-        check_device(mat1, mat2)
-        and len(mat1.shape) == 2
-        and len(mat2.shape) == 2
+        check_device(mat1, mat2, device="cuda")
         and mat1.shape[0] >= min_first_dimension_decomposition
         and mat2.shape[0] < max_other_dimention_decomposition
         and mat2.shape[1] < max_other_dimention_decomposition
+    ) or (
+        check_device(mat1, mat2, device="cpu")
+        and mat1.shape[0] == 1
+        and mat2.shape[0] <= 64
+        and mat2.shape[1] <= 16
     )
 
 
@@ -80,7 +86,7 @@ def is_node_meta_valid(node: torch.fx.Node):
     return "val" in node.meta
 
 
-def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
+def print_decompose_pattern(match: Match, inputs: list[torch.fx.Node]):
     node = match.nodes[-1]
     log.debug(
         "Decompose %s with input shape: %s",

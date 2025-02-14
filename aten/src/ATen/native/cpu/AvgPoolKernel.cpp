@@ -1130,9 +1130,9 @@ void avg_pool3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(avg_pool2d_kernel, &avg_pool2d_kernel_impl);
-REGISTER_DISPATCH(avg_pool2d_backward_kernel, &avg_pool2d_backward_kernel_impl);
-REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
-REGISTER_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl);
+REGISTER_DISPATCH(avg_pool2d_kernel, &avg_pool2d_kernel_impl)
+REGISTER_DISPATCH(avg_pool2d_backward_kernel, &avg_pool2d_backward_kernel_impl)
+REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl)
+REGISTER_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl)
 
 } // at::native

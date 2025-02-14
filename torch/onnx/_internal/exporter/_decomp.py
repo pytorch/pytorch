@@ -58,7 +58,7 @@ def create_onnx_friendly_decomposition_table(
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
 
     for op_overload, decomp_fn in itertools.chain(
-        torch._export.utils._decomp_table_to_post_autograd_aten().items(),  # type: ignore[attr-defined]
+        torch.export.default_decompositions().items(),  # type: ignore[attr-defined]
         torch._decomp.decomposition_table.items(),  # type: ignore[attr-defined]
     ):
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
@@ -70,6 +70,10 @@ def create_onnx_friendly_decomposition_table(
         # If it is HOP, we filter those out as well.
         if not hasattr(op_overload, "_schema"):
             continue
+        # NOTE: torch._decomp.decomposition_table covers more ops
+        # than torch.export.default_decompositions, but the latter is
+        # more critical to torch.onnx.export.
+        if op_overload in decomposition_table:
+            continue
         decomposition_table[op_overload] = decomp_fn
-
     return decomposition_table

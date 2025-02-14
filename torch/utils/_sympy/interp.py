@@ -10,7 +10,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import functools
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -18,6 +18,8 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from .functions import (
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -104,6 +106,8 @@ def handlers():
         RoundDecimal: "round_decimal",
         # TODO: do the rest of the opaque unary functions...
         OpaqueUnaryFn_log2: "log2",
+        BitwiseFn_bitwise_and: "bitwise_and",
+        BitwiseFn_bitwise_or: "bitwise_or",
     }
     # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
     # for these functions, they should be Opaque instead
@@ -178,7 +182,7 @@ _nil = object()
 
 def sympy_interp(
     analysis,
-    env: Dict[sympy.Symbol, Any],
+    env: dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,

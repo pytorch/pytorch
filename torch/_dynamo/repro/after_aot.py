@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 
+"""
+Utilities for reproducing and debugging issues in PyTorch's Dynamo AOT compilation.
+
+This module provides tools and infrastructure for:
+1. Generating minimal reproducible test cases ("repros") from failing compilations
+2. Analyzing accuracy issues between eager and compiled execution
+3. Minifying large models/inputs to isolate problematic patterns
+4. Debugging compiler errors and accuracy divergences
+
+The main components include:
+- Repro generation: Creates standalone Python files that reproduce compiler issues
+- Minification: Reduces large graphs to minimal failing examples
+- Accuracy analysis: Compares compiled vs eager execution, with fp64 reference
+- Debug tools: Dumps graph state, tracks intermediates, analyzes divergences
+
+This is primarily used by PyTorch developers and researchers to debug issues in
+the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
+"""
+
 import argparse
 import copy
 import functools
@@ -11,9 +30,10 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 import torch
@@ -25,8 +45,10 @@ from torch._dynamo.debug_utils import (
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    extra_deps,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -36,7 +58,9 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
+from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._inductor.output_code import OutputCode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -48,8 +72,7 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
-    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.utils import InputType
 
 
@@ -65,9 +88,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallableEx",
+    unconfigured_compiler_fn: "_CompileFxCallable",
     compiler_name: str,
-) -> "_CompileFxCallableEx":
+) -> "_CompileFxCallable":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -80,8 +103,8 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargsEx"],
-    ) -> Union["CompiledFxGraph", str]:
+        **kwargs: Unpack["_CompileFxKwargs"],
+    ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -98,7 +121,7 @@ def wrap_compiler_debug(
             # Call the compiler_fn - which is either aot_autograd or inductor
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
-        except Exception as e:
+        except Exception:
             # TODO: Failures here are troublesome because no real inputs,
             # need a different serialization strategy
             if config.repro_after == "aot":
@@ -195,7 +218,7 @@ def wrap_compiler_debug(
                             torch.cuda.synchronize()
                             break
                     return out
-                except Exception as e:
+                except Exception:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
@@ -225,11 +248,44 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def maybe_fbcode_instructions():
+    if is_fbcode:
+        extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
+        if len(extra_deps_formatted) > 0:
+            extra_deps_formatted = "\n" + extra_deps_formatted
+        return f"""\
+\"\"\"
+To run this script in fbcode:
+- Create a directory (//scripts/{{your_unixname}}/repro)
+- Put this file in scripts/{{your_unixname}}/repro/fx_graph_runnable.py
+- Add a TARGETS file that looks like the following
+- `buck2 run //scripts/{{your_unixname}}/repro:repro`
+
+NOTE: you may need additional deps to actually be able to run the script.
+```
+# Contents of TARGETS file
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "repro",
+    main_src = "fx_graph_runnable.py",
+    deps = [
+        "//caffe2:torch",{extra_deps_formatted}
+    ],
+)
+```
+\"\"\"
+"""
+    else:
+        return ""
+
+
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 from torch import tensor, device
 import torch.fx as fx
@@ -243,6 +299,7 @@ isolate_fails_code_str = None
 
 {extra_imports}
 
+{maybe_fbcode_instructions()}
         """
     )
     if not stable_output:
@@ -269,7 +326,9 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+            # It's better to produce a slightly wrong repro string than none
+            # at all
+            writer.unsupported(placeholder, arg)
 
     model_str += "\n".join(writer.lines()) + "\n"
 
@@ -532,7 +591,7 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
+ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more

@@ -94,8 +94,7 @@ const Tensor& quantized_resize_cpu_(
           qscheme == QScheme::PER_TENSOR_SYMMETRIC,
       "Can only resize quantized tensors with per-tensor schemes!");
   auto* self_ = self.unsafeGetTensorImpl();
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  resize_impl_cpu_(self_, size, /*strides=*/std::nullopt);
+  resize_impl_cpu_(self_, size, /*stride=*/std::nullopt);
   return self;
 }
 

@@ -34,6 +34,6 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 } // namespace
 
-REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
+REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel)
 
 } // namespace at::native

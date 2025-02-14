@@ -2,7 +2,6 @@
 import copy
 import logging
 import random
-from typing import Tuple
 
 from torch._inductor.virtualized import V
 
@@ -215,6 +214,14 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         return 0;
     } // kernel definition
     } // extern C
+
+    #ifdef GENERATE_CK_STANDALONE_RUNNER
+    int main(int argc, char** argv) {
+        (void) argc;
+        (void) argv;
+        return 0;
+    }
+    #endif // GENERATE_CK_STANDALONE_RUNNER
 """
 
     def globals(self) -> IndentedBuffer:
@@ -482,7 +489,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> Tuple[str, str]:  # type: ignore[name-defined]
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:  # type: ignore[name-defined]
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -540,11 +547,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             n_d_tensors=1 if Bias is not None else 0,
             n_dim_spatial=self.n_spatial_dimensions,
             group_count=self.groups,
-            batch_size=X.shape[0],
-            n_output_channels=Y.shape[1],
-            n_input_channels=X.shape[1],
-            filter_size=", ".join(map(str, W.shape[2:])),
-            input_size=", ".join(map(str, X.shape[2:])),
+            batch_size=X.shape[0],  # type: ignore[index]
+            n_output_channels=Y.shape[1],  # type: ignore[index]
+            n_input_channels=X.shape[1],  # type: ignore[index]
+            filter_size=", ".join(map(str, W.shape[2:])),  # type: ignore[index]
+            input_size=", ".join(map(str, X.shape[2:])),  # type: ignore[index]
             convolution_strides=", ".join(map(str, self.stride)),
             dilations=", ".join(map(str, self.dilation)),
             left_pads=", ".join(map(str, self.padding)),
