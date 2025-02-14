@@ -4243,9 +4243,7 @@ class AssociativeScanTests(TestCase):
         x = torch.randn(3, 2, 2, device=device)
 
         with self.assertRaisesRegex(
-            # Should be:
-            # UnsupportedAliasMutationException,
-            torch._dynamo.exc.BackendCompilerFailed,
+            RuntimeError,
             "Combine_fn might be modifying the input!",
         ):
             associative_scan(fct_input_mutation, x, 0)
@@ -4263,9 +4261,7 @@ class AssociativeScanTests(TestCase):
         inp = (x, y)
 
         with self.assertRaisesRegex(
-            # Should be:
-            # UnsupportedAliasMutationException,
-            torch._dynamo.exc.BackendCompilerFailed,
+            RuntimeError,
             "Combine_fn might be aliasing the input!",
         ):
             associative_scan(fct_input_output_alias, inp, 0)

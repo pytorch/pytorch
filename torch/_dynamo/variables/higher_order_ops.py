@@ -1316,6 +1316,55 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
+
+        from torch._higher_order_ops.utils import (
+            _has_potential_branch_input_alias,
+            _has_potential_branch_input_mutation,
+            _maybe_fake_tracing,
+        )
+        from torch._inductor.utils import is_pointwise_use
+
+        # Create GraphModule from speculated subgraph
+        gm = torch.fx.GraphModule(torch.nn.Module(), combine_graph)
+
+        with tx.fake_mode:
+            xs_fake = [
+                first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
+                for leaf in itertools.chain(xs.items, xs.items)
+            ]
+            additional_fake = [
+                leaf.proxy.node.meta["example_value"].clone()
+                for leaf in additional_inputs.items
+            ]
+            sub_args_fake = xs_fake + additional_fake
+
+            # TODO: Set this correctly
+            pre_dispatch = False
+
+            fx = _maybe_fake_tracing(gm, sub_args_fake, pre_dispatch=pre_dispatch)
+
+            for node in fx.graph.nodes:
+                # Check that the combine_fn is pointwise, if combine_mode='pointwise'
+                if not all(
+                    is_pointwise_use(use) or use.op == "output" for use in node.users
+                ):
+                    raise RuntimeError(
+                        "For combine_mode='pointwise', the combine_fn needs to be pointwise"
+                    )
+
+            if _has_potential_branch_input_mutation(
+                gm, sub_args_fake, pre_dispatch=pre_dispatch
+            ):
+                raise RuntimeError(
+                    "Combine_fn might be modifying the input!"
+                )  # noqa: F541
+            if _has_potential_branch_input_alias(
+                gm, sub_args_fake, pre_dispatch=pre_dispatch
+            ):
+                raise RuntimeError(
+                    "Combine_fn might be aliasing the input!"
+                )  # noqa: F541
+
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
