@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
+log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
@@ -887,7 +888,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_asserts(self) -> None:
         graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         for name, buf in graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if not isinstance(buf, ir.TensorBox):
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -1409,7 +1410,10 @@ class PythonWrapperCodegen(CodeGen):
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
         else:
-            raise AssertionError(f"Unknown value type: {type(value)}")
+            log.warning(
+                "Skip size and stride assertion for an unknown value type %s",
+                type(value),
+            )
 
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
