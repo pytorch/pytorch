@@ -1532,7 +1532,7 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, val):
+    def _raise_exception_variable(self, inst):
         def set_context_recursive(val, prev_idx):
             if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
                 return val
