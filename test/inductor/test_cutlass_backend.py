@@ -11,8 +11,8 @@ from typing import Callable, Optional
 
 from torch._inductor.utils import clear_inductor_caches
 from torch.export import Dim
-
 from torch.testing._internal.logging_utils import log_settings
+
 
 try:
     from test_aot_inductor_utils import AOTIRunnerUtil
@@ -77,9 +77,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
-                old_disable_fresh_cache_envvar
-            )
+            os.environ[
+                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
+            ] = old_disable_fresh_cache_envvar
         torch.random.manual_seed(1234)
 
     def tearDown(self):
