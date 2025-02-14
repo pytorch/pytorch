@@ -338,7 +338,7 @@ def requires_nccl_version_less_or_equal(version, msg):
     else:
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() >= version,
-            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+            f"Requires NCCL version less then than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
 def requires_nccl():
