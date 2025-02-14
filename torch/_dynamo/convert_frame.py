@@ -1,4 +1,24 @@
 # mypy: allow-untyped-decorators
+
+"""
+This module implements TorchDynamo's core frame conversion functionality, transforming Python
+frames into FX graphs. It handles:
+
+- Frame analysis and bytecode transformation
+- Guard creation and management for dynamic behaviors
+- Cache management for recompilation
+- Error handling and fallback mechanisms
+
+Key classes:
+- ConvertFrame: Main entry point for frame conversion with error handling
+- ConvertFrameAssert: Implements core frame to graph conversion logic
+- Tracker: Tracks input/output code objects during conversion
+- CatchErrorsWrapper: Provides error handling and suppression logic
+
+The conversion process preserves program semantics while enabling optimizations
+through torch.compile() and related systems.
+"""
+
 from __future__ import annotations
 
 import collections
@@ -925,6 +945,13 @@ def _compile(
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
+                )
+            elif one_graph:
+                raise FailOnRecompileLimitHit(
+                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
+                    "performance due to the compilation overhead of each recompilation. To monitor "
+                    "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
+                    "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
                 )
             elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
