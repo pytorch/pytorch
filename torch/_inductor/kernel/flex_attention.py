@@ -680,7 +680,7 @@ def _use_flex_decoding(query, kernel_options):
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
-    force_flex = kernel_options.get("FORCE_USE_FLEX_DECODING", False)
+    force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
     )
