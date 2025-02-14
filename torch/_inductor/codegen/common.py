@@ -550,12 +550,12 @@ def deduce_output_dtype_by_name(
     return None
 
 
-def check_dtype(var: Union[str, CSEVariable], dtype: torch.dtype) -> None:
+def check_dtype(
+    buffer: IndentedBuffer, var: Union[str, CSEVariable], dtype: torch.dtype
+) -> None:
     backend = get_current_backend()
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
-        V.kernel.compute.writeline(
-            f"tl.static_assert({var}.dtype == {triton_type(dtype)})"
-        )
+        buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
@@ -571,7 +571,7 @@ def check_dtype(var: Union[str, CSEVariable], dtype: torch.dtype) -> None:
                 # operator&(bool, bool) returns int and int can be used as boolean in C++
                 is_same_dt = f"({is_same_dt}) || (std::is_same_v<{c_var_type}, int>)"
 
-        V.kernel.compute.writeline(f"static_assert({is_same_dt});")
+        buffer.writeline(f"static_assert({is_same_dt});")
 
 
 class DataTypePropagation:
@@ -1826,7 +1826,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     # cpp backend cannot determin is_vec at this point
                     backend = get_current_backend()
                     if assignment and dtype is not None and backend != "cpp":
-                        check_dtype(var, dtype)
+                        check_dtype(buffer, var, dtype)
 
         else:
             var.bounds = var.bounds.tighten(bounds)
@@ -2352,7 +2352,7 @@ class CSEProxy(DefaultHandler):
 
             csevar.update_on_args(name, args, kwargs)
 
-            check_dtype(csevar, var_dtype)
+            check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
         return pytree.tree_map(do_cse, value)
