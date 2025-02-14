@@ -1009,39 +1009,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
             << logCppStackOnUncleanShutdown_;
 
-  if (options_->global_ranks_in_group.empty()) {
-    this->globalRankStart = 0;
-  } else {
-    this->globalRankStart =
-        static_cast<int>(options_->global_ranks_in_group[0]);
-  }
-
-  if (options_->global_ranks_in_group.empty()) {
-    this->globalRankStride = 1;
-  } else if (options_->global_ranks_in_group.size() == 1) {
-    this->globalRankStride = 0;
-  } else {
-    bool ranksAreStrided = true;
-    auto startRank = options_->global_ranks_in_group[0];
-    auto stride =
-        options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
-    for (std::vector<uint64_t>::size_type i = 0;
-         i < options_->global_ranks_in_group.size();
-         i++) {
-      if (options_->global_ranks_in_group[i] != startRank + i * stride) {
-        ranksAreStrided = false;
-        break;
-      }
-    }
-
-    if (ranksAreStrided) {
-      this->globalRankStride = static_cast<int>(
-          options_->global_ranks_in_group[1] -
-          options_->global_ranks_in_group[0]);
-    } else {
-      this->globalRankStride = -1;
-    }
-  }
+  getGlobalRankStartAndStride(
+      options_->global_ranks_in_group,
+      this->globalRankStart,
+      this->globalRankStride);
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
   // action is called. In the following hooks, we register a newly allocated
