@@ -449,10 +449,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-     iter.tensor(0).conj_physical_();
+     iter.tensor(0)._set_conj(iter.tensor(1).is_conj());
   }
   if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-     iter.tensor(0).neg_();
+     iter.tensor(0)._set_neg(iter.tensor(1).is_neg());
   }
 }
 
