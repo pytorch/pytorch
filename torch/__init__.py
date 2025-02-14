@@ -324,11 +324,12 @@ def _preload_pypi_cuda_deps() -> None:
         pass
     finally:
         # if importing failed during iteration
-        if current_lib is not None:
+        if current_lib is not None:  # type: ignore[possibly-undefined]
             import warnings
 
             warnings.warn(
-                f"Failed to load {lib_name} library, please uninstall nvidia-* packages via python package manager and reinstall torch.",
+                f"Failed to load {lib_name} library,"  # type: ignore[possibly-undefined]
+                "please uninstall nvidia-* packages via python package manager and reinstall torch.",
             )
 
 
