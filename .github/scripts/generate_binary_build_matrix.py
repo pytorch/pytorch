@@ -116,6 +116,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
 }
 
+
 def get_nccl_wheel_version(arch_version: str) -> str:
     import re
 
@@ -126,11 +127,20 @@ def get_nccl_wheel_version(arch_version: str) -> str:
         1
     ]
 
+
 def read_nccl_pin(arch_version: str) -> str:
     from pathlib import Path
-    nccl_pin_path = os.path.join(Path(__file__).absolute().parents[2], ".ci", "docker", "ci_commit_pins", f"nccl-cu{arch_version[:2]}.txt")
+
+    nccl_pin_path = os.path.join(
+        Path(__file__).absolute().parents[2],
+        ".ci",
+        "docker",
+        "ci_commit_pins",
+        f"nccl-cu{arch_version[:2]}.txt",
+    )
     with open(nccl_pin_path) as f:
         return f.read().strip()
+
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
     nccl_release_tag = read_nccl_pin(arch_version)
@@ -431,6 +441,7 @@ def generate_wheels_matrix(
                 )
 
     return ret
+
 
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
