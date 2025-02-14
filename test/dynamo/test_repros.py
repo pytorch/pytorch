@@ -49,6 +49,9 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import (
+    requires_nccl_version_less_or_equal,
+)
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
@@ -56,9 +59,6 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
-)
-from torch.testing._internal.common_distributed import (
-    requires_nccl_version_less_or_equal,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 

@@ -403,7 +403,9 @@ def get_submodule_folders():
 
 def read_nccl_pin() -> str:
     nccl_file = "nccl-cu12.txt"
-    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv("CUDA_VERSION", "").startswith("11"):
+    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv(
+        "CUDA_VERSION", ""
+    ).startswith("11"):
         nccl_file = "nccl-cu11.txt"
     nccl_pin_path = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", nccl_file)
     with open(nccl_pin_path) as f:
