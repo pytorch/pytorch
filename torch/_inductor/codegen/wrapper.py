@@ -900,7 +900,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_nan_asserts(self) -> None:
         graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in graph_inputs:
+        for name, buf in graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
 

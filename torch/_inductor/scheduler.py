@@ -3947,7 +3947,13 @@ class Scheduler:
                 - output_names
             )
 
-            inputs.append({name: name_to_node[name] for name in partition_input_names})
+            inputs.append(
+                {
+                    name: name_to_node[name]
+                    for name in partition_input_names
+                    if name in name_to_node
+                }
+            )
             outputs.append([name_to_node[name] for name in returned_output_names])
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
