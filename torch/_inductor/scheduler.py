@@ -74,6 +74,8 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
+ir_pre_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_pre_fusion")
+ir_post_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_post_fusion")
 
 
 @dataclasses.dataclass
@@ -1996,6 +1998,7 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
+        ir_pre_fusion_log.debug(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
@@ -2025,6 +2028,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
+        ir_post_fusion_log.debug(self.nodes)
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()

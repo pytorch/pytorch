@@ -201,5 +201,8 @@ register_artifact(
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
     off_by_default=True,
 )
+register_artifact("ir_pre_fusion", "Logs inductor pre fusion IR")
+
+register_artifact("ir_post_fusion", "Logs inductor post fusion IR")
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
