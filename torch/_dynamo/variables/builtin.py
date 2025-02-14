@@ -2096,6 +2096,10 @@ class BuiltinVariable(VariableTracker):
         if op not in supported_tensor_comparison_op_values:
             unimplemented(f"{op.__name__}({left}, {right})")
 
+        # This is seen in inspect signature where we check if the value is a default value
+        if isinstance(right, variables.UserDefinedClassVariable):
+            return variables.ConstantVariable(op(object(), None))
+
         proxy = tx.output.create_proxy(
             "call_function", op, (left.as_proxy(), right.as_proxy()), {}
         )
