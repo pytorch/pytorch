@@ -110,7 +110,7 @@ static void fmin_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
-  mps::binary_mps_impl(iter, "copysign", false);
+  mps::binary_mps_impl(iter, "copysign");
 }
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
