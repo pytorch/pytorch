@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import threading
+from collections.abc import Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Union
+from typing import Callable, cast, Optional, Union
 
 import torch
 from torch._ops import OpOverload
@@ -51,18 +52,20 @@ class LocalLRUCache(threading.local):
 
 class ShardingPropagator:
     def __init__(self) -> None:
-        self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
-        self.op_strategy_funcs: Dict[
+        self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
+        self.op_strategy_funcs: dict[
             OpOverload,
             Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
-        # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
-        self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
+        # op map to save static argnum to decide to reuse sharding prop cache or
+        # re-run sharding prop
+        self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
-        # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
-        self.op_to_shape_and_stride_idx: Dict[
+        # op map to save indices of shape (and stride) args which may need to be
+        # modified in sharding prop
+        self.op_to_shape_and_stride_idx: dict[
             OpOverload, Union[int, tuple[int, int]]
         ] = {
             # new factory ops
@@ -128,7 +131,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list: List[Optional[TensorMeta]] = []
+            tensor_meta_list: list[Optional[TensorMeta]] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -170,10 +173,12 @@ class ShardingPropagator:
                 # Either error due to ShardingPropagator or due to incorrect OutputSpec
                 if not isinstance(output_tensor_meta, (tuple, list)):
                     raise ValueError(
-                        "ShardingPropagator error: output does not have an associated TensorMeta"
+                        "ShardingPropagator error: output does not have an associated "
+                        "TensorMeta"
                     )
                 raise ValueError(
-                    f"For the op {op.name()}, `output_specs` has 1 output which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has 1 output which does "
+                    "not equal the "
                     f"number of op outputs: {len(output_tensor_meta)}."
                 )
             output_specs.tensor_meta = output_tensor_meta
@@ -182,16 +187,35 @@ class ShardingPropagator:
                 output_specs
             ) != len(output_tensor_meta):
                 raise ValueError(
-                    f"For the op {op.name()}, `output_specs` has {len(output_specs)} outputs which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has {len(output_specs)} "
+                    "outputs which does not equal the "
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
+
             for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
-                        raise ValueError(
-                            f"ShardingPropagator error: output {i} does not have an associated TensorMeta"
-                        )
+                        # NOTE: aten.convolution_backward.default is an exception and it
+                        # needs extra handling because the first Tensor in the output
+                        # tuple can be `None` if the input Tensor to convolution op has
+                        # `requires_grad=False` (e.g. convolution layer is the first
+                        # layer in the model). We explicitly allow its corresponding
+                        # TensorMeta to be `None`.
+                        if (
+                            op == aten.convolution_backward.default
+                            and i == 0
+                            and output_tensor_meta_i is None
+                        ):
+                            assert isinstance(output_specs, list)
+                            output_specs[i] = None
+                            continue
+                        else:
+                            raise ValueError(
+                                f"ShardingPropagator error: output {i} of {op.name()} "
+                                "does not have an associated TensorMeta"
+                            )
+
                     spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
@@ -260,7 +284,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs: List[DTensorSpec] = []
+                expected_input_specs: list[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
@@ -335,8 +359,8 @@ class ShardingPropagator:
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
                 # runtime selected placement strategy for each TupleStrategy input arg
-                selected_strategies: List[PlacementStrategy] = []
-                out_spec_list: List[DTensorSpec] = []
+                selected_strategies: list[PlacementStrategy] = []
+                out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     selected_strategy = self._select_strategy(strategy)
@@ -344,7 +368,7 @@ class ShardingPropagator:
                     out_spec_list.append(selected_strategy.output_spec)
 
                 needs_redistribute = False
-                suggestion_args: List[object] = []
+                suggestion_args: list[object] = []
                 tensor_or_list_tensor_arg_idx = 0
 
                 for arg in op_schema.args_schema:
@@ -353,7 +377,7 @@ class ShardingPropagator:
                         and isinstance(arg, (list, tuple))
                         and isinstance(arg[0], DTensorSpec)
                     ):
-                        expected_input_spec_list: List[DTensorSpec] = []
+                        expected_input_spec_list: list[DTensorSpec] = []
                         for idx, arg_spec in enumerate(arg):
                             expected_input_spec = selected_strategies[idx].input_spec(
                                 tensor_or_list_tensor_arg_idx
@@ -420,7 +444,7 @@ class ShardingPropagator:
                 raise e
             except Exception as e:
                 raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}.\n" f"Error: {e}"
+                    f"Sharding propagation failed on op {op_schema}.\nError: {e}"
                 ) from e
 
             # step 2. if can't get output_spec from sharding
@@ -461,7 +485,7 @@ class ShardingPropagator:
             # short cut with only one possible strategy
             return strategy.strategies[0]
 
-        strategy_costs: List[float] = []
+        strategy_costs: list[float] = []
         for strtg in strategy.strategies:
             assert (
                 strtg.redistribute_cost is not None

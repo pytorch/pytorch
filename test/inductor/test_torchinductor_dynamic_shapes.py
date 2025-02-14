@@ -7,7 +7,6 @@ import os
 import sys
 import unittest
 from functools import partial
-from typing import List, Tuple
 
 import torch
 import torch.library
@@ -438,11 +437,11 @@ class TestInductorDynamic(TestCase):
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_unbacked_save_for_backwards(self, device) -> None:
         @torch.library.custom_op("_test::_cat", mutates_args=())
-        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             return t * t.new_ones([sum(ds)])
 
         @torch.library.register_fake("_test::_cat")
-        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
@@ -558,7 +557,7 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
+        @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             stride = x.item()
             return torch.empty_strided((1,), (stride,), device=x.device)
@@ -571,7 +570,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            r = torch.ops.test.foo(x)
+            r = torch.ops.test_dynamic_stride_nobreak.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
 
@@ -587,7 +586,7 @@ class TestInductorDynamic(TestCase):
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
         @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
         @foo.register_fake

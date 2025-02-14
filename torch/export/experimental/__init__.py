@@ -7,9 +7,7 @@ from torch.export.exported_program import _decompose_exported_program
 
 def _copy_graph_module_and_signature(
     ep: torch.fx.GraphModule,
-) -> typing.Tuple[
-    torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature
-]:
+) -> tuple[torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
     # and this can break placeholder names in some particular cases.
     # For example, node copying will avoid Python keywords like 'input', suffixing and renaming to 'input_1'.

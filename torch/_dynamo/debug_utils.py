@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
+
+"""
+Debug utilities for TorchDynamo compilation and execution.
+
+This module provides various debugging tools and utilities for TorchDynamo, including:
+
+- Minification support for reducing test cases while preserving bugs
+- Input/output handling via InputReader and InputWriter for reproducible testing
+- Accuracy checking between original and compiled models
+- Neural network module string conversion via NNModuleToString
+- Profiling tools and system information collection
+- Buck build system integration for Meta-internal testing
+
+Key classes:
+- InputReader/InputWriter: Handle serialization of model inputs/outputs
+- NNModuleToString: Converts nn.Modules to string representations
+- BuckTargetWriter: Manages Buck build system integration
+"""
+
 import atexit
 import copy
 import cProfile
@@ -16,7 +35,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -86,6 +105,7 @@ python_binary(
     compile = False,
     deps = [
         "//caffe2:torch",
+        "//caffe2:libtorch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
         "{cur_target}",
@@ -678,14 +698,16 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
         args = []
         # NB: this is positional, must come first
-        if _stride_or_default(None, shape=t.shape) != t.stride():
+        if not statically_known_true(
+            sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
+        ):
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
@@ -738,11 +760,11 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]],
+    func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
-    sym_shapes: Optional[Dict[str, int]] = None,
+    sym_shapes: Optional[dict[str, int]] = None,
     default_sym_shape: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
 
@@ -775,7 +797,7 @@ def aot_graph_input_parser(
         "Container for tensors as attributes"
 
     # Dictionary for tensors from annotations
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
 
     sym_shapes = sym_shapes or {}
 

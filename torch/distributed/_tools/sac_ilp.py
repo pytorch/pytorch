@@ -1,7 +1,7 @@
 import logging
 import math
 from enum import IntEnum
-from typing import Dict, List, Optional
+from typing import Optional
 
 from torch.distributed._tools.ilp_utils import Graph, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats
@@ -36,9 +36,9 @@ def sac_milp(
     graph: Graph,
     memory_budget: float,
     world_size: int = 1,
-    ac_units: Optional[List[str]] = None,
-    fsdp_units: Optional[List[str]] = None,
-) -> tuple[Dict[str, float], float, int]:
+    ac_units: Optional[list[str]] = None,
+    fsdp_units: Optional[list[str]] = None,
+) -> tuple[dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.
     The objective is to minimize recomputation time.
@@ -224,7 +224,7 @@ class SACDecision(IntEnum):
 
 def get_optimal_checkpointing_policy_per_module(
     sac_stats: SACStats, memory_budget: float
-) -> List[int]:
+) -> list[int]:
     """
     This is adapted from --
     https://github.com/facebookresearch/xformers/blob/c6c0ac31f1b08542a0bc27278c6ed10f825f6963/xformers/checkpoint.py#L375
