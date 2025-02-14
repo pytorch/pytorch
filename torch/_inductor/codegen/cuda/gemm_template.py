@@ -120,7 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
-  arguments.scheduler.max_swizzle_size = {{swizzle}};
+  arguments.scheduler.max_swizzle_size = 2;
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,

@@ -153,7 +153,7 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(self, kernel_name, runtime_arg_decls, runtime_arg_values) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -162,6 +162,8 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
+        self.runtime_arg_decls = runtime_arg_decls
+        self.runtime_arg_values = runtime_arg_values
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -244,7 +246,7 @@ class CUDATemplateKernel(CUDAKernel):
             f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
         ]
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self.runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -278,7 +280,9 @@ class CUDATemplateKernel(CUDAKernel):
 
         layout_args = self.get_layout_args()
         call_args.extend(layout_args)  # type: ignore[arg-type]
+        call_args.append("2")
         arg_types.extend("int" for a in layout_args)
+        arg_types.append("int")  # swizzle
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):

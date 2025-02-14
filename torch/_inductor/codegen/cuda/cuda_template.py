@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Optional
+from typing import Any, Optional
+from typing_extensions import override
 from unittest.mock import patch
 
 import sympy
@@ -67,6 +68,8 @@ class CUDATemplate(KernelTemplate):
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), CUDATemplateKernel(
             kernel_name=kernel_name,
+            runtime_arg_decls=self.get_runtime_arg_decls(),
+            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
@@ -92,6 +95,7 @@ class CUDATemplate(KernelTemplate):
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
+        extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 
@@ -100,7 +104,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=size_args,
+            extra_args=extra_args,
             source_code=code,
         )
 
@@ -110,6 +114,8 @@ class CUDATemplate(KernelTemplate):
         ):
             kernel = CUDATemplateKernel(
                 kernel_name="KERNEL_NAME",
+                runtime_arg_decls=self.get_runtime_arg_decls(),
+                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
             )
             render = functools.partial(
                 self.render,
@@ -168,6 +174,12 @@ class CUDATemplate(KernelTemplate):
 
     def render(self, **kwargs) -> str:
         raise NotImplementedError
+
+    def get_runtime_arg_decls(self) -> str:
+        return ""
+
+    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
+        return []
 
 
 class CUTLASSTemplate(CUDATemplate):
@@ -257,3 +269,17 @@ class CUTLASSTemplate(CUDATemplate):
             return (
                 f"({self._DTYPE_TO_CUTLASS_SPARSE_META.get(node.get_dtype())}*)({ptr})"
             )
+
+    @override
+    def get_runtime_arg_decls(self) -> str:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return "const uint8_t swizzle,"
+
+    @override
+    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return [kwargs["swizzle"]]
