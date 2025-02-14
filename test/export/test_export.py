@@ -76,7 +76,7 @@ from torch.testing._internal.custom_tensor import (
     CustomTensorPlainOut,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -6380,7 +6380,7 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_gpu
+    @requires_cuda
     def test_export_associative_scan_symbol_dim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -6398,7 +6398,7 @@ def forward(self, b_a_buffer, x):
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    @requires_gpu
+    @requires_cuda
     def test_export_associative_scan_symbol_scandim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
