@@ -670,7 +670,9 @@ def _compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
-    with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+    with _WaitCounter(
+        "pytorch.wait_counter.fx_codegen_and_compile"
+    ).guard() as _, _WaitCounter("pytorch.wait_counter.all_compilation_types").guard():
         use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
