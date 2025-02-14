@@ -979,6 +979,9 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
       schema_arg.type()->kind() == c10::TypeKind::TensorType) {
     return;
   }
+  if (arg.isGenericDict() && arg.toGenericDict().empty()) {
+    return;
+  }
   TORCH_CHECK(
       arg.type()->isSubtypeOf(schema_arg.type()),
       arg.type()->annotation_str(),
