@@ -46,6 +46,8 @@ IF "%BUILD_VISION%" == "" (
 set "CUDA_PATH=%CUDA_PATH_V126%"
 set "PATH=%CUDA_PATH_V126%\bin;%PATH%"
 
+set USE_STATIC_MKL=1
+
 :optcheck
 
 call internal\check_opts.bat
