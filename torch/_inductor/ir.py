@@ -2910,13 +2910,14 @@ class View(GenericView):
             var, size_new = stack_new.pop()
             V.graph.sizevars.guard_equals(size_new, 1)
 
-        # we reordered the dense dim to be processed first, and so it is at the end of view_expr
-        # Now move back to its original index in the input shape
-        if reordering_dense_dim:
-            dense_expr = view_expr.pop(-1)
+        if dense_dim is not None and len(new_size) == 1:
+            view_expr.reverse()
+            # Move the last expression (dense dim) to its original position
+            dense_expr = view_expr.pop()
             view_expr.insert(dense_dim, dense_expr)
+        else:
+            view_expr.reverse()
 
-        view_expr.reverse()
         assert len(view_expr) == len(old_size)
 
         def reindex(index):  # type: ignore[no-untyped-def]
