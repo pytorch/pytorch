@@ -471,7 +471,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
-            if _overlap([arg.meta["val"] for arg in mutated_arg]):
+            # A storage of a node can be None in which case
+            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
+            if len(unique_storages) != len(mutated_arg):
                 # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
@@ -573,6 +575,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         missed_nodes = []
         missed_args = []
 
+        # TODO this logic can be made more precise using _overlap
         def tensor_with_same_storage_already_reinplaced(arg):
             if isinstance(arg, (list, tuple)):
                 return any(
