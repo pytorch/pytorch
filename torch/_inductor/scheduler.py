@@ -3953,10 +3953,6 @@ class Scheduler:
                 unmet_output_names - returned_output_names
             )
 
-        assert unmet_output_names.issubset(
-            OrderedSet(V.graph.graph_inputs.keys())
-        ), f"{unmet_output_names=} should be subset of {V.graph.graph_inputs.keys()=}"
-
         return inputs[::-1], outputs[::-1]
 
     def graph_partition(

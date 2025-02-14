@@ -971,7 +971,8 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 graph_input_names = V.graph.graph_input_names
 
-            self.write_args(graph_input_names)
+            if graph_input_names:
+                self.write_args(graph_input_names)
 
             self.codegen_inputs()
             self.codegen_input_size_and_nan_asserts()
