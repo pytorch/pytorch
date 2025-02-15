@@ -2509,14 +2509,20 @@ class PythonWrapperCodegen(CodeGen):
         ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
-    def codegen_partition_call(self, partition_id, input_names, output_nodes):
-        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
+    def codegen_partition_call(self, partition_id, input_names_to_free, output_nodes):
+        breakpoint()
+        inputs = ", ".join(input_names_to_free.keys()) + (
+            "," if len(input_names_to_free) == 1 else ""
+        )
 
         output_names = [node.get_name() for node in output_nodes]
         outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"partition{partition_id}_args = [{inputs}]")
+        for name in input_names_to_free:
+            if input_names_to_free[name]:
+                self.writeline(f"del {name}")
 
         # Call the subgraph launcher function
         self.writeline(
