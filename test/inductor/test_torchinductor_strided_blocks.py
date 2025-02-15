@@ -895,7 +895,6 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
-    @config.patch("triton.max_tiles", 3)
     def test_3d_permute_tiling(self):
         """
         Test 3D tiling with permute.
@@ -907,13 +906,17 @@ class CommonTemplate:
             b = (z + y).permute(dims=dims)
             return a + b
 
-        inps = (torch.rand((1, 51, 51), device=self.device, dtype=torch.float32),) * 3
+        inps = (torch.rand((51, 51, 51), device=self.device, dtype=torch.float32),) * 3
         result, (code,) = run_and_compare(
             self,
             foo,
             *inps,
             expected_num_triton_kernels=1,
             expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
         )
 
         # Check for 3D tiling
