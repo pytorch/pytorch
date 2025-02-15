@@ -21,6 +21,26 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <deque>
+
+class FixedSizeStack {
+  private:
+      std::deque<std::string> stack;
+      const size_t max_size;
+
+  public:
+      FixedSizeStack(size_t size) : max_size(size) {}
+
+      void push(const std::string& value) {
+          if (stack.size() >= max_size) {
+              stack.pop_front(); // Remove the oldest entry
+          }
+          stack.push_back(value); // Add new entry
+      }
+
+      auto rbegin() { return stack.rbegin(); }
+      auto rend() { return stack.rend(); }
+};
 
 namespace at::cuda::tunable {
 
@@ -208,6 +228,7 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
+      auto top_solns = FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
