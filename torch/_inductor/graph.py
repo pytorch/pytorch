@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -1299,6 +1299,14 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
+    @contextmanager
+    def set_current_wrapper_code(self) -> Iterator[None]:
+        old = self.wrapper_code
+        try:
+            yield
+        finally:
+            self.wrapper_code = old
+
     def propagate_mutation(
         self,
         fx_node: torch.fx.Node,
@@ -1755,6 +1763,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
+        output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1776,9 +1786,19 @@ class GraphLowering(torch.fx.Interpreter):
         assert (
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
-        self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph, subgraph_name, parent_wrapper_code
-        )
+
+        if self.device_type == "cuda":
+            self.wrapper_code = wrapper_code_gen_cls.create(
+                is_subgraph,
+                subgraph_name,
+                parent_wrapper_code,
+                input_nodes,
+                output_nodes,
+            )
+        else:
+            self.wrapper_code = wrapper_code_gen_cls.create(
+                is_subgraph, subgraph_name, parent_wrapper_code
+            )
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
@@ -2094,6 +2114,8 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
+        output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,
