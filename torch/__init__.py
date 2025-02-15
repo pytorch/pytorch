@@ -2402,6 +2402,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    example_inputs: _Optional[list[_Any]] = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2415,6 +2416,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    example_inputs: _Optional[list[_Any]] = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2427,6 +2429,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    example_inputs: _Optional[list[_Any]] = None,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2540,6 +2543,7 @@ def compile(
                 mode=mode,
                 options=options,
                 disable=disable,
+                example_inputs=example_inputs,
             )
 
         return fn
@@ -2566,6 +2570,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        example_inputs=example_inputs,
     )(model)  # type: ignore[return-value]
 
 
