@@ -296,17 +296,9 @@ def _single_tensor_nadam(
     differentiable: bool,
     has_complex: bool,
 ):
-    def _needs_0dim(lr):
-        if differentiable or capturable:
-            if lr.is_cpu:
-                return True
-            else:
-                return any(lr.dim() > param.dim() for param in params)
-        else:
-            return True
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
-        lr = lr.squeeze()
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -418,16 +410,7 @@ def _multi_tensor_nadam(
             for p, mp, step in zip(params, mu_products, state_steps)
         ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
 
-    def _needs_0dim(lr):
-        if capturable:
-            return not lr.is_cpu
-        else:
-            if decoupled_weight_decay:
-                return lr.is_cpu == params[0].is_cpu
-            else:
-                return False
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
+    if isinstance(lr, Tensor) and lr.dim() != 0:
         lr = lr.squeeze()
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(

@@ -209,18 +209,10 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
-    def _needs_0dim(lr):
-        if capturable:
-            if lr.is_cpu:
-                return True
-            else:
-                return any(lr.dim() > param.dim() for param in params)
-        else:
-            return False
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
-        lr = lr.squeeze()
-        etas = [eta.squeeze() for eta in etas]
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
+            etas = [eta.squeeze() for eta in etas]
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -314,19 +306,7 @@ def _multi_tensor_asgd(
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
         ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
 
-    def _needs_0dim(lr):
-        if capturable:
-            if lr.is_cpu and not params[0].is_cpu:
-                return any(lr.dim() > param.dim() for param in params)
-            else:
-                return True
-        else:
-            if lr.is_cpu and not params[0].is_cpu:
-                return True
-            else:
-                return any(lr.dim() > param.dim() for param in params)
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
+    if isinstance(lr, Tensor) and lr.dim() != 0:
         lr = lr.squeeze()
         etas = [eta.squeeze() for eta in etas]
 

@@ -316,7 +316,7 @@ class TestOptimRenewed(TestCase):
 
             self.assertLess(closure().item(), initial_value)
 
-    @parametrize("num_dim", [0, 1, 2, 3])
+    @parametrize("num_dim", [0, 1, 2])
     @optims(optim_db, dtypes=[torch.float32])
     def test_tensor_lr(self, device, dtype, optim_info, num_dim):
         optim_cls = optim_info.optim_cls

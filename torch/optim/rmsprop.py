@@ -15,7 +15,6 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
-    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -280,7 +279,9 @@ def _single_tensor_rmsprop(
     capturable: bool,
     has_complex: bool,
 ):
-    lr = _to_scalar(lr)
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
 
     for i, param in enumerate(params):
         step = state_steps[i]
@@ -367,13 +368,7 @@ def _multi_tensor_rmsprop(
             for p, step in zip(params, state_steps)
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
-    def _needs_0dim(lr):
-        if capturable:
-            return not lr.is_cpu
-        else:
-            return True
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
+    if isinstance(lr, Tensor) and lr.dim() != 0:
         lr = lr.squeeze()
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(

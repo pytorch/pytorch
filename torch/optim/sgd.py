@@ -330,17 +330,9 @@ def _single_tensor_sgd(
 ):
     assert grad_scale is None and found_inf is None
 
-    def _needs_0dim(lr):
-        if lr.requires_grad:
-            # TODO: Determine the condition for this case.
-            # Maybe it is like:
-            # return any(lr.dim() > param.dim() for param in params)
-            return False
-        else:
-            return True
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
-        lr = lr.squeeze()
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -400,37 +392,12 @@ def _multi_tensor_sgd(
     if len(params) == 0:
         return
 
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
     )
-
-    def _needs_0dim(lr):
-        for (_, device_grads_, _), _ in grouped_tensors.values():
-            device_grads: list[Tensor] = cast(list[Tensor], device_grads_)
-
-            device_has_sparse_grad = has_sparse_grad and any(
-                grad.is_sparse for grad in device_grads
-            )
-
-            if not device_has_sparse_grad:
-                if torch.compiler.is_compiling():
-                    # TODO: Determine the condition for this case.
-                    # Maybe it is like:
-                    # if not lr.is_cpu:
-                    #     return True
-                    pass
-                else:
-                    return True
-            else:
-                # TODO: Determine the condition for this case.
-                # Maybe it is like:
-                # return True
-                pass
-        return False
-
-    if isinstance(lr, Tensor) and lr.dim() != 0 and _needs_0dim(lr):
-        lr = lr.squeeze()
-
     for (
         device_params_,
         device_grads_,
