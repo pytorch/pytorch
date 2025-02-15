@@ -362,6 +362,25 @@ jobs:
       test-matrix: ${{ needs.linux-focal-py3_9-clang9-xla-build.outputs.test-matrix }}
     secrets: inherit
 
+  win-vs2022-cpu-py3-build:
+    # don't run build twice on main
+    if: github.event_name == 'pull_request'
+    name: win-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    needs: get-label-type
+    with:
+      build-environment: win-vs2022-cpu-py3
+      cuda-version: cpu
+      sync-tag: win-cpu-build
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+        ]}
+    secrets: inherit
+
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
