@@ -1,0 +1,10 @@
+ubuntu|pytorch|apex|release/1.6.0|31d60e599c2ecbe31d5bcf7e4b873366b8747aea|https://github.com/ROCm/apex
+centos|pytorch|apex|release/1.6.0|31d60e599c2ecbe31d5bcf7e4b873366b8747aea|https://github.com/ROCm/apex
+ubuntu|pytorch|torchvision|release/0.21|7af698794eded568735f9519593603c1ec889eba|https://github.com/pytorch/vision
+centos|pytorch|torchvision|release/0.21|7af698794eded568735f9519593603c1ec889eba|https://github.com/pytorch/vision
+ubuntu|pytorch|torchtext|release/0.18.0|9bed85d7a7ae13cf8c28598a88d8e461fe1afcb4|https://github.com/pytorch/text
+centos|pytorch|torchtext|release/0.18.0|9bed85d7a7ae13cf8c28598a88d8e461fe1afcb4|https://github.com/pytorch/text
+ubuntu|pytorch|torchdata|release/0.10|a4bed25873e071ecb4d4206a47b5326965283ad4|https://github.com/pytorch/data
+centos|pytorch|torchdata|release/0.10|a4bed25873e071ecb4d4206a47b5326965283ad4|https://github.com/pytorch/data
+ubuntu|pytorch|torchaudio|release/2.6|d8831425203385077a03c1d92cfbbe3bf2106008|https://github.com/pytorch/audio
+centos|pytorch|torchaudio|release/2.6|d8831425203385077a03c1d92cfbbe3bf2106008|https://github.com/pytorch/audio
