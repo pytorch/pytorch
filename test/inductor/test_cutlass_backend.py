@@ -78,6 +78,9 @@ class TestCutlassBackend(TestCase):
                 "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
             ] = old_disable_fresh_cache_envvar
         torch.random.manual_seed(1234)
+        
+        
+    t1
 
     def tearDown(self):
         super().tearDown()
