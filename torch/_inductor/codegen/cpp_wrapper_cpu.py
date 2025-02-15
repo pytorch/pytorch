@@ -85,16 +85,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         kernel_name: str,
         call_args,
-        grid=None,
         device_index=None,
-        gpu=False,
-        triton=False,
+        gpu=True,
+        triton=True,
         arg_types=None,
         raw_args=None,
-        grid_fn: str = "grid",
         triton_meta=None,
         autotune_configs=None,
-        grid_extra_kwargs="",
+        *,
+        grid_arg=None,
     ):
         """
         Generates kernel call code.
@@ -106,6 +105,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 Only valid when cuda == True.
         """
         assert not gpu, "CppWrapperCpu.generate_kernel_call does not support GPU"
+        assert grid_arg is None
         assert arg_types is not None and len(call_args) == len(
             arg_types
         ), "Mismatch call_args and arg_types in generate_kernel_call"
@@ -1218,7 +1218,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
 
-    def prepare_triton_kernel_call(self, device_index, call_args):
+    def prepare_triton_kernel_call(self, call_args):
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -1228,13 +1228,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 return cexpr(V.graph.sizevars.simplify(arg))
 
-        call_args = [wrap_arg(arg) for arg in call_args]
-
-        if device_index is None:
-            current_device = V.graph.get_current_device_or_throw()
-            device_index = current_device.index
-
-        return device_index, call_args
+        return [wrap_arg(arg) for arg in call_args]
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
