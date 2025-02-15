@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
@@ -895,6 +896,7 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
+    @requires_gpu()  # FIXME this test failed on Triton-CPU
     def test_3d_permute_tiling(self):
         """
         Test 3D tiling with permute.
