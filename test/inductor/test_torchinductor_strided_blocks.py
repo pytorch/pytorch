@@ -913,7 +913,7 @@ class CommonTemplate:
             foo,
             *inps,
             expected_num_triton_kernels=1,
-            expected_num_block_pointers=4,
+            expected_num_block_pointers=3,
         )
 
         # Check for 3D tiling
