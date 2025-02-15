@@ -2011,8 +2011,8 @@ class SIMDScheduling(BaseScheduling):
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
             ) -> Optional[dict[str, sympy.Expr]]:
-                a0, a1 = tiling0["x"], tiling0["y"]
-                b0, b1 = tiling1["x"], tiling1["y"]
+                a0, a1 = tiling0["x"], tiling0.get("y", 1)
+                b0, b1 = tiling1["x"], tiling1.get("y", 1)
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
