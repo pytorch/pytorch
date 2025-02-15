@@ -447,6 +447,50 @@ def delayed_compile(*compile_args, **compile_kwargs):
 
     return decorator
 
+def delayed_export(*compile_args, **compile_kwargs):
+    def decorator(fn: Callable):
+        example_inputs: List[Any] = []
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            sig = inspect.signature(fn)
+            bound_args = sig.bind(*args, **kwargs)
+            arguments = bound_args.arguments
+            if len(example_inputs) < 5:
+                example_inputs.append(arguments)
+                print(example_inputs)
+
+            dynamic_shapes = torch.export.ShapesCollection()
+            # TODO: support pytrees of tensors
+            for example in example_inputs:
+                for name, tensor in example.items():
+                    if isinstance(tensor, torch.Tensor):
+                        dynamic_dims = [
+                            i for i, size in enumerate(tensor.shape)
+                            if any(e[name].shape[i] != size for e in example_inputs)
+                        ]
+
+                        for dim in dynamic_dims:
+                            dynamic_tensor = arguments[name]
+                            dynamic_shapes[dynamic_tensor] = dynamic_shapes[dynamic_tensor] or {}
+                            dynamic_shapes[dynamic_tensor][dim] = torch.export.Dim(name + str(dim))
+
+            class DummyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, *args, **kwargs):
+                    return fn(*args, **kwargs)
+
+            model = DummyModule()
+            exported_program = torch.export.export(model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes)
+            torch.export.save(exported_program, compile_kwargs["path"])
+
+            return model(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 @dataclass(frozen=True)
 class _DimRange:
