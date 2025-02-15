@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import sympy
 
@@ -31,12 +31,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: list[int],
-    stride: list[int],
-    dilation: list[int],
+    padding: Sequence[int],
+    stride: Sequence[int],
+    dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[list[int]] = None,
+    output_padding: Optional[Sequence[int]] = None,
     quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):

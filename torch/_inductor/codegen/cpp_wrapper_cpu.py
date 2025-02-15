@@ -404,6 +404,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode:
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
+                assert V.graph.const_code is not None
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:
