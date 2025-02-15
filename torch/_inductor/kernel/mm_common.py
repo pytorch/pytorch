@@ -2,26 +2,18 @@
 import functools
 import itertools
 import logging
-from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, Sequence
 
 import sympy
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Layout
-from ..runtime.runtime_utils import next_power_of_2
-from ..utils import (
-    ceildiv as cdiv,
-    get_backend_num_stages,
-    get_num_sms,
-    TMA_DESCRIPTOR_SIZE,
-)
+from ..utils import ceildiv as cdiv, get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
@@ -505,6 +497,15 @@ def mm_args(
     others = [realize_inputs(expand(x, layout.size)) for x in others]
 
     return [m, n, k, layout, mat1, mat2, *others]
+
+
+def mm_config_kwargs(device, exclude_condition):
+    if device == "cpu":
+        return {
+            "scale": 0.5,
+            "exclude": exclude_condition,
+        }
+    return {}
 
 
 def addmm_epilogue(dtype, alpha, beta):
