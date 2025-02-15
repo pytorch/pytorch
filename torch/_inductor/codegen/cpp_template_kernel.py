@@ -502,6 +502,10 @@ class CppTemplateKernel(CppKernel):
                 )
                 return ""
 
+    def check_bounds(self, expr, size, lower, upper):
+        # CppTemplateKernel does not need codegen related operations
+        return
+
 
 class CppTemplateCaller(ir.ChoiceCaller):
     """

@@ -15,7 +15,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/WaitCounter.h>
@@ -419,7 +418,6 @@ static std::future<bool> launchAsyncGilCheck() {
 
     try {
       auto& gil_checker = get_gil_checker();
-      // NOLINTNEXTLINE(clang-analyzer-core*)
       promise.set_value((*gil_checker)());
     } catch (...) {
       promise.set_exception(std::current_exception());
@@ -1177,7 +1175,8 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
     ncclComm->registerSegment(
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
-        segmentInfo.total_size);
+        segmentInfo.total_size,
+        /*errorOnRereg=*/false); // ignores reregistration error
   }
 }
 
@@ -1456,6 +1455,14 @@ void ProcessGroupNCCL::shutdown() {
     auto& ncclComm = it.second;
     // Use long interval to avoid acquiring CPU too frequently
     ncclComm->waitReady(true);
+  }
+  // Deregister memory pool after finalizing all collectives
+  if (memPool_) {
+    try {
+      deregisterMemPool(memPool_.get());
+    } catch (...) {
+      LOG(ERROR) << logPrefix() << "Failed to deregister memory pool, ignoring";
+    }
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
@@ -5412,16 +5419,66 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#endif // NCCL_HAS_MEM_ALLOC
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
+  if (!supportsTensorAlloc()) {
+    TORCH_CHECK(
+        false, "NCCL mem allocator is not supported in this NCCL version");
+  }
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
       ncclMemAllocator =
           torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
               _ncclMemAlloc, _ncclMemFree);
   return ncclMemAllocator;
+}
+
+bool ProcessGroupNCCL::supportsTensorAlloc() {
+  int version = 0;
+  // Rely on link-time versioning
+  ncclGetVersion(&version);
+  if (version >= NCCL_VERSION(2, 19, 0)) {
+    return true;
+  }
+  return false;
+}
+
+at::Tensor ProcessGroupNCCL::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  // Some checks
+  TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
+  auto device = options.device();
+  TORCH_CHECK_VALUE(
+      device.is_cuda(),
+      "NCCL tensor allocator expects cuda type but got " + c10::str(device))
+
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  // Create memory pool
+  if (!memPool_) {
+    // Needs a CUDAAllocator
+    auto allocator =
+        reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
+            getMemAllocator().get());
+    // Pool is created
+    memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
+    LOG(INFO) << logPrefix() << "Created memory pool";
+  }
+
+  // Allocate tensor under this MemPool's context
+  auto ctx = c10::cuda::MemPoolContext(memPool_.get());
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
+  at::Tensor tensor = at::empty({size}, options);
+  // Also need to ncclCommRegister the pool in case new segments are created;
+  // reregistration of old segments will be ignored
+  registerMemPool(memPool_.get());
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(
+      memPool_->device(), memPool_->id());
+  c10::cuda::CUDACachingAllocator::releasePool(
+      memPool_->device(), memPool_->id());
+  LOG(INFO) << logPrefix() << "Allocated tensor of size " << size
+            << " from memory pool";
+  return tensor;
 }
 
 } // namespace c10d

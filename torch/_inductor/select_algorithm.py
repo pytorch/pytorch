@@ -742,7 +742,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
+                name = "StoreOutputSubstitution"
 
                 def store(
                     self,
@@ -770,7 +770,10 @@ class TritonTemplateKernel(TritonKernel):
                         if value_dtype != V.graph.get_buffer(name).dtype:
                             value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
 
-                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
+                        # TODO: we should have intermediary var shapes
+                        V.kernel.compute.writeline(
+                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                        )
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -2110,11 +2113,8 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if config.autotune_num_choices_displayed == 0:
             return
-        elif config.autotune_num_choices_displayed is None:
-            n = -1
-        else:
-            n = config.autotune_num_choices_displayed
-
+        # when autotune_num_choices_displayed is None, [:None] means all
+        n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
 
         best = top_k[0]

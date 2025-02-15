@@ -1,4 +1,22 @@
 # mypy: ignore-errors
+
+"""
+This module contains miscellaneous variable tracker implementations for various Python types
+and features used in Dynamo's symbolic execution. These classes help track and propagate
+information about different kinds of variables during graph capture.
+
+Key classes include:
+- SuperVariable: Handles super() calls and method resolution
+- ExceptionVariable: Tracks exception objects
+- RandomVariable: Manages random number generators
+- GetAttrVariable: Tracks attribute access
+- MethodWrapperVariable: Handles method wrappers
+- PythonModuleVariable: Tracks Python modules
+- NumpyVariable: Handles numpy functions and types
+- StringFormatVariable: Manages string formatting
+- DebuggingVariable: Handles print and logging
+"""
+
 import dataclasses
 import functools
 import inspect
@@ -20,29 +38,19 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
-from ..source import (
-    AttrSource,
-    DefaultsSource,
-    GetItemSource,
-    TypeSource,
-    WeakRefCallSource,
-)
+from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
 from ..utils import (
     check_unspec_or_constant_args,
+    cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    list_methods,
     proxy_args_kwargs,
     set_example_value,
     tuple_methods,
 )
 from .base import VariableTracker
-from .functions import (
-    NestedUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-    wrap_bound_arg,
-)
-from .nn_module import UnspecializedNNModuleVariable
+from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -168,10 +176,21 @@ class SuperVariable(VariableTracker):
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
-        elif self.objvar.source and inner_fn is object.__new__:
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                self.objvar
-            )
+        elif (
+            self.objvar.source
+            and hasattr(inner_fn, "__name__")
+            and inner_fn.__name__ == "__new__"
+            and variables.UserDefinedClassVariable.is_supported_new_method(inner_fn)
+        ):
+            user_cls = inner_fn.__self__
+            if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
+                user_cls_vt = variables.BuiltinVariable(user_cls)
+            else:
+                user_cls_source = source.member
+                user_cls_vt = variables.UserDefinedClassVariable(
+                    user_cls, source=user_cls_source
+                )
+            return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
@@ -219,6 +238,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in tuple_methods
         ):
             return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedListVariable)
+            and inner_fn in list_methods
+        ):
+            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -245,6 +269,7 @@ class SuperVariable(VariableTracker):
 
 
 class ExceptionVariable(VariableTracker):
+    # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(self, exc_type, args, **kwargs) -> None:
         super().__init__(**kwargs)
         self.exc_type = exc_type
@@ -256,6 +281,12 @@ class ExceptionVariable(VariableTracker):
         )
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
+
+    def __str__(self):
+        return f"ExceptionVariable({self.exc_type})"
+
+    def __repr__(self):
+        return f"ExceptionVariable({self.exc_type})"
 
 
 class UnknownVariable(VariableTracker):
@@ -354,254 +385,6 @@ class CellVariable(VariableTracker):
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-
-
-class InspectSignatureVariable(VariableTracker):
-    """represents inspect.signature(...)"""
-
-    _nonvar_fields = {
-        "signature",
-        "parameters",
-        *VariableTracker._nonvar_fields,
-    }
-
-    @staticmethod
-    def create(callable, **kwargs):
-        if kwargs:
-            unimplemented(f"inspect.signature with {kwargs}")
-        return InspectSignatureVariable(
-            callable, mutation_type=variables.base.ValueMutationNew()
-        )
-
-    def __init__(self, inspected: VariableTracker, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.inspected = inspected
-
-        try:
-            if hasattr(self.inspected, "get_function"):
-                self.fn = self.inspected.get_function()
-            elif isinstance(self.inspected, UnspecializedNNModuleVariable):
-                self.fn = self.inspected.value
-            else:
-                self.fn = self.inspected.as_python_constant()
-        except NotImplementedError:
-            unimplemented("inspect.signature with non-constant function")
-
-        self.signature = inspect.signature(self.fn)
-        self.parameters = list(self.signature.parameters.items())
-        if isinstance(self.inspected, UserMethodVariable):
-            self.parameters = self.parameters[1:]
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if name == "parameters":
-            return variables.ConstDictVariable(
-                {
-                    variables.ConstantVariable.create(
-                        param[0]
-                    ): InspectParameterVariable(param[1])
-                    for param in self.parameters
-                },
-                user_cls=dict,
-            )
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "bind":
-            if not hasattr(self.fn, "__kwdefaults__"):
-                unimplemented(
-                    f"inspect.signature.bind with {self.fn} without __kwdefaults__"
-                )
-            obj = self.signature.bind(*args, **kwargs)
-
-            # wrap function defaults in VTs
-            defaults = {}
-            if self.fn.__kwdefaults__:
-                wrap = functools.partial(wrap_bound_arg, tx=tx)
-                kwdefaults_sources = {
-                    k: (
-                        None
-                        if self.source is None
-                        else DefaultsSource(self.source, k, is_kw=True)
-                    )
-                    for k in self.fn.__kwdefaults__
-                }
-                defaults = {
-                    k: wrap(val=v, source=kwdefaults_sources[k])
-                    for k, v in self.fn.__kwdefaults__.items()
-                }
-
-            return InspectBoundArgumentsVariable(
-                obj,
-                defaults,
-                self,
-            )
-        return super().call_method(tx, name, args, kwargs)
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(inspect),
-                    codegen.create_load_attr("signature"),
-                ]
-            )
-        )
-        codegen(self.inspected)
-        codegen.extend_output(create_call_function(1, False))
-
-
-class InspectParameterVariable(VariableTracker):
-    """represents inspect.Parameter(...)"""
-
-    def __init__(self, value, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.value = value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        try:
-            attr_value = getattr(self.value, name)
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, attr_value, source)
-        except AttributeError:
-            unimplemented(f"getattr({self.value}, {name})")
-
-
-class InspectBoundArgumentsVariable(VariableTracker):
-    """represents inspect.signature(...).bind(...)"""
-
-    _nonvar_fields = {
-        "bound_arguments",
-        "packed_vars",
-        *VariableTracker._nonvar_fields,
-    }
-
-    # NOTE: we keep track of changes to arguments via bound_arguments_var,
-    # but we still keep a copy of the inspect.BoundArguments object in order
-    # to get the correct args/kwargs.
-    def __init__(
-        self,
-        bound_arguments: inspect.BoundArguments,
-        defaults: dict[str, VariableTracker],
-        signature: InspectSignatureVariable,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.bound_arguments = bound_arguments
-        self.defaults = defaults
-        # used to convert from VT to tuple/dict when updating bound_arguments
-        self.packed_vars = set()
-
-        arguments_dict = {}
-        for key, val in bound_arguments.arguments.items():
-            key_var = variables.ConstantVariable(key)
-            # convert val to VT
-            if isinstance(val, tuple):
-                arguments_dict[key_var] = variables.TupleVariable(list(val))
-                self.packed_vars.add(key)
-            elif isinstance(val, dict):
-                self.packed_vars.add(key)
-                arguments_dict[key_var] = variables.ConstDictVariable(
-                    {variables.ConstantVariable(k): v for k, v in val.items()}
-                )
-            elif isinstance(val, VariableTracker):
-                arguments_dict[key_var] = val
-            else:
-                unimplemented(
-                    "inspect.signature(...).bind(...).arguments contains non-variable/tuple/dict"
-                )
-
-        self.bound_arguments_var = variables.ConstDictVariable(
-            arguments_dict,
-            type(bound_arguments.arguments),
-            mutation_type=variables.base.ValueMutationNew(),
-        )
-        self.signature = signature
-
-    def _update_bound_arguments(self):
-        for key, val in self.bound_arguments_var.items.items():
-            true_val = val
-            if key.underlying_value in self.packed_vars:
-                if isinstance(val, variables.TupleVariable):
-                    true_val = tuple(val.items)
-                elif isinstance(val, variables.ConstDictVariable):
-                    true_val = {k.underlying_value: v for k, v in val.items.items()}
-                else:
-                    unimplemented(
-                        "inspect.signature(...).bind(...) cannot update bound arguments"
-                    )
-            self.bound_arguments.arguments[key.underlying_value] = true_val
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if name == "arguments":
-            return self.bound_arguments_var
-        elif name == "args":
-            self._update_bound_arguments()
-            return variables.TupleVariable(list(self.bound_arguments.args))
-        elif name == "kwargs":
-            self._update_bound_arguments()
-            kw = {
-                variables.ConstantVariable(key): val
-                for key, val in self.bound_arguments.kwargs.items()
-            }
-            return variables.ConstDictVariable(kw)
-        elif name == "signature":
-            return self.signature
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "apply_defaults":
-            # mimic calling apply_defaults
-            for key, val in self.defaults.items():
-                key_var = variables.ConstantVariable(key)
-                if key_var not in self.bound_arguments_var:
-                    self.bound_arguments_var.call_method(
-                        tx, "__setitem__", [key_var, val], {}
-                    )
-
-            # actually apply the changes
-            self._update_bound_arguments()
-
-            return variables.ConstantVariable(None)
-        return super().call_method(tx, name, args, kwargs)
-
-    def reconstruct(self, codegen):
-        # reconstruct inspect.signature(...).bind(*bound_arguments.args, **bound_arguments.kwargs)
-        # NOTE the reconstructed inspect.signature(...) object might not be the same object
-        # as the Signature object that originally created the BoundArguments object.
-        self._update_bound_arguments()
-
-        def gen_fn():
-            codegen(self.signature)
-            codegen.append_output(codegen.create_load_attr("bind"))
-
-        codegen.add_push_null(gen_fn, call_function_ex=True)
-
-        codegen.foreach(self.bound_arguments.args)
-        codegen.append_output(
-            create_instruction("BUILD_TUPLE", arg=len(self.bound_arguments.args))
-        )
-
-        for key, val in self.bound_arguments.kwargs.items():
-            codegen.append_output(codegen.create_load_const(key))
-            codegen(val)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_MAP", arg=len(self.bound_arguments.kwargs)),
-                create_instruction("CALL_FUNCTION_EX", arg=1),
-            ]
-        )
 
 
 def produce_trampoline_autograd_apply(fn_cls):
@@ -1212,6 +995,9 @@ class TypingVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
 
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.side_effects.load_attr(self, name)
 
@@ -1220,7 +1006,7 @@ class TypingVariable(VariableTracker):
             attr_source = AttrSource(self.source, name)
             return VariableBuilder(tx, attr_source)(value)
         else:
-            return SourcelessBuilder(tx, value)
+            return SourcelessBuilder.create(tx, value)
 
     def as_python_constant(self):
         return self.value
