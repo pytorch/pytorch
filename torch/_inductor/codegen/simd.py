@@ -1364,7 +1364,10 @@ class SIMDScheduling(BaseScheduling):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule,  # type: ignore[arg-type]
+                    kernel_name,
+                )
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
