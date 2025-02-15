@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypesAnd,
     OpDTypes,
     ops,
     skipMeta,
@@ -356,7 +355,7 @@ class TestCommon(TestCase):
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
-    @onlyNativeDeviceTypesAnd(["hpu"])
+
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
@@ -410,7 +409,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @onlyNativeDeviceTypesAnd(["hpu"])
+
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
@@ -605,7 +604,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @onlyNativeDeviceTypesAnd(["hpu"])
+
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref(self, device, dtype, op):
@@ -623,7 +622,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @onlyNativeDeviceTypesAnd(["hpu"])
+
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_torch_fallback(self, device, dtype, op):
@@ -660,7 +659,6 @@ class TestCommon(TestCase):
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
@@ -671,7 +669,6 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         [op for op in op_db if op.error_inputs_sparse_func is not None],
         dtypes=OpDTypes.none,
@@ -694,7 +691,6 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         [op for op in python_ref_db if op.error_inputs_func is not None],
         dtypes=OpDTypes.none,
@@ -720,7 +716,6 @@ class TestCommon(TestCase):
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     @with_tf32_off
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -1462,7 +1457,6 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
@@ -1658,7 +1652,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
     @skipMeta
-    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         (op for op in op_db if op.promotes_int_to_float),
         allowed_dtypes=integral_types_and(torch.bool),
