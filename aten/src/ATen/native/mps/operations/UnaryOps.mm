@@ -4,6 +4,7 @@
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/UnaryOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -43,7 +44,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
-#include <ATen/ops/round_native.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
@@ -165,6 +165,12 @@ static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor*
   return [mpsGraph squareRootWithTensor:sumSquares name:nil];
 }
 
+static void round_kernel(TensorIteratorBase& iter) {
+  unary_op(iter.input(0), iter.output(0), __func__, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) {
+          return [mpsGraph roundWithTensor:inputTensor name:nil];
+  });
+}
+
 } // namespace mps
 
 TORCH_IMPL_FUNC(trunc_out_mps)(const Tensor& self, const Tensor& output) {
@@ -214,7 +220,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   }
 CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(ceil_out_mps, ceil)
 CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(floor_out_mps, floor)
-CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
@@ -560,4 +565,5 @@ Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   return result;
 }
 
+REGISTER_DISPATCH(round_stub, mps::round_kernel);
 } // namespace at::native

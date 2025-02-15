@@ -5000,9 +5000,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: round_out
-    CUDA: round_out
-    MPS: round_out_mps
+    CPU, CUDA, MPS: round_out
     SparseCPU, SparseCUDA: round_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: round_sparse_csr_out
   tags: pointwise
@@ -5024,8 +5022,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: round_decimals_out
-    CUDA: round_decimals_out
+    CPU, CUDA, MPS: round_decimals_out
   tags: pointwise
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
