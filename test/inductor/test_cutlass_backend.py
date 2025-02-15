@@ -1031,7 +1031,7 @@ class TestCutlassBackend(TestCase):
             os.remove(cu_file.name)
             os.remove(exe_file.name)
 
-
+    t3
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
