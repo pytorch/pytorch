@@ -143,7 +143,7 @@ def associative_scan(
 
     if not torch.compiler.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
+            return torch.compile(associative_scan, fullgraph=True, backend="eager")(
                 combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
             )
 
@@ -355,8 +355,6 @@ def trace_associative_scan(
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
 ):
-    from torch._inductor.utils import is_pointwise_use
-
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *additional_inputs)
@@ -367,11 +365,6 @@ def trace_associative_scan(
             assert outputs is None
             assert len(node.args) == 1
             outputs = node.args[0]
-
-        if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
-            raise ValueError(
-                "For combine_mode='pointwise', the combine_fn needs to be pointwise"
-            )
 
     assert outputs is not None
     assert len(outputs) == len(
@@ -432,6 +425,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
+
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
