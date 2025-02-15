@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <c10/core/SafePyObject.h>
 
 namespace py = pybind11;
 
@@ -17,6 +18,7 @@ struct PySavedVariableHooks : public SavedVariableHooks {
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override;
+  std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>  get_hook_for_compiled_autograd() const override;
 
  private:
   PyObject* pack_hook_;

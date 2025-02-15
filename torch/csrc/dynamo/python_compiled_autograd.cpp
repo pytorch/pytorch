@@ -829,6 +829,12 @@ static CacheNode* _compiled_autograd_impl(
       }
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
+        auto n = fn->num_inputs();
+        std::cout << fn->name() << " has " << n << " inputs" << std::endl;
+        for (uint i=0; i<n; i++) {
+          auto meta = fn->input_metadata(i);
+          std::cout << meta.shape_as_dim_vector() << std::endl; 
+        }
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
@@ -1047,6 +1053,7 @@ static CacheNode* _compiled_autograd_impl(
       call->node->release_variables();
     }
   }
+  std::cout << "released variables" << std::endl;
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);

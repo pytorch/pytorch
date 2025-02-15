@@ -167,8 +167,10 @@ struct TensorArgs {
     // TODO(jansel): Here we unpack the SavedVariable exactly once.  This might
     // fire SavedTensor hooks.  In the future we should try to put saved tensor
     // hooks into the graph.
+    //
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
+    //
     _saved_variables.emplace(&sv, &arg);
     return arg;
   }
@@ -285,6 +287,11 @@ class CompiledNodeArgs {
     collect(_compiler.tensor_args.add(t));
   }
   void collect(const SavedVariable& sv, bool is_output) {
+    auto hook = sv.get_hook_for_compiled_autograd();
+    TORCH_INTERNAL_ASSERT(hook.has_value());
+    auto& [unpack_hook, data] = hook.value();
+    _compiler.emplace_hook(std::move(unpack_hook));
+    _compiler.emplace_hook(std::move(data));
     collect(
         _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
@@ -496,7 +503,7 @@ class CompiledNodeArgs {
         fn->retains_grad_hooks().empty(),
         "retains_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
-      i->compiled_args(*this);
+        i->compiled_args(*this);
     }
     for (auto& i : fn->pre_hooks()) {
       i->compiled_args(*this);
