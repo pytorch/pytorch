@@ -39,7 +39,9 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
     def wrapped(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
             if has_torch_function((self,) + args):
-                return handle_torch_function(wrapped, (self,) + args, *args, **kwargs)
+                return handle_torch_function(
+                    wrapped, (self,) + args, self, *args, **kwargs
+                )
             return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
