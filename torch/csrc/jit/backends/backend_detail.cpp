@@ -296,7 +296,7 @@ Module codegen_backend_module(
         continue;
       }
 
-      auto default_value = arg.default_value();
+      const auto& default_value = arg.default_value();
 
       if (arg.kwarg_only()) {
         // If this is a kwarg, it needs to be emitted as keyword=value

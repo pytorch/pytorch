@@ -640,7 +640,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
     if (remaining_bailout_depth.has_value()) {
-      remaining_bailout_depth_ = *remaining_bailout_depth;
+      remaining_bailout_depth_ = remaining_bailout_depth;
     } else {
       remaining_bailout_depth_ = getInstantiatedBailoutDepth();
     }

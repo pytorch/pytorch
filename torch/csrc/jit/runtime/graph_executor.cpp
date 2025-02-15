@@ -64,6 +64,7 @@ EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
   executor_mode = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   old_get_optimize = getGraphExecutorOptimize();
   setGraphExecutorOptimize(true);
 }
@@ -522,7 +523,9 @@ struct DifferentiableGraphOp {
   Gradient grad;
   GraphExecutor grad_executor;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t num_inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t num_outputs;
 };
 

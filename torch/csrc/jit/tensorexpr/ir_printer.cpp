@@ -61,7 +61,7 @@ template <
         decltype(detail::bin_op_deducer(std::declval<Op>())),
         void>>* = nullptr>
 static void visitBinaryOp(
-    NodePtr<Op> v,
+    const NodePtr<Op>& v,
     const std::string& op_str,
     IRPrinter* printer,
     bool parens = true) {

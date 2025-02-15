@@ -325,8 +325,8 @@ static bool hasConflictingOverlap(
     auto bTABIs = bIt->second;
     for (size_t i = 0; i < aTABIs.size(); ++i) {
       for (size_t j = 0; j < bTABIs.size(); ++j) {
-        auto aTABI = aTABIs[i];
-        auto bTABI = bTABIs[j];
+        const auto& aTABI = aTABIs[i];
+        const auto& bTABI = bTABIs[j];
         if (aTABI.kind == kLoad && bTABI.kind == kLoad) {
           continue;
         }

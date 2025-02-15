@@ -681,7 +681,7 @@ class FunctionInliner : public IRMutator {
     }
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
-      ExprPtr func_caller_param = dims.at(i);
+      const ExprPtr& func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
         continue;
       }
@@ -1328,7 +1328,7 @@ bool LoopNest::optimizeConditionals() {
       continue;
     }
 
-    auto for_to_split = fors.back();
+    const auto& for_to_split = fors.back();
     if (!LoopNest::isNormalized(for_to_split)) {
       // Do not optimize this conditional since the condition variable
       // refers to a loop that is not normalized.
@@ -1360,7 +1360,7 @@ bool LoopNest::optimizeConditionals() {
     // Remove all the if-then-else expressions from this store and create
     // one loop per sub-expression.
     std::vector<StmtPtr> split_loops;
-    auto cond_to_replace = ifthenelse_exprs.front();
+    const auto& cond_to_replace = ifthenelse_exprs.front();
     for (size_t i = 0; i < sub_exprs.size(); ++i) {
       IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
       auto new_store = store->accept_mutator(&ifthenelseReplacer);
@@ -2435,7 +2435,7 @@ bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
   ExprPtr stop = immLike(flat_var, 1);
   for (size_t i = 0; i < normalized_loops.size(); ++i) {
     size_t idx = normalized_loops.size() - i - 1;
-    auto curr_loop = normalized_loops[idx];
+    const auto& curr_loop = normalized_loops[idx];
     ExprPtr div = alloc<Div>(flat_var, stop);
     ExprPtr sub_expr = idx == 0 ? div : alloc<Mod>(div, curr_loop->stop());
     var_mapping.emplace_back(curr_loop->var(), sub_expr);
@@ -2878,6 +2878,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   // determine the offsets for calls into the cache based off the loop start of
   // each axis.
   std::vector<ExprPtr> tmp_params;
+  tmp_params.reserve(new_loop_vars.size());
   for (size_t i = 0; i < new_loop_vars.size(); ++i) {
     tmp_params.push_back(alloc<Add>(new_loop_vars[i], info.start[i]));
   }

@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch::jit::tensorexpr {
 
 namespace {
@@ -100,16 +102,16 @@ Tensor conv2d_depthwise_dynamic(
     BufHandle weight,
     const InitFunc& init_func,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups) {
+    const ExprHandle& groups) {
   TORCH_INTERNAL_ASSERT(input.ndim() == 4);
   TORCH_INTERNAL_ASSERT(weight.ndim() == 4);
 
@@ -118,7 +120,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {N, K, OH, OW},
+      {std::move(N), std::move(K), OH, OW},
       std::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
@@ -146,8 +148,8 @@ Tensor conv2d_depthwise_dynamic(
 } // namespace
 
 Tensor conv2d_depthwise(
-    BufHandle input,
-    BufHandle weight,
+    const BufHandle& input,
+    const BufHandle& weight,
     BufHandle bias,
     int stride,
     int pad,
@@ -160,8 +162,8 @@ Tensor conv2d_depthwise(
 }
 
 Tensor conv2d_depthwise(
-    BufHandle input,
-    BufHandle weight,
+    const BufHandle& input,
+    const BufHandle& weight,
     int stride,
     int pad,
     int groups) {
@@ -191,20 +193,20 @@ Tensor conv2d_depthwise(
     return bias.load(v[1]);
   };
   return conv2d_depthwise_dynamic(
-      input,
-      weight,
+      std::move(input),
+      std::move(weight),
       init_func,
-      N,
-      C,
-      H,
-      W,
-      K,
-      CperG,
-      R,
-      S,
-      stride,
-      pad,
-      groups);
+      std::move(N),
+      std::move(C),
+      std::move(H),
+      std::move(W),
+      std::move(K),
+      std::move(CperG),
+      std::move(R),
+      std::move(S),
+      std::move(stride),
+      std::move(pad),
+      std::move(groups));
 }
 
 Tensor conv2d_depthwise(
@@ -225,20 +227,20 @@ Tensor conv2d_depthwise(
     return ExprHandle(Sum().initializer());
   };
   return conv2d_depthwise_dynamic(
-      input,
-      weight,
+      std::move(input),
+      std::move(weight),
       init_func,
-      N,
-      C,
-      H,
-      W,
-      K,
-      CperG,
-      R,
-      S,
-      stride,
-      pad,
-      groups);
+      std::move(N),
+      std::move(C),
+      std::move(H),
+      std::move(W),
+      std::move(K),
+      std::move(CperG),
+      std::move(R),
+      std::move(S),
+      std::move(stride),
+      std::move(pad),
+      std::move(groups));
 }
 
 static std::vector<int64_t> _pair_int(ArgValue v) {
