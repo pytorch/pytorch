@@ -39,7 +39,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     Common options to matmul triton templates.
     """
@@ -57,7 +57,6 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
