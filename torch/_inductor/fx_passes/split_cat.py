@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
@@ -71,6 +72,7 @@ post_grad_pass_names = [
     "pad_aten_mm_pass",
     "split_cat_aten_pass",
     "select_cat_aten_pass",
+    "select_view_cat_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -1784,6 +1786,127 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
                 if len(select_node.users) == 0:
                     graph.erase_node(select_node)
             counters["inductor"]["select_cat_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.cat.default,
+        ListOf(
+            CallFunction(
+                torch.ops.aten.reshape.default,
+                CallFunctionVarArgs(torch.ops.aten.select.int, users=MULTIPLE),
+                Ignored(),
+                _users=MULTIPLE,
+            ),
+            partial=True,
+        ),
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("select_view_cat_aten_pass"),
+)
+def decompose_select_view_cat_aten(match: Match, *args, **kwargs):
+    graph = match.graph
+    cat_node = next(
+        node for node in match.nodes if node.target == torch.ops.aten.cat.default
+    )
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    view_nodes = list(cat_node.args[0])  # type: ignore[arg-type]
+    # check the input of the cat node should be view nodes
+    if not all(
+        view_node.target == torch.ops.aten.reshape.default for view_node in view_nodes
+    ):
+        return
+    select_nodes = [view_node.args[0] for view_node in view_nodes]
+    select_dims = [get_arg_value(select_node, 1, "dim") for select_node in select_nodes]
+    # check all select nodes have same slice dim
+    if not all(select_dims[0] == dim for dim in select_dims):
+        return
+    # check the input of the cat node should be select nodes
+    if not all(
+        select_node.target == torch.ops.aten.select.int for select_node in select_nodes
+    ):
+        return
+    # get the indices of the slect nodes and check they are consecutive
+    select_indices = [select_node.args[2] for select_node in select_nodes]
+    if not is_sorted_and_consecutive(select_indices):
+        return
+    # check the input of select nodes are slice nodes
+    slice_nodes = [select_node.args[0] for select_node in select_nodes]
+    # check all input nodes of select nodes are slice nodes
+    if not all(
+        slice_node.target == torch.ops.aten.slice.Tensor for slice_node in slice_nodes
+    ):
+        return
+    # check the input of the select nodes are identical
+    if not all(slice_node == slice_nodes[0] for slice_node in slice_nodes):
+        return
+    # check all the slice nodes are into the view nodes, which composed as the cat node inputs
+    if (
+        not is_node_meta_valid(slice_nodes[0])
+        or not is_node_meta_valid(view_nodes[0])
+        or not is_node_meta_valid(cat_node)
+    ):
+        return
+    if math.prod(view_nodes[0].meta["val"].shape) * len(view_nodes) != math.prod(
+        list(slice_nodes[0].meta["val"].shape)
+    ):
+        return
+
+    permute_node = None
+    # if cat_dim is not the same as the select_dim, we need to do permute first
+    if cat_dim != select_dims[0]:
+        permute_index_lst = list(range(len(slice_nodes[0].meta["val"].shape)))
+        permute_index_lst[cat_dim], permute_index_lst[select_dims[0]] = (
+            select_dims[0],
+            cat_dim,
+        )
+        # construct the permute node
+        permutation_input = slice_nodes[0]
+        with graph.inserting_after(permutation_input):
+            permute_node = graph.call_function(
+                torch.ops.aten.permute.default,
+                args=(permutation_input, permute_index_lst),
+            )
+            # update meta data
+            permute_node.meta["val"] = torch.ops.aten.permute.default(
+                slice_nodes[0].meta["val"], permute_index_lst
+            )
+    # if cat node has different shape from permute node, we need to do view then
+    # reshape the permute node to be the same shape as the cat node
+    if permute_node and cat_node.meta["val"].shape != permute_node.meta["val"].shape:
+        with graph.inserting_after(permute_node):
+            new_view_node = graph.call_function(
+                torch.ops.aten.reshape.default,
+                args=(permute_node, list(cat_node.meta["val"].shape)),
+            )
+        # replace the node input with the new node
+        cat_node.replace_all_uses_with(new_view_node)
+        new_view_node.meta.update(cat_node.meta)
+    elif permute_node and cat_node.meta["val"].shape == permute_node.meta["val"].shape:
+        cat_node.replace_all_uses_with(permute_node)
+    else:
+        # permute node is None
+        if slice_nodes[0].meta["val"].shape != cat_node.meta["val"].shape:
+            with graph.inserting_after(cat_node):
+                new_view_node = graph.call_function(
+                    torch.ops.aten.reshape.default,
+                    args=(slice_nodes[0], list(cat_node.meta["val"].shape)),
+                )
+            # replace the node input with the new node
+            cat_node.replace_all_uses_with(new_view_node)
+            new_view_node.meta.update(cat_node.meta)
+        else:
+            cat_node.replace_all_uses_with(slice_nodes[0])
+    # remove the cat node
+    graph.erase_node(cat_node)
+    for view_node in view_nodes:
+        if len(view_node.users.keys()) == 0:
+            graph.erase_node(view_node)
+    for select_node in select_nodes:
+        if len(select_node.users.keys()) == 0:
+            graph.erase_node(select_node)
+    counters["inductor"]["select_view_cat_aten_pass"] += 1
 
 
 @register_graph_pattern(
