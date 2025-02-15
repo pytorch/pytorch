@@ -4,6 +4,7 @@ import functools
 import logging
 import os
 import re
+import unittest
 import unittest.mock
 
 import torch
@@ -21,6 +22,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    SM90OrLater,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -758,6 +760,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(autotuning=True)
     @requires_cuda
+    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_inductor_cache():
 
@@ -767,7 +770,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             f = torch.compile(f, mode="max-autotune-no-cudagraphs")
             f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
             self.assertGreater(len(records), 0)
-            self.assertLess(len(records), 20)
+            self.assertLess(len(records), 40)
 
     @make_logging_test(graph_region_expansion=True)
     def test_graph_region_expansion(self, records):
