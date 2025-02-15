@@ -172,8 +172,8 @@ inline bool sr_schema_check(torch::jit::Node*) {
 template <typename Schema, typename... Schemas>
 bool sr_schema_check(
     torch::jit::Node* node,
-    Schema&& first,
-    Schemas&&... rest) {
+    const Schema& first,
+    const Schemas&... rest) {
   auto is_match = node->matches(first) || sr_schema_check(node, rest...);
   if (!is_match) {
     torch::jit::LogAndDumpSchema(node);

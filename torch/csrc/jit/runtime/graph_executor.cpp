@@ -64,6 +64,7 @@ EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
   executor_mode = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   old_get_optimize = getGraphExecutorOptimize();
   setGraphExecutorOptimize(true);
 }
