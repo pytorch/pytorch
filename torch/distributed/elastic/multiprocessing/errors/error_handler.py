@@ -117,7 +117,7 @@ class ErrorHandler:
                     rootcause_error_file, rootcause_error, error_code
                 )
             logger.debug(
-                "child error file (%s) contents:\n" "%s",
+                "child error file (%s) contents:\n%s",
                 rootcause_error_file,
                 json.dumps(rootcause_error, indent=2),
             )
