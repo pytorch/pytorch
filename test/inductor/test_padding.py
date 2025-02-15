@@ -707,6 +707,53 @@ class PaddingTest(TestCaseBase):
         # Check strides
         self.assertFalse(compiled_out.is_contiguous())
         self.assertEqual(compiled_out.stride(), expected_stride)
+    
+    @parametrize("shape,alignment_bytes,pad_output",
+        [
+        ((512, 1), 32, False),
+        ((32, 30), 64, False),
+        ((512, 1), 32, True),
+        ((32, 30), 64, True),
+        ]
+    )
+    def test_noop_concat_output_padding(self, shape, alignment_bytes, pad_output):
+        """
+        When we generate no-op concat kernel, alignment of the inputs
+        and outputs should be honored based on padding_alignment_bytes.
+        """
+
+        def get_input(size: list[int], alignment_bytes: int) -> torch.Tensor:
+            device = torch.device("cpu")
+            size_padded = list(size)
+            elem_size = 4 # float32
+            pad_elems = alignment_bytes // elem_size
+            if pad_output:
+                size_padded[-1] = (size_padded[-1] + pad_elems - 1) // pad_elems * pad_elems
+            full = torch.randn(size_padded, dtype=torch.float32).to(device)
+            view = torch.as_strided(full, size, full.stride())
+            return view
+
+        x = get_input(shape, alignment_bytes)
+        y = get_input(shape, alignment_bytes)
+
+        config_patches = {
+                "padding_alignment_bytes": alignment_bytes,
+                "disable_padding_cpu": False,
+                "pad_channels_last": True,
+                "pad_outputs": pad_output,
+                "comprehensive_padding": True,
+                "padding_stride_threshold": 0,
+                "triton.prefer_nd_tiling": True,
+                "max_pointwise_cat_inputs" : 1,
+        }
+        with config.patch(config_patches):
+            compiled = torch.compile(torch.cat)
+            _, code = run_and_get_code(compiled, (x, y), 0)
+
+        output_shape = (shape[0] + shape[0], shape[1])
+        output_stride = x.stride()
+        output_line = f"buf2 = empty_strided_cpu({output_shape}, {output_stride}, torch.float32)"
+        self.assertTrue(any(output_line in line for line in code))
 
 
 if __name__ == "__main__":
