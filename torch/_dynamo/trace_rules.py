@@ -3763,7 +3763,7 @@ def lookup_inner(
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
         elif name == "__torch_function__" or (
-            obj and obj.__name__ == "__torch_function__"
+            obj and getattr(obj, "__name__", None) == "__torch_function__"
         ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
