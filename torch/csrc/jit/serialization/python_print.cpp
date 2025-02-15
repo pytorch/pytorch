@@ -130,6 +130,10 @@ struct PythonPrintImpl {
         stack->push_back(n->sourceRange());
       }
     }
+    WithSourceRange(const WithSourceRange&) = delete;
+    WithSourceRange(WithSourceRange&&) = delete;
+    WithSourceRange& operator=(const WithSourceRange&) = delete;
+    WithSourceRange& operator=(WithSourceRange&&) = delete;
 
     ~WithSourceRange() {
       stack->pop_back();
