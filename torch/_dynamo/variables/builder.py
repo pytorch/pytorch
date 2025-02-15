@@ -2740,7 +2740,7 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic or (source.dynamism and source.dynamism[i]):
+        if marked_dynamic or (isinstance(source, LocalSource) and source.dynamism and source.dynamism[i]):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong

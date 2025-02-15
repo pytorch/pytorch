@@ -2874,7 +2874,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
                     is_dynamic = []
-                    for x in example_inputs:
+                    for x in example_inputs or []:
                         value = x.get(name)
                         if isinstance(value, torch.Tensor):
                             while len(is_dynamic) < len(
