@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Concatenate, Optional, ParamSpec, TypeVar, Union
+from typing import Any, Callable, cast, Optional, ParamSpec, TypeVar, Union
+from typing_extensions import Concatenate
 
 import torch
 import torch._C as _C
