@@ -287,6 +287,7 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
+        self.assertTrue(len(report.expressions_created) > 4)
 
     def test_offsets(self):
         class M(torch.nn.Module):
