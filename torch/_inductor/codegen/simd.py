@@ -39,10 +39,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import (
-    can_codegen_without_upcasts,
-    prologue_preserves_zero_mask,
-)
+from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -1507,7 +1504,7 @@ class SIMDScheduling(BaseScheduling):
                     buffer.get_name(), []
                 ):
                     can_codegen_without_upcast = all(
-                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
+                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
                     )
 
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
