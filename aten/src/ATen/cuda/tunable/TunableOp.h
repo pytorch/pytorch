@@ -370,6 +370,8 @@ class TunableOp {
                 " std ", s_stddev);
           min_duration_ms = s._mean;
           id_name = op_names_[i];
+          std::string current_soln = std::to_string(s._mean) + " " + op_names_[i];
+          top_solns.push(current_soln);
         }
         else {
           TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
@@ -388,6 +390,10 @@ class TunableOp {
       }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
+      TUNABLE_LOG2("└──top five solutions for ", op_sig, '(', params_sig, ") ");
+      for (auto it = top_solns.rbegin(); it != top_solns.rend(); ++it) {
+        TUNABLE_LOG2("   ", *it);
+      }
       return ResultEntry(id_name, min_duration_ms);
     }
 
