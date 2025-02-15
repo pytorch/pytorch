@@ -1,19 +1,21 @@
 # mypy: allow-untyped-defs
-import os
-from itertools import chain, count, zip_longest
-from typing import Any, Callable, Hashable, Optional, TYPE_CHECKING, Union
+from __future__ import annotations
+
+import dataclasses
+import re
+from itertools import count, zip_longest
+from typing import Any, Optional, Self, Union
 
 import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
-from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import IRNode, TensorBox
-from ..utils import cache_on_self, DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
+from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -23,158 +25,160 @@ from .multi_kernel import MultiKernelCall
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
-if TYPE_CHECKING:
-    from ..graph import GraphLowering
+_cpp_string_literal_escapes = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\t": "\\t",
+    "\r": "\\r",
+}
+_cpp_string_literal_pattern = re.compile(r'["\\\n\t\r]')
 
 
-class DeferredGpuKernelLine(DeferredLineBase):
+def cpp_string_literal(s: str) -> str:
+    escaped = _cpp_string_literal_pattern.sub(
+        lambda match: _cpp_string_literal_escapes[match.group(0)], s
+    )
+    return f'"{escaped}"'
+
+
+@dataclasses.dataclass
+class DeferredTritonCallWrapper:
     """
     When using cpp wrapper, GPU kernel load and launch needs to wait for Triton kernels
-    to be tuned and stored as cubin files, so use a deferred line to backfill those information
+    to be tuned and stored as cubin files, so use a deferred generating the final wrapper around
+    the triton kernel until right before the prefix is written.
     """
 
-    def __init__(
-        self,
-        kernel_name: str,
-        line_template: str,
-        keys: tuple[str, ...],
-        additional_files: list[str],
-    ):
-        super().__init__(line_template)
-        assert not isinstance(line_template, DeferredLineBase)
-        self.additional_files = additional_files
-        self.kernel_name = kernel_name
-        self.line_template = line_template
-        self.keys = keys
+    wrapper_name: str
+    kernel_name: str
+    arg_types: list[str]
+    device_index: int
+    has_grid_arg: bool
 
-    def __call__(self):
+    def generate(self, wrapper: CppWrapperGpu):
+        prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
             # MultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        for key in self.keys:
-            assert (
-                key in params
-            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
-            if key == get_cpp_wrapper_cubin_path_name():
-                assert os.path.exists(params[key]), f"{params[key]} does not exist"
-                self.additional_files.append(params[key])
+        assert params, f"CudaKernelParamCache not populated for {self.kernel_name}"
+        def_args = params["def_args"]
+        inductor_meta = params["inductor_meta"]
 
-        return self.line_template % tuple(params[key] for key in self.keys)
+        if not V.graph.aot_mode:
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"static {wrapper.device_codegen.cpp_kernel_type()} {self.kernel_name} = nullptr;"
+                )
+            )
+            kernel_var_name = self.kernel_name
+        else:
+            kernel_var_name = f"kernels.{self.kernel_name}"
 
-    def _new_line(self, line):
-        return DeferredGpuKernelLine(
-            self.kernel_name, line, self.keys, self.additional_files
-        )
+        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        with prefix.indent():
+            assert len(def_args) == len(self.arg_types), (def_args, self.arg_types)
+            for name, arg_type in zip(def_args, self.arg_types):
+                if isinstance(arg_type, torch_dtype):
+                    prefix.writeline(f"const RAIIAtenTensorHandle& {name},")
+                elif arg_type is SymbolicCallArg:
+                    prefix.writeline(f"int64_t {name},")
+                else:
+                    raise ValueError(f"Unexpected arg type {arg_type}")
+            if self.has_grid_arg:
+                prefix.writeline("int grid_0, int grid_1, int grid_2,")
+            prefix.writeline("cudaStream_t stream_,")
+            prefix.writeline(
+                "const std::optional<std::string>& cubin_dir_ = std::nullopt"
+            )
+        prefix.writeline("){")
+        with prefix.indent():
+            self.generate_grid(prefix, inductor_meta, params)
+            self.generate_load_kernel(prefix, kernel_var_name, params)
+            self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
+        prefix.writeline("}")
 
-
-class DeferredGpuDefaultGrid:
-    """
-    A container for the default grid, which may be used by DeferredGpuGridLine
-    """
-
-    def __init__(
+    def generate_grid(
         self,
-        kernel_name: str,
-        grid,
-        grid_callable: Optional[Callable[..., Any]] = None,
-        **grid_extra_kwargs,
+        prefix: IndentedBuffer,
+        inductor_meta: dict[str, Any],
+        params: dict[str, Any],
     ):
-        self.kernel_name = kernel_name
-        self.grid = grid
-        self.grid_callable = grid_callable
-        self.grid_extra_kwargs = grid_extra_kwargs
+        if not self.has_grid_arg:
+            from ..runtime import triton_heuristics
 
-    def __iter__(self):
-        # DeferredGpuDefaultGrid can be passed to the base class, PythonWrapperCodegen,
-        # to generate the autotune code block, and thus we need this iterator
-        return iter(self.grid)
+            grid_cls = getattr(triton_heuristics, inductor_meta["grid_type"])
+            assert issubclass(grid_cls, triton_heuristics.GridExpr)
+            grid = grid_cls(inductor_meta, mode="cpp")
+            grid.generate(params["config"])
+            for line in grid.prefix:
+                prefix.writeline(line)
+            prefix.splice(
+                f"""\
+                uint32_t grid_0 = {grid.x_grid};
+                uint32_t grid_1 = {grid.y_grid};
+                uint32_t grid_2 = {grid.z_grid};
+                """
+            )
+        prefix.writeline("if (grid_0 == 0 || grid_1 == 0 || grid_2 == 0) return;")
 
-    def _process_grid(self, grid: Union[list[Any], tuple[Any, ...]]):
-        if isinstance(grid, (list, tuple)):
-            return [self._process_grid(e) for e in grid]
-        else:
-            return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
+    def generate_load_kernel(self, prefix, kernel_var_name, params):
+        prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
+        with prefix.indent():
+            load_kernel_args = [
+                cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
+                cpp_string_literal(params["mangled_name"]),
+                str(params["shared_mem"]),
+                "cubin_dir_",
+            ]
+            prefix.writeline(
+                f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
+            )
+        prefix.writeline("}")
 
-    def __call__(self):
-        if self.kernel_name.startswith("multi_kernel_"):
-            # MultiKernel will select one kernel after running the autotune block
-            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+    def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
+        triton_meta = params["triton_meta"]
+        arg_types = self.arg_types
 
-        grid = self.grid
-        assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
-        grid = self._process_grid(grid)
-        assert self.grid_callable is not None, "grid_callable can't be None"
-        if not self.grid_extra_kwargs:
-            grid_fn = self.grid_callable(*grid)
-        else:
-            grid_fn = self.grid_callable(*grid, **self.grid_extra_kwargs)
+        # args with value 1 are added into equal_to_1 and constants
+        # in triton_meta (in the Python codegen) which makes them
+        # inlined in the PTX and compiled CUBIN
+        equal_to_1 = triton_meta["configs"][0].equal_to_1
+        call_args = [
+            arg for i, arg in enumerate(params["def_args"]) if i not in equal_to_1
+        ]
+        arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+        # extract the arg signatures from triton_meta
+        arg_signatures = triton_meta["signature"].values()
+        arg_signatures = [
+            v for i, v in enumerate(arg_signatures) if i not in equal_to_1
+        ]
+        assert call_args == params["call_args"], (call_args, params["call_args"])
+        assert len(call_args) == len(arg_types) == len(arg_signatures)
 
-        params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        return grid_fn(params["meta"])
-
-
-class DeferredGpuGridLine(DeferredLineBase):
-    """
-    When using cpp wrapper, GPU kernel load and launch needs to wait for Triton kernels
-    to be tuned and stored as cubin files, so use a deferred line to backfill those information
-    """
-
-    def __init__(
-        self,
-        kernel_name: str,
-        grid_var: str,
-        grid,
-        autotune_configs,
-    ):
-        super().__init__("")
-        self.kernel_name = kernel_name
-        self.grid_var = grid_var
-        self.grid = grid
-        self.autotune_configs = autotune_configs
-
-    def __call__(self):
-        if self.kernel_name.startswith("multi_kernel_"):
-            # MultiKernel will select one kernel after running the autotune block
-            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
-
-        params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
-
-        if self.autotune_configs is not None:
-            # This indicates the Triton kernel is a user-defined one.
-            grid = None
-            if len(self.grid) == 1:
-                grid = self.grid[0]
-            else:
-                for i, c in enumerate(self.autotune_configs):
-                    if all(arg == params["meta"][key] for key, arg in c.kwargs.items()):
-                        grid = self.grid[i]
-                        break
-            assert grid is not None
-        elif isinstance(self.grid, DeferredGpuDefaultGrid):
-            grid = self.grid()
-        else:
-            grid = self.grid
-
-        assert len(grid) != 0, "Grid can't be empty"
-        grid_args_str = ", ".join(
-            [cexpr(V.graph.sizevars.simplify(item)) for item in grid]
+        call_args_str = wrapper.generate_args_decl(
+            prefix, call_args, arg_types, arg_signatures
         )
-        return f"    Grid {self.grid_var} = Grid({grid_args_str});"
+        prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
 
-    def _new_line(self, line):
-        return DeferredGpuGridLine(
-            self.kernel_name, self.grid_var, self.grid, self.autotune_configs
+        # add debug printer code for all triton kernel related calls
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, self.kernel_name, arg_types, None
         )
+        with debug_printer_manager:
+            launch_kernel_args = [
+                kernel_var_name,
+                "grid_0",
+                "grid_1",
+                "grid_2",
+                str(params["num_warps"]),
+                str(params["shared_mem"]),
+                "kernel_args_",
+                "stream_",
+            ]
+            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
 
 
 class CppWrapperGpu(CppWrapperCpu):
@@ -187,7 +191,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
-        self._load_kernel_cache: dict[Hashable, str] = {}
+        self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
 
     @staticmethod
     def create(
@@ -284,21 +288,18 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate(self, is_inference):
         with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
-            self.prefix.writeline("\n")
-            if not V.graph.aot_mode:
-                for kernel in chain(
-                    sorted(self.src_to_kernel.values()),
-                    sorted(
-                        [entry[0] for entry in self.user_defined_kernel_cache.values()]
-                    ),
-                ):
-                    self.prefix.writeline(
-                        maybe_hipify_code_wrapper(
-                            f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
-                        )
-                    )
-                self.prefix.writeline("\n")
             return super().generate(is_inference)
+
+    def finalize_prefix(self):
+        """Define the triton kernels now that autotuning is finished"""
+        old_prefix = self.prefix  # new content should go at start of prefix
+        self.prefix = IndentedBuffer()
+        super().finalize_prefix()
+        for kernel in self._triton_call_wrappers.values():
+            self.prefix.writeline("\n")
+            kernel.generate(self)
+        self.prefix.writeline("\n")
+        self.prefix.splice(old_prefix)
 
     def generate_user_defined_triton_kernel(
         self,
@@ -354,6 +355,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
         # generate data pointer for the source tensor
         source = self.generate_args_decl(
+            code=self,
             call_args=[self.val_to_arg_str(desc.tensor)],
             arg_types=[desc.tensor.get_dtype()],
             arg_signatures=[None],
@@ -374,36 +376,9 @@ class CppWrapperGpu(CppWrapperCpu):
         args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
         self.writeline(f"{fn}({args});")
 
-    def generate_load_kernel_once(
-        self,
-        kernel_name: str,
-        graph: "GraphLowering",  # for per-graph caching
+    def generate_args_decl(
+        self, code: Union[IndentedBuffer, Self], call_args, arg_types, arg_signatures
     ):
-        cache_key = (kernel_name, graph)
-        if cache_key in self._load_kernel_cache:
-            return self._load_kernel_cache[cache_key]
-        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        self._load_kernel_cache[cache_key] = kernel_var_name
-
-        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
-        self.writeline(f"if ({kernel_var_name} == nullptr) {{")
-        deferred_gpu_kernel_line = DeferredGpuKernelLine(
-            kernel_name,
-            (
-                "    "
-                + kernel_var_name
-                + ' = loadKernel("%s", "%s", %s, this->cubin_dir_);'
-                if V.graph.aot_mode
-                else "    " + kernel_var_name + ' = loadKernel("%s", "%s", %s);'
-            ),
-            keys,
-            self.additional_files,
-        )
-        self.writeline(deferred_gpu_kernel_line)
-        self.writeline("}")
-        return kernel_var_name
-
-    def generate_args_decl(self, call_args, arg_types, arg_signatures):
         new_args: list[str] = []
 
         # Add more cases for other types as needed
@@ -425,18 +400,19 @@ class CppWrapperGpu(CppWrapperCpu):
                         arg_type,
                         arg,
                         var_name,
+                        indented_buffer=code,
                     )
                 else:
                     device_ptr_type = self.device_codegen.cpp_device_ptr()
-                    self.writeline(
+                    code.writeline(
                         maybe_hipify_code_wrapper(
                             f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                         )
                     )
             elif arg_type in (sympy.Integer, int):
-                self.writeline(f"int {var_name} = {cexpr(arg)};")
+                code.writeline(f"int {var_name} = {cexpr(arg)};")
             elif arg_type in (sympy.Float, float):
-                self.writeline(f"float {var_name} = {cexpr(arg)};")
+                code.writeline(f"float {var_name} = {cexpr(arg)};")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
@@ -445,11 +421,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 and arg_signature is not None
                 and arg_signature in signature2dtype.keys()
             ):
-                self.writeline(
+                code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
             else:
-                self.writeline(f"auto {var_name} = {cexpr(arg)};")
+                code.writeline(f"auto {var_name} = {cexpr(arg)};")
             new_args.append(f"&{var_name}")
 
         for arg, arg_type, arg_signature in zip_longest(
@@ -459,39 +435,19 @@ class CppWrapperGpu(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(
-        self,
-        kernel_name: str,
-        grid_args: list[Any],
-        gpu: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
-        **grid_extra_kwargs,
-    ):
-        """
-        Generate grid configs for launching a CUDA kernel using the grid
-        function from triton_heuristics. Because its computation needs
-        to read kernel config after autotune, it is done in a deferred way
-        using DeferredGpuDefaultGrid.
-        """
-        assert gpu, "CppWrapperGpu.generate_default_grid does not support non-GPU"
-        return DeferredGpuDefaultGrid(
-            kernel_name, grid_args, grid_callable, **grid_extra_kwargs
-        )
-
     def generate_kernel_call(
         self,
         kernel_name: str,
         call_args,
-        grid=None,
         device_index=None,
         gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
-        grid_fn: str = "grid",
         triton_meta=None,
         autotune_configs=None,
-        grid_extra_kwargs="",
+        *,
+        grid_arg=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -504,16 +460,14 @@ class CppWrapperGpu(CppWrapperCpu):
                 self,
                 kernel_name,
                 call_args,
-                grid,
                 device_index,
                 gpu,
                 triton,
                 arg_types,
                 raw_args,
-                grid_fn,
                 triton_meta,
                 autotune_configs,
-                grid_extra_kwargs,
+                grid_arg=grid_arg,
             )
 
         if (
@@ -526,16 +480,14 @@ class CppWrapperGpu(CppWrapperCpu):
                 self,
                 kernel_name,
                 call_args,
-                grid,
                 device_index,
                 gpu,
                 triton,
                 arg_types,
                 raw_args,
-                grid_fn,
                 triton_meta,
                 autotune_configs,
-                grid_extra_kwargs,
+                grid_arg=grid_arg,
             )
 
         if device_index is None:
@@ -549,68 +501,17 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
         if triton:
-            device_index, call_args = self.prepare_triton_kernel_call(
-                device_index, call_args
+            call_args = self.prepare_triton_kernel_call(call_args)
+            if grid_arg:  # only be set for templates/user-defined kernels
+                assert len(grid_arg) == 3, grid_arg
+                call_args.extend(map(str, grid_arg))
+            fn_name = self.define_triton_kernel_call_wrapper(
+                kernel_name, arg_types, device_index, bool(grid_arg)
             )
-            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
-
-            # args with value 1 are added into equal_to_1 and constants
-            # in triton_meta (in the Python codegen) which makes them
-            # inlined in the PTX and compiled CUBIN
-            arg_signatures = []
-            if (
-                triton_meta is not None
-                and triton_meta.get("configs")
-                and triton_meta.get("signature")
-            ):
-                equal_to_1 = triton_meta["configs"][0].equal_to_1
-                call_args = [
-                    arg for i, arg in enumerate(call_args) if i not in equal_to_1
-                ]
-                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-                # extract the arg signatures from triton_meta
-                arg_signatures = triton_meta["signature"].values()
-                arg_signatures = [
-                    v for i, v in enumerate(arg_signatures) if i not in equal_to_1
-                ]
-
-            call_args_str = self.generate_args_decl(
-                call_args, arg_types, arg_signatures
-            )
-            kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
-
-            grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
-            self.writeline(
-                DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
-            )
-
-            kernel_var_name = (
-                f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-            )
-            # add debug printer code for all triton kernel related calls
-            debug_printer_manager = V.graph.wrapper_code.debug_printer
-            debug_printer_manager.set_printer_args(
-                call_args, kernel_name, arg_types, None
-            )
-            with debug_printer_manager:
-                self.writeline(f"if ({grid_var}.is_non_zero()) {{")
-                self.writeline(
-                    DeferredGpuKernelLine(
-                        kernel_name,
-                        r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                            kernel_var_name,
-                            f"{grid_var}.grid_x",
-                            f"{grid_var}.grid_y",
-                            f"{grid_var}.grid_z",
-                            kernel_args_var,
-                            stream,
-                        ),
-                        ("num_warps", "shared_mem"),
-                        self.additional_files,
-                    ),
-                )
-                self.writeline("}")
+            call_args.append(stream)
+            if V.graph.aot_mode:
+                call_args.append("this->cubin_dir_")
+            self.writeline(f"{fn_name}({', '.join(call_args)});")
         else:
             casted = []
             for arg_type, arg in zip(arg_types, call_args):
@@ -620,6 +521,20 @@ class CppWrapperGpu(CppWrapperCpu):
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+
+    def define_triton_kernel_call_wrapper(
+        self,
+        kernel_name: str,
+        arg_types: list[str],
+        device_index: int,
+        has_grid_arg: bool,
+    ) -> str:
+        wrapper_name = f"call_{kernel_name}"
+        if wrapper_name not in self._triton_call_wrappers:
+            self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
+                wrapper_name, kernel_name, arg_types, device_index, has_grid_arg
+            )
+        return wrapper_name
 
     def make_zero_buffer(self, name):
         return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get()));"

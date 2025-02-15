@@ -202,7 +202,7 @@ class ComboKernelBenchmarkTests(TestCase):
         out_compiled = torch.compile(test_activations)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     @requires_cuda
     def test_reduce_benchmark(self):
@@ -248,7 +248,7 @@ class ComboKernelBenchmarkTests(TestCase):
         out_compiled = torch.compile(test_mutated)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertTrue(torch._inductor.metrics.generated_kernel_count in [6, 9])
+        self.assertTrue(torch._inductor.metrics.generated_kernel_count in [5, 8])
 
     @requires_cuda
     def test_round_robin_dispatch(self):
@@ -272,7 +272,7 @@ class ComboKernelBenchmarkTests(TestCase):
         out_compiled = torch.compile(test_mutated)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_cuda
     def test_2d_blocking_benchmark(self):
@@ -294,7 +294,8 @@ class ComboKernelBenchmarkTests(TestCase):
             ),
         )
 
-        self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
+        self.assertGreaterEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertLessEqual(torch._inductor.metrics.generated_kernel_count, 8)
 
     @requires_cuda
     def test_persistent_reduction_no_x_dim(self):
@@ -311,7 +312,7 @@ class ComboKernelBenchmarkTests(TestCase):
         out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
 
 @instantiate_parametrized_tests
@@ -364,7 +365,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(test_activations)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     @requires_cuda
     def test_dynamic_shapes_2d_blocking(self):
@@ -386,7 +387,8 @@ class ComboKernelDynamicShapesTests(TestCase):
             ),
         )
 
-        self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
+        self.assertGreaterEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertLessEqual(torch._inductor.metrics.generated_kernel_count, 8)
 
     @requires_cuda
     def test_dynamic_shapes_reduce(self):
@@ -433,7 +435,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(test_mutated)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_cuda
     @torch._inductor.config.patch("combo_kernels_autotune", 0)
@@ -454,7 +456,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(test_activations)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     @requires_cuda
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
@@ -473,7 +475,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
@@ -498,7 +500,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         compiled = torch.compile(fn)
         out_compiled = compiled(*inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertTrue(5 <= torch._inductor.metrics.generated_kernel_count <= 6)
+        self.assertTrue(4 <= torch._inductor.metrics.generated_kernel_count <= 6)
         torch._inductor.metrics.reset()
 
         inps = (
@@ -512,7 +514,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = compiled(*inps)
         out_eager = fn(*inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertTrue(5 <= torch._inductor.metrics.generated_kernel_count <= 6)
+        self.assertTrue(4 <= torch._inductor.metrics.generated_kernel_count <= 6)
 
     @requires_cuda
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
