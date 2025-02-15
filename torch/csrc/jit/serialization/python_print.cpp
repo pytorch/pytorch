@@ -1316,14 +1316,14 @@ struct PythonPrintImpl {
     // handle broadcasting lists
     if (arg.type()->kind() == ListType::Kind &&
         (value.isInt() || value.isDouble() || value.isBool())) {
-      TORCH_INTERNAL_ASSERT(arg.N(), "expected broadcastinglist");
+      auto N = arg.N();
+      TORCH_INTERNAL_ASSERT(N, "expected broadcastinglist");
       if (value.isInt()) {
-        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *arg.N()));
+        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *N));
       } else if (value.isBool()) {
-        printConstant(stmt, createBroadList<bool>(value.toBool(), *arg.N()));
+        printConstant(stmt, createBroadList<bool>(value.toBool(), *N));
       } else if (value.isDouble()) {
-        printConstant(
-            stmt, createBroadList<double>(value.toDouble(), *arg.N()));
+        printConstant(stmt, createBroadList<double>(value.toDouble(), *N));
       }
     } else {
       printConstant(stmt, value);
