@@ -1915,13 +1915,34 @@ def _new_process_group_helper(
         group_rank,
         group_size,
     )
-    # Set the default backend when only single backend is passed in.
+    backend_config = BackendConfig(backend)
+    # Set the default backend when single backend is passed in.
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
-        pg._set_default_backend(Backend.backend_type_map[backend])
+        if backend == Backend.UNDEFINED:
+            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
+            # will be created, we use nccl(if cuda is available) or gloo as default
+            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            if Backend.NCCL in backend_config.get_device_backend_map().values():
+                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
+            else:
+                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        else:
+            pg._set_default_backend(Backend.backend_type_map[backend])
+    # In order to correctly call pg._has_hooks(), we should set the default backend
+    # when multi backend is passed in
+    else:
+        if Backend.NCCL in backend_config.device_backend_map.values():
+            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
+        elif Backend._plugins.keys():
+            custom_backend = next(iter(Backend._plugins.keys()))
+            if custom_backend in backend_config.device_backend_map.values():
+                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
+        else:
+            pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+
     if device_id:
         pg.bound_device_id = device_id
-    backend_config = BackendConfig(backend)
     backend_class: torch._C._distributed_c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
@@ -2135,7 +2156,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     # alive until all works and hooks are done. The current implementation does the
     # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
     # for the pending hooks to finish.
-    if pg.name().lower() == "nccl" and pg._has_hooks():
+    if type(pg) == ProcessGroup and pg._has_hooks():
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
@@ -2651,13 +2672,15 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
+    if group is None:
+        group = _get_default_group()
     device = p2p_op_list[0].tensor.device
 
     def peer_kwarg(op: P2POp) -> dict[str, int]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
-    if device.type == "cuda":
+    if type(group) == ProcessGroup and group._get_backend(device).supports_coalescing:
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
@@ -2670,7 +2693,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
 
         return cm.works
     else:
-        # Backward support for Gloo
+        # backend not support coalescing
         reqs = []
         for p2p_op in p2p_op_list:
             work = p2p_op.op(
