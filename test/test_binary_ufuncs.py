@@ -1244,7 +1244,10 @@ class TestBinaryUfuncs(TestCase):
         # output partially overlaps with input:
         if not expected_failure:
             if TEST_WITH_TORCHDYNAMO:
-                with self.assertRaisesRegex(TorchDynamoException, "Unexpected exception when running generated GraphModule"):
+                with self.assertRaisesRegex(
+                    TorchDynamoException,
+                    "Unexpected exception when running generated GraphModule",
+                ):
                     _test(op, data[0:sz], data[1 : sz + 1])
             else:
                 with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
