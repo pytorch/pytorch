@@ -48,7 +48,7 @@ class ProfilesRegistry {
 };
 
 ProfilesRegistry& getProfilesRegistry() {
-  static auto registry = std::ref(*new ProfilesRegistry{});
+  static ProfilesRegistry registry;
   return registry;
 }
 
