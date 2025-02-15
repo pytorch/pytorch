@@ -279,9 +279,6 @@ class CUTLASSTemplate(CUDATemplate):
 
     @override
     def get_runtime_arg_info(self) -> list[ArgInfo]:
-        """
-        Helper method to retrieve runtime args from generate kwargs
-        """
         return [ArgInfo("swizzle", "const uint8_t")]
 
     @override
