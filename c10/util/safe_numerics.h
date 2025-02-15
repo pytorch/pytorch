@@ -31,6 +31,15 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #endif
 }
 
+C10_ALWAYS_INLINE bool add_overflows(int64_t a, int64_t b, int64_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_add_overflow(a, b, out);
+#else
+  *out = a + b;
+  return *out < a;
+#endif
+}
+
 C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
