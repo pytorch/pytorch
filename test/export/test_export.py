@@ -29,6 +29,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
@@ -75,7 +76,7 @@ from torch.testing._internal.custom_tensor import (
     CustomTensorPlainOut,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -519,6 +520,22 @@ class TestExport(TestCase):
                 self.assertTrue(node.target == torch.ops.aten.linear.default)
 
         self.assertEqual(counter, 1)
+
+    def test_bincount(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                weights = torch.linspace(0, 1, steps=5)
+                bc = x.bincount(weights)
+                return bc
+
+        model = M()
+        ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
+        print(ep)
+        inp = torch.randint(0, 8, (5,), dtype=torch.int64)
+        self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -6369,6 +6386,72 @@ def forward(self, b_a_buffer, x):
         inp = torch.ones(2, 3)
         ep = torch.export.export(M(), (inp,))
         inp = torch.randn(2, 3)
+        epm = ep.module()
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
+            )
+
+    @requires_cuda
+    def test_export_associative_scan_symbol_dim(self):
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(self.combine_fn, x, 2)
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+
+    @requires_cuda
+    def test_export_associative_scan_symbol_scandim(self):
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(self.combine_fn, x, 1)
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+
+    # This test is expected to fail because accociative_scan's backend is not set to "eager"
+    @unittest.expectedFailure
+    @requires_gpu
+    def test_export_associative_scan_lifted_buffers(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    torch.ones(3, 2, device=torch.device("cuda"))
+                )
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.buffer
+
+            def forward(self, x):
+                # TODO: need combine_mode='generic' here as lifted arguments are not yet supported in inductor
+                return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
+
+        inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        ep = export(M(), (inp,))
         epm = ep.module()
         self.assertTrue(torch.allclose(epm(inp), M()(inp)))
 
