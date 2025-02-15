@@ -895,6 +895,30 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
+    @config.patch("triton.max_tiles", 3)
+    def test_3d_permute_tiling(self):
+        """
+        Test 3D tiling with permute.
+        """
+
+        def foo(x, y, z):
+            dims = [0, 2, 1]
+            a = x.permute(dims=dims) + y
+            b = (z + y).permute(dims=dims)
+            return a + b
+
+        inps = (torch.rand((1, 51, 51), device=self.device, dtype=torch.float32),) * 3
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=4,
+        )
+
+        # Check for 3D tiling
+        self.assertIn("ZBLOCK", code)
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
