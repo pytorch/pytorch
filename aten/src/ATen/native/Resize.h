@@ -88,26 +88,31 @@ inline void checkInBoundsForStorage(
     const Storage& new_storage) {
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  T storage_offset_bytes;
-  T storage_offset_bytes = c10::mul_overflows(storage_offset, data_type.itemsize(), &storage_offset_bytes);
 
-  TORCH_CHECK(!storage_offset_bytes,
+  int64_t storage_size_bytes_int64 = maybe_convert_symint<int64_t>(storage_size_bytes);
+  uint64_t storage_size_bytes_uint64 = static_cast<uint64_t>(storage_size_bytes_int64);
+
+  uint64_t storage_offset_bytes;
+  uint64_t itemsize = data_type.itemsize();
+  bool storage_offset_overflow = c10::mul_overflows(static_cast<uint64_t>(maybe_convert_symint<int64_t>(storage_offset)), itemsize, &storage_offset_bytes);
+
+  TORCH_CHECK(!storage_offset_overflow,
               "Storage offset byte calculation overflowed with offset=", storage_offset);
 
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
+  int64_t new_storage_size_bytes = maybe_convert_symint<int64_t>(new_storage.sym_nbytes());
 
-  T sum_size;
-  bool overflowed = c10::add_overflows(storage_size_bytes, storage_offset_bytes, &sum_size);
+  uint64_t sum_size;
+  bool overflowed = c10::add_overflows(storage_size_bytes_uint64, storage_offset_bytes, &sum_size);
 
   TORCH_CHECK(!overflowed,
               "Total storage size calculation overflowed with offset=", storage_offset);
 
   TORCH_CHECK(
-      sum_size <= new_storage_size_bytes,
+      sum_size <= static_cast<uint64_t>(new_storage_size_bytes),
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -174,7 +179,7 @@ inline void setStrided(
                 "got strides: ", stride);
   }
 
-  
+
 
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
