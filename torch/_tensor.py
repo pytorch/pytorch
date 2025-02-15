@@ -6,8 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, ParamSpec, TypeVar, Union
-from typing_extensions import Concatenate
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -33,7 +33,7 @@ _T = TypeVar("_T")
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
-    f: Callable[Concatenate[_T, _P], "Tensor"]
+    f: Callable[Concatenate[_T, _P], "Tensor"],
 ) -> Callable[Concatenate[_T, _P], "Tensor"]:
     @functools.wraps(f)
     def wrapped(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
@@ -1115,7 +1115,7 @@ class Tensor(torch._C.TensorBase):
         ],
         _handle_torch_function_and_wrap_type_error_to_not_implemented(
             _C.TensorBase.pow
-        )
+        ),
     )
 
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
