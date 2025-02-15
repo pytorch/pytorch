@@ -33,6 +33,7 @@ from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..ops_handler import DefaultHandler
+from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
@@ -41,10 +42,6 @@ from ..runtime.hints import (
     TRITON_MAX_RSPLIT,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..runtime.triton_heuristics import (
-    cooperative_reduction_grid,
-    grid as default_grid_fn,
-)
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -3277,7 +3274,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-            from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
         """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
@@ -3466,6 +3462,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             # Triton will not accept an OrderedSet for autotune_hints
+            "grid_type": self._get_grid_type().__name__,
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
@@ -3617,12 +3614,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if tree.prefix == "x" and self.no_x_dim:
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
-    def _get_grid_fn(self):
+    def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
+        n = len(self.range_trees) - 1
         if self.cooperative_reduction:
-            return cooperative_reduction_grid
-        return default_grid_fn
+            assert n == 1
+            return triton_heuristics.CooperativeReductionGrid
+        elif n == 1:
+            return triton_heuristics.Grid1D
+        elif n == 2:
+            # TODO(jansel): need to implement overflow grid
+            return triton_heuristics.Grid2D
+        elif n == 3:
+            return triton_heuristics.Grid3D
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
+    def add_numel_to_call_args(self, name, call_args, arg_types):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -3633,31 +3638,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if not tree.is_reduction or self.inside_reduction:
                 call_args.append(expr)
                 arg_types.append(type(expr))
-            if tree.grid_dim is not None:
-                grid.append(expr)
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
-        grid: list[Any] = []
-        self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
+        self.add_numel_to_call_args(name, call_args, arg_types)
         current_device = V.graph.get_current_device_or_throw()
 
         for ws in self.args.workspace_args:
             wrapper.generate_workspace_allocation(ws)
 
-        grid_fn = self._get_grid_fn()
-        grid = wrapper.generate_default_grid(name, grid, grid_callable=grid_fn)
         wrapper.generate_kernel_call(
             name,
             call_args,
-            grid,
             current_device.index,
             gpu=current_device.type != "cpu",
             triton=True,
             arg_types=arg_types,
-            grid_fn=grid_fn.__name__,
             triton_meta=self.triton_meta,
         )
 

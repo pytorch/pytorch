@@ -439,6 +439,7 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta = triton_meta
 
         inductor_meta = {
+            "grid_type": None,
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **TritonKernel.inductor_meta_common(),
         }
@@ -985,37 +986,44 @@ class TritonTemplateKernel(TritonKernel):
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)
 
+        if all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
+            static_grid = self.grid_fn(*map(int, self.call_sizes), self.meta)
+        else:
+            static_grid = None
+
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
             # of the grid function to generate those grid configs, which may contain
             # symbolic values. The wrapper will use cexpr to print out C++ code
             # appropriately for the grid configs.
-            grid = self.call_sizes + [self.meta]
+            assert static_grid, "cpp_wrapper requires static grid size"
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                grid=self.grid_fn(*grid),
                 # Calling self.grid_fn(*grid) already computes grid as a tuple,
                 # so we need to explicitly set grid_fn as empty here. Otherwise, the
                 # generated wrapper code will wrap the tuple as grid(tuple), which can
                 # cause incorrect grid computation in some corner cases.
-                grid_fn="",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
+                grid_arg=static_grid,
             )
         else:
-            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
-            meta = wrapper.add_meta_once(self.meta)
-            grid = self.call_sizes + [meta]
+            if static_grid:
+                grid_arg = repr(static_grid)
+            else:
+                wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+                meta = wrapper.add_meta_once(self.meta)
+                grid = [*map(str, self.call_sizes), meta]
+                grid_arg = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid)})"
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                grid=grid,
-                grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
                 gpu="cpu" not in V.graph.device_types,
+                grid_arg=grid_arg,
             )
 
         if self.workspace_arg is not None:
@@ -2043,6 +2051,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
+                    raise
                     raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
