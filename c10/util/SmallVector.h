@@ -18,6 +18,7 @@
 // added SmallVector::at
 // added operator<< for std::ostream
 // added C10_API to export SmallVectorBase
+// added SmallVectorImpl move constructor
 
 #pragma once
 
@@ -126,6 +127,7 @@ class SmallVectorTemplateCommon
   /// with small-size of 0 for T with lots of alignment, it's important that
   /// SmallVectorStorage is properly-aligned even for small-size of 0.
   void* getFirstEl() const {
+    // NOLINTNEXTLINE(*const-cast)
     return const_cast<void*>(reinterpret_cast<const void*>(
         reinterpret_cast<const char*>(this) +
         offsetof(SmallVectorAlignmentAndSize<T>, FirstEl)));
@@ -1007,6 +1009,10 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   SmallVectorImpl& operator=(const SmallVectorImpl& RHS);
 
+  SmallVectorImpl(SmallVectorImpl&& RHS) noexcept(
+      std::is_nothrow_move_constructible_v<T> &&
+      std::is_nothrow_destructible_v<T>);
+
   SmallVectorImpl& operator=(SmallVectorImpl&& RHS) noexcept(
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_destructible_v<T>);
@@ -1179,10 +1185,18 @@ operator=(SmallVectorImpl<T>&& RHS) noexcept(
   return *this;
 }
 
+template <typename T>
+SmallVectorImpl<T>::SmallVectorImpl(SmallVectorImpl<T>&& RHS) noexcept(
+    std::is_nothrow_move_constructible_v<T> &&
+    std::is_nothrow_destructible_v<T>) {
+  this->operator=(std::move(RHS));
+}
+
 /// Storage for the SmallVector elements.  This is specialized for the N=0 case
 /// to avoid allocating unnecessary storage.
 template <typename T, unsigned N>
 struct SmallVectorStorage {
+  // NOLINTNEXTLINE(*c-arrays*)
   alignas(T) char InlineElts[N * sizeof(T)];
 };
 
@@ -1312,7 +1326,8 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                   std::input_iterator_tag>,
           int> = 0>
   explicit SmallVector(Container&& c) : SmallVectorImpl<T>(N) {
-    this->append(c.begin(), c.end());
+    this->append(
+        std::forward<Container>(c).begin(), std::forward<Container>(c).end());
   }
 
   SmallVector(std::initializer_list<T> IL) : SmallVectorImpl<T>(N) {
