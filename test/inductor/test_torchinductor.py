@@ -775,12 +775,13 @@ def skip_if_halide(fn):
     return wrapper
 
 
-def skip_if_mps(fn):
+def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self):
-        if is_mps_backend(self.device):
-            raise unittest.SkipTest("mps not supported")
-        return fn(self)
+        if not is_mps_backend(self.device):
+            return fn(self)
+        with self.assertRaises(Exception):
+            return fn(self)
 
     return wrapper
 
@@ -2017,8 +2018,8 @@ class CommonTemplate:
         ):
             if not self.is_dtype_supported(dtype):
                 continue
-            # cumsum not implemented on MacOS-13
-            if self.device == "mps" and dtype == torch.int64 and MACOS_VERSION < 13.3:
+            # cumsum not implemented for integers on MacOS-13
+            if self.device == "mps" and not dtype.is_floating_point and MACOS_VERSION < 13.3:
                 continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
@@ -2087,7 +2088,7 @@ class CommonTemplate:
             if not self.is_dtype_supported(dtype):
                 continue
             # cumsum not implemented on MacOS-13
-            if self.device == "mps" and dtype == torch.int64 and MACOS_VERSION < 13.3:
+            if self.device == "mps" and not dtype.is_floating_point and MACOS_VERSION < 13.3:
                 continue
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
@@ -2456,7 +2457,7 @@ class CommonTemplate:
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
-    @skip_if_mps
+    @xfail_if_mps
     def test_sum_dtype(self):
         def fn(x):
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
@@ -4281,7 +4282,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 3, 10, 10),))
 
-    @skip_if_mps
+    @xfail_if_mps
     def test_to_dtype(self):
         def fn(a, b):
             return (
@@ -11801,7 +11802,7 @@ class CommonTemplate:
         pt2_optimizer_step(o)
 
     # Skipped on MPS because avgpool size is not divisible
-    @skip_if_mps
+    @xfail_if_mps
     @skip_if_gpu_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
@@ -12184,7 +12185,7 @@ class CommonTemplate:
         t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
         self.assertFalse(complex_memory_overlap(t))
 
-    @skip_if_mps
+    @xfail_if_mps
     def test_generate_rand_fp8(self):
         """
         PyTorch can not generate fp8 tensors with a normal distribution because of
