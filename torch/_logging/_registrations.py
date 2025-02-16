@@ -52,6 +52,8 @@ register_log(
         "torch._export.serde.serialize",
     ],
 )
+register_log("memory", "torch.memory")
+register_log("delivery", "torch.delivery")
 
 register_artifact(
     "guards",
