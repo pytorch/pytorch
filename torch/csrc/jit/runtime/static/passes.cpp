@@ -1272,7 +1272,7 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
     if (!axis_opt) {
       continue;
     }
-    auto axis = *axis_opt;
+    const auto& axis = *axis_opt;
     auto* split_node_output = node->output();
     auto* list_unpack_node =
         maybeUserWithKind(split_node_output, prim::ListUnpack);
