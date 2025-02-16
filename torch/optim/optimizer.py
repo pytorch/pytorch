@@ -900,18 +900,66 @@ class Optimizer:
             else:
                 return value
 
+        def _contain_tensor(data):
+            if data is None:
+                return False
+            elif isinstance(data, (int, float, str, bool, complex)):
+                return False
+            elif isinstance(data, torch.Tensor):
+                return True
+            elif isinstance(data, dict):
+                for k, v in data.items():
+                    if _contain_tensor(data[k]):
+                        return True
+            elif isinstance(data, Iterable):
+                for d in data:
+                    if _contain_tensor(d):
+                        return True
+            else: # for customized class
+                for k, v in vars(data).items():
+                    if _contain_tensor(v):
+                        return True
+            return False
+
+        def _copy(self_data, data):
+            r"""Copy values only for Tensors and deepcopy otherwise
+            """
+            if isinstance(data, torch.Tensor):
+                self_data.data = data
+            elif isinstance(data, dict):
+                for k, v in data.items():
+                    if not _contain_tensor(v):
+                        self_data[k] = deepcopy(v)
+                    else:
+                        _copy(self_data[k], v)
+            elif isinstance(data, Iterable):
+                for i, v in enumerate(data):
+                    if not _contain_tensor(v):
+                        self_data[i] = deepcopy(v)
+                    else:
+                        _copy(self_data[i], v)
+            else: # Customized class
+                for k, v in vars(data).items():
+                    if _contain_tensor(v):
+                        _copy(getattr(self_data, k), v)
+                    else:
+                        setattr(self_data, k, v)
+
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = _cast(
-                    param, v, param_id=k, param_groups=state_dict["param_groups"]
-                )
+
+                if not _contain_tensor(v) or len(self.state[param]) == 0:
+                    self.state[param] = _cast(
+                        param, v, param_id=k, param_groups=state_dict["param_groups"]
+                    )
+                else:
+                    _copy(self.state[param], v)
             else:
-                state[k] = v
+                self.state[k] = v
 
         # Update parameter groups, setting their 'params' value
         def update_group(
@@ -923,7 +971,7 @@ class Optimizer:
             return new_group
 
         param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
-        self.__setstate__({"state": state, "param_groups": param_groups})
+        self.__setstate__({"param_groups": param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
             post_hook(self)
