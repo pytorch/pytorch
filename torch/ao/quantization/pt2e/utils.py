@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -12,7 +13,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.utils._pytree import LeafSpec
 
 
 __all__ = [
@@ -464,7 +464,10 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    args_spec = in_spec.children_specs[0]
+    assert in_spec.type is tuple
+    args_spec = in_spec.child(0)
+    assert args_spec.type is tuple
+    args_spec_children = args_spec.children()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -479,7 +482,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        args_spec.children_specs.append(LeafSpec())
+                        args_spec_children.append(pytree.treespec_leaf())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -490,8 +493,8 @@ def _replace_literals_with_new_placeholders(
         node.args = new_args
 
     # Update `num_nodes`, `num_leaves`, `num_children`.
-    args_spec.__post_init__()
-    in_spec.__post_init__()
+    args_spec = pytree.treespec_tuple(args_spec_children)
+    gm._in_spec = in_spec = pytree.treespec_tuple([args_spec, *in_spec.children()[1:]])
     return gm
 
 
