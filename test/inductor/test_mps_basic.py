@@ -226,6 +226,7 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
+    "test_vectorized_ops_masked",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",
