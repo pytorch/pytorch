@@ -1887,7 +1887,11 @@ class VariableBuilder:
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif (
+                self.source.dynamism is not None
+                and self.source.dynamism[0]
+                or not config.assume_static_by_default
+            ):
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2736,7 +2740,7 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic:
+        if marked_dynamic or (isinstance(source, LocalSource) and source.dynamism and source.dynamism[i]):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
