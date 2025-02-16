@@ -1458,8 +1458,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: ceil_out
-    MPS: ceil_out_mps
+    CPU, CUDA, MPS: ceil_out
     SparseCPU, SparseCUDA: ceil_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: ceil_sparse_csr_out
   tags: pointwise
@@ -2742,8 +2741,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: floor_out
-    MPS: floor_out_mps
+    CPU, CUDA, MPS: floor_out
     SparseCPU, SparseCUDA: floor_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: floor_sparse_csr_out
   tags: pointwise
@@ -5000,9 +4998,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: round_out
-    CUDA: round_out
-    MPS: round_out_mps
+    CPU, CUDA, MPS: round_out
     SparseCPU, SparseCUDA: round_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: round_sparse_csr_out
   tags: pointwise
@@ -6352,8 +6348,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: trunc_out
-    MPS: trunc_out_mps
+    CPU, CUDA, MPS: trunc_out
     SparseCPU, SparseCUDA: trunc_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: trunc_sparse_csr_out
   tags: pointwise
