@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, IO, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch._inductor
@@ -28,7 +29,7 @@ class PT2ArchiveWriter:
         self.archive_path: FileLike = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveWriter":
+    def __enter__(self) -> Self:
         assert self.archive_file is None
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "w", compression=zipfile.ZIP_STORED
@@ -63,7 +64,7 @@ class PT2ArchiveReader:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveReader":
+    def __enter__(self) -> Self:
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "r", compression=zipfile.ZIP_STORED
         )

@@ -5,10 +5,10 @@ import dataclasses
 from typing import Optional
 
 import torch
-from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
+from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
 
 
-class InvokeQuantTracer(PrimHOPBase):
+class InvokeQuantTracer(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant_packed")
 
@@ -22,7 +22,7 @@ class InvokeQuantTracer(PrimHOPBase):
 invoke_quant_packed = InvokeQuantTracer()
 
 
-class InvokeQuantUnpacked(PrimHOPBase):
+class InvokeQuantUnpacked(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant")
 
@@ -63,7 +63,7 @@ class InvokeQuant:
         scheme: Optional[str] = None,
         **kwargs,
     ):
-        if not torch._utils.is_compiling():
+        if not torch.compiler.is_compiling():
             return args[0](*args[1], **kwargs)
 
         if scheme is not None:

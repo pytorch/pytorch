@@ -14,7 +14,10 @@ from typing import Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.inductor_prims
 import torch.fx as fx
-import torch.utils.pytree as pytree
+import torch.utils.pytree.python as pytree
+from torch._functorch._activation_checkpointing.ac_logging_utils import (
+    create_structured_trace_for_min_cut_info,
+)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -196,7 +199,7 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "placeholder":
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
-            all_args = pytree.tree_leaves((node.args, node.kwargs))
+            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
                 isinstance(env[x], InvalidNodeBase)
                 for x in all_args
@@ -274,8 +277,8 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs
 ) -> tuple[list[fx.Node], list[fx.Node]]:
-    outputs = pytree.tree_leaves(
-        [node.args for node in joint_module.graph.find_nodes(op="output")]
+    outputs = pytree.arg_tree_leaves(
+        *(node.args for node in joint_module.graph.find_nodes(op="output"))
     )
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
@@ -1623,44 +1626,6 @@ def choose_saved_values_set(
                 node_info,
                 all_recomputable_banned_nodes,
             )
-            if AOT_PARTITIONER_DEBUG:
-                max_runtime = max(
-                    runtimes_banned_nodes
-                )  # For normalizing runtimes in logs
-                input_summary = [
-                    f"\n\t\t\t{index}, {memory}, {runtime / max_runtime}, {node.op}, {node.target}, {node.meta}, {node.args}"
-                    for index, (memory, runtime, node) in enumerate(
-                        zip(
-                            memories_banned_nodes,
-                            runtimes_banned_nodes,
-                            all_recomputable_banned_nodes,
-                        )
-                    )
-                ]
-                joint_graph_nodes = [node.name for node in joint_graph.nodes]
-                joint_graph_edges = [
-                    (inp.name, node.name)
-                    for node in joint_graph.nodes
-                    for inp in node.all_input_nodes
-                ]
-                knapsack_summary = f"""
-Activation Checkpointing - Knapsack Problem Summary:
-    Input:
-        Solver: {config.activation_memory_budget_solver}
-        Max Memory: {max(config.activation_memory_budget, 0)}
-        Graph Nodes: {joint_graph_nodes}
-        Graph Edges: {joint_graph_edges}
-        (Index, Memory, Runtime, Node.Op, Node.Target, Metadata): {"".join(input_summary)}
-    Output:
-        Expected Runtime: {expected_runtime}
-        Saved Nodes: {saved_node_idxs}
-        Recomputable Nodes: {recomputable_node_idxs}
-            """
-                torch._logging.trace_structured(
-                    name="artifact",
-                    payload_fn=lambda: knapsack_summary,
-                )
-                log.info(knapsack_summary)
         dont_ban: OrderedSet[fx.Node] = OrderedSet()
         for idx in recomputable_node_idxs:
             # if idx in all_recomputable_banned_nodes:
@@ -1677,6 +1642,17 @@ Activation Checkpointing - Knapsack Problem Summary:
             aggressive_options,
             dont_ban,
         )
+        if AOT_PARTITIONER_DEBUG:
+            create_structured_trace_for_min_cut_info(
+                joint_graph=joint_graph,
+                all_recomputable_banned_nodes=all_recomputable_banned_nodes,
+                saved_node_idxs=saved_node_idxs,
+                recomputable_node_idxs=recomputable_node_idxs,
+                expected_runtime=expected_runtime,
+                memories_banned_nodes=memories_banned_nodes,
+                runtimes_banned_nodes=runtimes_banned_nodes,
+                min_cut_saved_values=saved_values,
+            )
         return saved_values, expected_runtime
 
     if config.visualize_memory_budget_pareto:

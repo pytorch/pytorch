@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skip_but_pass_in_sandcastle_if,
 )
-from torch.utils.pytree.python import tree_map_only
+from torch.utils.pytree import tree_map_only
 
 
 d_hid = 512

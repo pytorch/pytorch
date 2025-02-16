@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
-import functools
 import inspect
 import warnings
 import weakref
@@ -21,7 +21,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -49,10 +49,29 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
+def _manual_list_update(list_from, list_to):
+    list.clear(list_to)
+    list.extend(list_to, list_from)
+
+
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]
@@ -75,6 +94,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Used by MappingProxyVariable to graph break in case of any mutated
+        # dict
+        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
@@ -214,6 +236,7 @@ class SideEffects:
             dict.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
+            list.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -234,8 +257,16 @@ class SideEffects:
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
+
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            # Checks if the underlying dict or tuple vt has been modified
+            return item in self.store_attr_mutations or item.is_underlying_vt_modified(
+                self
+            )
+
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
+
         return item.mutation_type.is_modified
 
     def _track_obj(
@@ -269,7 +300,9 @@ class SideEffects:
         variable: VariableTracker,
     ):
         return self._track_obj(
-            item, variable, mutation_type_cls=AttributeMutationExisting
+            item,
+            variable,
+            mutation_type_cls=AttributeMutationExisting,
         )
 
     def track_object_new(
@@ -282,20 +315,8 @@ class SideEffects:
         if user_cls is torch.autograd.function.FunctionCtx:
             with warnings.catch_warnings(record=True):
                 obj = torch.autograd.Function()
-        elif issubclass(user_cls, torch.nn.Module):
-            obj = nn_module_new(user_cls)
-        elif issubclass(user_cls, (dict, collections.OrderedDict)):
-            obj = dict_new(user_cls)
-        elif issubclass(user_cls, tuple):
-            obj = tuple_new(user_cls)
         else:
-            try:
-                obj = object_new(user_cls)
-            except TypeError:
-                # TODO(anijain2305/jansel) - Even though object.__new__ is same
-                # as user_cls.__new__, calling object.__new__(user_cls) fails
-                # with TypeError.
-                unimplemented(f"Unable to construct the object of type {user_cls}")
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
@@ -305,35 +326,101 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_object_new_from_user_defined_class(
-        self,
-        cls_variable: "variables.UserDefinedClassVariable",
-    ):
-        cls_source = cls_variable.source
-        user_cls = cls_variable.value
+    def get_variable_cls(self, user_cls):
+        from torch.overrides import TorchFunctionMode
 
-        # Find the variable class
+        from .variables.ctx_manager import GenericContextWrappingVariable
+        from .variables.torch_function import TorchFunctionModeVariable
+        from .variables.user_defined import is_forbidden_context_manager
+
         variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
-        if issubclass(user_cls, torch.nn.Module):
+        if issubclass(
+            user_cls, TorchFunctionMode
+        ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
+            variable_cls = TorchFunctionModeVariable
+        elif (
+            hasattr(user_cls, "__enter__")
+            and hasattr(user_cls, "__exit__")
+            and not is_forbidden_context_manager(user_cls)
+        ):
+            variable_cls = GenericContextWrappingVariable
+        elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
+        elif issubclass(user_cls, list):
+            variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
-        else:
-            variable_cls = variables.UserDefinedObjectVariable
-
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+        return variable_cls
 
-        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+    def get_example_value(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        user_cls = cls_vt.value
+        if issubclass(user_cls, torch.nn.Module):
+            # TODO(anijain2305) - Is it possible to remove this specialization?
+            obj = nn_module_new(user_cls)
+        else:
+            if isinstance(base_cls_vt, variables.BuiltinVariable):
+                base_cls = base_cls_vt.fn
+            elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
+                base_cls = base_cls_vt.value
+            else:
+                raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-        return self.track_object_new(cls_source, user_cls, variable_cls, {})
+            assert variables.UserDefinedClassVariable.is_supported_new_method(
+                base_cls.__new__
+            )
+            # TODO(anijain2305) - Consider adding get_example_value method to
+            # each VT to get an example value for all args. As we expand the
+            # scope to other __new__ methods, we might need to call __new__ with
+            # init_args (like functools.partial)
+            # init_args = [arg.get_example_value() for arg in init_args]
+            # obj = base_cls.__new__(user_cls, *init_args)
+
+            obj = base_cls.__new__(user_cls)
+        return obj
+
+    def track_new_user_defined_object(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        """
+        Creates a UserDefinedObjectVariable (or its subclass) variable tracker
+        and mark it for attribute mutation tracking.
+
+        Also records the variable trackers to call __new__ method on
+        reconstruction. Roughly, the reconstruction looks like this
+            base_cls_vt.__new__(user_cls, *init_args)
+        """
+        cls_source = cls_vt.source
+        user_cls = cls_vt.value
+        variable_cls = self.get_variable_cls(user_cls)
+        obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
+
+        variable = variable_cls(
+            obj,
+            cls_source=cls_vt.source,
+            base_cls_vt=base_cls_vt,
+            init_args=init_args,
+            mutation_type=AttributeMutationNew(cls_source),
+        )
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
 
     def track_cell_new(
         self,
@@ -452,16 +539,18 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if (
+            var.source
+            and isinstance(var, variables.ConstDictVariable)
+            and not isinstance(var, variables.SetVariable)
+        ):
+            self._has_existing_dict_mutation = True
+
+    def has_existing_dict_mutation(self):
+        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
-
-    def get_new_function(self, var):
-        if isinstance(var, variables.UserDefinedDictVariable):
-            return "dict_new"
-        elif isinstance(var, variables.UserDefinedTupleVariable):
-            return "tuple_new"
-        return "object_new"
 
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
@@ -486,17 +575,31 @@ class SideEffects:
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, self.get_new_function(var)
-                    )
-                )
-                cg(var.mutation_type.cls_source)
-                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
-                    cg(var.new_args)
-                    cg.extend_output(create_call_function(2, False))
+
+                # Reconstruct the bytecode for
+                # base_cls.__new__(user_cls, *args)
+
+                if isinstance(var, variables.UserDefinedObjectVariable):
+
+                    def load_new_method():
+                        assert var.base_cls_vt is not None
+                        cg(var.base_cls_vt)  # type: ignore[attr-defined]
+                        cg.extend_output([cg.create_load_attr("__new__")])
+
+                    cg.add_push_null(load_new_method)
                 else:
-                    cg.extend_output(create_call_function(1, False))
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "object_new")
+                    )
+                cg(var.mutation_type.cls_source)
+
+                # Generate the args to the __new__ method
+                for arg in var.init_args:
+                    cg(arg)
+
+                # Call the __new__ method
+                cg.extend_output(create_call_function(1 + len(var.init_args), False))
+
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
@@ -713,7 +816,9 @@ class SideEffects:
                     suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
-                if isinstance(var, variables.UserDefinedDictVariable):
+                if isinstance(
+                    var, variables.UserDefinedDictVariable
+                ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -761,6 +866,43 @@ class SideEffects:
                     suffixes.append(
                         [
                             *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                elif isinstance(
+                    var, variables.UserDefinedListVariable
+                ) and self.is_modified(var._list_vt):
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
+
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_update, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *list_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )

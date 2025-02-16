@@ -41,7 +41,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 
-from torch.utils.pytree.python import tree_flatten, tree_unflatten, TreeSpec
+from torch.utils.pytree import tree_flatten, tree_unflatten, PyTreeSpec
 from torch._utils import _get_device_module
 
 if TEST_CUDA:
@@ -445,9 +445,9 @@ class DTensorConverter:
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
         self.flatten_args: list[object] = flatten_args
-        self.flatten_args_spec: TreeSpec = flatten_args_spec
+        self.flatten_args_spec: PyTreeSpec = flatten_args_spec
         self.flatten_kwargs: list[object] = flatten_kwargs
-        self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
+        self.flatten_kwargs_spec: PyTreeSpec = flatten_kwargs_spec
 
         choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
 

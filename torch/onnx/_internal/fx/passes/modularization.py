@@ -66,8 +66,7 @@ class _ModuleMeta:
         """
         # E.g., from 'L__self___h_1_mlp_c_proj' to 'h_1_mlp_c_proj'.
         name = self.module_name
-        if name.startswith("L__self___"):
-            name = name[len("L__self___") :]
+        name = name.removeprefix("L__self___")
         return name
 
     @property
