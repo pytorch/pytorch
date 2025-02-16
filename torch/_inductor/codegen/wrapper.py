@@ -1048,8 +1048,13 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
-    ):
+        self,
+        kernel: str,
+        out: str,
+        out_view: Optional[str],
+        args: list[str],
+        device: str,
+    ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -2551,7 +2556,7 @@ class PythonWrapperCodegen(CodeGen):
             while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
         )
         self.writeline(
-            f"if not {cond_outer_outputs[0]}.item(): break"
+            f"if not {cond_outer_outputs[0]}: break"
         )  # condition doesn't hold
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))

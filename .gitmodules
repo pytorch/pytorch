@@ -62,10 +62,6 @@
     ignore = dirty
     path = third_party/ideep
     url = https://github.com/intel/ideep
-[submodule "third_party/nccl/nccl"]
-    ignore = dirty
-    path = third_party/nccl/nccl
-    url = https://github.com/NVIDIA/nccl
 [submodule "third_party/gemmlowp/gemmlowp"]
     ignore = dirty
     path = third_party/gemmlowp/gemmlowp

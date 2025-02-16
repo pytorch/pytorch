@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+
+"""Exception handling and error reporting for TorchDynamo.
+
+This module provides a comprehensive set of exception classes and utilities for error
+handling in TorchDynamo. It includes:
+
+Base Exceptions:
+    - TorchDynamoException: Base class for all TorchDynamo-specific exceptions
+    - Various specialized subclasses for different error scenarios
+
+User Error Handling:
+    - UserError: Exceptions for user-facing errors in TorchDynamo usage
+    - UserErrorType: Enumeration of different categories of user errors
+    - Formatted error messages with debugging information
+
+Observed Exceptions:
+    - Classes for handling exceptions observed during tracing
+    - Special handling for StopIteration, LookupError, etc.
+    - Exception state management during compilation
+
+Error Formatting:
+    - Stack trace filtering and formatting
+    - Error message augmentation
+    - Debugging utilities for error reporting
+"""
+
 import logging
 import os
 import textwrap
@@ -148,6 +174,10 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class UnknownPropertiesDuringBackwardTrace(Unsupported):
+    pass
+
+
 class RecompileError(TorchDynamoException):
     pass
 
@@ -158,6 +188,17 @@ class ArgsMismatchError(Unsupported):
 
 
 class AttributeMutationError(Unsupported):
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
+class InfiniteGeneratorError(Unsupported):
+    # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
+class SideEffectsError(Unsupported):
     def __init__(self, msg: str) -> None:
         super().__init__(msg)
 
@@ -267,12 +308,17 @@ class ObservedKeyError(ObservedLookupError):
     pass
 
 
+class ObservedGeneratorExit(ObservedException):
+    pass
+
+
 class ObservedAttributeError(ObservedException):
     # An AttributeError exception to be raised from inside Dynamo tracing. This can happen on user defined object __getattr__
     pass
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
     pass
 
 
@@ -280,15 +326,30 @@ class ObservedNotImplementedError(ObservedException):
     pass
 
 
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
     IndexError: ObservedIndexError,
+    GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
     NotImplementedError: ObservedNotImplementedError,
+    TypeError: ObservedTypeError,
 }
+
+
+def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
+    if exc_type not in observed_exception_map:
+        observed_exception_map[exc_type] = type(
+            f"Observed{exc_type.__name__}Error", (ObservedException,), {}
+        )
+    return observed_exception_map[exc_type]
 
 
 def raise_observed_exception(
@@ -429,14 +490,6 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
                 f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
-
-    if not config.suppress_errors and not export:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    import torch._dynamo\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
 
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
