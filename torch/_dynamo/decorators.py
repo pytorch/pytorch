@@ -423,6 +423,31 @@ def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
             func(inner, *args, **kwargs)
 
 
+def delayed_compile(*compile_args, **compile_kwargs):
+    def decorator(fn: Callable):
+        example_inputs: List[Any] = []
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if len(example_inputs) < 5:
+                sig = inspect.signature(fn)
+                bound_args = sig.bind(*args, **kwargs)
+                example_inputs.append(bound_args.arguments)
+                print(example_inputs)
+
+            if len(example_inputs) == 1:
+                return fn(*args, **kwargs)
+            else:
+                compiled_fn = torch.compile(
+                    fn, *compile_args, **compile_kwargs, example_inputs=example_inputs
+                )
+                return compiled_fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 @dataclass(frozen=True)
 class _DimRange:
     """
