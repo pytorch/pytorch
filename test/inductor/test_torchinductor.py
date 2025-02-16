@@ -2019,7 +2019,11 @@ class CommonTemplate:
             if not self.is_dtype_supported(dtype):
                 continue
             # cumsum not implemented for integers on MacOS-13
-            if self.device == "mps" and not dtype.is_floating_point and MACOS_VERSION < 13.3:
+            if (
+                self.device == "mps"
+                and not dtype.is_floating_point
+                and MACOS_VERSION < 13.3
+            ):
                 continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
@@ -2088,7 +2092,11 @@ class CommonTemplate:
             if not self.is_dtype_supported(dtype):
                 continue
             # cumsum not implemented on MacOS-13
-            if self.device == "mps" and not dtype.is_floating_point and MACOS_VERSION < 13.3:
+            if (
+                self.device == "mps"
+                and not dtype.is_floating_point
+                and MACOS_VERSION < 13.3
+            ):
                 continue
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
