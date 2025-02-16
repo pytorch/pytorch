@@ -205,27 +205,17 @@ static PyObject* (*previous_eval_frame)(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) = NULL;
 
-#if PY_VERSION_HEX >= 0x03090000
 static PyObject* dynamo_custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
-#else
-static PyObject* dynamo_custom_eval_frame_shim(
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag) {
-  PyThreadState* tstate = PyThreadState_GET();
-  return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
-}
-#endif
 
 static PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
-#if PY_VERSION_HEX >= 0x03090000
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
@@ -234,13 +224,9 @@ static PyObject* dynamo_eval_frame_default(
   } else {
     return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
   }
-#else
-  return _PyEval_EvalFrameDefault(frame, throw_flag);
-#endif
 }
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {
-#if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &dynamo_custom_eval_frame_shim) {
     DEBUG_CHECK(previous_eval_frame == NULL);
@@ -248,28 +234,15 @@ static void enable_eval_frame_shim(PyThreadState* tstate) {
     _PyInterpreterState_SetEvalFrameFunc(
         tstate->interp, &dynamo_custom_eval_frame_shim);
   }
-#else
-  if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
-    // First call
-    tstate->interp->eval_frame = &custom_eval_frame_shim;
-  }
-#endif
 }
 
 static void enable_eval_frame_default(PyThreadState* tstate) {
-#if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       previous_eval_frame) {
     DEBUG_CHECK(previous_eval_frame != NULL);
     _PyInterpreterState_SetEvalFrameFunc(tstate->interp, previous_eval_frame);
     previous_eval_frame = NULL;
   }
-#else
-  if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
-    // First call
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  }
-#endif
 }
 
 static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
