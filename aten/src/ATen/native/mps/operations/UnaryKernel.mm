@@ -22,7 +22,10 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
-static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const std::string& name, std::optional<int64_t> extra = std::nullopt) {
+static void exec_unary_kernel(const Tensor& self,
+                              const Tensor& output_,
+                              const std::string& name,
+                              std::optional<int64_t> extra = std::nullopt) {
   Tensor inputTensor = self.contiguous();
   Tensor outputTensor = output_;
   bool needs_output_copy = false;

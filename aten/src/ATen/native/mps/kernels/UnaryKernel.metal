@@ -156,17 +156,18 @@ template <typename T>
 kernel void round_decimals_kernel(
     device T* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
-    constant long& ndigits [[ buffer(2)]],
+    constant long& ndigits [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
-  output[index] = static_cast<T>(rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
+  output[index] = static_cast<T>(
+      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
 }
 
-#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                          \
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                 \
   template [[host_name("round_decimals_" #DTYPE "_" #DTYPE)]] kernel void \
-  round_decimals_kernel(                                                         \
-      device DTYPE * output [[buffer(0)]],                           \
-      constant DTYPE * input [[buffer(1)]],                          \
-    constant long& ndigits [[ buffer(2)]], \
+  round_decimals_kernel(                                                  \
+      device DTYPE* output [[buffer(0)]],                                 \
+      constant DTYPE* input [[buffer(1)]],                                \
+      constant long& ndigits [[buffer(2)]],                               \
       uint id [[thread_position_in_grid]])
 
 INSTANTIATE_ROUND_DECIMALS(float);
