@@ -1,4 +1,22 @@
 # mypy: ignore-errors
+
+"""
+This module contains miscellaneous variable tracker implementations for various Python types
+and features used in Dynamo's symbolic execution. These classes help track and propagate
+information about different kinds of variables during graph capture.
+
+Key classes include:
+- SuperVariable: Handles super() calls and method resolution
+- ExceptionVariable: Tracks exception objects
+- RandomVariable: Manages random number generators
+- GetAttrVariable: Tracks attribute access
+- MethodWrapperVariable: Handles method wrappers
+- PythonModuleVariable: Tracks Python modules
+- NumpyVariable: Handles numpy functions and types
+- StringFormatVariable: Manages string formatting
+- DebuggingVariable: Handles print and logging
+"""
+
 import dataclasses
 import functools
 import inspect
@@ -23,8 +41,10 @@ from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
 from ..utils import (
     check_unspec_or_constant_args,
+    cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    list_methods,
     proxy_args_kwargs,
     set_example_value,
     tuple_methods,
@@ -156,10 +176,21 @@ class SuperVariable(VariableTracker):
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
-        elif self.objvar.source and inner_fn is object.__new__:
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                self.objvar
-            )
+        elif (
+            self.objvar.source
+            and hasattr(inner_fn, "__name__")
+            and inner_fn.__name__ == "__new__"
+            and variables.UserDefinedClassVariable.is_supported_new_method(inner_fn)
+        ):
+            user_cls = inner_fn.__self__
+            if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
+                user_cls_vt = variables.BuiltinVariable(user_cls)
+            else:
+                user_cls_source = source.member
+                user_cls_vt = variables.UserDefinedClassVariable(
+                    user_cls, source=user_cls_source
+                )
+            return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
@@ -207,6 +238,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in tuple_methods
         ):
             return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedListVariable)
+            and inner_fn in list_methods
+        ):
+            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -233,6 +269,7 @@ class SuperVariable(VariableTracker):
 
 
 class ExceptionVariable(VariableTracker):
+    # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(self, exc_type, args, **kwargs) -> None:
         super().__init__(**kwargs)
         self.exc_type = exc_type
@@ -244,6 +281,12 @@ class ExceptionVariable(VariableTracker):
         )
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
+
+    def __str__(self):
+        return f"ExceptionVariable({self.exc_type})"
+
+    def __repr__(self):
+        return f"ExceptionVariable({self.exc_type})"
 
 
 class UnknownVariable(VariableTracker):
@@ -952,6 +995,9 @@ class TypingVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
 
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.side_effects.load_attr(self, name)
 
@@ -960,7 +1006,7 @@ class TypingVariable(VariableTracker):
             attr_source = AttrSource(self.source, name)
             return VariableBuilder(tx, attr_source)(value)
         else:
-            return SourcelessBuilder(tx, value)
+            return SourcelessBuilder.create(tx, value)
 
     def as_python_constant(self):
         return self.value

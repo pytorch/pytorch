@@ -83,7 +83,7 @@ inline float blockReduceSum(
 
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
-    device int* success [[buffer(1)]],
+    device int* info [[buffer(1)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -142,7 +142,7 @@ kernel void factorDiagonalBlock(
     if (linear_tid == 0) {
       float diagVal = tile[kk][kk] - diagElt;
       if (diagVal <= 0.0f) {
-        success[bid.x] = 0;
+        info[bid.x] = kk + 1;
         return;
       }
       tile[kk][kk] = sqrt(diagVal);
@@ -392,6 +392,58 @@ kernel void applySYRK(
             sum_accumulator[y * tpg.x + x];
       }
     }
+  }
+}
+
+kernel void applyPivots(
+    device float* P [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint& R [[buffer(2)]],
+    constant uint& K [[buffer(3)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  uint tx = tid.x;
+  uint group_size = tpg.x * tpg.y;
+  uint batch_idx = bid.x;
+
+  for (int i = static_cast<int>(K) - 1; i >= 0; i--) {
+    int pivot = pivots[batch_idx * K + i];
+    if (pivot == i) {
+      // no swap needed
+      continue;
+    }
+
+    for (uint j = tx * 4; j < R; j += group_size * 4) {
+      uint elementsRemaining = R - j;
+
+      // if we can use float4 or not
+      if (elementsRemaining < 4) {
+        for (uint e = 0; e < elementsRemaining; e++) {
+          float row_i_value = P[batch_idx * R * R + i * R + (j + e)];
+          float pivot_row_value = P[batch_idx * R * R + pivot * R + (j + e)];
+
+          P[batch_idx * R * R + i * R + (j + e)] = pivot_row_value;
+          P[batch_idx * R * R + pivot * R + (j + e)] = row_i_value;
+        }
+      } else {
+        // vectorized load/stores
+        device float4* rowIPtr =
+            reinterpret_cast<device float4*>(&P[batch_idx * R * R + i * R + j]);
+        device float4* pivotPtr = reinterpret_cast<device float4*>(
+            &P[batch_idx * R * R + pivot * R + j]);
+
+        float4 row_i_val = *rowIPtr;
+        float4 pivot_val = *pivotPtr;
+
+        *rowIPtr = pivot_val;
+        *pivotPtr = row_i_val;
+      }
+    }
+    // barrier here so different threads do not rush after each other
+    // swapping rows for the next iteration while
+    // some threads are swapping the current one
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
