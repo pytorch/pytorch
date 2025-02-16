@@ -1323,7 +1323,8 @@ class SIMDScheduling(BaseScheduling):
 
     @staticmethod
     def can_use_32bit_indexing(
-        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+        numel: sympy.Expr,
+        buffers: Iterable[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
