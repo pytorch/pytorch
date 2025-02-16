@@ -265,7 +265,8 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     b, h, s_q, d_q = query_shape
     _b2, _h2, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
-    assert b == _b2 == _b3 and h == _h2 == _h3 and d_q == _d2 and s_k == _s3 and d_q == _d2
+    # under gqa, h is not necessarily equal to h2 and h3
+    assert b == _b2 == _b3 and _h2 == _h3 and d_q == _d2 and s_k == _s3
     total_flops = 0
     # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
     total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
@@ -459,7 +460,8 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     _b2, _h2, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
     _b4, _h4, _s4, _d4 = grad_out_shape
-    assert b == _b2 == _b3 == _b4 and h == _h2 == _h3 == _h4 and d_q == _d2
+    # under gqa, h is not necessarily equal to h2 and h3
+    assert b == _b2 == _b3 == _b4 and _h2 == _h3 and h == _h4 and d_q == _d2
     assert d_v == _d4 and s_k == _s3 and s_q == _s4
     total_flops = 0
     # Step 1: We recompute the scores matrix.
