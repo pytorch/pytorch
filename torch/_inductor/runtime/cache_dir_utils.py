@@ -16,10 +16,9 @@ def cache_dir() -> str:
 
 
 def default_cache_dir() -> str:
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
     return os.path.join(
         tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
+        "torchinductor_cache_dir"
     )
 
 
