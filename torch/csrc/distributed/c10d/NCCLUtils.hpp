@@ -238,7 +238,10 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
-  ncclResult_t registerSegment(void* ptr, size_t size);
+  ncclResult_t registerSegment(
+      void* ptr,
+      size_t size,
+      bool errorOnRereg = true);
 
   ncclResult_t deregisterSegment(void* ptr);
 
@@ -303,7 +306,7 @@ struct ncclRedOpRAII {
 };
 
 void printNcclCommProxyTrace(
-    std::string dumpReason,
+    const std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap);
 } // namespace c10d
 

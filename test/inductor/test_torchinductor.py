@@ -41,6 +41,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._guards import CompileContext, CompileId
+from torch._inductor import lowering
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -120,6 +121,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -128,6 +130,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -370,20 +373,6 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return x
-    buffer = torch.as_strided(
-        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-    return out
-
-
 def check_model(
     self: TestCase,
     model,
@@ -407,7 +396,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+    ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -420,7 +409,7 @@ def check_model(
             # Eager model may fail if the dtype is not supported
             eager_result = None
 
-        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
         expect_dtypes = [
             x.dtype if isinstance(x, torch.Tensor) else None
             for x in pytree.tree_leaves(eager_result)
@@ -623,7 +612,7 @@ def check_model_gpu(
 
     if copy_to_gpu:
         example_inputs = tuple(
-            clone_preserve_strides(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
         )
 
     check_model(
@@ -900,6 +889,11 @@ class skip_if_cpp_wrapper:
             return fn(test_self)
 
         return wrapper
+
+
+def is_dynamic_shape_enabled():
+    # What's the best way to decide this?
+    return not torch._dynamo.config.assume_static_by_default
 
 
 @instantiate_parametrized_tests
@@ -2408,7 +2402,7 @@ class CommonTemplate:
             )
 
         dtypes = [torch.float, torch.float16]
-        if not (self.device == "cuda" and not SM80OrLater):
+        if self.is_dtype_supported(torch.bfloat16):
             dtypes += [torch.bfloat16]
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
@@ -3746,6 +3740,26 @@ class CommonTemplate:
         msg = r".*isDifferentiableType\(variable.scalar_type\(\)\) INTERNAL ASSERT FAILED.*"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_linear_dynamic_maxautotune(self):
+        @torch.compile(dynamic=True)
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.common(Model(), (x,))
 
     def test_scalar_input(self):
         def fn(x, y):
@@ -5823,6 +5837,8 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    # Disable size_asserts for this test due to https://github.com/pytorch/pytorch/issues/145963
+    @config.patch(size_asserts=os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS") == "1")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
@@ -10691,6 +10707,14 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_single(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (10, 10))
+            return y
+
+        x = torch.rand(1, 1, 1)
+        self.common(fn, (x,))
+
     def test_pad_cast(self):
         def fn(x):
             return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
@@ -11872,7 +11896,7 @@ class CommonTemplate:
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         x = torch.ones(4, dtype=torch.float16, device=self.device)
         ref = fn(x)
@@ -11885,7 +11909,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
@@ -11897,7 +11921,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int32)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
@@ -12409,10 +12433,84 @@ class CommonTemplate:
         reset_rng_state()
         ref = f(image_latent)
         opt_f = torch.compile(f)
+
+        code = run_and_get_triton_code(opt_f, image_latent)
         reset_rng_state()
         act = opt_f(image_latent)
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+        if is_dynamic_shape_enabled():
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, s1, s2, s2., .3\*s1\*s2\*s2, s1\*s2\*s2, 1, s1\*s2, s1.."  # noqa: B950
+        else:
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
+        FileCheck().check_regex(size_assert_pattern).run(code)
+
+    @lowering.force_fallback(aten.sort.default)
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "Inductor does not generate size/stride asserts for cpp_wrapper",
+    )
+    def test_size_asserts_for_multi_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x.sort()
+
+        x = torch.randn(16, 32, device=self.device)
+        code = run_and_get_triton_code(f, x)
+
+        if is_dynamic_shape_enabled():
+            FileCheck().check("assert_size_stride(buf1, (s0, s1), (s1, 1))").check(
+                "assert_size_stride(buf2, (s0, s1), (s1, 1))"
+            ).run(code)
+        else:
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            ).run(code)
+
+    @requires_cuda
+    @config.patch(use_fast_math=True)
+    def test_prepare_softmax_with_fast_math(self):
+        """
+        Measure on a A100, perf is 3.487ms v.s. 3.358ms without or with flushing to zero. A 4% speedup.
+        """
+        if DO_PERF_TEST:
+            M = 32768
+            N = 50304
+        else:
+            # Use small shapes if not doing perf test
+            M = 128
+            N = 128
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        def f(x):
+            """
+            Not calling softmax directly to generate kernel just for
+            computation of max & sum.
+
+            If we call softmax directly, the computation of the final
+            result will double the membw usage. In that case saving
+            computation does not matter much.
+
+            In reality during training, since max & sum need to be saved
+            for bwd and the computation of softmax result is fused with
+            other kernels, we do see such prepare_softmax kernel appear
+            in real models.
+            """
+            x_max = x.amax(dim=-1, keepdim=True)
+            x_sum = (x - x_max).exp().sum(dim=-1, keepdim=True).log()
+            return x_max, x_sum
+
+        opt_f = torch.compile(f)
+        ref = f(x)
+        act = opt_f(x)
+        self.assertTrue(same(ref, act, tol=1e-2), f"Ref:\n{ref}\nAct:\n{act}")
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            ms = do_bench(lambda: opt_f(x))
+            print(f"{ms=:.3f}")
 
 
 @dataclasses.dataclass
