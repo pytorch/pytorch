@@ -1500,6 +1500,39 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
 
+    def test_custom_layer_optional_input(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def symbolic(g, x, y, z):
+                return g.op("CustomNamespace::Custom", x, y, z)
+
+            @staticmethod
+            def forward(ctx, x, y, z):
+                if y is None:
+                    return x + z
+
+                return x + z + y
+
+        class Custom(torch.nn.Module):
+            def forward(self, x, y, z):
+                return CustomFunction.apply(x, y, z)
+
+        model = Custom()
+        x = torch.FloatTensor(1, 3)
+        y = None
+        z = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(
+            model,
+            (x, y, z),
+            input_names=["x", "z"],
+            dynamic_axes={"x": [0, 1], "z": [0, 1]},
+        )
+
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::Constant")
+        self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
+
     def test_autograd_onnx_fallthrough(self):
         class CustomFunction(torch.autograd.Function):
             @staticmethod
