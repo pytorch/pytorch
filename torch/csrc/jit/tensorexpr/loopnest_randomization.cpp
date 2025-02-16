@@ -101,7 +101,7 @@ static void printHistory(int index, std::string message) {
 
 template <typename T>
 std::string join(std::vector<T> indices, char sep = ',') {
-  std::string s = "";
+  std::string s;
   for (const auto& index : indices) {
     s += std::to_string(index) + sep;
   }
@@ -111,7 +111,7 @@ std::string join(std::vector<T> indices, char sep = ',') {
 static std::string join(
     const std::vector<std::string>& indices,
     char sep = ',') {
-  std::string s = "";
+  std::string s;
   for (const auto& index : indices) {
     s += index + sep;
   }
@@ -141,7 +141,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   int max_allowed_transformations = 20;
   int n_transforms = randomization_helper::max_transformations(
       std::rand() % max_allowed_transformations);
-  std::string message = "";
+  std::string message;
   // clang-format off
   //   Transformations list:
   //

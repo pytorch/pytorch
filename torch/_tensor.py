@@ -7,6 +7,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
 from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -27,24 +28,25 @@ from torch.overrides import (
 )
 
 
-TensorMethodT = TypeVar("TensorMethodT", bound=Callable[[Any, Any], "Tensor"])
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
-    f: TensorMethodT,
-) -> TensorMethodT:
+    f: Callable[Concatenate[_T, _P], "Tensor"],
+) -> Callable[Concatenate[_T, _P], "Tensor"]:
     @functools.wraps(f)
-    def wrapped(self: Union["Tensor", "torch._C.TensorBase"], other: Any) -> "Tensor":
+    def wrapped(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
-            args = self, other
-            # See https://github.com/pytorch/pytorch/issues/75462
-            if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args)
-            return f(*args)
+            if has_torch_function((self,) + args):
+                return handle_torch_function(
+                    wrapped, (self,) + args, self, *args, **kwargs
+                )
+            return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
 
-    return cast(TensorMethodT, wrapped)
+    return wrapped
 
 
 # Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
@@ -1108,8 +1110,15 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    def __pow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.pow(self, other)
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
+    )
 
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
