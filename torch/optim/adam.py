@@ -365,6 +365,14 @@ def _single_tensor_adam(
 ):
     assert grad_scale is None and found_inf is None
 
+    if isinstance(lr, Tensor):
+        if differentiable:
+            if lr.dim() > 1:
+                lr = lr.squeeze()
+        else:
+            if lr.dim() != 0:
+                lr = lr.squeeze()
+
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
@@ -556,26 +564,13 @@ def _multi_tensor_adam(
     if len(params) == 0:
         return
 
-    if isinstance(lr, Tensor) and not capturable:
-        raise RuntimeError(
-            "lr as a Tensor is not supported for capturable=False and foreach=True"
-        )
-
-    if isinstance(beta1, Tensor):
+    if isinstance(lr, Tensor):
         if not capturable:
-            raise ValueError(
-                "beta1 as a Tensor is not supported for capturable=False and foreach=True"
+            raise RuntimeError(
+                "lr as a Tensor is not supported for capturable=False and foreach=True"
             )
-        if beta1.numel() != 1:
-            raise ValueError("Tensor beta1 must be 1-element")
-
-    if isinstance(beta2, Tensor):
-        if not capturable:
-            raise ValueError(
-                "beta2 as a Tensor is not supported for capturable=False and foreach=True"
-            )
-        if beta2.numel() != 1:
-            raise ValueError("Tensor beta2 must be 1-element")
+        if lr.device.type != "cpu" and lr.dim() != 0:
+            lr = lr.squeeze()
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:

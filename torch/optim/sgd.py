@@ -330,6 +330,10 @@ def _single_tensor_sgd(
 ):
     assert grad_scale is None and found_inf is None
 
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
 
@@ -388,10 +392,12 @@ def _multi_tensor_sgd(
     if len(params) == 0:
         return
 
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
     )
-
     for (
         device_params_,
         device_grads_,

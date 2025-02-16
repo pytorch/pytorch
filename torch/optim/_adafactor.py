@@ -356,6 +356,10 @@ def _single_tensor_adafactor(
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
 
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         step_t = state_steps[i]
@@ -472,6 +476,9 @@ def _multi_tensor_adafactor(
     assert (
         grad_scale is None and found_inf is None
     ), "Grad scaling should occur outside of optimizer.step()"
+
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
 
     grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
         [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]

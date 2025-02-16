@@ -336,6 +336,11 @@ def _single_tensor_adagrad(
     has_complex: bool,
 ):
     assert grad_scale is None and found_inf is None
+
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
+
     for param, grad, state_sum, step_t in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
@@ -402,6 +407,9 @@ def _multi_tensor_adagrad(
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:
         return
+
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, state_sums, state_steps]  # type: ignore[list-item]
@@ -512,6 +520,9 @@ def _fused_adagrad(
         raise RuntimeError(
             "adagrad with fused=True does not support differentiable=True"
         )
+
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
 
     grad_scale_dict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else None
