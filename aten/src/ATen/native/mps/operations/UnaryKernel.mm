@@ -22,7 +22,10 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
-static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const std::string& name) {
+static void exec_unary_kernel(const Tensor& self,
+                              const Tensor& output_,
+                              const std::string& name,
+                              std::optional<int64_t> extra = std::nullopt) {
   Tensor inputTensor = self.contiguous();
   Tensor outputTensor = output_;
   bool needs_output_copy = false;
@@ -54,6 +57,9 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
 
       [computeEncoder setComputePipelineState:cplState];
       mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+      if (extra) {
+        mtl_setBytes(computeEncoder, *extra, 2);
+      }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -79,4 +85,10 @@ TORCH_IMPL_FUNC(sinc_out_mps)(const Tensor& self, const Tensor& output_) {
 TORCH_IMPL_FUNC(tanh_out_mps)(const Tensor& self, const Tensor& output_) {
   exec_unary_kernel(self, output_, "tanh");
 }
+
+static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+  exec_unary_kernel(iter.input(0), iter.output(0), "round_decimals", decimals);
+}
+
+REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 } // namespace at::native
