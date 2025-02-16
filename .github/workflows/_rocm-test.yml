@@ -234,8 +234,7 @@ jobs:
             --shm-size="8g" \
             --tty \
             --detach \
-            --name="${container_name}" \
-            --user jenkins \
+            --user root \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
@@ -265,6 +264,14 @@ jobs:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
           kill "$MONITOR_SCRIPT_PID"
+
+      - name: Get directory perms
+        if: always()
+        run: |
+          ls -la /home/runner/_work
+          ls -la /home/runner/_work/pytorch
+          ls -la /home/runner/_work/pytorch/pytorch
+          ls -la /home/runner/_work/pytorch/pytorch/test/test-reports/
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
