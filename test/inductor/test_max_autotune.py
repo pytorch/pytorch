@@ -47,16 +47,13 @@ torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
-_CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+
+def _get_func_call() -> str:
+    return "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
 
 
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
+def _get_kernel_launch() -> str:
+    return "launchKernel(" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -790,12 +787,14 @@ class TestMaxAutotune(TestCase):
             torch.randn(32, 32, device=GPU_TYPE),
             torch.randn(32, 32, device=GPU_TYPE),
         ]
-        out, code = run_and_get_code(f_c, inps[0], inps[1])
+        _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
         # mm kernel, and cos kernel
         count = 2 if using_triton_mm else 1
-        FileCheck().check("call(").check_count(".run", count, exactly=True).run(code[0])
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), count, exactly=True
+        ).run(code[0])
 
         def f(x, y):
             y = torch.cos(y)
@@ -804,9 +803,11 @@ class TestMaxAutotune(TestCase):
             return out, x + 1
 
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
-        out, code = run_and_get_code(f_c, inps[0], inps[1])
+        _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
-        FileCheck().check("call(").check_count(".run", 2, exactly=True).run(code[0])
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 2, exactly=True
+        ).run(code[0])
 
         def f(x, y):
             y = torch.cos(y)
@@ -1030,6 +1031,9 @@ class TestMaxAutotuneRemoteCache(TestCase):
         PatchCaches.tearDown()
 
     @parametrize("dynamic", (False, True))
+    @config.patch(
+        {"compile_threads": 1, "prologue_fusion": False}
+    )  # Worker processes do not register PatchCaches() properly
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
 
@@ -1085,7 +1089,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
             self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
 
-class TestBenchmarkRequest(BenchmarkRequest):
+class _TestBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
     ) -> None:
@@ -1114,8 +1118,8 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
-class TestTritonTemplateCaller(TritonTemplateCaller):
-    def __init__(self, bmreq: TestBenchmarkRequest):
+class _TestTritonTemplateCaller(TritonTemplateCaller):
+    def __init__(self, bmreq: _TestBenchmarkRequest):
         self.bmreq = bmreq
 
     def __str__(self) -> str:
@@ -1132,8 +1136,8 @@ class TestTuningProcess(TestCase):
 
             # First force the tuning process to "crash" by setting a bogus
             # string for the expected visible devices.
-            bmreq = TestBenchmarkRequest(3.14, False, "invalid")
-            choice = TestTritonTemplateCaller(bmreq)
+            bmreq = _TestBenchmarkRequest(3.14, False, "invalid")
+            choice = _TestTritonTemplateCaller(bmreq)
 
             timings = tuning_pool.benchmark([choice])
             self.assertTrue(choice in timings)
@@ -1168,11 +1172,11 @@ class TestTuningProcess(TestCase):
             tuning_pool = TuningProcessPool()
             tuning_pool.initialize()
 
-            choice1 = TestTritonTemplateCaller(
-                TestBenchmarkRequest(3.14, True, parent_visible_devices),
+            choice1 = _TestTritonTemplateCaller(
+                _TestBenchmarkRequest(3.14, True, parent_visible_devices),
             )
-            choice2 = TestTritonTemplateCaller(
-                TestBenchmarkRequest(2.718, True, parent_visible_devices),
+            choice2 = _TestTritonTemplateCaller(
+                _TestBenchmarkRequest(2.718, True, parent_visible_devices),
             )
 
             timings = tuning_pool.benchmark([choice1, choice2])
@@ -1202,17 +1206,21 @@ class TestPrologueFusion(TestCase):
         )
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
-        FileCheck().check("def call").check_count(
-            ".run", num_kernels, exactly=True
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(),
+            num_kernels,
+            exactly=True,
         ).run(code_str)
 
         if num_allocs is not None:
-            FileCheck().check("def call").check_count(
+            FileCheck().check(_get_func_call()).check_count(
                 "empty_strided", num_allocs, exactly=True
             ).run(code_str)
 
-        if num_deallocs is not None:
-            FileCheck().check("def call").check_count(
+        # skip the deallocation check when using cpp_wrapper; most deallocations happen
+        # outside of our control via RAIIAtenTensorHandle
+        if num_deallocs is not None and not config.cpp_wrapper:
+            FileCheck().check(_get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
@@ -1340,6 +1348,9 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+    )
     def test_pending_fusions_multiple(self):
         def multi_use(x, y):
             return (x @ x.T) * (y @ y.T)
@@ -1349,7 +1360,9 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        FileCheck().check("def call").check_count(".run(", 2, exactly=True).run(code[0])
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 2, exactly=True
+        ).run(code[0])
         self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
 
         def resolve_pending(x):
@@ -1357,7 +1370,9 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 1, exactly=True
+        ).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
     @config.patch(
@@ -1369,6 +1384,9 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+    )
     def test_pending_fusion_pro_and_epi(self):
         def test_multiple_fusions(x):
             y = x.to(torch.float)
@@ -1376,7 +1394,9 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 1, exactly=True
+        ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
