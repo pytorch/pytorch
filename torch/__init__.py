@@ -100,6 +100,7 @@ __all__ = [
     "autocast",
     "chunk",
     "compile",
+    "delayed_compile"
     "cond",
     "enable_grad",
     "export",
@@ -2391,6 +2392,36 @@ class _TorchCompileWrapper:
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
 
+import functools
+
+def delayed_compile(fn: _Optional[_Callable] = None, *compile_args, **compile_kwargs):
+    def decorator(fn: _Callable):
+        example_inputs: list[_Any] = []
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if len(example_inputs) < 5:
+                sig = inspect.signature(fn)
+                bound_args = sig.bind(*args, **kwargs)
+                example_inputs.append(bound_args.arguments)
+                print(example_inputs)
+
+            if len(example_inputs) == 1:
+                return fn(*args, **kwargs)
+            else:
+                compiled_fn = torch.compile(
+                    fn, *compile_args, **compile_kwargs, example_inputs=example_inputs
+                )
+                return compiled_fn(*args, **kwargs)
+
+        return wrapper
+
+    # If `fn` is None, it means compile was used as `@compile()`, so return decorator
+    if fn is None or isinstance(fn, (tuple, list)):
+        return decorator
+
+    # Otherwise, `compile` was called directly, so return the decorated function
+    return decorator(fn)
 
 @_overload
 def compile(
@@ -2402,6 +2433,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay_iterations: builtins.int = 0,
     example_inputs: _Optional[list[_Any]] = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2416,6 +2448,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay_iterations: builtins.int = 0,
     example_inputs: _Optional[list[_Any]] = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2429,6 +2462,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay_iterations: builtins.int = 0,
     example_inputs: _Optional[list[_Any]] = None,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
