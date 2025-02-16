@@ -846,6 +846,19 @@ class TreeSpec:
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
 
+    def __eq__(self, other: PyTree) -> bool:
+        if self is other:
+            return True
+        elif other.__class__ is self.__class__:
+            if str(self.type) != str(other.type):
+                return False
+            if self._context != other._context:
+                return False
+            elif self._children != other._children:
+                return False
+            return True
+        return NotImplemented
+
     @property
     def context(self) -> Context:
         return self._context
