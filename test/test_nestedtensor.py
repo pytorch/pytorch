@@ -7021,13 +7021,17 @@ torch.cuda.synchronize()
             (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
         )
         offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
-        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16).transpose(
+            1, 2
+        )
 
         values_meta = torch.randn(
             (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
         )
         offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
-        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt_meta = convert_jagged_to_nested_tensor(
+            values_meta, offsets_meta, max_length=16
+        ).transpose(1, 2)
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
 
@@ -7678,6 +7682,22 @@ torch.cuda.synchronize()
 
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    def test_dropout_inference_mode(self, device):
+        seq_len = 32
+        embed_dim = 128
+
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(11, seq_len, embed_dim, device=device),
+                torch.randn(11, seq_len, embed_dim, device=device),
+            ],
+            layout=torch.jagged,
+            device=device,
+        )
+
+        with torch.inference_mode():
+            torch.nn.functional.dropout(nt, p=0.05)
 
     @dtypes(torch.float32, torch.double, torch.half)
     def test_unbind_backward(self, device, dtype):
