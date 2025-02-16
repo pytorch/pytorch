@@ -17,19 +17,19 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-class PrimHOPBase(HigherOrderOperator, abc.ABC):
+class BaseHOP(HigherOrderOperator, abc.ABC):
     """
     This is the "Base" HOP implementation for a HOP that looks like:
 
         call_subgraph_hop(subgraph, operands, **kwargs)
 
     That is:
-    1) the HOP is a "prim" (it stays alive until Inductor)
+    1) the HOP stays alive until Inductor
     2) the HOP's semantics are subgraph(*operands)
 
     To use this, please subclass this class and override methods as necessary:
     ```
-    class InvokeQuant(PrimHOPBase):
+    class InvokeQuant(BaseHOP):
         def __init__(self):
             return super().__init__("invoke_quant")
 
@@ -43,7 +43,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         return invoke_quant(g, (x,), scheme="nf4")
     ```
 
-    NOTE: don't subclass PrimHOPBase out of tree! That is not allowed. All
+    NOTE: don't subclass BaseHOP out of tree! That is not allowed. All
     usages must be in tree.
     """
 
@@ -87,7 +87,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
 
         # We assume the subgraph doesn't mutate inputs and there is no aliasing.
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
-        return PrimHOPBaseFunction.apply(self, subgraph, kwargs, *operands)
+        return HOPBaseFunction.apply(self, subgraph, kwargs, *operands)
 
     def _call_CompositeExplicitAutograd(self, subgraph, operands, *_, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -133,7 +133,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         return ctx.wrap_tensors(out)
 
 
-class PrimHOPBaseFunction(torch.autograd.Function):
+class HOPBaseFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, hop, subgraph, kwargs, *operands):
         ctx.hop = hop
