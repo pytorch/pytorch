@@ -36,19 +36,19 @@ struct PyNode : public Node {
 
   variable_list apply(variable_list&& inputs) override;
   variable_list defer_to_dynamo(
-      variable_list&& inputs,
+      const variable_list& inputs,
       const std::optional<PyObject*>& compiler);
 
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
 
+  bool is_aot_backward() const override;
+
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
-
-  bool compiled_autograd_should_lift() const;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;

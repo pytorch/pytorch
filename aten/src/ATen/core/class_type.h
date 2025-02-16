@@ -432,7 +432,7 @@ struct TORCH_API ClassType : public NamedType {
   bool isModule_ = false;
 
   // Doc string of class.
-  std::string doc_string_ = "";
+  std::string doc_string_;
 
   // For error reporting accesses to class level attributes.
   std::vector<std::string> unresolved_class_attributes_;

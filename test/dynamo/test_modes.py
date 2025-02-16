@@ -489,7 +489,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, actual)
 
     # Needs larger cache size since we recompile for each op
-    @patch.object(torch._dynamo.config, "cache_size_limit", 48)
+    @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,

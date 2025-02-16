@@ -12,17 +12,16 @@ from enum import Enum
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
-from typing import Any, Iterator, Sequence
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
 
 
-FSTRING_TOKENS = dict.fromkeys(
-    [
-        getattr(token, "FSTRING_START", -1),
-        getattr(token, "FSTRING_MIDDLE", -1),
-        getattr(token, "FSTRING_END", -1),
-    ]
-)
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
+
+FSTRING_START = getattr(token, "FSTRING_START", None)  # py3.12+
+FSTRING_END = getattr(token, "FSTRING_END", None)
 EMPTY_TOKENS = dict.fromkeys(
     [
         token.COMMENT,
@@ -294,10 +293,18 @@ def bracket_pairs(tokens: Sequence[TokenInfo]) -> dict[int, int]:
             elif inv := BRACKETS_INV.get(t.string):
                 ParseError.check(stack, t, "Never opened")
                 begin = stack.pop()
-                braces[begin] = i
+
+                if not (stack and stack[-1] == FSTRING_START):
+                    braces[begin] = i
 
                 b = tokens[begin].string
                 ParseError.check(b == inv, t, f"Mismatched braces '{b}' at {begin}")
+        elif FSTRING_START and t.type == FSTRING_START:
+            stack.append(FSTRING_START)
+        elif FSTRING_END and t.type == FSTRING_END:
+            ParseError.check(
+                stack.pop() == FSTRING_START, t, "Mismatched FSTRING_START/FSTRING_END"
+            )
 
     if tokens:
         ParseError.check(not stack, t, "Left open")

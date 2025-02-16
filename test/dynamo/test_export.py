@@ -3,14 +3,15 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
+
 import copy
 import functools
 import inspect
 import io
 import operator
 import unittest
+from collections.abc import Sequence
 from enum import Enum
-from typing import Dict, List, Sequence
 from unittest.mock import patch
 
 import torch
@@ -31,7 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 @torch._dynamo.assume_constant_result
@@ -1923,7 +1924,7 @@ def forward(self, l_x_):
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                "Expected true_fn_output and false_fn_output to have same metadata but found",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
@@ -1997,7 +1998,7 @@ def forward(self, l_x_):
                 self.assertIn("val", node.meta)
 
     def test_input_container_type(self):
-        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        def f(x: torch.Tensor, y: list[torch.Tensor]) -> dict[str, torch.Tensor]:
             return {"a": x.sum() + sum(y).sum()}
 
         inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])
@@ -2460,70 +2461,6 @@ def forward(self, x):
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
-    @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
-    def test_export_with_parameters(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.features = torch.nn.Sequential(
-                    torch.nn.Conv2d(
-                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
-                    ),
-                    torch.nn.ReLU(inplace=True),
-                )
-
-            def forward(self, x):
-                return self.features(x)
-
-        model = MyModule().eval().cuda()
-        random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
-        dim_x = torch.export.Dim("dim_x", min=1, max=32)
-        exp_program = torch.export.export(
-            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
-        )
-        output_buffer = io.BytesIO()
-        # Tests if we can restore saved nn.Parameters when we load them again
-        torch.export.save(exp_program, output_buffer)
-        loaded_model = torch.export.load(output_buffer)
-        self.assertTrue(
-            isinstance(
-                loaded_model.module().get_parameter("features.0.weight"),
-                torch.nn.Parameter,
-            )
-        )
-
-    def test_export_fast_binary_broadcast_check(self):
-        # This test looks at the case where we erroneously create a guard
-        # when checking the equality of the operands' shape and the output
-        # shape during FakeTensor's binary op fast path.
-
-        class MyModel(torch.nn.Module):
-            def forward(self, a, b):
-                # final shape is (dim0, 4, 8)
-                # order matters since a & the output have the same shape
-                return b + a
-
-        a = torch.randn(100, 4, 8)
-        b = torch.randn(4, 8)
-        model = MyModel().eval().cuda()
-        batchsize = torch.export.Dim("dim0", min=3, max=1024)
-        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
-
-        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
-
-    def test_export_fast_binary_broadcast_check_unbacked(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, numel, scalar):
-                u0 = numel.item()
-                torch._check_is_size(u0)
-                x = torch.ones(u0 + 1)
-                return scalar - x
-
-        model = MyModel().eval().cuda()
-        numel = torch.tensor(10)
-        scalar = torch.randn(1)
-        torch.export.export(model, (numel, scalar))
-
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2563,7 +2500,7 @@ def forward(self, x):
             "by dim0 = 2\\*dim1(.*\n)*.*"
             "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
-            torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
         class Bar(torch.nn.Module):
             def forward(self, x):
@@ -2581,7 +2518,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be a constant",
         ):
-            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
         class Qux(torch.nn.Module):
             def forward(self, x):
@@ -2599,7 +2536,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*satisfy the generated guard",
         ):
-            torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
@@ -2617,7 +2554,9 @@ def forward(self, x):
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
 
         example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(
+            foo, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         ep.module()(torch.randn(3), y)  # no specialization error
 
     def test_export_raise_guard_full_constraint(self):
@@ -2734,6 +2673,7 @@ def forward(self, x):
                 foo,
                 (a, {"k": b}),
                 dynamic_shapes={"x": {0: dim0_a}, "y": {"k": {0: dim0_b}}},
+                strict=True,
             )
 
     def test_enforce_equalities(self):
@@ -2752,16 +2692,10 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
-            torch.export.export(
-                bar,
-                (x, y),
-                dynamic_shapes=dynamic_shapes,
-            )
+            torch.export.export(bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True)
         y = torch.randn(10, 3, 3)
         ebar = torch.export.export(
-            bar,
-            (x, y),
-            dynamic_shapes=dynamic_shapes,
+            bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
         )
         self.assertEqual(
             [
@@ -2923,15 +2857,15 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             r"Constraints violated \(dim0\)",
         ):
-            torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes, strict=True)
 
-        torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
+        torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes, strict=True)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r"Constraints violated \(dim0\)",
         ):
-            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes, strict=True)
 
     def test_list_contains(self):
         def func(x):
@@ -3400,7 +3334,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError, "Unmatched number of outputs from cond"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3420,7 +3355,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            "Expected true_fn_output and false_fn_output to have same metadata but found",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
@@ -4637,7 +4572,76 @@ def forward(self, x, b, y):
         self.assertEqual(ref_out, out)
 
 
+class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    def test_export_with_parameters(self, device):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.features = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                    ),
+                    torch.nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.features(x)
+
+        model = MyModule().eval().to(device)
+        random_inputs = (torch.rand([32, 3, 32, 32]).to(device),)
+        dim_x = torch.export.Dim("dim_x", min=1, max=32)
+        exp_program = torch.export.export(
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}, strict=True
+        )
+        output_buffer = io.BytesIO()
+        # Tests if we can restore saved nn.Parameters when we load them again
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        self.assertTrue(
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
+        )
+
+    def test_export_fast_binary_broadcast_check(self, device):
+        # This test looks at the case where we erroneously create a guard
+        # when checking the equality of the operands' shape and the output
+        # shape during FakeTensor's binary op fast path.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().to(device)
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(
+            model, (a, b), dynamic_shapes=dynamic_shape_spec, strict=True
+        )
+
+    def test_export_fast_binary_broadcast_check_unbacked(self, device):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().to(device)
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar), strict=True)
+
+
 common_utils.instantiate_parametrized_tests(ExportTests)
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(ExportTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -94,11 +94,11 @@ Functional collectives can accept any of these types to describe the ranks parti
 The different types will be desugared to a canonical format
 """
 RANK_TYPES = Union[
-    List[int],
-    List[List[int]],
+    list[int],
+    list[list[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist.tensor.DeviceMesh", int],
+    tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 
@@ -182,7 +182,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
-):
+) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
@@ -331,8 +331,8 @@ def reduce_scatter_tensor_autograd(
 
 
 def all_reduce_coalesced(
-    self: List[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
-) -> List[torch.Tensor]:
+    self: list[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
     the final result.
@@ -359,8 +359,8 @@ def all_reduce_coalesced(
 
 
 def all_gather_into_tensor_coalesced(
-    self: List[torch.Tensor], group: RANK_TYPES, tag: str = ""
-) -> List[torch.Tensor]:
+    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
     """
     Gather a list of tensors across from all machines.
 
@@ -388,12 +388,12 @@ def all_gather_into_tensor_coalesced(
 
 
 def reduce_scatter_tensor_coalesced(
-    inputs: List[torch.Tensor],
+    inputs: list[torch.Tensor],
     reduceOp: str,
-    scatter_dim: List[int],
+    scatter_dim: list[int],
     group: RANK_TYPES,
     tag: str = "",
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
     the final result, then scatter the results to corresponding ranks.
@@ -435,6 +435,12 @@ def reduce_scatter_tensor_coalesced(
 # Today, this maps 1:1 with "aten ops that are views".
 def _is_view_op(tgt):
     assert isinstance(tgt, torch._ops.OpOverload)
+    # Don't apply the view optimization to any `CompositeImplicitAutograd` ops.
+    # See issue: https://github.com/pytorch/pytorch/issues/133421
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        tgt.name(), torch.DispatchKey.CompositeImplicitAutograd
+    ):
+        return False
     schema = tgt._schema
     if len(schema.arguments) > 0:
         first_arg = schema.arguments[0]
@@ -444,8 +450,8 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: Optional[list[int]],
+    input_split_sizes: Optional[list[int]],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -492,8 +498,8 @@ def all_to_all_single(
 
 def all_to_all_single_autograd(
     self: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: Optional[list[int]],
+    input_split_sizes: Optional[list[int]],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -529,7 +535,7 @@ def all_to_all_single_autograd(
 
 def permute_tensor(
     self: torch.Tensor,
-    src_dst: List[int],
+    src_dst: list[int],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -602,7 +608,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[Type] = None
+        self, expected_metadata: Any, expected_type: Optional[type] = None
     ):
         if expected_type is not torch.Tensor:
             return None
@@ -671,7 +677,7 @@ Utils and infrastructure for tracing support
 """
 
 
-def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
+def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int]:
     """
     _expand_group desugars the different RANK_TYPES types into a canonical format that is traceable.
 
@@ -684,10 +690,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     if TYPE_CHECKING:
 
         def cast_listlistint(x):
-            return cast(List[List[int]], x)
+            return cast(list[list[int]], x)
 
         def cast_listint(x):
-            return cast(List[int], x)
+            return cast(list[int], x)
 
     else:
         # fake cast op for use at runtime since dynamo doesn't support real cast
@@ -699,7 +705,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         def cast_listint(x):
             return x
 
-    rankset: List[int]
+    rankset: list[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
             nested_list = cast_listlistint(group)
@@ -781,7 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
@@ -1137,7 +1143,7 @@ def all_to_all_inplace(
 
 
 def all_gather_inplace(
-    tensor_list: List[torch.Tensor],
+    tensor_list: list[torch.Tensor],
     tensor: torch.Tensor,
     group=None,
     async_op=False,

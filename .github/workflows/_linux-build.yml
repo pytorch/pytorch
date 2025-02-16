@@ -197,9 +197,9 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
@@ -216,6 +216,10 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
             USED_IMAGE="${DOCKER_IMAGE_S390X}"
+            # ensure that docker container cleanly exits in 12 hours
+            # if for some reason cleanup action doesn't stop container
+            # when job is cancelled
+            DOCKER_SHELL_CMD="sleep 12h"
 
             # since some steps are skipped on s390x, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -223,6 +227,7 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
+            DOCKER_SHELL_CMD=
           fi
 
           # Leaving 1GB for the runner and other things
@@ -232,7 +237,7 @@ jobs:
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           # detached container should get cleaned up by teardown_ec2_linux
-          # Used for JENKINS_USER, which can be empty
+          # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -243,7 +248,6 @@ jobs:
             -e BRANCH \
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
-            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -263,7 +267,8 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${USED_IMAGE}"
+            "${USED_IMAGE}" \
+            ${DOCKER_SHELL_CMD}
           )
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
@@ -329,6 +334,5 @@ jobs:
         shell: bash
         run: |
           # on s390x stop the container for clean worker stop
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
+          docker stop -a || true
+          docker kill -a || true
