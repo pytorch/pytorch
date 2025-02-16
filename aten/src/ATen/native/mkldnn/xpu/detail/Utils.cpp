@@ -1,5 +1,8 @@
+#include <ATen/Context.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <dnnl.hpp>
+#include <dnnl_common.hpp>
 
 namespace at::native::onednn {
 
@@ -484,6 +487,14 @@ dnnl::memory::format_tag conv_weight_fmt(
         : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
                                   : dnnl::memory::format_tag::odhwi)
                        : dnnl::memory::format_tag::undef);
+  }
+}
+
+void apply_tf32_if_allowed(dnnl::primitive_attr& pattr) {
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32OneDNN();
+  if (allow_tf32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
 }
 
