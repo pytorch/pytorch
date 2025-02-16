@@ -4,6 +4,7 @@ torch.utils.cpp_extension
 .. currentmodule:: torch.utils.cpp_extension
 .. autofunction:: CppExtension
 .. autofunction:: CUDAExtension
+.. autofunction:: SyclExtension
 .. autofunction:: BuildExtension
 .. autofunction:: load
 .. autofunction:: load_inline
