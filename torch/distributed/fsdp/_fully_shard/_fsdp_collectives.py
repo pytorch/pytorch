@@ -1,4 +1,4 @@
-from typing import cast, NamedTuple, Optional, Union
+from typing import Callable, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -345,6 +345,7 @@ def foreach_reduce(
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
+    all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -437,6 +438,18 @@ def foreach_reduce(
                 )
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
+    # -- END: ops in reduce_scatter stream
+
+    if all_reduce_hook is not None:
+        # Execute user-specified all reduce hook.
+        # If native HSDP is used, this is executed after the HSDP all reduce.
+        # If 1-d FSDP is used, this is executed post reduce-scatter.
+        post_reduce_stream = all_reduce_stream
+        all_reduce_stream.wait_stream(reduce_scatter_stream)
+        with device_handle.stream(all_reduce_stream):
+            all_reduce_hook(reduce_output)
+    # -- END: ops post reduce_scatter
+
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
