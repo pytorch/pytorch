@@ -25,6 +25,18 @@ inline void check_size_nonnegative(ArrayRef<c10::SymInt> size) {
   }
 }
 
+#ifndef C10_MOBILE
+constexpr uint64_t storage_max() {
+  // int64_t and size_t are used somewhat inconsistently throughout ATen.
+  // To be safe, storage size calculations must fit in both types.
+  constexpr auto int64_max =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr auto size_max =
+      static_cast<uint64_t>(std::numeric_limits<size_t>::max());
+  return std::min(int64_max, size_max);
+}
+#endif
+
 TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize,
