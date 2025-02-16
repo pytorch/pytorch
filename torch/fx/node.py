@@ -5,7 +5,7 @@ import operator
 import types
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._C import _NodeBase
@@ -56,6 +56,7 @@ Argument = Optional[
         BaseArgumentTypes,
     ]
 ]
+ArgumentT = TypeVar("ArgumentT", bound=Argument)
 
 _legal_ops = dict.fromkeys(
     [
@@ -892,35 +893,44 @@ class Node(_NodeBase):
 
 
 @compatibility(is_backward_compatible=True)
-def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
+def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     """
-    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each Node appearing in arg.
+
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
 
 @compatibility(is_backward_compatible=True)
-def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
+def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT:
     """
-    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each object appearing in arg.
+
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
+    result: Argument
+
     if isinstance(a, tuple):
-        t = tuple([map_aggregate(elem, fn) for elem in a])
+        it = (map_aggregate(elem, fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, "_fields") else type(a)(*t)  # type: ignore[arg-type]
+        result = type(a)(*it) if hasattr(a, "_fields") else tuple(it)
     elif isinstance(a, list):
-        return immutable_list([map_aggregate(elem, fn) for elem in a])
+        result = immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
-        rv = immutable_dict()
+        result = immutable_dict()
         for k, v in a.items():
-            dict.__setitem__(rv, k, map_aggregate(v, fn))
-        return rv
+            dict.__setitem__(result, k, map_aggregate(v, fn))  # type: ignore[index]
     elif isinstance(a, slice):
-        return slice(
+        result = slice(
             map_aggregate(a.start, fn),
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
     else:
-        return fn(a)
+        result = fn(a)
+
+    return cast(ArgumentT, result)
