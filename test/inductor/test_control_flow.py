@@ -877,6 +877,23 @@ class WhileLoopModels:
                 [c, a, b],
             )
 
+    class SymExprCond(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a.sum().to(torch.int64).item()
+            e = torch.nonzero(b).size(0)
+
+            def cond_fn(c, a, b):
+                return d + e + a.shape[0] - b.shape[0] < 10
+
+            def body_fn(c, a, b):
+                return c + 1, a + e, b + d
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a, b],
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1132,6 +1149,23 @@ class WhileLoopTests(TestCase):
     def test_while_loop_with_unbacked_symint_closure(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.UnbackedSymIntClosure(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_while_loop_with_sym_expr_cond(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.SymExprCond(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),

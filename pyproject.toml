@@ -150,6 +150,7 @@ select = [
     "RUF019", # unnecessary-key-check
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
+    "RUF030", # No print statement in assert
     "SLOT",
     "TCH",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
