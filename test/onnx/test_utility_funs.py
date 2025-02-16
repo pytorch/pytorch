@@ -1522,9 +1522,15 @@ class TestUtilityFuns(_BaseTestCase):
         y = None
         z = torch.FloatTensor(1, 3)
 
-        graph, _, _ = self._model_to_graph(model, (x, y, z), input_names=["x", "z"])
+        graph, _, _ = self._model_to_graph(
+            model,
+            (x, y, z),
+            input_names=["x", "z"],
+            dynamic_axes={"x": [0, 1], "z": [0, 1]},
+        )
 
         iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::Constant")
         self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
 
     def test_autograd_onnx_fallthrough(self):
