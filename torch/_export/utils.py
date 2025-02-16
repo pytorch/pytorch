@@ -28,10 +28,6 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
-from torch.fx._pytree import (
-    _deregister_pytree_flatten_spec,
-    register_pytree_flatten_spec,
-)
 from torch.utils._pytree import (
     _deregister_pytree_node,
     _register_pytree_node,
@@ -1336,17 +1332,6 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         from_dumpable_context=from_dumpable_context,
     )
 
-    def default_flatten_fn_spec(obj, spec) -> list[Any]:
-        flats, context = flatten_fn(obj)
-        assert context == spec.context
-        return flats
-
-    register_pytree_flatten_spec(
-        cls,
-        default_flatten_fn_spec,
-    )
-
 
 def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_node(cls)
-    _deregister_pytree_flatten_spec(cls)
