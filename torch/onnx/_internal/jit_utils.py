@@ -264,7 +264,7 @@ def _add_op(
 
 def _const_if_tensor(graph_context: GraphContext, arg):
     if arg is None:
-        return graph_context.op('prim::Constant').setType(_C.OptionalType.ofTensor())
+        return graph_context.op("prim::Constant").setType(_C.OptionalType.ofTensor())
     if isinstance(arg, _C.Value):
         return arg
 
