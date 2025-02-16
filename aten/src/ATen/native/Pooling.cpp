@@ -122,7 +122,7 @@ bool use_mkldnn_maxpool(const Tensor& input, IntArrayRef dilation, bool is_3d) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
-  if (input.numel() <= 1) {
+  if (input.sym_numel() <= 1) {
     return false;
   }
   if (input.dim() != (is_3d ? 5 : 4)) {
@@ -142,13 +142,11 @@ bool use_mkldnn_maxpool(const Tensor& input, IntArrayRef dilation, bool is_3d) {
     if (is_3d) {
       return input.device().is_cpu() && is_channels_last &&
           (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
-           (input.scalar_type() == kFloat));
+           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()));
     } else {
       return input.device().is_cpu() &&
           (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
-           ((input.scalar_type() == kFloat) && is_channels_last));
+           ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()));
     }
   }
 
