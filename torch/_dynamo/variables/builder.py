@@ -1,5 +1,24 @@
 # mypy: ignore-errors
 
+"""
+This module contains classes and utilities for building variable trackers in Dynamo.
+Variable trackers are used to convert Python values into symbolic representations
+that can be traced and transformed during graph capture.
+
+The key classes are:
+
+- VariableBuilder: Handles source-tracked objects that need guards and proper
+  reconstruction in the output graph. Used for inputs, module attributes, etc.
+
+- SourcelessBuilder: Handles ephemeral objects created during tracing that don't
+  need source tracking or guards. Used for temporary lists, intermediate values, etc.
+
+Variable trackers enable Dynamo to track the flow of values through the program,
+maintain guards for dynamic properties, and reconstruct values in the output graph.
+The builders in this module handle converting Python values into appropriate
+VariableTracker instances based on their type and usage context.
+"""
+
 import abc
 import collections
 import contextlib
@@ -15,28 +34,22 @@ import operator
 import random
 import re
 import sys
+import traceback
 import types
 import warnings
 import weakref
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    MutableMapping,
-    NamedTuple,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import MutableMapping
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_metrics_context
+from torch._dynamo.utils import (
+    get_metrics_context,
+    is_int_specialization_case,
+    is_torch_sym,
+)
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -76,12 +89,13 @@ from ..source import (
     CallMethodItemSource,
     ConstDictKeySource,
     ConvertIntSource,
+    DictGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
     is_constant_source,
-    is_from_defaults,
     is_from_optimizer_source,
+    ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -98,6 +112,7 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -122,7 +137,13 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .base import (
+    typestr,
+    ValueMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+    VariableTrackerMeta,
+)
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -137,8 +158,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    HFPretrainedConfigVariable,
-    PythonSysModulesVariable,
+    MappingProxyVariable,
     SetVariable,
 )
 from .distributed import (
@@ -149,9 +169,14 @@ from .distributed import (
     WorldMetaClassVariable,
 )
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
+    SysFunctionVariable,
+    TracebackVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -166,7 +191,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    RestrictedListSubclassVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -181,7 +205,6 @@ from .misc import (
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
@@ -213,7 +236,12 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch import (
+    DispatchKeySetVariable,
+    FuncTorchInterpreterVariable,
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+)
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
@@ -227,7 +255,9 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -247,7 +277,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-DimList = List
+DimList = list
 
 
 def safe_has_grad(t):
@@ -343,13 +373,13 @@ class BackwardStateGraphArg(GraphArg):
 
 # All class-based iterators in itertools
 # NOTE: use id() because some objects are not hashable, it will raise error during lookup
-ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
     id(member)
     for name, member in vars(itertools).items()
     if not name.startswith("_") and inspect.isclass(member)
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
+ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 
 
 class VariableBuilder:
@@ -401,20 +431,6 @@ class VariableBuilder:
             NumpyNdarrayVariable,
         }
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
-        }
-
     def get_source(self):
         return self.source
 
@@ -457,6 +473,7 @@ class VariableBuilder:
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
+            (types.MappingProxyType, cls.wrap_mapping_proxy),
         ]
 
         if trace_numpy and np:
@@ -492,22 +509,40 @@ class VariableBuilder:
             value, "_torchdynamo_inline", source=self.source
         )
 
+    def wrap_mapping_proxy(self, value):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        # This might be suboptimal compared to dict guards. But mappingproxy is
+        # not very common, so its ok to guard on all keys.
+        self.install_guards(GuardBuilder.MAPPING_KEYS_CHECK)
+        all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+
+        if not all_const:
+            unimplemented("mapping proxy type supports only const keys")
+
+        def build_key_value(k, v):
+            key = ConstantVariable.create(k)
+            source_key = k
+
+            source_value = GetItemSource(self.get_source(), source_key)
+            value = LazyVariableTracker.create(v, source_value)
+
+            return key, value
+
+        items = dict(build_key_value(k, v) for k, v in value.items())
+
+        # Create a dict_vt to be used in the mapping proxy variable
+        dict_vt = ConstDictVariable(items, source=None)
+        result = MappingProxyVariable(dict_vt, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
     @classmethod
     @functools.lru_cache(None)
     def _id_dispatch(
         cls,
-    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
+    ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
-            (
-                inspect.signature,
-                lambda self, value: LambdaVariable(
-                    InspectSignatureVariable.create,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
-                ),
-            ),
             (comptime, lambda self, value: ComptimeVariable()),
             (
                 dataclasses.fields,
@@ -584,37 +619,15 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                TypingVariable(k): UserDefinedObjectVariable(
-                    v,
-                    source=GetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-            # Optimisation for the common case strings, ints, etc
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -643,13 +656,18 @@ class VariableBuilder:
                     source_key = ConstDictKeySource(self.get_source(), i)
                     key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -693,7 +711,9 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
             return FrozensetVariable(items, source=self.source)
-        elif isinstance(value, enum.Enum):
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -725,12 +745,12 @@ class VariableBuilder:
                 if not ConstantVariable.is_literal(k):
                     unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
-                    self.tx, GetItemSource(keywords_source, k)
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
@@ -848,9 +868,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
                 unimplemented(
@@ -885,6 +902,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch._functorch.pyfunctorch.FuncTorchInterpreter):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -920,6 +940,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
             return OptimizerVariable(value, source=self.source)
+        elif isinstance(value, torch.DispatchKeySet):
+            self.install_guards(GuardBuilder.DISPATCH_KEY_SET_MATCH)
+            return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
@@ -946,9 +969,7 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
-            value.node, torch.nested._internal.nested_int.NestedIntNode
-        ):
+        elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
@@ -1045,6 +1066,12 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+        elif value is traceback.clear_frames:
+            return TracebackVariable(source=self.source)
+        elif value is sys.exc_info or (
+            sys.version_info >= (3, 11) and value is sys.exception
+        ):
+            return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
@@ -1052,6 +1079,17 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
+        elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FunctoolsWrapsVariable(value, source=self.source)
+        elif value is collections.namedtuple:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CollectionsNamedTupleFunction(value, source=self.source)
+        elif isinstance(
+            value, types.BuiltinMethodType
+        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return BuiltinMethodVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1142,22 +1180,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.tx.output.side_effects.track_mutable(
-                value,
-                RestrictedListSubclassVariable(
-                    [
-                        LazyVariableTracker.create(
-                            value=value[i], source=GetItemSource(self.source, i)
-                        )
-                        for i in range(len(value))
-                    ],
-                    user_cls=type(value),
-                    user_cls_source=AttrSource(self.source, "__class__"),
-                    source=self.source,
-                ),
-            )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
@@ -1245,28 +1267,74 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(self.get_source(), i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
-            # NB: This is deliberately kept ValueMutationNew because dict_vt is
-            # an internal representation. dict_vt tracks the mutation on the
-            # dict side. side_effects infra uses the UserDefinedDictVariable to
-            # apply side-effects of this dict_vt.
             dict_vt = ConstDictVariable(
                 result,
-                user_cls=collections.OrderedDict
-                if isinstance(value, collections.OrderedDict)
-                else dict,
-                mutation_type=ValueMutationNew(),
+                user_cls=(
+                    collections.OrderedDict
+                    if isinstance(value, collections.OrderedDict)
+                    else dict
+                ),
+                mutation_type=ValueMutationExisting(),
+                source=self.source,
             )
+            # Force this to reconstruct on mutation to keep the reconstruction
+            # bytecode simple
+            dict_vt.should_reconstruct_all = True
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # NB - Be careful in not triggering user code. Guards also work on
+            # the underlying tuple data structure.
+            output = [
+                LazyVariableTracker.create(
+                    tuple.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                )
+                for i in range(tuple.__len__(value))
+            ]
+
+            tuple_vt = TupleVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
+            result = UserDefinedTupleVariable.create(
+                value, tuple_vt=tuple_vt, source=self.source
+            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, list):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # NB - Be careful in not triggering user code. Guards also work on
+            # the underlying list data structure.
+            output = [
+                LazyVariableTracker.create(
+                    list.__getitem__(value, i),
+                    source=ListGetItemSource(self.get_source(), i),
+                )
+                for i in range(list.__len__(value))
+            ]
+            list_vt = ListVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
+            result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1468,9 +1536,8 @@ class VariableBuilder:
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
+            if not getattr(value, "_fsdp_use_orig_params", False):
+                unimplemented("Dynamo only supports FSDP with use_orig_params=True")
 
             # Note on FSDP guarding
             # Eager FSDP already assumes (requires, but without enforcement)
@@ -1540,30 +1607,7 @@ class VariableBuilder:
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                # Assume integers from global variables want to be specialized
-                not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly), unless explicitly disabled
-                or (
-                    self.source.guard_source().is_specialized_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or (
-                    self.source.guard_source().is_unspecialized_builtin_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or is_from_defaults(self.source)
-                # TODO: Delete this condition when rollout is done.  NB: this
-                # condition never evaluates True in open source
-                or (
-                    not justknobs_check(
-                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
-                    )
-                    and value in self._common_constants()
-                )
-            ):
+            if is_int_specialization_case(value, self.source):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
@@ -1607,7 +1651,9 @@ class VariableBuilder:
             is_static_input = True
 
         make_graph_attribute = is_static_input and (
-            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+            not config.inline_inbuilt_nn_modules
+            or is_parameter_freezing()
+            or torch._dynamo.config.prepare_freezing
         )
 
         if (
@@ -2173,7 +2219,7 @@ def _dataclasses_fields_lambda(obj):
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = GetItemSource(
+            source = DictGetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
         items.append(UserDefinedObjectVariable(field, source=source))
@@ -3001,7 +3047,9 @@ class SourcelessBuilder:
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, enum.Enum):
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
@@ -3017,10 +3065,18 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif value is functools.wraps:
+            return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
+        elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
+            return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
+                value
+            )
+        elif isinstance(value, types.GenericAlias):
+            return TypingVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
@@ -3058,6 +3114,15 @@ class SourcelessBuilder:
         handlers[immutable_list] = handlers[list]
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
+
+        handlers[torch.DispatchKeySet] = lambda tx, value: DispatchKeySetVariable(
+            value, mutation_type=ValueMutationNew()
+        )
+        handlers[
+            torch._functorch.pyfunctorch.FuncTorchInterpreter
+        ] = lambda tx, value: FuncTorchInterpreterVariable(
+            value, mutation_type=ValueMutationNew()
+        )
 
         handlers[
             torch.distributions.constraints._Real

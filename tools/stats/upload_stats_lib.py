@@ -9,7 +9,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -21,6 +21,9 @@ PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 @lru_cache
 def get_s3_resource() -> Any:
     return boto3.resource("s3")
+
+
+GHA_ARTIFACTS_BUCKET = "gha-artifacts"
 
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
@@ -84,16 +87,22 @@ def _download_artifact(
 
 
 def download_s3_artifacts(
-    prefix: str, workflow_run_id: int, workflow_run_attempt: int
+    prefix: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    job_id: Optional[int] = None,
 ) -> list[Path]:
-    bucket = get_s3_resource().Bucket("gha-artifacts")
+    bucket = get_s3_resource().Bucket(GHA_ARTIFACTS_BUCKET)
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
     )
-
     found_one = False
     paths = []
     for obj in objs:
+        object_name = Path(obj.key).name
+        # target an artifact for a specific job_id if provided, otherwise skip the download.
+        if job_id is not None and str(job_id) not in object_name:
+            continue
         found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading {p}")
@@ -122,8 +131,8 @@ def download_gha_artifacts(
 def upload_to_dynamodb(
     dynamodb_table: str,
     repo: str,
-    docs: List[Any],
-    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+    docs: list[Any],
+    generate_partition_key: Optional[Callable[[str, dict[str, Any]], str]],
 ) -> None:
     print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
@@ -142,7 +151,7 @@ def upload_to_s3(
     key: str,
     docs: list[dict[str, Any]],
 ) -> None:
-    print(f"Writing {len(docs)} documents to S3")
+    print(f"Writing {len(docs)} documents to S3 {bucket_name}/{key}")
     body = io.StringIO()
     for doc in docs:
         json.dump(doc, body)
@@ -156,7 +165,7 @@ def upload_to_s3(
         ContentEncoding="gzip",
         ContentType="application/json",
     )
-    print("Done!")
+    print(f"Done! Finish writing document to S3 {bucket_name}/{key} ")
 
 
 def read_from_s3(

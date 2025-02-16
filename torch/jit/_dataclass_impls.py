@@ -5,7 +5,7 @@ import dataclasses
 import inspect
 import os
 from functools import partial
-from typing import Callable, Dict, List
+from typing import Callable
 
 from torch._jit_internal import FAKE_FILENAME_PREFIX, is_optional
 from torch._sources import ParsedDef, SourceContext
@@ -15,7 +15,7 @@ def _get_fake_filename(cls, method_name):
     return os.path.join(FAKE_FILENAME_PREFIX, cls.__name__, method_name)
 
 
-def compose_fn(cls, name: str, body_lines: List[str], signature: str) -> ParsedDef:
+def compose_fn(cls, name: str, body_lines: list[str], signature: str) -> ParsedDef:
     body = "\n".join(f"  {b}" for b in body_lines)
     decl = f"def {name}{signature}:\n{body}"
 
@@ -59,7 +59,7 @@ def synthesize__init__(cls) -> ParsedDef:
 
     # Handle InitVars if needed (only works on Python 3.8+, when a `type` attribute was added to InitVar);
     # see CPython commit here https://github.com/python/cpython/commit/01ee12ba35a333e8a6a25c4153c4a21838e9585c
-    init_vars: List[str] = []
+    init_vars: list[str] = []
     params = []
     for name, param in signature.parameters.items():
         ann = param.annotation
@@ -144,7 +144,7 @@ def synthesize_inequality(cls, name: str, op: str, allow_eq: bool) -> ParsedDef:
 
 
 def synthesize_comparison(
-    cls, name: str, allow_eq: bool, raise_on_none: bool, inner: List[str]
+    cls, name: str, allow_eq: bool, raise_on_none: bool, inner: list[str]
 ) -> ParsedDef:
     body = []
     for field in dataclasses.fields(cls):
@@ -177,7 +177,7 @@ def synthesize_comparison(
     )
 
 
-DATACLASS_MAGIC_METHODS: Dict[str, Callable] = {
+DATACLASS_MAGIC_METHODS: dict[str, Callable] = {
     "__init__": synthesize__init__,
     "__repr__": synthesize__repr__,
     "__hash__": synthesize__hash__,

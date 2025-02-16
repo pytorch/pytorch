@@ -1,9 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import Optional, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -30,10 +29,12 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import build_rocm_gemm_configs, filtered_configs
+from .mm_common import mm_config_kwargs
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
@@ -58,49 +59,11 @@ def conv3d_grid(n, c, d, h, w, meta):
     )
 
 
-# List of dictionaries to store the kernel configs. Configs that evaluate to true
-# will be utilised on the target platform
-kernel_configs = [
-    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-    {"config": (64, 256, 16, 2, 4), "cond": True},
-    {"config": (256, 64, 16, 2, 4), "cond": True},
-    {"config": (1024, 16, 16, 1, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 256, 32, 2, 8), "cond": True},
-    {"config": (256, 64, 32, 2, 8), "cond": True},
-]
-
-# Create filtered list of configs based on conv
-platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in kernel_configs
-    if config["cond"]
-)
-
-# On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip and torch.cuda.is_available():
-    platform_configs = build_rocm_gemm_configs(platform_configs)
-
-
 def _is_large_block_for_cpu(m, n, k):
     # Thresholds are experimentally determined to reduce Triton CPU compile times
     if m > 256 or n > 256 or k > 256:
         return True
     return m * n * k > 2**17
-
-
-def conv_configs(m, n, k, *, device_type, **kwargs):
-    if device_type == "cpu":
-        return filtered_configs(
-            m,
-            n,
-            k,
-            configs=platform_configs,
-            scale=0.5,
-            exclude=_is_large_block_for_cpu,
-        )
-    return filtered_configs(m, n, k, configs=platform_configs)
 
 
 LOOP_BODY_2D = """
@@ -460,12 +423,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: Sequence[int],
     groups: int,
 ):
     stride = tuple(stride)
@@ -494,6 +457,8 @@ def convolution(
         "groups": groups,
     }
 
+    device_type = ir.get_device_type(x)
+
     if len(x.get_size()) == len(weight.get_size()) - 1:
         # add batch dimension to simplify rest of function
         return L[aten.squeeze](
@@ -504,6 +469,28 @@ def convolution(
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
+
+    # Always convert conv1D to 2D for Intel GPU.
+    # Only conv2D can be converted to channel last layout,
+    # which have much better performance.
+    if len(x.get_size()) == 3 and len(kernel_shape) == 1 and device_type == "xpu":
+        kwargs.update(
+            {
+                "stride": (1,) + stride,
+                "padding": (0,) + padding,
+                "dilation": (1,) + dilation,
+                "output_padding": (0,) + output_padding,
+            }
+        )
+        # (N, C, L) -> (N, C, 1, L)
+        x = L[aten.unsqueeze](x, dim=2)
+        weight = L[aten.unsqueeze](weight, dim=2)
+
+        return L[aten.squeeze](
+            convolution(x, weight, bias, **kwargs),
+            dim=2,
+        )
+
     ndim = len(kernel_shape)
     stride = pad_listlike(stride, ndim)
     padding = pad_listlike(padding, ndim)
@@ -535,7 +522,7 @@ def convolution(
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 
-    if bias is not None and ir.get_device_type(x) != "cpu":
+    if bias is not None and device_type != "cpu":
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
         return L[aten.add](
@@ -610,11 +597,13 @@ def convolution(
         ):
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
+        conv_configs = V.choices.get_conv_configs(device_type)
+
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
-            device_type=ir.get_device_type(x),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(

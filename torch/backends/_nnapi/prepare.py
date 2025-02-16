@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
@@ -21,16 +21,16 @@ class NnapiModule(torch.nn.Module):
 
     # _nnapi.Compilation is defined
     comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
-    weights: List[torch.Tensor]
-    out_templates: List[torch.Tensor]
+    weights: list[torch.Tensor]
+    out_templates: list[torch.Tensor]
 
     def __init__(
         self,
         shape_compute_module: torch.nn.Module,
         ser_model: torch.Tensor,
-        weights: List[torch.Tensor],
-        inp_mem_fmts: List[int],
-        out_mem_fmts: List[int],
+        weights: list[torch.Tensor],
+        inp_mem_fmts: list[int],
+        out_mem_fmts: list[int],
         compilation_preference: int,
         relax_f32_to_f16: bool,
     ):
@@ -46,7 +46,7 @@ class NnapiModule(torch.nn.Module):
         self.relax_f32_to_f16 = relax_f32_to_f16
 
     @torch.jit.export
-    def init(self, args: List[torch.Tensor]):
+    def init(self, args: list[torch.Tensor]):
         assert self.comp is None
         self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
@@ -60,7 +60,7 @@ class NnapiModule(torch.nn.Module):
 
         self.comp = comp
 
-    def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
+    def forward(self, args: list[torch.Tensor]) -> list[torch.Tensor]:
         if self.comp is None:
             self.init(args)
         comp = self.comp
