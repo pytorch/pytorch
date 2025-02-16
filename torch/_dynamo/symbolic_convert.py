@@ -2817,6 +2817,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
+        example_inputs,
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2872,8 +2873,25 @@ class InstructionTranslator(InstructionTranslatorBase):
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    is_dynamic = []
+                    for x in example_inputs or []:
+                        value = x.get(name)
+                        if isinstance(value, torch.Tensor):
+                            while len(is_dynamic) < len(
+                                value.shape
+                            ):  # Ensure list is long enough
+                                is_dynamic.append(set())
+                            for i, dim in enumerate(value.shape):
+                                is_dynamic[i].add(dim)
+                        else:
+                            if not is_dynamic:
+                                is_dynamic.append(set())
+                            is_dynamic[0].add(value)
+
+                    dynamism = tuple(len(x) > 1 for x in is_dynamic)
+
                     var = LazyVariableTracker.create(
-                        value, LocalSource(name, is_input=True)
+                        value, LocalSource(name, is_input=True, dynamism=dynamism)
                     )
                     self.symbolic_locals[name] = var
 
