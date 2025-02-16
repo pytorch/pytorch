@@ -1159,7 +1159,9 @@ class InstructionTranslatorBase(
                 if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
-                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                        + torch.fx.GraphModule(
+                            self.output.nn_modules, self.output.graph
+                        ).print_readable(
                             print_output=False, include_stride=True, include_device=True
                         ),
                         file=sys.stderr,
