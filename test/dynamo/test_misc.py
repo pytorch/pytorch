@@ -10845,6 +10845,7 @@ fn
 
         fn(torch.tensor([3, 3]))
 
+    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_mark_unbacked_strict(self):
         @torch.compile()
         def fn(x, y):
