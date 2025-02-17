@@ -485,8 +485,6 @@ XFAILLIST_GRAD = {
     # trunc_tensor not working properly for float16
     "divtrunc_rounding": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     "fmod": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
-    # round not working properly for float16
-    "round": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     # atomic operation in backward pass
     "_unsafe_masked_index": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     "_unsafe_masked_index_put_accumulate": MPSSkipInfo(
@@ -806,6 +804,17 @@ OTHER_XFAILLIST = {
     "empty": MPSSkipInfo(),
     "empty_like": MPSSkipInfo(),
     "empty_permuted": MPSSkipInfo(TEST_OUTPUT_MATCH, TEST_OUTPUT_GRAD_MATCH),
+    # round has precision issues with float16 dtypes
+    "round": [
+        MPSSkipInfo(
+            TEST_OUTPUT_MATCH, variant=" ", dtypes=[torch.float16, torch.bfloat16]
+        ),
+        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_0", dtypes=[torch.float16]),
+        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_3", dtypes=[torch.bfloat16]),
+        MPSSkipInfo(
+            TEST_OUTPUT_MATCH, variant="decimals_neg_3", dtypes=[torch.bfloat16]
+        ),
+    ],
 }
 
 ERRORINPUT_XFAILLIST = {
