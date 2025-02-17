@@ -1154,26 +1154,4 @@ mkldnn_rnn_layer_differentiable_backward(
 
 Tensor values_backward(const Tensor& grad, const Tensor& self);
 
-std::tuple<Tensor, Tensor, Tensor> betainc_partials(
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& x);
-
-std::tuple<Tensor, Tensor, Tensor> special_betainc_backward(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& x);
-
-std::tuple<Tensor, Tensor, Tensor> betaincinv_partials(
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& y);
-
-std::tuple<Tensor, Tensor, Tensor> special_betaincinv_backward(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& y);
-
 } // namespace torch::autograd::generated::details
