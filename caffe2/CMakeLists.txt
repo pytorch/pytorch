@@ -937,25 +937,25 @@ if(USE_ROCM)
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  set(CUDAToolkit_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  if(CUDA_SEPARABLE_COMPILATION)
+  if(CUDAToolkit_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
     add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
-    set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+    set_property(TARGET torch_cuda PROPERTY CUDAToolkit_SEPARABLE_COMPILATION ON)
 
     add_library(torch_cuda_w_sort_by_key OBJECT
         ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
         ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
-    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDAToolkit_SEPARABLE_COMPILATION OFF)
     target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
   else()
     add_library(torch_cuda
         ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
         ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  set(CUDAToolkit_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
@@ -1004,12 +1004,12 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+      if(CUDAToolkit_VERSION_MAJOR LESS_EQUAL 11)
         target_link_libraries(torch_cuda_linalg PRIVATE
             CUDA::cusolver_static
             ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
         )
-      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+      elseif(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 12)
         target_link_libraries(torch_cuda_linalg PRIVATE
             CUDA::cusolver_static
             ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
