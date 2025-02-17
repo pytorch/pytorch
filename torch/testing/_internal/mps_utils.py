@@ -665,19 +665,15 @@ MACOS_13_XFAILLIST = {
     "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
-
     # Unsupported dtype pre MacOS14
     "isin": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[torch.int16],
         upper=14.0,
     ),
-
     # Precision issues
     "atan2": MPSSkipInfo(
-        TEST_OUTPUT_MATCH,
-        dtypes=[torch.uint8, torch.int8, torch.int16],
-        upper=14.0
+        TEST_OUTPUT_MATCH, dtypes=[torch.uint8, torch.int8, torch.int16], upper=14.0
     ),
     "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
     "cumsum": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
@@ -689,7 +685,9 @@ MACOS_13_XFAILLIST = {
     "masked.log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "masked.softmin": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "masked.softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
-    "cumulative_trapezoid": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "cumulative_trapezoid": MPSSkipInfo(
+        TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0
+    ),
     "dot": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
     "nn.functional.max_pool2d": MPSSkipInfo(
         TEST_OUTPUT_MATCH,
