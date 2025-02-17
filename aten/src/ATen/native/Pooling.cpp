@@ -118,7 +118,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
 }
 
 #if AT_MKLDNN_ENABLED()
-bool use_mkldnn_maxpool(const Tensor& input, IntArrayRef dilation, bool is_3d) {
+static bool use_mkldnn_maxpool(const Tensor& input, IntArrayRef dilation, bool is_3d) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
