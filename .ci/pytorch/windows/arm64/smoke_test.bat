@@ -36,7 +36,7 @@ if not exist tmp mkdir tmp
 for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do C:\Windows\System32\tar.exe -xf "%%i" -C tmp
 if ERRORLEVEL 1 exit /b 1
 
-pushd tmp\libtorch
+pushd tmp
 
 set VC_VERSION_LOWER=14
 set VC_VERSION_UPPER=36
