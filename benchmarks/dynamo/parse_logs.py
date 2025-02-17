@@ -192,7 +192,7 @@ for name, name2, log in chunker(entries, 3):
             "unique_graph_breaks": unique_graph_breaks,
         }
     )
-    i += 1
+    i += 1  # noqa: SIM113
 
 if c:
     print(f"failed to classify {c} entries", file=sys.stderr)
