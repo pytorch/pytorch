@@ -838,6 +838,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d["e"] = 5
         self.assertEqual(d["e"], res["e"])
 
+    def test_mapping_proxy_existing(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x, mp):
+            y = torch.sin(x * mp["a"])
+            for k, v in mp.items():
+                y += torch.cos(x * v)
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        mp = types.MappingProxyType(d)
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+        d["a"] = 3
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+        d.pop("b")
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+    def test_mapping_proxy_existing_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        mp = types.MappingProxyType(d)
+
+        def fn(x):
+            d["d"] = 4
+            y = torch.sin(x * mp["d"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = torch.sin(x * 4)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(d.keys(), mp.keys())
+
+    def test_mapping_proxy_existing_local_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        mp = types.MappingProxyType(d)
+
+        def fn(x):
+            # Dynamo should not cause a graph break here because it knows that
+            # the existing proxy cant point to this new dict
+            other_dict = {}
+            other_dict["d"] = 4
+            y = torch.sin(x * mp["c"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = torch.sin(x * mp["c"])
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(d.keys(), mp.keys())
+
     def test_move_to_end(self):
         def fn(x):
             d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
