@@ -1001,10 +1001,11 @@ class CPUReproTests(TestCase):
 
     def test_low_fp_index_expr_issue_147279(self):
         # https://github.com/pytorch/pytorch/issues/147279
-        def fn(*args):
-            sym_0, sym_1, sym_2, sym_3 = args
-            var_228 = torch.arange(start=sym_0, end=sym_1, dtype=sym_2)
-            return torch.sum(var_228, dim=sym_3)
+        def fn(start, end, dtype, dim):
+            return torch.sum(
+                torch.arange(start=start, end=end, dtype=dtype),
+                dim=dim,
+            )
 
         self.common(
             fn,
