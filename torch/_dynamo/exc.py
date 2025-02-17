@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+
+"""Exception handling and error reporting for TorchDynamo.
+
+This module provides a comprehensive set of exception classes and utilities for error
+handling in TorchDynamo. It includes:
+
+Base Exceptions:
+    - TorchDynamoException: Base class for all TorchDynamo-specific exceptions
+    - Various specialized subclasses for different error scenarios
+
+User Error Handling:
+    - UserError: Exceptions for user-facing errors in TorchDynamo usage
+    - UserErrorType: Enumeration of different categories of user errors
+    - Formatted error messages with debugging information
+
+Observed Exceptions:
+    - Classes for handling exceptions observed during tracing
+    - Special handling for StopIteration, LookupError, etc.
+    - Exception state management during compilation
+
+Error Formatting:
+    - Stack trace filtering and formatting
+    - Error message augmentation
+    - Debugging utilities for error reporting
+"""
+
 import logging
 import os
 import textwrap
@@ -146,6 +172,10 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category: str = "unimplemented") -> None:
         self.category = category
         counters[category][self.msg] += 1
+
+
+class UnknownPropertiesDuringBackwardTrace(Unsupported):
+    pass
 
 
 class RecompileError(TorchDynamoException):

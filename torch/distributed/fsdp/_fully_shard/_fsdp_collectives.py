@@ -1,4 +1,4 @@
-from typing import cast, NamedTuple, Optional, Union
+from typing import Callable, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -290,7 +290,15 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
-    with torch.autograd._unsafe_preserve_version_counter(tuple(out)):
+
+    # only avoid VC bump if we are not in inference mode
+    non_inference_outs = [o for o in out if not o.is_inference()]
+    if len(non_inference_outs) > 0:
+        with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
+            torch.ops.fsdp.split_with_sizes_copy(
+                all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+            )
+    else:
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
@@ -337,6 +345,7 @@ def foreach_reduce(
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
+    all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -429,6 +438,18 @@ def foreach_reduce(
                 )
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
+    # -- END: ops in reduce_scatter stream
+
+    if all_reduce_hook is not None:
+        # Execute user-specified all reduce hook.
+        # If native HSDP is used, this is executed after the HSDP all reduce.
+        # If 1-d FSDP is used, this is executed post reduce-scatter.
+        post_reduce_stream = all_reduce_stream
+        all_reduce_stream.wait_stream(reduce_scatter_stream)
+        with device_handle.stream(all_reduce_stream):
+            all_reduce_hook(reduce_output)
+    # -- END: ops post reduce_scatter
+
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
