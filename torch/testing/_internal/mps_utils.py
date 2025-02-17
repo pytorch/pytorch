@@ -555,7 +555,7 @@ COMPLEX_XFAILLIST = {
     "istft": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "lerp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.cholesky_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.det": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.inv": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -658,12 +658,6 @@ MACOS_13_XFAILLIST = {
     "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
-    # Unsupported dtype pre MacOS14
-    "isin": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16],
-        upper=14.0,
-    ),
     # Precision issues
     "atan2": MPSSkipInfo(
         TEST_OUTPUT_MATCH, dtypes=[torch.uint8, torch.int8, torch.int16], upper=14.0
