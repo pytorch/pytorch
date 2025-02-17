@@ -3914,17 +3914,11 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
+            BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.TUPLE_REDUCTION,
         ]
     )
-    if torch.version.hip is None:
-        backend_features.update(
-            [
-                # TODO: Move this above when ROCm triton adds support for multiple inputs
-                BackendFeature.TUPLE_REDUCTION,
-                BackendFeature.SORT,
-            ]
-        )
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
