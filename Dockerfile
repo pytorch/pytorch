@@ -128,12 +128,12 @@ RUN set -eux; \
     PIP_PRE_FLAG=""; \
     fi; \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-    EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu/"; \
+    INDEX_URL="https://download.pytorch.org/whl/cpu/"; \
     else \
-    EXTRA_INDEX_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH%.}/"; \
+    INDEX_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH%.}/"; \
     fi; \
     echo "Installing main packages with PIP_PRE_FLAG=${PIP_PRE_FLAG}"; \
-    pip install --no-cache-dir $PACKAGES --no-deps $PIP_PRE_FLAG --extra-index-url $EXTRA_INDEX_URL && \
+    pip install --no-cache-dir $PACKAGES --no-deps $PIP_PRE_FLAG --index-url $INDEX_URL && \
     pip install torchelastic && \
     /opt/conda/bin/conda clean -ya
 
