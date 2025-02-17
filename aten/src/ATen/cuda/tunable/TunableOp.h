@@ -98,6 +98,7 @@ class TunableOp {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
         auto params_sig = params->Signature();
+        auto blas_sig = params->BLASSignature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result == ResultEntry::Null()) {
@@ -107,7 +108,7 @@ class TunableOp {
           }
           else if (ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
           }
         }
       }
@@ -204,6 +205,7 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
+      auto blas_sig = params->BLASSignature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
@@ -364,7 +366,7 @@ class TunableOp {
       }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
-      return ResultEntry(id_name, min_duration_ms);
+      return ResultEntry(id_name, min_duration_ms, blas_sig);
     }
 
   private:
@@ -392,6 +394,7 @@ class TunableOp {
 struct OpParams {
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
+  virtual std::string BLASSignature() const = 0;
 };
 
 } // namespace at::cuda::tunable

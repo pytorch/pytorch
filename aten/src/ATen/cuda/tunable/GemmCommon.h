@@ -44,6 +44,89 @@ inline char BlasOpToString(BlasOp op) {
   return 'N';
 }
 
+template <typename T>
+inline const char* TypeName(T v) {
+  return "unknown";
+}
+
+template <>
+inline const char* TypeName(float v) {
+  return "float";
+}
+
+template <>
+inline const char* TypeName(double v) {
+  return "double";
+}
+
+template <>
+inline const char* TypeName(BFloat16 v) {
+  return "BFloat16";
+}
+
+template <>
+inline const char* TypeName(Half v) {
+  return "Half";
+}
+
+template <>
+inline const char* TypeName(Float8_e4m3fn v) {
+  return "Float8_e4m3fn";
+}
+
+template <>
+inline const char* TypeName(Float8_e5m2 v) {
+  return "Float8_e5m2";
+}
+
+template <>
+inline const char* TypeName(Float8_e4m3fnuz v) {
+  return "Float8_e4m3fnuz";
+}
+
+template <>
+inline const char* TypeName(Float8_e5m2fnuz v) {
+  return "Float8_e5m2fnuz";
+}
+
+template <>
+inline const char* TypeName(c10::complex<double> v) {
+  return "c10::complex<double>";
+}
+
+template <>
+inline const char* TypeName(c10::complex<float> v) {
+  return "c10::complex<float>";
+}
+
+// Convert opmath_type<T> to string
+template <typename T>
+inline std::string to_string_opmath(const at::opmath_type<T>& value) {
+    if constexpr (std::is_same_v<at::opmath_type<T>, c10::complex<float>> ||
+                  std::is_same_v<at::opmath_type<T>, c10::complex<double>>) {
+        return fmt::format("({:.4f}, {:.4f})", value.real(), value.imag());
+    } else {
+        return fmt::format("{:.4f}", value);
+    }
+}
+
+// convert activation epilogue to string
+inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
+  switch (value) {
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
+      return std::string("None");
+      break;
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      return std::string("RELU");
+      break;
+    case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      return std::string("GELU");
+      break;
+    default:
+      return std::string("unknown");
+  }
+}
+
 namespace detail {
 
 static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
@@ -85,6 +168,15 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
+
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    // compute_type is hard-coded for now to float = HIPBLAS_COMPUTE_32F
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--alpha %s --beta %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
+  }
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
@@ -171,6 +263,15 @@ private:
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string activation_str = to_string_epilogue(activation);
+    // compute_type is hard-coded for now to float = HIPBLAS_COMPUTE_32F
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--alpha %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --activation %s --bias_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), activation_str, TypeName<T>(T{}));
+  }
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
@@ -257,6 +358,16 @@ private:
 
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    // compute_type is hard-coded for now to float = HIPBLAS_COMPUTE_32F
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a %ld --stride_b %ld --stride_c %ld --stride_d %ld "
+      "--alpha %s --beta %s --transA %c --transB %c --batch_count %ld --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, stride_a, stride_b, stride_c, stride_c, alpha_str, beta_str, transa, transb, batch,
+      TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
+  }
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
   }
@@ -349,6 +460,19 @@ private:
 template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
+
+  std::string BLASSignature() const override {
+    std::string a_dtype_str = c10::toString(a_dtype);
+    std::string b_dtype_str = c10::toString(b_dtype);
+    std::string c_dtype_str = c10::toString(c_dtype);
+    std::string bias_dtype_str = c10::toString(bias_dtype);
+
+    // Excluding use_fast_accum and use_rowise booleans for now
+    // compute_type is hard-coded for now to float = HIPBLAS_COMPUTE_32F
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--transA %c --transB %c --batch_count 1 --scaleA s --scaleB s --a_type %s --b_type %s --c_type %s --d_type %s --bias_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str);
+  }
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
