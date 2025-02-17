@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
-from sympy import Expr
+from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -404,6 +404,7 @@ class CUDATemplateKernel(CUDAKernel):
         if len(sizes) == 0:
             return str(default_value)
 
+        sizes = [symbols(v) if isinstance(v, str) else v for v in sizes]
         val = sympy_product(sizes)
         return val
 

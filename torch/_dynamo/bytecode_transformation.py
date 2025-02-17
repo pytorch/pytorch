@@ -1,4 +1,20 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for analyzing, transforming and manipulating Python bytecode.
+It includes functionality for:
+- Converting between different bytecode formats and versions
+- Virtualizing jumps and managing jump targets
+- Handling exception tables and their entries
+- Managing instruction offsets and extended arguments
+- Providing a clean API for bytecode modification and transformation
+- Supporting Python version-specific bytecode features
+- Generating bytecode from template functions
+
+The module is designed to work across different Python versions (3.7+) and handles
+version-specific bytecode differences transparently.
+"""
+
 import copy
 import dataclasses
 import dis
@@ -218,8 +234,6 @@ def create_rot_n(n) -> list[Instruction]:
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
     # ensure desired rotate function exists
-    if sys.version_info < (3, 8) and n >= 4:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.8")
     if sys.version_info < (3, 10) and n >= 5:
         raise AttributeError(f"rotate {n} not supported for Python < 3.10")
 
