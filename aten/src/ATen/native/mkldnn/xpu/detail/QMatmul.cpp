@@ -118,6 +118,7 @@ void quantized_matmul(
       binary_alpha,
       input_scale,
       input_zero_point,
+      other,
       unary_post_op,
       unary_post_op_args,
       unary_post_op_algorithm,
@@ -210,11 +211,9 @@ void quantized_matmul(
   std::unordered_map<int, dnnl::memory> args;
 
   dnnl::post_ops po;
-  po = attr.extract_post_ops(
-      dst,
-      true,
-      dst.scalar_type() == at::kByte || dst.scalar_type() == at::kChar);
+  po = attr.extract_post_ops(dst);
   bool m1_need_zp = (input_zero_point != 0);
+  bool dst_need_zp = (output_zero_point != 0);
   bool wgh_is_per_channel = weight_scales.numel() > 1;
 
   dnnl::matmul matmul_p;
@@ -241,6 +240,10 @@ void quantized_matmul(
   pattr.set_scales_mask(DNNL_ARG_SRC, mask_ac);
   if (m1_need_zp) {
     pattr.set_zero_points_mask(DNNL_ARG_SRC, mask_ac);
+  }
+  pattr.set_scales_mask(DNNL_ARG_DST, mask_ac);
+  if (dst_need_zp) {
+    pattr.set_zero_points_mask(DNNL_ARG_DST, mask_ac);
   }
 
   if (with_bias) {
@@ -307,6 +310,17 @@ void quantized_matmul(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
+  }
+
+  dnnl::memory dst_sc_m, dst_zp_m;
+  Tensor dst_sc_tensor, dst_zp_tensor;
+  dst_sc_m = dnnl_memory_from_host_scalar(
+      static_cast<float>(output_scale), dst_sc_tensor, engine);
+  dst_zp_m = dnnl_memory_from_host_scalar(
+      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
+  if (dst_need_zp) {
+    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
   }
 
   auto qmatmul_event = dnnl::sycl_interop::execute(matmul_p, stream, args);
