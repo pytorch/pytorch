@@ -6492,11 +6492,8 @@ class ShapeEnv:
                 for s in x.node.expr.free_symbols:
                     if str(s) in frame_symbols:  # type: ignore[operator]
                         continue
-                    frame_symbols[str(s)] = (  # type: ignore[index]
-                        self.var_to_sources[s][0].name()  # type: ignore[assignment]
-                        if s in self.var_to_sources
-                        else None  # unbacked
-                    )
+                    if s in self.var_to_sources:
+                        frame_symbols[str(s)] = self.var_to_sources[s][0].name()  # type: ignore[assignment]
                 return str(x)
             return None
 

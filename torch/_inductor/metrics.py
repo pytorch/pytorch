@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, cast, Dict, List, Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -145,11 +145,11 @@ class MetricTable:
             row_dict.keys()
         ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
 
-        row = [
-            get_benchmark_name(),
-        ]
-        row += [row_dict[column_name] for column_name in self.column_names]
-        self._write_row(row)
+        bn = get_benchmark_name()
+        # assert bn is not None
+        row = [bn] + [row_dict[column_name] for column_name in self.column_names]
+        assert all(isinstance(i, str) for i in row)
+        self._write_row(cast(list[str], row))
 
     def output_filename(self) -> str:
         return f"metric_table_{self.table_name}.csv"

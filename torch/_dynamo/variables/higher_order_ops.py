@@ -978,18 +978,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_shared + unique_true + unique_false,
         )
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            true_r.as_proxy(),
-        )
-
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.cond,
             p_args,
             {},
-            flat_example_value,
+            None,
             true_treespec,
         )
 
