@@ -49,8 +49,8 @@ import sympy
 
 import torch
 import torch.fx
-import torch.utils._pytree as pytree
 import torch.utils.checkpoint
+import torch.utils.pytree.python as pytree
 from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699

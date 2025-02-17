@@ -20,7 +20,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 __all__ = [

@@ -19,6 +19,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._library.utils as library_utils
+import torch.utils.pytree.python as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
@@ -43,9 +44,16 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.pytree.python import (
+    KeyPath,
+    keystr,
+    PyTree,
+    tree_map,
+    tree_map_,
+    TreeSpec,
+)
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -79,7 +87,6 @@ _UNASSIGNED = _Unassigned()
 
 DimList = list
 
-pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten

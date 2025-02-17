@@ -302,7 +302,7 @@ class TestUnbackedSymints(InductorTestCase):
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
         from torch.testing._internal.common_subclass import WrapperTensor
-        from torch.utils._pytree import tree_map
+        from torch.utils.pytree.python import tree_map
 
         # NB: the error we're testing for only triggers when unbacked SymInts
         # are created within a subclass's torch_dispatch, because they're not seen

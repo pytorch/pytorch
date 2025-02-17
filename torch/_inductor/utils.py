@@ -56,7 +56,7 @@ import sympy
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 if TYPE_CHECKING:

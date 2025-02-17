@@ -78,7 +78,7 @@ from torch.testing._internal.custom_tensor import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (
     LeafSpec,
     tree_flatten,
     tree_map,
@@ -430,7 +430,7 @@ class TestExport(TestCase):
             _dump_dynamic_shapes,
             _load_dynamic_shapes,
         )
-        from torch.utils._pytree import tree_map
+        from torch.utils.pytree.python import tree_map
 
         def _construct_inputs(shapes):
             def _is_tensor_leaf(x):
@@ -4147,7 +4147,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def __init__(self, content):
                 self.content = content
 
-        from torch.utils._pytree import register_pytree_node
+        from torch.utils.pytree.python import register_pytree_node
 
         register_pytree_node(
             Box,
@@ -5128,7 +5128,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_dynamic_shapes_spec_with_pytree(self):
         from torch.export import Dim, export
-        from torch.utils._pytree import tree_map
+        from torch.utils.pytree.python import tree_map
 
         inputs = {
             "tensor": torch.randn(3),

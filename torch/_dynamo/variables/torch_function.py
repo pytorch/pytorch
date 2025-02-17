@@ -37,7 +37,7 @@ import operator
 from typing import TYPE_CHECKING
 
 import torch._C
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._guards import Source
 from torch.overrides import (
     _get_overloaded_args,

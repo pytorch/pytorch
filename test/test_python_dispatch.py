@@ -9,6 +9,7 @@ from copy import deepcopy
 
 import torch
 import torch._dynamo
+import torch.utils.pytree.python as pytree
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -39,7 +40,6 @@ from torch.testing._internal.logging_tensor import (
     LoggingTensorReentrant,
 )
 from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils import _pytree as pytree
 from torch.utils._mode_utils import all_same_mode, no_dispatch
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -47,7 +47,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils.pytree.python import tree_map, tree_map_only
 
 
 # used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda

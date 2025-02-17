@@ -55,7 +55,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 try:
     import torchvision.models

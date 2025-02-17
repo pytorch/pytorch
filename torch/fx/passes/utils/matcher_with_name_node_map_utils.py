@@ -11,7 +11,7 @@ def _split_to_graph_and_name_node_map(
     gm: GraphModule,
 ) -> tuple[GraphModule, dict[str, Node]]:
     from torch.fx.graph import _PyTreeInfo
-    from torch.utils._pytree import tree_flatten, tree_unflatten
+    from torch.utils.pytree.python import tree_flatten, tree_unflatten
 
     name_node_map = {}
     for n in gm.graph.nodes:

@@ -10,6 +10,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
+import torch.utils.pytree.python as pytree
 from torch._prims_common import (
     CustomOutParamAnnotation,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -19,8 +20,7 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
 )
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree.python import tree_flatten, tree_unflatten
 
 
 _T = TypeVar("_T")

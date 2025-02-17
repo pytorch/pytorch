@@ -904,7 +904,7 @@ class WhileLoopTests(TestCase):
         dynamic=False,
         num_counters=1,
     ):
-        import torch.utils._pytree as pytree
+        import torch.utils.pytree.python as pytree
 
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)

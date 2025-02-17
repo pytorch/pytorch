@@ -700,7 +700,7 @@ class VariableBuilder:
                 (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
                 or
                 # Another commonly used frozenset of types.
-                x in torch.utils._pytree.BUILTIN_TYPES
+                x in torch.utils.pytree.python.BUILTIN_TYPES
             )
             for x in value
         ):
@@ -1121,7 +1121,7 @@ class VariableBuilder:
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
         elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
+            value.__self__, (torch.nn.Module, torch.utils.pytree.python.TreeSpec)
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'
@@ -3058,7 +3058,8 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
+            value,
+            (torch.utils.pytree.python.TreeSpec, torch.utils.pytree.python.LeafSpec),
         ):
             return UserDefinedObjectVariable(value)
         elif PlacementVariable.is_placement(value):

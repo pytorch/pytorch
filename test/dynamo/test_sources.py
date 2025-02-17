@@ -58,7 +58,9 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
             def forward(self):
                 if (
-                    torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type
+                    torch.utils.pytree.python.SUPPORTED_NODES[
+                        CausalLMOutputWithPast
+                    ].type
                     == int
                 ):
                     x = torch.sin(self.x)
@@ -66,7 +68,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
                     x = torch.cos(self.x)
                 return x
 
-        torch.utils._pytree.register_pytree_node(
+        torch.utils.pytree.python.register_pytree_node(
             CausalLMOutputWithPast,
             lambda x: ((), None),
             lambda x, _: CausalLMOutputWithPast(),

@@ -3,7 +3,7 @@
 import contextlib
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 @contextlib.contextmanager

@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from typing import Callable, Optional
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -19,7 +20,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.utils import _pytree as pytree
 
 
 profile = functools.partial(

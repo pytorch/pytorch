@@ -14,6 +14,7 @@ from onnxscript.function_libs.torch_lib import (
 
 import torch
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.fx import (
@@ -22,7 +23,6 @@ from torch.onnx._internal.fx import (
     onnxfunction_dispatcher,
     type_utils as fx_type_utils,
 )
-from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -247,8 +247,8 @@ def _fill_tensor_shape_type(
         # onnxscript_values is a single tensor, but expected_values is a list of tensors.
         return
 
-    flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
-    flat_expected_values, _ = _pytree.tree_flatten(expected_values)
+    flat_onnxscript_values, _ = pytree.tree_flatten(onnxscript_values)
+    flat_expected_values, _ = pytree.tree_flatten(expected_values)
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
@@ -692,7 +692,7 @@ class FxOnnxInterpreter:
         else:
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            flat_args, _ = _pytree.tree_flatten(node.args[0])
+            flat_args, _ = pytree.tree_flatten(node.args[0])
             for arg in flat_args:
                 assert isinstance(
                     arg, torch.fx.Node

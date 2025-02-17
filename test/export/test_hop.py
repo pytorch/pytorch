@@ -6,7 +6,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.test_case import TestCase
 from torch.export import export, load, save
 from torch.export._trace import _export

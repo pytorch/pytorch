@@ -8,8 +8,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
-import torch.utils._pytree as pytree
 import torch.utils.checkpoint
+import torch.utils.pytree.python as pytree
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._functorch._aot_autograd.utils import make_boxed_compiler
@@ -1289,7 +1289,7 @@ class GraphModule(torch.nn.Module):
                 if kwargs is None:
                     kwargs = {}
 
-                args_inner = torch.utils._pytree.tree_map_only(
+                args_inner = torch.utils.pytree.python.tree_map_only(
                     DoubleSizeMaybeAddGeThreeTensor, lambda x: x.inner_elem, args
                 )
                 out_inner = func(*args_inner, **kwargs)

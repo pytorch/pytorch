@@ -12,7 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.utils import _pytree
+import torch.utils.pytree.python as pytree
 
 
 if TYPE_CHECKING:
@@ -232,7 +232,7 @@ class JitTraceConvertStrategy(CaptureStrategy):
 
         del dynamic_shapes  # Unused
 
-        flattened_args, spec = _pytree.tree_flatten((args, kwargs))
+        flattened_args, spec = pytree.tree_flatten((args, kwargs))
         flattened_args = tuple(flattened_args)
 
         # Since torch.jit.trace only accepts Tensors as inputs, we filter
@@ -264,13 +264,13 @@ class JitTraceConvertStrategy(CaptureStrategy):
                     if arg is tensor_placeholder:
                         reconstructed_flattened_args[i] = next(_args_iter)
                 # Unflatten the arguments and kwargs to pass to the model.
-                unflattened_args, unflattened_kwargs = _pytree.tree_unflatten(
+                unflattened_args, unflattened_kwargs = pytree.tree_unflatten(
                     reconstructed_flattened_args, spec
                 )
                 results = self.model(*unflattened_args, **unflattened_kwargs)
                 if not isinstance(results, tuple):
                     results = (results,)
-                flattened_results, _ = _pytree.tree_flatten(results)
+                flattened_results, _ = pytree.tree_flatten(results)
                 if len(flattened_results) == 1:
                     return flattened_results[0]
                 return tuple(flattened_results)

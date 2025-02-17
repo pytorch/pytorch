@@ -7,7 +7,7 @@ from typing import Any, Callable, Union
 
 import torch
 import torch._subclasses.functional_tensor
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,

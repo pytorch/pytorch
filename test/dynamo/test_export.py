@@ -4034,7 +4034,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_fx_pytree(self):
         def foo(args):
-            flat_args, spec = torch.utils._pytree.tree_flatten(args)
+            flat_args, spec = torch.utils.pytree.python.tree_flatten(args)
             flat_args_fx = torch.fx._pytree.tree_flatten_spec(args, spec)
             return flat_args_fx[0] + flat_args[0]
 

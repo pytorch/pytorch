@@ -62,7 +62,7 @@ def get_fw_bw_graph(
         requires_grad = requires_grad or t.requires_grad
         return t
 
-    torch.utils._pytree.tree_map_only(torch.Tensor, fn_req_grad, inps)
+    torch.utils.pytree.tree_map_only(torch.Tensor, fn_req_grad, inps)
 
     out = aot_function(
         f,
@@ -82,7 +82,7 @@ def get_fw_bw_graph(
 
 
 def make_inputs_non_leaves(inps):
-    return torch.utils._pytree.tree_map_only(torch.Tensor, lambda t: t.add(1), inps)
+    return torch.utils.pytree.tree_map_only(torch.Tensor, lambda t: t.add(1), inps)
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")

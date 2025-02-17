@@ -1452,7 +1452,7 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
             "for non-contiguous nested tensors with holes"
         )
 
-    from torch.utils._pytree import tree_map
+    from torch.utils.pytree.python import tree_map
 
     # raggedness reduced away --> return dense tensor
     if reduce_on_ragged:

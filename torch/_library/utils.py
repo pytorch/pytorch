@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Callable, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
 
@@ -280,7 +280,7 @@ def requires_set_python_module() -> bool:
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
     assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
-    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    args_flattened, _ = torch.utils.pytree.python.tree_flatten((args, kwargs.values()))
     # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
     # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
     # where in one case we only include tensors with the python key, and in another

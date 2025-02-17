@@ -5,7 +5,7 @@ from collections import OrderedDict
 from typing import Any, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram

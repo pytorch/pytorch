@@ -3,7 +3,7 @@
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._utils import wrapper_set_seed
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 def make_fx_check(

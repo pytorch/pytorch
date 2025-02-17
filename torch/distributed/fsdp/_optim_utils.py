@@ -39,7 +39,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.tensor import DTensor, Replicate
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 if TYPE_CHECKING:

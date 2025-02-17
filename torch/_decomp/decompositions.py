@@ -16,6 +16,7 @@ import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
+import torch.utils.pytree.python as pytree
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -32,8 +33,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]

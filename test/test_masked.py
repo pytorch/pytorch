@@ -189,19 +189,19 @@ def _tensor_to_strided(obj):
 def to_strided(obj):
     """Convert the tensor content of object to strided tensor content.
     """
-    return torch.utils._pytree.tree_map(_tensor_to_strided, obj)
+    return torch.utils.pytree.tree_map(_tensor_to_strided, obj)
 
 
 def to_sparse_coo(obj):
     """Convert the tensor content of object to sparse coo tensor content.
     """
-    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse, obj)
+    return torch.utils.pytree.tree_map(torch.Tensor.to_sparse, obj)
 
 
 def to_sparse_csr(obj):
     """Convert the tensor content of object to sparse csr tensor content.
     """
-    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse_csr, obj)
+    return torch.utils.pytree.tree_map(torch.Tensor.to_sparse_csr, obj)
 
 
 class mask_layouts(_TestParametrizer):

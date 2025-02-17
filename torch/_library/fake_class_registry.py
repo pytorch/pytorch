@@ -126,7 +126,7 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
 def maybe_to_fake_obj(
     fake_mode, x: torch.ScriptObject
 ) -> Union[FakeScriptObject, torch.ScriptObject]:
-    import torch.utils._pytree as pytree
+    import torch.utils.pytree.python as pytree
     from torch.utils._python_dispatch import _disable_current_modes
 
     # When tracing with real mode, people should implement meta kernels that can

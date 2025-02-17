@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._dynamo
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.db.logging import (
@@ -85,8 +85,8 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.graph_module import _get_attr
-from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
+from torch.utils.pytree.python import TreeSpec
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 from .exported_program import (

@@ -4,7 +4,7 @@ from typing import Any
 import torch
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 
 aten = torch.ops.aten

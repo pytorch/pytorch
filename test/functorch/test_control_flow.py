@@ -4,7 +4,7 @@ import functools
 import unittest
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._dynamo.testing import normalize_gm
@@ -1734,7 +1734,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(expected_grads, grads)
 
     def test_map_autograd_nested_list(self):
-        import torch.utils._pytree as pytree
+        import torch.utils.pytree.python as pytree
 
         def f(x, y):
             a, b = x
@@ -5637,7 +5637,7 @@ def forward(self, arg0_1):
         self.check_map_count(gm, 2)
 
     def test_tracing_map_autograd_symbolic_list(self):
-        import torch.utils._pytree as pytree
+        import torch.utils.pytree.python as pytree
 
         def f(x, y):
             return [x[0].cos() + y.sin(), x[1].sin() * y.cos()]

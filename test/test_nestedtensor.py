@@ -72,8 +72,8 @@ from torch.testing._internal.opinfo.core import (
     XFailRule,
 )
 from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
-from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+from torch.utils.pytree.python import tree_flatten, tree_map_only
 
 
 # Tests are ported from pytorch/nestedtensor.

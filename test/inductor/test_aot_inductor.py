@@ -13,6 +13,7 @@ import torch._inductor
 import torch._inductor.config
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
+import torch.utils.pytree.python as pytree
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
@@ -49,7 +50,6 @@ from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
-from torch.utils import _pytree as pytree
 from torch.utils._triton import has_triton_tma
 
 

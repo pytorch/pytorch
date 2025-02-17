@@ -3,6 +3,7 @@ import logging
 from contextlib import contextmanager
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -11,7 +12,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.fx.node import has_side_effect
-from torch.utils import _pytree as pytree
 
 
 log = logging.getLogger(__name__)

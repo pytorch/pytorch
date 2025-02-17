@@ -9,8 +9,8 @@ from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch.onnx._internal.fx import _pass, diagnostics
-from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:

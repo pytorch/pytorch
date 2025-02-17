@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,

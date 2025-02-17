@@ -32,6 +32,7 @@ from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.autograd.forward_ad as fwAD
+import torch.utils.pytree.python as pytree
 from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -58,8 +59,7 @@ from torch.testing._internal.common_utils import (
     xfailIfS390X,
 )
 from torch.testing._internal.opinfo.core import SampleInput
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree.python import tree_flatten, tree_map, tree_unflatten
 
 
 aten = torch.ops.aten

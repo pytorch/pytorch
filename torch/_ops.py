@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import _utils_internal
 from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
 from torch._functorch.pyfunctorch import dispatch_functorch, TransformType

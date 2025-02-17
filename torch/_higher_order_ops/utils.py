@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor

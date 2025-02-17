@@ -40,7 +40,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.tensor import DTensor
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 __all__ = [

@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 # These functions can vary from based on platform and build (e.g. with CUDA)

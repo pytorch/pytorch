@@ -8,9 +8,9 @@ import warnings
 from typing import Any, Sequence
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.export.dynamic_shapes import _Dim, _DimHint
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
-from torch.utils import _pytree
 
 
 def from_dynamic_axes_to_dynamic_shapes(
@@ -205,7 +205,7 @@ def convert_str_to_export_dim(
                     converted_axes_list.append(dim)
             dynamic_shapes_with_export_dim.append(converted_axes_list)
 
-    dynamic_shapes_with_export_dim = _pytree.tree_unflatten(
+    dynamic_shapes_with_export_dim = pytree.tree_unflatten(
         dynamic_shapes_with_export_dim, tree_structure
     )
     return (
@@ -291,13 +291,13 @@ def _unflatten_dynamic_shapes_with_inputs_tree(
     inputs: list[Any],
     dynamic_shapes: dict[str, Any],
 ) -> dict[str, Any | None]:
-    _, tree_structure = _pytree.tree_flatten(inputs)
-    return _pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
+    _, tree_structure = pytree.tree_flatten(inputs)
+    return pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
 
 
 def _flatten_dynamic_shapes_to_axes(
     dynamic_shapes: dict[str, Any | None] | tuple[Any, ...] | list[Any],
-) -> tuple[list[Any], _pytree.TreeSpec]:
+) -> tuple[list[Any], pytree.TreeSpec]:
     # If it's a dict/list/tuple with torch.export._Dim, we consider it's an axis to dim mapping
     def is_axes(x) -> bool:
         return (
@@ -312,7 +312,7 @@ def _flatten_dynamic_shapes_to_axes(
             and all(isinstance(v, (_Dim, _DimHint, str)) for v in x)
         )
 
-    return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
+    return pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
 
 
 def _signature(model) -> inspect.Signature:

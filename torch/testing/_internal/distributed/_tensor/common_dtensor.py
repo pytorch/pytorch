@@ -41,7 +41,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch.utils.pytree.python import tree_flatten, tree_unflatten, TreeSpec
 from torch._utils import _get_device_module
 
 if TEST_CUDA:

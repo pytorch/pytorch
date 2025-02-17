@@ -24,7 +24,7 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument, ArgumentT, _format_arg
@@ -48,11 +48,7 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
-
-from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
-    AnnotationsTest,
-    TypeCheckerTest,
-)
+from fx.test_gradual_type import AnnotationsTest, TypeCheckerTest  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
@@ -70,6 +66,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 try:
     from torchvision import models as torchvision_models

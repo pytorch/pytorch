@@ -12,7 +12,7 @@ from typing_extensions import Never
 import sympy
 
 import torch.fx as fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator

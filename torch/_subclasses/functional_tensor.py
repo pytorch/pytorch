@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -695,14 +695,14 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
         with self.mode:
-            return torch.utils._pytree.tree_map_only(
+            return pytree.tree_map_only(
                 torch.Tensor, FunctionalTensor.to_functional, args
             )
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, tuple[torch.Tensor, ...], list[torch.Tensor]]
     ) -> Any:
-        return torch.utils._pytree.tree_map_only(
+        return pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
 

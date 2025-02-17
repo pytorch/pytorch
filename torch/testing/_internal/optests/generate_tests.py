@@ -15,7 +15,7 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._dynamo
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
 from torch._subclasses.schema_check_mode import SchemaCheckMode

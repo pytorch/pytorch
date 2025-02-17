@@ -6,7 +6,7 @@ from typing import Any, Callable
 from typing_extensions import Self
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._guards import active_fake_mode
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch._subclasses.fake_tensor import FakeTensorMode

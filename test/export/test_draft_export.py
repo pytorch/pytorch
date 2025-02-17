@@ -12,7 +12,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
-from torch.utils._pytree import tree_leaves
+from torch.utils.pytree.python import tree_leaves
 
 
 class TestDraftExport(TestCase):

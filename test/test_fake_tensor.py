@@ -19,7 +19,7 @@ import torch._dynamo
 import torch._functorch.config
 import torch._prims as prims
 import torch.testing._internal.optests as optests
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor

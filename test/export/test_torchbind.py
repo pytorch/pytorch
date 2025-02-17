@@ -5,7 +5,7 @@ import copy
 import unittest
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing

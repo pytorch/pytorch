@@ -14,7 +14,7 @@ from typing import Any
 
 import torch.fx
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 from .graph_region_tracker import Node, Region
 

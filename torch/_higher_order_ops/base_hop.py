@@ -3,7 +3,7 @@
 import abc
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import reenter_make_fx

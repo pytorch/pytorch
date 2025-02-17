@@ -11,7 +11,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy

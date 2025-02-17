@@ -5,7 +5,7 @@ from typing import Any, Callable, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 import torch.export as torch_export
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 if TYPE_CHECKING:

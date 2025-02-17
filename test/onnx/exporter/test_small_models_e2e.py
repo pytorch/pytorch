@@ -9,9 +9,9 @@ import torchvision
 import transformers
 
 import torch
+import torch.utils.pytree.python as torch_pytree
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
-from torch.utils import _pytree as torch_pytree
 
 
 @common_utils.instantiate_parametrized_tests

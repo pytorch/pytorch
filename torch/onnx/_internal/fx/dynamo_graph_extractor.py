@@ -15,8 +15,8 @@ import torch._dynamo
 import torch.export as torch_export
 import torch.fx
 import torch.onnx
+import torch.utils.pytree.python as pytree
 from torch.onnx._internal import _exporter_legacy, io_adapter
-from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class _PyTreeExtensionContext:
 
     def __enter__(self):
         for class_type, (flatten_func, unflatten_func) in self._extensions.items():
-            pytree._private_register_pytree_node(
+            pytree._private_register_pytree_node(  # type: ignore[attr-defined]
                 class_type,
                 flatten_func,
                 unflatten_func,

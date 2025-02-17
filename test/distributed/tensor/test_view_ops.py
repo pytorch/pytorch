@@ -6,6 +6,7 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
+import torch.utils.pytree.python as pytree
 from torch import rand, randn, Tensor
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -31,7 +32,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.utils import _pytree as pytree
 
 
 class TestViewOps(DTensorTestBase):

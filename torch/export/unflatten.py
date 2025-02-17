@@ -13,7 +13,7 @@ from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -29,7 +29,7 @@ from torch.export.exported_program import (
 )
 from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
-from torch.utils._pytree import GetAttrKey, SequenceKey
+from torch.utils.pytree.python import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 

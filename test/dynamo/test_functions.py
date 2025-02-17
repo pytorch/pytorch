@@ -4441,7 +4441,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_tree_map(self):
         def fn(a, b, index):
             def call(index):
-                mapped_attributes = torch.utils._pytree.tree_map_only(
+                mapped_attributes = torch.utils.pytree.python.tree_map_only(
                     torch.Tensor,
                     lambda x: x[index],
                     (a, b),

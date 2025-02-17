@@ -10,8 +10,8 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
+from torch.utils.pytree.python import tree_flatten, tree_unflatten
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (

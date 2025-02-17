@@ -25,7 +25,7 @@ from collections import Counter, defaultdict
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,

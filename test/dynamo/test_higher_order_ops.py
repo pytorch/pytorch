@@ -13,8 +13,8 @@ import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn as nn
-import torch.utils._pytree as pytree
 import torch.utils.checkpoint
+import torch.utils.pytree.python as pytree
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
     check_dynamic_shape_capture,

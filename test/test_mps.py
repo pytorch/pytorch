@@ -43,7 +43,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 import numpy as np
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from itertools import product
 import operator
 
