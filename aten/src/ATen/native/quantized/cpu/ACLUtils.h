@@ -35,9 +35,7 @@ struct ACLDynamicQuantMatmul {
   std::optional<arm_compute::Tensor> bia_tensor;
   arm_compute::Tensor dst_tensor;
   arm_compute::NEQuantizationLayer quant;
-  std::shared_ptr<arm_compute::IMemoryManager> memory_manager{
-      arm_compute::MemoryManagerOnDemand::make_default()};
-  arm_compute::NEGEMMLowpMatrixMultiplyCore gemm{memory_manager};
+  arm_compute::NEGEMMLowpMatrixMultiplyCore gemm;
   arm_compute::NEActivationLayer acl_relu;
   // configuration details for the ACL gemm
   arm_compute::TensorInfo src_s8_tensor_info;
@@ -62,8 +60,6 @@ struct ACLDynamicQuantMatmul {
     if (bia_tensor.has_value()) {
       bia_tensor.value().allocator()->free();
     }
-    // deallocate memory used for auxiliary tensors
-    memory_manager->clear();
   }
 };
 
@@ -251,10 +247,6 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
           &acl_gemm->dst_tensor,
           acl_gemm->acl_relu_info);
     }
-
-    // allocate memory for ACL's auxiliary tensors
-    arm_compute::Allocator alloc{};
-    acl_gemm->memory_manager->populate(alloc, 1);
 
     return acl_gemm;
   }
