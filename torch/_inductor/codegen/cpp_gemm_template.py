@@ -383,9 +383,9 @@ def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]
             # Case may happen when the candidate tensor is used by more than 1 get_attr node
             # https://github.com/pytorch/pytorch/issues/134998
             if node.op == "get_attr" and hasattr(
-                V.graph.module, node.name
+                V.graph.module, node.target
             ):  # candidate tensor might already be deleted
-                comp_tensor = getattr(V.graph.module, node.name)
+                comp_tensor = getattr(V.graph.module, node.target)
                 if isinstance(comp_tensor, torch.Tensor) and share_storage(
                     candidate_tensor, comp_tensor
                 ):
@@ -395,13 +395,15 @@ def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]
             # The get_attr node has only 1 user fx node
             # The candidate tensor has been used by only 1 get_attr node
             if (
-                node.name == candidate_node.get_name()
+                node.op == "get_attr"
+                and node.target == candidate_node.get_name()
                 and len(node.users) == 1
                 and candidate_tensor_users == 1
             ):
-                del V.graph.constants[node.name]
-                delattr(V.graph.module, node.name)
-                delattr(V.graph.graph.owning_module, node.name)
+                del V.graph.constants[node.target]
+                delattr(V.graph.module, node.target)
+                delattr(V.graph.graph.owning_module, node.target)
+                counters["inductor"]["select_algorithm_weight_prune"] += 1
 
 
 def gen_2d_view_of_epilogue_buf(

@@ -608,8 +608,9 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     2. Overrides torch functions that are known to cause problems in non-strict.
 
     Certain Python features, such as indexing/slicing, cannot be intercepted
-    in non-strict. When these features need special handling in the compiler,
-    tracing can fail in non-strict (yet surprisingly succeed in strict).
+    in non-strict. Likewise, certain legacy ops, such as distributed collectives,
+    may need to be mapped to other ops. When there is special handling in Dynamo
+    for such things, tracing can fail in non-strict (while succeeding in strict).
     Fortunately, redirecting to other torch functions can often fix such issues.
 
     3. Handles line-of-code logging for each torch function call in non-strict.
@@ -618,6 +619,21 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     """
 
     def _override(self, func, args, kwargs):
+        if torch.distributed.is_available() and func is torch.distributed.all_reduce:
+            # Redirect to a corresponding functional collective, following Dynamo.
+            # See torch/distributed/_functional_collectives.py for details.
+            from torch.distributed._functional_collectives import (
+                all_reduce_inplace,
+                REDUCE_OP_TO_STR,
+            )
+
+            # see CollectiveFunctionRewriteVariable for remapping logic
+            signature = inspect.signature(func)
+            kwargs = dict(signature.bind(*args, **kwargs).arguments)
+            args = ()
+            if "op" in kwargs:
+                kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
+            return all_reduce_inplace, args, kwargs
         if func is torch.tensor:
             # Redirect to Python implementation of torch.tensor for data with symints.
             # NOTE(avik): We don't unconditionally redirect to this implementation

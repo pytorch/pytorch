@@ -1792,7 +1792,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
-        for arg in output_node(gm).args[0]
+        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(

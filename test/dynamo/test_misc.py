@@ -11897,6 +11897,27 @@ fn
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    def test_RAISE_VARARGS_0(self):
+        def foo():
+            try:
+                raise ValueError
+            except:
+                raise
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                foo()
+            except ValueError:
+                return t.sin()
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+
     def test_overridden_getattribute(self):
         class Foo:
             attribute_map = {}

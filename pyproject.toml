@@ -77,7 +77,6 @@ ignore = [
     "PYI041",
     "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
-    "SIM113", # please fix
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
     "SIM110",

@@ -676,9 +676,6 @@ def mps_ops_modifier(ops):
         'linalg.eigvals': None,
         'put': None,
         'nn.functional.conv_transpose3d': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
@@ -861,6 +858,7 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16 and bfloat16
         'round': [torch.float16, torch.bfloat16],
+        'rounddecimals_0': [torch.bfloat16],
 
         # bfloat16 have weird issues with rounding
         'divfloor_rounding': [torch.bfloat16],

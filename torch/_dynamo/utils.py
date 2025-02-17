@@ -2976,6 +2976,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)

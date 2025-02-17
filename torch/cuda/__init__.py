@@ -79,7 +79,7 @@ try:
             # already loaded version of amdsmi, or any version in the processes
             # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
             # of the .so.
-            class amdsmi_cdll_hook:
+            class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
                     paths = ["libamd_smi.so"]
@@ -104,7 +104,7 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with amdsmi_cdll_hook():
+            with _amdsmi_cdll_hook():
                 import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
@@ -232,8 +232,7 @@ def _sleep(cycles):
 def _extract_arch_version(arch_string: str):
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_")[1]
-    if base.endswith("a"):
-        base = base[:-1]
+    base = base.removesuffix("a")
     return int(base)
 
 

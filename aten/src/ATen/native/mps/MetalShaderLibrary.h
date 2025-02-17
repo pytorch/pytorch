@@ -21,10 +21,11 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <utility>
 #include <vector>
 
-// Forward declaration of TensorBase
+// Forward declaration of TensorBase and TensorIteratorBase
 namespace at {
 class TensorBase;
-}
+struct TensorIteratorBase;
+} // namespace at
 
 namespace at::native::mps {
 
@@ -128,6 +129,10 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  void exec_unary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      std::optional<int64_t> extra = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();

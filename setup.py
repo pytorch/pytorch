@@ -419,16 +419,16 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -484,7 +484,6 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL

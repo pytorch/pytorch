@@ -1,5 +1,8 @@
+#include <ATen/Context.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <dnnl.hpp>
+#include <dnnl_common.hpp>
 
 namespace at::native::onednn {
 
@@ -94,10 +97,8 @@ dnnl::memory::data_type get_onednn_dtype_include_double(
 }
 
 bool is_supported_onednn_dtype(const at::Tensor& tensor) {
-  return get_onednn_dtype(tensor, /*allow_undef*/ true) ==
-          dnnl::memory::data_type::undef
-      ? false
-      : true;
+  return get_onednn_dtype_include_double(tensor) !=
+      dnnl::memory::data_type::undef;
 }
 
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor) {
@@ -116,7 +117,10 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
-  return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
+  return {
+      get_onednn_dims(t),
+      get_onednn_dtype_include_double(t),
+      get_onednn_strides(t)};
 }
 
 bool onednn_strides_check(const Tensor& src) {
@@ -484,6 +488,14 @@ dnnl::memory::format_tag conv_weight_fmt(
         : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
                                   : dnnl::memory::format_tag::odhwi)
                        : dnnl::memory::format_tag::undef);
+  }
+}
+
+void apply_tf32_if_allowed(dnnl::primitive_attr& pattr) {
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32OneDNN();
+  if (allow_tf32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
 }
 
