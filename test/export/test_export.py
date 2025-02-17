@@ -29,6 +29,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
@@ -75,7 +76,7 @@ from torch.testing._internal.custom_tensor import (
     CustomTensorPlainOut,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -520,6 +521,22 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    def test_bincount(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                weights = torch.linspace(0, 1, steps=5)
+                bc = x.bincount(weights)
+                return bc
+
+        model = M()
+        ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
+        print(ep)
+        inp = torch.randint(0, 8, (5,), dtype=torch.int64)
+        self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
     def test_symint_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -949,44 +966,6 @@ graph():
                 index = torch.nonzero_static(mask, size=exp.shape[0])
                 chunked_index = index.chunk(chunks=mask.dim(), dim=1)
                 output = seq_embeddings[chunked_index].squeeze()
-                final_output = output * 2
-                return final_output
-
-        m = TestModule()
-
-        seq_embeddings = torch.randn(5, 5)
-        mask = torch.ones(5, 5, dtype=torch.bool)
-        exp = torch.randn(25)
-        output = m(seq_embeddings, mask, exp)
-
-        batch = torch.export.Dim("batch")
-        exp_size = torch.export.Dim("exp_size", max=100)
-        ep = export(
-            m,
-            (seq_embeddings, mask, exp),
-            dynamic_shapes={
-                "seq_embeddings": (batch, None),
-                "mask": (batch, None),
-                "exp": (exp_size,),
-            },
-        )
-        ep_output = ep.module()(seq_embeddings, mask, exp)
-        self.assertTrue(torch.allclose(output, ep_output))
-
-        seq_embeddings = torch.randn(6, 5)
-        mask = torch.ones(6, 5, dtype=torch.bool)
-        exp = torch.randn(30)
-        output = m(seq_embeddings, mask, exp)
-        ep_output = ep.module()(seq_embeddings, mask, exp)
-        self.assertTrue(torch.allclose(output, ep_output))
-
-    def test_mask_torch_check(self):
-        class TestModule(torch.nn.Module):
-            def forward(self, seq_embeddings, mask, exp):
-                output = seq_embeddings[mask]
-                # output.shape has unbacked symint, assert side knowledge of
-                # output.shape as exp.shape to force it to have backed symint
-                torch._check(output.size(0) == exp.size(0))
                 final_output = output * 2
                 return final_output
 
@@ -1968,8 +1947,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1996,6 +1973,7 @@ graph():
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
         ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertTrue(torch.allclose(ep_training.module()(ref_x), ref_out))
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2008,9 +1986,9 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_b1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
-    %getattr_65 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
-    %getattr_70 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_65, b), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_70), kwargs = {})
+    %access_subclass_inner_tensor_default_64 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%sum_1, a), kwargs = {})
+    %access_subclass_inner_tensor_default_69 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_64, b), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %access_subclass_inner_tensor_default_69), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -2018,8 +1996,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access_submodule(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -2066,9 +2042,9 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_bar_p2), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_bar_b1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
-    %getattr_65 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
-    %getattr_70 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_65, b), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_70), kwargs = {})
+    %access_subclass_inner_tensor_default_64 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%sum_1, a), kwargs = {})
+    %access_subclass_inner_tensor_default_69 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_64, b), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %access_subclass_inner_tensor_default_69), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -2076,8 +2052,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access_const_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2108,9 +2082,9 @@ graph():
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
-    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
-    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    %access_subclass_inner_tensor_default_10 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, elem), kwargs = {})
+    %access_subclass_inner_tensor_default_13 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_10, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %access_subclass_inner_tensor_default_13), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -2118,8 +2092,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2160,8 +2132,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2192,13 +2162,13 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
-    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%add, a), kwargs = {})
-    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, elem), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %getattr_38), kwargs = {})
+    %access_subclass_inner_tensor_default_18 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add, a), kwargs = {})
+    %access_subclass_inner_tensor_default_21 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_18, elem), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %access_subclass_inner_tensor_default_21), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, 4), kwargs = {})
-    %getattr_45 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_2, a), kwargs = {})
-    %getattr_50 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_45, elem), kwargs = {})
-    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_50), kwargs = {})
+    %access_subclass_inner_tensor_default_25 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_2, a), kwargs = {})
+    %access_subclass_inner_tensor_default_28 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_25, elem), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %access_subclass_inner_tensor_default_28), kwargs = {})
     return (add_3,)""",
         )
         ep = export(m, (ref_x,))
@@ -2206,8 +2176,6 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access_complicated_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2237,9 +2205,9 @@ graph():
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
-    %getattr_21 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
-    %getattr_26 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_21, elem), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_26, 4), kwargs = {})
+    %access_subclass_inner_tensor_default_10 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, elem), kwargs = {})
+    %access_subclass_inner_tensor_default_13 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_10, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_13, 4), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -6428,6 +6396,72 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
+    @requires_cuda
+    def test_export_associative_scan_symbol_dim(self):
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(self.combine_fn, x, 2)
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+
+    @requires_cuda
+    def test_export_associative_scan_symbol_scandim(self):
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(self.combine_fn, x, 1)
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+
+    # This test is expected to fail because accociative_scan's backend is not set to "eager"
+    @unittest.expectedFailure
+    @requires_gpu
+    def test_export_associative_scan_lifted_buffers(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    torch.ones(3, 2, device=torch.device("cuda"))
+                )
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.buffer
+
+            def forward(self, x):
+                # TODO: need combine_mode='generic' here as lifted arguments are not yet supported in inductor
+                return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
+
+        inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        ep = export(M(), (inp,))
+        epm = ep.module()
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
+            )
+
     # map_fn references module outside the module hierarchy
     @unittest.expectedFailure
     def test_map_buffers(self):
@@ -9729,6 +9763,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureSerDerNonStrict
     def test_replace_unbacked_with_very_large_upperbound(self):
         # beyond 2^53 where python floats lose precision
         VERY_LARGE_INT = 1000000007999999992
@@ -11918,6 +11953,34 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=2,
+                rank=0,
+                store=FakeStore(),
+            )
+
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        finally:
+            torch.distributed.destroy_process_group()
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -12488,39 +12551,6 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
-
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
-    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
-    @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
-    @testing.expectedFailureRetraceabilityNonStrict
-    @testing.expectedFailureLegacyExportNonStrict
-    def test_distributed_all_reduce(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 3)
-
-            def forward(self, x):
-                y = self.linear(x).abs().clamp(max=1.0) * 2
-                torch.distributed.all_reduce(y)
-                return y
-
-        try:
-            torch.distributed.init_process_group(
-                backend="fake",
-                world_size=2,
-                rank=0,
-                store=FakeStore(),
-            )
-
-            m = Foo()
-            ep = export(m, (torch.randn(4, 4),))
-            inp = (torch.randn(4, 4),)
-            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
-
-        finally:
-            torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):

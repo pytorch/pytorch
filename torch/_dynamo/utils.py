@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+Utility functions and classes used throughout the TorchDynamo system.
+
+This module contains a collection of helper utilities used by various parts of Dynamo for:
+- Performance metrics collection and reporting
+- Compilation timing and debugging
+- Graph manipulation and tensor operations
+- Runtime guards and checks
+- Common data structure operations
+- Testing and development tools
+
+This is an internal module that provides shared functionality used across the Dynamo codebase.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -2356,6 +2371,10 @@ dict_methods = {
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
+list_methods = {method for method in list.__dict__.values() if callable(method)}
+list_getitem = list.__getitem__
+
+str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 
 def builtin_dict_keys(d):
@@ -2407,8 +2426,15 @@ def to_subclass(t, cls):
     return t.as_subclass(cls)
 
 
+dict_getitem = dict.__getitem__
+
+
 def dict_keys_getitem(d, n):
-    return next(itertools.islice(iter(d), n, n + 1))
+    # Call dict(d) to prevent calling overridden __iter__/keys
+    dict_class = dict
+    if isinstance(d, OrderedDict):
+        dict_class = OrderedDict
+    return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -2949,6 +2975,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # fake tensor validity is checked inside get_fake_value using
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
+
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
 
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
