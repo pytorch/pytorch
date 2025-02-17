@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
@@ -894,6 +895,34 @@ class CommonTemplate:
             expected_num_block_pointers=4,
         )
         self.assertTrue("Min" not in code[0])
+
+    @requires_gpu()  # FIXME this test failed on Triton-CPU
+    def test_3d_permute_tiling(self):
+        """
+        Test 3D tiling with permute.
+        """
+
+        def foo(x, y, z):
+            dims = [0, 2, 1]
+            a = x.permute(dims=dims) + y
+            b = (z + y).permute(dims=dims)
+            return a + b
+
+        inps = (torch.rand((51, 51, 51), device=self.device, dtype=torch.float32),) * 3
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check for 3D tiling
+        self.assertIn("ZBLOCK", code)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

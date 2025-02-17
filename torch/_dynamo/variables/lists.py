@@ -1,5 +1,21 @@
 # mypy: ignore-errors
 
+"""
+Variable tracking implementations for list-like data structures in Dynamo.
+
+This module provides specialized variable tracking for various collection types:
+- Lists and list subclasses (including torch.nn.ModuleList, ParameterList)
+- Tuples and named tuples
+- Ranges and slices
+- Collections.deque
+- torch.Size with special proxy handling
+
+The implementations support both mutable and immutable collections, iteration,
+and common sequence operations. Each collection type has a dedicated Variable
+class that handles its unique behaviors while integrating with Dynamo's
+variable tracking system.
+"""
+
 import collections
 import inspect
 import operator
@@ -939,7 +955,7 @@ class NamedTupleVariable(TupleVariable):
         )
 
 
-class SliceVariable(BaseListVariable):
+class SliceVariable(VariableTracker):
     def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
@@ -957,14 +973,15 @@ class SliceVariable(BaseListVariable):
             stop, variables.TensorVariable
         ):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
+        self.items = (start, stop, step)
 
-        super().__init__([start, stop, step], **kwargs)
+        super().__init__(**kwargs)
 
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
 
     def as_proxy(self):
-        return slice(*self._as_proxy())
+        return slice(*[x.as_proxy() for x in self.items])
 
     def python_type(self):
         return slice
@@ -977,6 +994,8 @@ class SliceVariable(BaseListVariable):
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")

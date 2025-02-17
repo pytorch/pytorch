@@ -999,6 +999,19 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_low_fp_index_expr_issue_147279(self):
+        # https://github.com/pytorch/pytorch/issues/147279
+        def fn(start, end, dtype, dim):
+            return torch.sum(
+                torch.arange(start=start, end=end, dtype=dtype),
+                dim=dim,
+            )
+
+        self.common(
+            fn,
+            (300, 400, torch.float16, (0,)),
+        )
+
     def test_index_put(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y):

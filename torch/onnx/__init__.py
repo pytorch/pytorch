@@ -169,19 +169,6 @@ def export(
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
-    .. versionchanged:: 2.6
-        *training* is now deprecated. Instead, set the training mode of the model before exporting.
-    .. versionchanged:: 2.6
-        *operator_export_type* is now deprecated. Only ONNX is supported.
-    .. versionchanged:: 2.6
-        *do_constant_folding* is now deprecated. It is always enabled.
-    .. versionchanged:: 2.6
-        *export_modules_as_functions* is now deprecated.
-    .. versionchanged:: 2.6
-        *autograd_inlining* is now deprecated.
-    .. versionchanged:: 2.7
-        *optimize* is now True by default.
-
     Args:
         model: The model to be exported.
         args: Example positional inputs. Any non-Tensor arguments will be hard-coded into the
@@ -359,6 +346,15 @@ def export(
 
     Returns:
         :class:`torch.onnx.ONNXProgram` if dynamo is True, otherwise None.
+
+    .. versionchanged:: 2.6
+        *training* is now deprecated. Instead, set the training mode of the model before exporting.
+        *operator_export_type* is now deprecated. Only ONNX is supported.
+        *do_constant_folding* is now deprecated. It is always enabled.
+        *export_modules_as_functions* is now deprecated.
+        *autograd_inlining* is now deprecated.
+    .. versionchanged:: 2.7
+        *optimize* is now True by default.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
@@ -431,7 +427,7 @@ def dynamo_export(
 ) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
-    .. deprecated:: 2.6
+    .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:
@@ -442,37 +438,6 @@ def dynamo_export(
 
     Returns:
         An in-memory representation of the exported ONNX model.
-
-    **Example 1 - Simplest export**
-    ::
-
-        class MyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x, bias=None):
-                out = self.linear(x)
-                out = out + bias
-                return out
-
-
-        model = MyModel()
-        kwargs = {"bias": 3.0}
-        args = (torch.randn(2, 2, 2),)
-        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
-            "my_simple_model.onnx"
-        )
-
-    **Example 2 - Exporting with dynamic shapes**
-    ::
-
-        # The previous model can be exported with dynamic shapes
-        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
-        onnx_program = torch.onnx.dynamo_export(
-            model, *args, **kwargs, export_options=export_options
-        )
-        onnx_program.save("my_dynamic_model.onnx")
     """
 
     import warnings

@@ -108,7 +108,10 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
             model.train(originally_training)
 
 
-@deprecated("Please remove usage of this function", category=None)
+@deprecated(
+    "Please remove usage of this function. Copy its logic if it is required in user code",
+    category=None,
+)
 @contextlib.contextmanager
 def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFunction):
     """A context manager to temporarily disable the Apex O2 hook that returns.
@@ -145,7 +148,7 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
             pass
 
 
-@deprecated("Please remove usage of this function")
+@deprecated("The feature will be removed. Please remove usage of this function")
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
     """A context manager to temporarily set the ONNX logging verbosity.
@@ -163,7 +166,11 @@ def setup_onnx_logging(verbose: bool):
             _C._jit_set_onnx_log_enabled(False)
 
 
-@deprecated("Please remove usage of this function", category=None)
+@deprecated(
+    "The feature will be removed. Please remove usage of this function "
+    "and implement equivalent logic if needed",
+    category=None,
+)
 @contextlib.contextmanager
 def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     """A context manager to temporarily set the training mode of ``model``
@@ -1177,7 +1184,9 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
-@deprecated("Please remove usage of this function")
+@deprecated(
+    "Unconvertible ops are not definitive. Please remove usage of this function"
+)
 def unconvertible_ops(
     model,
     args,
@@ -1187,7 +1196,7 @@ def unconvertible_ops(
     """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
 
     .. deprecated:: 2.5
-        Please remove usage of this function.
+        Unconvertible ops are not definitive. Please remove usage of this function.
 
     The list is approximated because some ops may be removed during the conversion
     process and don't need to be converted. Some other ops may have partial support

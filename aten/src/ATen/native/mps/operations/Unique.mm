@@ -262,11 +262,14 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   Tensor length = at::empty({1}, ScalarType::Int, std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   if (input.numel() == 0) {
-    return std::make_tuple(output, inverse_indices, counts);
+    return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
   }
 
-  mps::UniqueCachedGraph* uniqueGraph = mps::getUniqueGraph(input, return_inverse, return_counts, consecutive, dimOpt);
-  mps::runUniqueGraph(uniqueGraph, input, output, inverse_indices, counts, length, return_inverse, return_counts);
+  @autoreleasepool {
+    mps::UniqueCachedGraph* uniqueGraph =
+        mps::getUniqueGraph(input, return_inverse, return_counts, consecutive, dimOpt);
+    mps::runUniqueGraph(uniqueGraph, input, output, inverse_indices, counts, length, return_inverse, return_counts);
+  }
 
   int64_t lengthScalar = length.item<int64_t>() + 1; // length actually holds max index, add 1
   if (output.sizes().size() != 0) {
@@ -275,7 +278,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   if (return_counts)
     counts = at::slice(counts, 0, 0, lengthScalar);
 
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 static std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, Tensor> out) {

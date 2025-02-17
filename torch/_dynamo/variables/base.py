@@ -1,5 +1,20 @@
 # mypy: ignore-errors
 
+"""
+Core variable tracking functionality for Dynamo. This module defines the fundamental
+classes and systems used to track and manage variables during Dynamo's operation.
+
+The module provides:
+1. VariableTracker - The base class for tracking variables during compilation
+2. MutationType system - Classes for tracking and managing mutations to variables
+3. Source type management - Utilities for tracking variable origins and scope
+4. Variable state management - Tools for managing variable state and transformations
+
+These components form the foundation of Dynamo's variable handling system,
+enabling accurate tracking and transformation of Python code into optimized
+computations.
+"""
+
 import collections
 from enum import Enum
 from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING

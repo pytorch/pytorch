@@ -1,4 +1,16 @@
 # mypy: allow-untyped-defs
+
+"""
+Configuration module for TorchDynamo compiler and optimization settings.
+
+This module contains various configuration flags and settings that control TorchDynamo's
+behavior, including:
+- Runtime behavior flags (e.g., guard settings, specialization options)
+- Debugging and development options
+- Performance tuning parameters
+- Feature toggles for experimental features
+"""
+
 import getpass
 import os
 import sys

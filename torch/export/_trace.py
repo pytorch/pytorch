@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
@@ -187,7 +188,7 @@ def _fixup_key(x):
 def _strip_root(x):
     if isinstance(x, str) and x.startswith("_export_root"):
         stripped = x[len("_export_root") :]
-        return stripped[1:] if stripped.startswith(".") else stripped
+        return stripped.removeprefix(".")
     return x
 
 
@@ -2069,6 +2070,8 @@ def _export(
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
 
+    dtrace_structured("export", payload_fn=lambda: "start!")
+
     # NOTE Export training IR rollout
     # Old export calls export._trace(pre_dispatch=True)
     # and there are still lot of internal/OSS callsites that
@@ -2077,7 +2080,7 @@ def _export(
     # export_training_ir_rollout_check returns True in OSS
     # while internally it returns False UNLESS otherwise specified.
     if pre_dispatch and export_training_ir_rollout_check():
-        return _export_for_training(
+        ep = _export_for_training(
             mod,
             args,
             kwargs,
@@ -2085,6 +2088,8 @@ def _export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
+        dtrace_structured("exported_program", payload_fn=lambda: str(ep))
+        return ep
 
     (
         args,
@@ -2155,5 +2160,7 @@ def _export(
         constants=export_artifact.aten.constants,
         verifiers=[Verifier],
     )
+
+    dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
     return exported_program

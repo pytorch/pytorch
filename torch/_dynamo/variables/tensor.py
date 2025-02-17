@@ -1,5 +1,22 @@
 # mypy: ignore-errors
 
+"""
+This module contains variable tracker classes for handling tensors and tensor-related operations in Dynamo.
+
+The main class is TensorVariable which represents torch.Tensor inputs and intermediate values in the FX graph.
+It handles tensor operations, method calls, and maintains metadata about tensor properties like dtype, device, etc.
+
+Other key classes include:
+- SymNodeVariable: Represents symbolic scalars (int/float/bool) used for size computation and unspecialized values
+- NumpyNdarrayVariable: Handles numpy array interop through torch._numpy
+- UnspecializedPythonVariable: Represents unspecialized Python numeric values as 1-element tensors
+- TensorSubclassVariable: Handles tensor subclasses with __torch_function__ overrides
+- UntypedStorageVariable: Represents tensor storage objects
+- DataPtrVariable: Handles tensor data pointer operations
+
+These classes work together to track tensor operations and properties during Dynamo's tracing process.
+"""
+
 import functools
 import inspect
 import logging

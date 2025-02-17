@@ -416,6 +416,17 @@ jobs:
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
 
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'

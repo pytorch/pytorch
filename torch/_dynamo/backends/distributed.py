@@ -1,5 +1,23 @@
 # mypy: ignore-errors
 
+"""
+This module implements distributed training optimizations for TorchDynamo backends.
+
+It provides functionality to optimize models wrapped in DistributedDataParallel (DDP)
+by intelligently splitting compiled graphs to align with DDP's gradient synchronization
+boundaries. Key features include:
+
+- Graph partitioning based on parameter bucket sizes
+- Optimization of allreduce operations for distributed training
+- Support for parameter ignoring and buffer handling
+- Submodule compilation and management
+- Debugging utilities for distributed training
+
+The main component is the DDPOptimizer class, which handles graph splitting and
+recompilation to enable efficient distributed training while maintaining the benefits
+of compilation.
+"""
+
 import logging
 import traceback
 from dataclasses import dataclass, field

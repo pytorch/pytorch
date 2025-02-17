@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
 import inspect
@@ -55,8 +56,22 @@ def _manual_list_update(list_from, list_to):
 
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]
@@ -79,6 +94,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Used by MappingProxyVariable to graph break in case of any mutated
+        # dict
+        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
@@ -521,6 +539,15 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if (
+            var.source
+            and isinstance(var, variables.ConstDictVariable)
+            and not isinstance(var, variables.SetVariable)
+        ):
+            self._has_existing_dict_mutation = True
+
+    def has_existing_dict_mutation(self):
+        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]

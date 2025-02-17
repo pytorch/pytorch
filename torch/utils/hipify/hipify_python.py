@@ -681,7 +681,7 @@ class Trie:
     def __init__(self):
         """Initialize the trie with an empty root node."""
         self.root = TrieNode()
-        self._hash = hashlib.md5()
+        self._hash = hashlib.md5(usedforsecurity=False)
         self._digest = self._hash.digest()
 
     def add(self, word):

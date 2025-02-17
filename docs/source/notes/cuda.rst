@@ -929,10 +929,6 @@ and you suspect its runtime is at least somewhat CPU-limited.
     https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
 .. _cudaGraphLaunch:
     https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
-.. _issue 144787:
-    https://github.com/pytorch/pytorch/issues/144787#issuecomment-2606480564
-.. _conditional nodes:
-    https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/
 
 PyTorch API
 ^^^^^^^^^^^
@@ -1021,9 +1017,6 @@ Violating any of these will likely cause a runtime error:
   Avoid using :meth:`Generator.get_state<torch.get_state>` and :meth:`Generator.set_state<torch.set_state>` during capture;
   instead, utilize :meth:`Generator.graphsafe_set_state<torch.Generator.graphsafe_set_state>` and :meth:`Generator.graphsafe_get_state<torch.Generator.graphsafe_get_state>`
   for managing generator states safely within the graph context. This ensures proper RNG operation and generator management within CUDA graphs.
-* Dynamic control flow (based on CPU or GPU data) is prohibited, unless it is based on GPU data and implemented via higher order operators
-  torch.cond() and torch.while_loop(). See :ref:`Data Dependent Control Flow<graph-data-dependent-control-flow>`.
-
 
 
 Violating any of these will likely cause silent numerical errors or undefined behavior:
@@ -1032,6 +1025,7 @@ Violating any of these will likely cause silent numerical errors or undefined be
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
 * CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
 * Every replay reads from and writes to the same (virtual) memory addresses.
+* Dynamic control flow (based on CPU or GPU data) is prohibited.
 * Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
   has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
@@ -1340,45 +1334,3 @@ If, in the live workload, your callables will run in an order that occasionally 
 or if they'll run concurrently, passing them as a tuple to a single invocation of
 :func:`~torch.cuda.make_graphed_callables` is not allowed. Instead, you must call
 :func:`~torch.cuda.make_graphed_callables` separately for each one.
-
-.. _graph-data-dependent-control-flow:
-
-Data Dependent Control Flow
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Data-dependent control flow can with cuda graphs in limited cases if
-the control flow is implemented using torch.cond() or
-torch.while_loop(). If your function uses these functions, compiling
-it with the "cudagraphs" backend will enable control flow in the
-resulting cuda graph via `conditional nodes`_.
-
-Unfortunately, eager mode execution does not work due to reasons
-described in `issue 144787`_.
-Support for inductor backend to torch.compile is not available yet, but there is no fundamental blocker.
-
-An example of using the cudagraphs backend to torch.compile on code
-using torch.cond is demonstrated below::
-
-    import torch
-
-    def true_fn(x):
-        return x.sin()
-
-    def false_fn(x):
-        return x.cos()
-
-    x = torch.randn(4, device="cuda", requires_grad=False)
-    pred = torch.tensor(False, device="cuda", requires_grad=False)
-    def foo(pred, x):
-        with torch.inference_mode():
-            return torch.cond(pred, true_fn, false_fn, [x])
-
-    # First call will run eager for warmup, second call will do graph
-    # capture followed by graph replay, third call and beyond will do
-    # just graph replay.
-    compiled_foo = torch.compile(foo, backend="cudagraphs")
-    for i in range(3):
-        y = compiled_foo(pred, x)
-
-    # will output x.sin()
-    y = compiled_foo(~pred, x)

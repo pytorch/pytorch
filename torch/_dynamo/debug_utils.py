@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
+
+"""
+Debug utilities for TorchDynamo compilation and execution.
+
+This module provides various debugging tools and utilities for TorchDynamo, including:
+
+- Minification support for reducing test cases while preserving bugs
+- Input/output handling via InputReader and InputWriter for reproducible testing
+- Accuracy checking between original and compiled models
+- Neural network module string conversion via NNModuleToString
+- Profiling tools and system information collection
+- Buck build system integration for Meta-internal testing
+
+Key classes:
+- InputReader/InputWriter: Handle serialization of model inputs/outputs
+- NNModuleToString: Converts nn.Modules to string representations
+- BuckTargetWriter: Manages Buck build system integration
+"""
+
 import atexit
 import copy
 import cProfile

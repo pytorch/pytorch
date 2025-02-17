@@ -1,5 +1,28 @@
 # mypy: ignore-errors
 
+"""
+Function-related variable tracking classes for Dynamo's symbolic execution.
+
+This module contains classes that track different types of functions during graph
+compilation, including:
+- User-defined functions and methods
+- Built-in functions and methods
+- Wrapped functions (e.g. from decorators)
+- Special function types (e.g. functools.partial)
+- Triton kernels and related function types
+
+These classes are responsible for:
+- Tracking function calls and their arguments
+- Managing function closures and cell variables
+- Handling function attributes and special methods
+- Maintaining guards for function identity and closure contents
+- Supporting function inlining and specialization
+- Enabling proper symbolic execution of different function types
+
+The variable trackers here work together with the rest of Dynamo to enable
+accurate graph capture while handling Python's various function-related behaviors.
+"""
+
 import builtins
 import functools
 import inspect
@@ -367,7 +390,6 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
@@ -1560,6 +1582,47 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+
+class TracebackVariable(VariableTracker):
+    # We don't track traceback. A call to any function in this module is a no-op
+    def call_function(self, tx, args, kwargs):
+        ...
+
+
+class SysFunctionVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def exc_info(self, tx):
+        if len(tx.exn_vt_stack):
+            exn = tx.exn_vt_stack[-1]
+            typ = exn.exc_type
+            tb = None
+            items = [
+                VariableTracker.build(tx, typ),
+                exn,
+                VariableTracker.build(tx, tb),
+            ]
+        else:
+            items = [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ]
+        return variables.TupleVariable(items)
+
+    def exception(self, tx):
+        return self.exc_info(tx).items[1]
+
+    def call_function(self, tx, args, kwargs):
+        if self.value is sys.exc_info:
+            return self.exc_info(tx)
+        elif self.value is sys.exception:
+            return self.exception(tx)
+        else:
+            unimplemented(f"sys.{self.value.__name__}")
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (

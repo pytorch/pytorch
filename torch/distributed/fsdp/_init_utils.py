@@ -549,7 +549,7 @@ def _verify_managed_params(module: nn.Module, params: list[nn.Parameter]) -> Non
                     break
             assert param_name
             raise ValueError(
-                "FSDP doesn't support salar parameters. "
+                "FSDP doesn't support scalar parameters. "
                 f"Change {param_name} to a 1D tensor with numel equal to 1."
             )
 

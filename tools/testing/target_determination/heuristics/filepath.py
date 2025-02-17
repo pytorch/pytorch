@@ -67,8 +67,7 @@ def get_keywords(file: str) -> list[str]:
 
 
 def sanitize_name(folder_name: str) -> str:
-    if folder_name.startswith("_"):
-        folder_name = folder_name[1:]
+    folder_name = folder_name.removeprefix("_")
 
     for syn_rep, syns in keyword_synonyms.items():
         if folder_name in syns or folder_name == syn_rep:

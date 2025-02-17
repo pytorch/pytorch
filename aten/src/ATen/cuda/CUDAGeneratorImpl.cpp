@@ -347,7 +347,7 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   at::cuda::assertNotCapturing(
-      "Please ensure to utilize the CUDAGeneratorImpl::graphsafe_set_state method during capturing.");
+      "Please ensure to utilize the CUDAGeneratorImpl::set_state_index method during capturing.");
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = seed_size + offset_size;

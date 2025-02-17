@@ -11,6 +11,7 @@ import pickle
 import unittest
 import weakref
 from unittest.mock import patch
+import io
 
 import numpy as np
 import torch
@@ -2064,6 +2065,24 @@ class FakeTensorDispatchCache(TestCase):
             out = f(x)
             out.sum().backward()
             self.assertEqual(x.shape, x.grad.shape)
+
+    def test_from_buffer(self):
+        with FakeTensorMode():
+            obj = [1, 2]
+            f = io.BytesIO()
+            pickle.Pickler(f).dump(obj)
+            storage = torch.UntypedStorage.from_buffer(f.getvalue(), dtype=torch.uint8)
+
+            t = torch.ByteTensor(storage)
+            self.assertTrue(isinstance(t, FakeTensor))
+            self.assertEqual(t.device, torch.device('cpu'))
+
+    def test_meta_tensor_to_fake_cpu(self):
+        x = torch.randn(4, 4, device='meta')
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            x_cpu = x.to(device='cpu')
+        self.assertTrue(isinstance(x_cpu, FakeTensor))
+        self.assertEqual(x_cpu.device, torch.device('cpu'))
 
     def test_cache_tuple_outputs(self):
         """

@@ -66,6 +66,10 @@ from .triton_compat import (
 )
 
 
+class NoTritonConfigsError(RuntimeError):
+    pass
+
+
 if TYPE_CHECKING:
     from collections.abc import Container, Hashable
 
@@ -282,7 +286,7 @@ class CachingAutotuner(KernelInterface):
             return
         assert not self.launchers
         if not self.configs:
-            raise RuntimeError("No triton configs are available")
+            raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
         exc = None
@@ -292,7 +296,9 @@ class CachingAutotuner(KernelInterface):
             except (OutOfResources, PTXASError) as e:
                 exc = e
         if len(compile_results) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            raise NoTritonConfigsError(
+                f"No valid triton configs. {type(exc).__name__}: {exc}"
+            )
         self.compile_results = compile_results
         self.configs = None
 

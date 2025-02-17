@@ -64,10 +64,6 @@ import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
-from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    ControlFlowOpWarmupDispatchMode,
-    CUDAGraphCaptureControlFlowOpDispatchMode,
-)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -638,7 +634,7 @@ class CUDAWarmupNode:
             self.device_index
         ), disable_conv_cache_emptying(), clear_cublas_manager(), _use_cuda_memory_pool_manager(
             self.device_index, self.cuda_graphs_pool, self.stream
-        ), ControlFlowOpWarmupDispatchMode(), get_history_recording():
+        ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
 
         # We need to know which outputs are allocated within the cudagraph pool
@@ -1213,7 +1209,7 @@ class CUDAGraphNode:
             stream=self.stream,
             pool=self.cuda_graphs_pool,
             capture_error_mode="thread_local",
-        ), CUDAGraphCaptureControlFlowOpDispatchMode(), get_history_recording():
+        ), get_history_recording():
             static_outputs = model(inputs)
 
         # running model should reclaim memory

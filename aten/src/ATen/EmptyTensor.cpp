@@ -16,25 +16,28 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
     // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
+
+    std::optional<c10::DeviceType> opt_device_type = std::nullopt;
+    // As mentioned in Note [Accelerator Context], the accelerators in PyTorch should be mutually exclusive,
+    // and PrivateUse1 has the highest priority, followed by CUDA;
+    // However, since exclusivity between accelerators cannot be guaranteed at present,
+    // in order to ensure backward compatibility (previously the default was CUDA), CUDA are prioritized.
     if (at::globalContext().hasCUDA()) {
-      at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-      return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
-    } else if (at::globalContext().hasMTIA()) {
-      at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
-      return at::detail::getMTIAHooks().getPinnedMemoryAllocator();
-    } else if (at::globalContext().hasXPU()) {
-      at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-      return at::detail::getXPUHooks().getPinnedMemoryAllocator();
-    } else if (at::globalContext().hasHPU()) {
-      at::globalContext().lazyInitDevice(c10::DeviceType::HPU);
-      return at::detail::getHPUHooks().getPinnedMemoryAllocator();
-    } else if(at::isPrivateUse1HooksRegistered()) {
-      at::globalContext().lazyInitDevice(c10::DeviceType::PrivateUse1);
-      return at::detail::getPrivateUse1Hooks().getPinnedMemoryAllocator();
+      opt_device_type = c10::DeviceType::CUDA;
     } else {
-      TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
+      opt_device_type = at::getAccelerator(false);
+    }
+    if (opt_device_type.has_value()) {
+      at::globalContext().lazyInitDevice(opt_device_type.value());
+      return at::globalContext()
+          .getAcceleratorHooksInterface(opt_device_type)
+          .getPinnedMemoryAllocator();
+    } else {
+      TORCH_CHECK(
+          false, "Need to provide pin_memory allocator to use pin memory.")
     }
   }
+
   return c10::GetCPUAllocator();
 }
 
