@@ -643,7 +643,7 @@ def update_schema():
         assert thrift_content[1].startswith("// checksum<<")
         thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
 
-        from yaml import load, Loader
+        from yaml import load
         try:
             from yaml import CSafeLoader as Loader
         except ImportError:
