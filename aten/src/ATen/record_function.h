@@ -357,7 +357,7 @@ struct TORCH_API RecordFunction {
   RecordFunction& operator=(RecordFunction&&) = delete;
 
   const char* name() const;
-  std::optional<const char*> overload_name() const;
+  const char* overload_name() const;
 
   int64_t seqNr() const {
     return sequence_nr_;

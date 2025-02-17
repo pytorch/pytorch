@@ -1049,13 +1049,6 @@ def _build_table(
         if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
             name = name[: (max_name_column_width - 3)] + "..."
 
-        if has_overload_names:
-            overload_name = evt.overload_name
-            if (
-                max_name_column_width is not None
-                and len(overload_name) >= max_name_column_width - 3
-            ):
-                overload_name = overload_name[: (max_name_column_width - 3)] + "..."
         evt.self_cpu_percent = _format_time_share(
             evt.self_cpu_time_total, sum_self_cpu_time_total
         )
@@ -1064,8 +1057,15 @@ def _build_table(
             if not evt.is_async
             else 0
         )
+
         row_values = [name]
         if has_overload_names:
+            overload_name = evt.overload_name
+            if (
+                max_name_column_width is not None
+                and len(overload_name) >= max_name_column_width - 3
+            ):
+                overload_name = overload_name[: (max_name_column_width - 3)] + "..."
             row_values += [overload_name]
         row_values += [
             # Self CPU total %, 0 for async events.

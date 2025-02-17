@@ -614,13 +614,11 @@ std::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
       fn_);
 }
 
-std::optional<const char*> RecordFunction::overload_name() const {
+const char* RecordFunction::overload_name() const {
   return std::visit(
       c10::overloaded(
-          [&](const std::string&) -> std::optional<const char*> {
-            return std::nullopt;
-          },
-          [](const schema_ref_t schema) -> std::optional<const char*> {
+          [&](const std::string&) -> const char* { return ""; },
+          [](const schema_ref_t schema) -> const char* {
             return schema.get().overload_name().c_str();
           }),
       fn_);
