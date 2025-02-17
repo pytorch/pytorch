@@ -282,7 +282,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 5)
   if (at::globalContext().userEnabledMkldnn() && cpuinfo_has_x86_amx_int8()) {
     return mkldnn_scaled_mm(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
   } else
