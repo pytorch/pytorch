@@ -968,10 +968,9 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
-        triton_binary_hash = launcher.cache_hash
 
         if self.save_cache_hook:
-            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns, triton_binary_hash=triton_binary_hash,)
+            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns, triton_cache_hash=launcher.cache_hash,)
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
