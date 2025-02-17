@@ -96,10 +96,6 @@ UNIMPLEMENTED_XFAILIST = {
     "linalg.eigvals": MPSSkipInfo(UNIMPLEMENTED),
     "put": MPSSkipInfo(UNIMPLEMENTED),
     "nn.functional.conv_transpose3d": MPSSkipInfo(UNIMPLEMENTED),
-    "round": [
-        # round not working properly for float16 and bfloat16
-        MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
-    ],
     "__rsub__": MPSSkipInfo(UNIMPLEMENTED),
     "cauchy_": MPSSkipInfo(UNIMPLEMENTED),
     "cauchy": MPSSkipInfo(UNIMPLEMENTED),
@@ -558,6 +554,7 @@ COMPLEX_XFAILLIST = {
     "index_put": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "istft": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "lerp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.det": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
