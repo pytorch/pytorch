@@ -14,7 +14,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import IRNode, TensorBox
 from ..utils import (
-    cache_on_self
+    cache_on_self,
     DeferredLineBase,
     get_gpu_type,
     GPU_ALIGN_BYTES,
