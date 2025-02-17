@@ -126,18 +126,13 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride(
-        {
-            torch.float: 1e-4,
-            torch.half: 1e-1,
-        }
-    )
-    @dtypes(torch.float32, torch.half)
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @dtypes(torch.float32, torch.half, torch.double)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4})
-    @dtypes(torch.bfloat16, torch.half, torch.float)
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
@@ -183,6 +178,7 @@ class TestBasicGEMM(TestCase):
     @dtypes(
         torch.half,
         torch.float32,
+        torch.float64,
     )
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
@@ -285,7 +281,7 @@ class TestBasicGEMM(TestCase):
             _test_mm(n, m, p, dtype, genf)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @dtypes(torch.float32, torch.bfloat16, torch.half, torch.float64)
     def test_bmm(self, device, dtype):
         batch_sizes = [1, 10]
         M, N, O = 23, 15, 12
@@ -401,27 +397,10 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(res7, ref)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
     def test_addbmm(self, device, dtype):
         num_batches = 2
         M, N, O = 16, 17, 18
-
-        is_supported = True
-
-        if not is_supported:
-            b1 = make_tensor(
-                (num_batches, M, N), dtype=dtype, device=device, low=-1, high=1
-            )
-            b2 = make_tensor(
-                (num_batches, N, O), dtype=dtype, device=device, low=-1, high=1
-            )
-            t = make_tensor((M, O), dtype=dtype, device=device, low=-1, high=1)
-            self.assertRaisesRegex(
-                RuntimeError,
-                "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                lambda: torch.addbmm(t, b1, b2),
-            )
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -520,8 +499,8 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
-    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
+    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 50
@@ -618,7 +597,7 @@ class TestBasicGEMM(TestCase):
         )
         self.assertEqual(a, an)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
     def test_1_sized_with_0_strided(self, device, dtype):
         a = make_tensor((8, 1, 64), dtype=dtype, device=device)
@@ -707,7 +686,7 @@ class TestBasicGEMM(TestCase):
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @dtypes(torch.float32)
+    @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
         x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=dtype, device=device)
@@ -781,7 +760,8 @@ class TestBasicGEMM(TestCase):
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
-    @dtypes(torch.float)
+    @precisionOverride({torch.double: 1e-6})
+    @dtypes(torch.float, torch.double)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -804,7 +784,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -812,13 +792,13 @@ class TestBasicGEMM(TestCase):
             torch.cdouble: 1e-8,
         }
     )
-    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -826,11 +806,11 @@ class TestBasicGEMM(TestCase):
             torch.cdouble: 1e-8,
         }
     )
-    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
-    @dtypes(torch.float, torch.bfloat16, torch.half)
+    @dtypes(torch.float, torch.bfloat16, torch.half, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
         o = 5
@@ -873,7 +853,7 @@ class TestBasicGEMM(TestCase):
             torch.cdouble: 1e-8,
         }
     )
-    @dtypes(torch.bfloat16, torch.half, torch.float32)
+    @dtypes(torch.double, torch.bfloat16, torch.half, torch.float32)
     def test_corner_cases_of_cublasltmatmul(self, device, dtype):
         # common case
         M = torch.randn(128, device=device).to(dtype)
