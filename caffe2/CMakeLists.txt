@@ -820,6 +820,8 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
     endif()
   endforeach()
 endif()
+
+set(INSTALL_NEEDS_METALLIBS NO)
 if(USE_MPS)
   if(CAN_COMPILE_METAL)
     add_dependencies(torch_cpu metallibs)
@@ -833,6 +835,7 @@ if(USE_MPS)
         # option STATIC_LIBRARY_OPTIONS is for the archiver rather than the linker,
         # so we meed to install the metallibs and let clients link to them.
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/${metallib} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+        set(INSTALL_NEEDS_METALLIBS YES)
       endif()
     endforeach()
   else()
