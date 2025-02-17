@@ -180,18 +180,24 @@ class LRScheduler:
         self.__dict__.update(state_dict)
 
     def get_last_lr(self) -> list[float]:
-        """Return last computed learning rate by current scheduler."""
+        """Return last computed learning rate by current scheduler. Cached value is used, no extra cost."""
         return self._last_lr
 
     def get_lr(self) -> list[float]:
-        """Compute learning rate using chainable form of the scheduler."""
+        """Compute learning rate using chainable form of the scheduler. No concrete implementation is provided in this class,
+        child classes must override this method and implement it according to their strategy.
+        """
         raise NotImplementedError
 
     def step(self, epoch: Optional[int] = None) -> None:
         """
-        Updates the learning rate for the current epoch.
+        Adjust the learning rate of the optimizer.
 
-        The `epoch` parameter is being deprecated, please use `scheduler.step()` to step the scheduler.
+        .. deprecated:: 1.3
+            The ``epoch`` parameter is being deprecated, use ``lr_scheduler.step()``.
+
+        Please make sure to call `optimizer.step()` before `lr_scheduler.step()`. See more details in
+        `How to adjust learning rate <https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>`_
         """
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
