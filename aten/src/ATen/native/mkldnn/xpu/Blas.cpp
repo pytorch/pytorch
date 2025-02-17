@@ -452,8 +452,118 @@ Tensor& tensordot_out(
   return result;
 }
 
+Tensor& scaled_mm_out_xpu(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum,
+    Tensor& out) {
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0],
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
+  TORCH_CHECK(
+      (scale_a.numel() == 1 || scale_a.numel() == mat1.sizes()[0]) &&
+          (scale_b.numel() == 1 || scale_b.numel() == mat2.sizes()[1]),
+      "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. ",
+      "For RowWise scaling, scale_a should be (",
+      mat1.sizes()[0],
+      ", 1) and scale_b should be (1, ",
+      mat2.sizes()[1],
+      "). "
+      "Got scale_a.size()=(",
+      scale_a.size(0),
+      ", ",
+      scale_a.dim() > 1 ? scale_a.size(1) : 1,
+      ") and ",
+      "scale_b.size()=(",
+      scale_b.size(0),
+      ", ",
+      scale_b.dim() > 1 ? scale_b.size(1) : 1,
+      ")");
+  // Check types
+  TORCH_CHECK(
+      !out_dtype || *out_dtype == out.scalar_type(),
+      "out_dtype must match output matrix type");
+  TORCH_CHECK(
+      isFloat8Type(mat1.scalar_type()),
+      "Expected mat1 to be Float8 matrix got ",
+      mat1.scalar_type());
+  TORCH_CHECK(
+      isFloat8Type(mat2.scalar_type()),
+      "Expected mat2 to be Float8 matrix got ",
+      mat2.scalar_type());
+  if (bias) {
+    TORCH_CHECK(
+        out.scalar_type() != kFloat,
+        "Bias is not supported when out_dtype is set to Float32");
+    TORCH_CHECK(
+        bias->scalar_type() == ScalarType::BFloat16 ||
+            bias->scalar_type() == ScalarType::Half,
+        "Bias must be either Half or BFloat16, but got ",
+        bias->scalar_type());
+    TORCH_CHECK(
+        (out.scalar_type() != kFloat &&
+         out.scalar_type() != ScalarType::BFloat16) ||
+            bias->scalar_type() == ScalarType::BFloat16,
+        "Bias must be BFloat16 to compute ",
+        out.scalar_type(),
+        " output, but got ",
+        bias->scalar_type());
+    TORCH_CHECK(
+        out.scalar_type() != ScalarType::Half ||
+            bias->scalar_type() == ScalarType::Half,
+        "Bias must be Float16 to compute ",
+        out.scalar_type(),
+        " output, but got ",
+        bias->scalar_type());
+  }
+  at::native::resize_output(out, {mat1.size(0), mat2.size(1)});
+  onednn::scaled_matmul(
+      out, mat1, mat2, bias, scale_a, scale_b, onednn::Attr());
+  return out;
+}
+
+Tensor scaled_mm_xpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum) {
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
+  return scaled_mm_out_xpu(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      bias,
+      scale_result,
+      out_dtype,
+      use_fast_accum,
+      out);
+}
+
 TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
+  m.impl("_scaled_mm", TORCH_FN(scaled_mm_xpu));
+  m.impl("_scaled_mm.out", TORCH_FN(scaled_mm_out_xpu));
 }
 } // namespace xpu
 
