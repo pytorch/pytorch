@@ -2215,7 +2215,7 @@ class GridExpr:
         raise NotImplementedError
 
     def ceildiv(self, numel: Union[str, int], block: Union[None, int, str]) -> str:
-        if block is None or block == 1:
+        if block is None or str(block) == "1":
             return str(numel)
         if isinstance(numel, int) and isinstance(block, int):
             return str(ceildiv(numel, block))
@@ -2226,8 +2226,10 @@ class GridExpr:
         return self._ceildiv_str(str(numel), str(block))
 
     def _ceildiv_str(self, numel: str, block: str) -> str:
-        div = "//" if self.mode == "python" else "/"
-        return f"(({numel} + ({block} - 1)) {div} {block})"
+        if self.mode == "python":
+            return f"-(({numel}) // -({block}))"
+        # trick above doesn't work in C++ due to rounding differences
+        return f"(({numel} + ({block} - 1)) / ({block}))"
 
     def _assign_tmp(self, name: str, expr: str) -> str:
         if self.mode == "python":
@@ -2292,13 +2294,13 @@ class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.prefix = [
-            self._assign_tmp("y_grid_raw", self.ceildiv("ynumel", meta.get("YBLOCK"))),
+            self._assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
             self._assign_tmp(
-                "y_grid_div", self.ceildiv("y_grid_raw", get_max_y_grid())
+                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
             ),
         ]
-        self.y_grid = self.ceildiv("y_grid_raw", "y_grid_div")
-        self.y_grid = "y_grid_div"
+        self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
+        self.z_grid = "y_grid_div_"
 
 
 class CooperativeReductionGrid(GridExpr):
@@ -2310,7 +2312,7 @@ class CooperativeReductionGrid(GridExpr):
 class SplitScanGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         assert meta.get("XBLOCK", 1) == 1
-        self.x_grid = self.ceildiv("rnumel", meta.get("R0_BLOCK"))
+        self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
 
