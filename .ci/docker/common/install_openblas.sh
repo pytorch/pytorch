@@ -4,7 +4,7 @@
 set -ex
 
 cd /
-git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.29 --depth 1 --shallow-submodules
+git clone https://github.com/OpenMathLib/OpenBLAS.git -b develop --depth 1 --shallow-submodules
 
 
 OPENBLAS_BUILD_FLAGS="
@@ -14,6 +14,7 @@ NO_SHARED=0
 DYNAMIC_ARCH=1
 TARGET=ARMV8
 CFLAGS=-O3
+BUILD_BFLOAT16=1
 "
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
