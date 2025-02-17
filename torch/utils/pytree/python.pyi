@@ -1,3 +1,5 @@
+# Owner(s): ["module: pytree"]
+
 from .._pytree import *  # previously public APIs # noqa: F403
 from .._pytree import (  # non-public internal APIs
     __all__ as __all__,
