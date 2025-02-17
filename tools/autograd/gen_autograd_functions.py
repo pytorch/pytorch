@@ -1033,13 +1033,16 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     )
     unpack_ivalues = []
     for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
-        typ = typ.removesuffix("&")
+        if typ.endswith("&"):
+            typ = typ[:-1]
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
     schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
     for typ in apply_functional_args_ref_types:
-        typ = typ.removesuffix("&")
-        typ = typ.removeprefix("const")
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        if typ.startswith("const"):
+            typ = typ[5:]
         schema_args.append(typ.strip())
     compute_schema = ["std::vector<at::TypePtr> schema = {"]
     for schema_arg in schema_args:

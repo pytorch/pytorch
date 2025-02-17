@@ -25,7 +25,8 @@ def _get_op_lists():
     supported_result = set()
     not_supported_result = set()
     for opname in all_schemas:
-        opname = opname.removesuffix("_")
+        if opname.endswith("_"):
+            opname = opname[:-1]
         if opname in symbolic_schemas:
             # Supported op
             opsets = symbolic_schemas[opname].opsets

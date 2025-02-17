@@ -390,6 +390,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
+    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
