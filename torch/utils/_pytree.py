@@ -92,17 +92,13 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 
 class KeyEntry(Protocol):
-    def __hash__(self) -> int:
-        ...
-
-    def __eq__(self, other: object) -> bool:
-        ...
+    entry: Any
 
     def __str__(self) -> str:
-        ...
+        raise NotImplementedError
 
     def get(self, parent: Any) -> Any:
-        ...
+        raise NotImplementedError
 
 
 class EnumEncoder(json.JSONEncoder):
@@ -125,7 +121,7 @@ ToStrFunc: TypeAlias = Callable[["TreeSpec", list[str]], str]
 MaybeFromStrFunc: TypeAlias = Callable[[str], Optional[tuple[Any, Context, str]]]
 KeyPath: TypeAlias = tuple[KeyEntry, ...]
 FlattenWithKeysFunc: TypeAlias = Callable[
-    [PyTree], tuple[list[tuple[KeyEntry, Any]], Any]
+    [PyTree], tuple[list[tuple[KeyEntry, Any]], Context]
 ]
 
 
@@ -253,6 +249,7 @@ def register_pytree_node(
             serialized_type_name=serialized_type_name,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
+            flatten_with_keys_fn=flatten_with_keys_fn,
         )
     else:
         args = (cls, flatten_fn, unflatten_fn)
@@ -260,6 +257,7 @@ def register_pytree_node(
             "serialized_type_name": serialized_type_name,
             "to_dumpable_context": to_dumpable_context,
             "from_dumpable_context": from_dumpable_context,
+            "flatten_with_keys_fn": flatten_with_keys_fn,
         }
         _cxx_pytree_pending_imports.append((args, kwargs))
 
@@ -507,8 +505,12 @@ def _private_register_pytree_node(
 
 
 @dataclasses.dataclass(frozen=True)
-class SequenceKey(Generic[T]):
-    idx: int
+class SequenceKey(KeyEntry, Generic[T]):
+    entry: int
+
+    @property
+    def idx(self) -> int:
+        return self.entry
 
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
@@ -521,8 +523,12 @@ K = TypeVar("K", bound=Hashable)
 
 
 @dataclasses.dataclass(frozen=True)
-class MappingKey(Generic[K, T]):
-    key: K
+class MappingKey(KeyEntry, Generic[K, T]):
+    entry: K
+
+    @property
+    def key(self) -> K:
+        return self.entry
 
     def __str__(self) -> str:
         return f"[{self.key!r}]"
@@ -532,8 +538,12 @@ class MappingKey(Generic[K, T]):
 
 
 @dataclasses.dataclass(frozen=True)
-class GetAttrKey:
-    name: str
+class GetAttrKey(KeyEntry):
+    entry: str
+
+    @property
+    def name(self) -> str:
+        return self.entry
 
     def __str__(self) -> str:
         return f".{self.name}"
