@@ -32,6 +32,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_CUDA,
+    TEST_XPU
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -52,6 +53,10 @@ elif TEST_HPU:
     DEVICE_TYPE = "hpu"
     PG_BACKEND = "hccl"
     DEVICE_COUNT = _get_device_module("hpu").device_count()
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    PG_BACKEND = "xccl"
+    DEVICE_COUNT = _get_device_module("xpu").device_count()
 else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
@@ -321,7 +326,14 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
+        if TEST_CUDA:
+            backend = "nccl"
+        elif TEST_HPU:
+            backend = "hccl"
+        elif TEST_XPU:
+            backend = "xccl"
+        else:
+            backend = "gloo"
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
@@ -331,13 +343,13 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl", "xccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend:
+        if "nccl" or "xccl" in self.backend:
             # set device for nccl pg for collectives
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
         # For nccl backend, bind the device to the process if device_id is not None
@@ -391,7 +403,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
+            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE
