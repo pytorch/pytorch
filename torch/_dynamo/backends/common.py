@@ -1,5 +1,23 @@
 # mypy: ignore-errors
 
+"""
+This module provides common utilities and base classes for TorchDynamo backends.
+
+Key components:
+- AotAutograd: Base class for implementing AOT (Ahead-of-Time) autograd backends
+- Backend utilities for handling:
+  - Fake tensor conversion
+  - Device/dtype detection from inputs
+  - Memory efficient fusion
+  - Graph flattening
+  - Common compiler configurations
+
+The utilities here are used by various backend implementations to handle
+common operations and provide consistent behavior across different backends.
+AOT autograd functionality is particularly important as it enables ahead-of-time
+optimization of both forward and backward passes.
+"""
+
 import contextlib
 import functools
 import logging
