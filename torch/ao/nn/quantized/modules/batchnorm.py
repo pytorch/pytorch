@@ -51,7 +51,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
 class BatchNorm1d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm1d`."""
 
-    _NNI_BN_RELU_MODULE = nni.BNReLU2d
+    _NNI_BN_RELU_MODULE = nni.BNReLU1d
 
     def __init__(
         self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None
