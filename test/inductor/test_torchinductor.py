@@ -3333,7 +3333,7 @@ class CommonTemplate:
 
     @skip_if_cpu
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest("4GB")
+    @largeTensorTest("4GB", inductor=True)
     def test_large_tensor_reduction(self):
         # Test 64-bit indexing works correctly
         def fn(a):
@@ -3369,7 +3369,7 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest("4GB")
+    @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
         def fn(a):
             return a + 1
@@ -3386,7 +3386,7 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest("3GB")
+    @largeTensorTest("3GB", inductor=True)
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
@@ -3401,7 +3401,7 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest("2GB")
+    @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -11748,7 +11748,7 @@ class CommonTemplate:
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
     @serialTest()
-    @largeTensorTest("13GB")
+    @largeTensorTest("13GB", inductor=True)
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will
@@ -12184,7 +12184,7 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
-    @largeTensorTest("1GB")
+    @largeTensorTest("1GB", inductor=True)
     def test_large_grid(self):
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
