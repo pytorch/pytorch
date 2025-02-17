@@ -190,7 +190,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     def dequantize(self):
         r"""Utility to convert the quantized MHA back to float.
 
-        The motivation for this is that it is not trivial to conver the weights
+        The motivation for this is that it is not trivial to convert the weights
         from the format that is used in the quantized version back to the
         float.
         """
