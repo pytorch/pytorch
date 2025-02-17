@@ -665,6 +665,15 @@ MACOS_13_XFAILLIST = {
     "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+
+    # Precision issues
+    "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
+    "linalg.vander": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
+    "masked.softmin": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
+    "cumulative_trapezoid": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "dot": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "nn.functional.max_pool2d": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
 }
 
 """Other uncategorized xfails"""
