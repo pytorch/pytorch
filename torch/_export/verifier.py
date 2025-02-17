@@ -18,6 +18,7 @@ from torch.export.graph_signature import (
     TokenArgument,
 )
 from torch.fx import GraphModule
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 if TYPE_CHECKING:
     from torch.export.exported_program import ExportedProgram
@@ -145,11 +146,11 @@ class Verifier(metaclass=_VerifierMeta):
         return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> tuple[type[Any], ...]:
-        return (torch.fx.GraphModule,)
+        return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
 
     def check_valid_op(self, op):
         pass
@@ -206,7 +207,7 @@ class Verifier(metaclass=_VerifierMeta):
             )
 
             if not isinstance(op, _allowed_op_types()):
-                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
+                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions and not is_traceable_wrapper_subclass_type(op):
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"

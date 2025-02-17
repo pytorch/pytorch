@@ -286,6 +286,11 @@ class DTensor(torch.Tensor):
         r._local_tensor = local_tensor
         return r
 
+    from torch._export.wrappers import _mark_constructor_exportable_experimental
+    @_mark_constructor_exportable_experimental
+    def __init__(self,  *args, **kwargs):
+        pass
+
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
     def __repr__(self):  # type: ignore[override]

@@ -11029,6 +11029,67 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDer  # constructor is not serialized today
+    @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
+    def test_capture_subclass_constructor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                two_tensor = TwoTensor(x, TwoTensor(x, x)) + self.buffer
+                val = x + two_tensor
+                return val.b.a
+
+        mod = Foo()
+        ep = export_for_training(mod, (torch.randn(4, 4),), strict=False)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_buffer : [num_users=1] = placeholder[target=b_buffer]
+    %x : [num_users=1] = placeholder[target=x]
+    %__init__0 : [num_users=1] = get_attr[target=__init__0]
+    %twotensor0 : [num_users=1] = get_attr[target=twotensor0]
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor0, %__init__0, %x, %x), kwargs = {})
+    %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
+    %__init__1 : [num_users=1] = get_attr[target=__init__1]
+    %twotensor1 : [num_users=1] = get_attr[target=twotensor1]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor1, %__init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
+    %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
+    %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_23, %add), kwargs = {})
+    %access_subclass_inner_tensor_default_24 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, b), kwargs = {})
+    %access_subclass_inner_tensor_default_29 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_24, a), kwargs = {})
+    return (access_subclass_inner_tensor_default_29,)""",
+        )
+
+        inp = torch.randn(4, 4)
+        self.assertEqual(ep.module()(inp), mod(inp))
+
+        mod = Foo()
+        ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
+
+        self.assertEqual(ep.module()(inp), mod(inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)""",
+        )
+
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
