@@ -66,7 +66,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
-    conda_install "openblas==0.3.29=*openmp*"
+    # conda_install "openblas==0.3.28=*openmp*"
+    :
   else
     conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
   fi

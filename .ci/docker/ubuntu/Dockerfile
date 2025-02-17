@@ -45,6 +45,10 @@ ARG GCC_VERSION
 COPY ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
+COPY ./common/install_openblas.sh install_openblas.sh 
+RUN bash ./install_openblas.sh && rm install_openblas.sh
+ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
+
 # Install lcov for C++ code coverage
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
