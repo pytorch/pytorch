@@ -3000,4 +3000,4 @@ class Module:
 
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+        self._compiled_call_impl = torch.delayed_compile(self._call_impl, *args, **kwargs)

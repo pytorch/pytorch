@@ -2888,7 +2888,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                                 is_dynamic.append(set())
                             is_dynamic[0].add(value)
 
-                    dynamism = tuple(len(x) > 1 for x in is_dynamic)
+                    dynamism = tuple(len(x) > 1 for x in is_dynamic) if is_dynamic else None
 
                     var = LazyVariableTracker.create(
                         value, LocalSource(name, is_input=True, dynamism=dynamism)
