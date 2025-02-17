@@ -1090,6 +1090,25 @@
     "Any",
     "to_dlpack"
   ],
+  "torch.utils.pytree": [
+    "python",
+    "cxx",
+    "register_pytree_node",
+    "tree_flatten",
+    "tree_unflatten",
+    "tree_iter",
+    "tree_leaves",
+    "tree_structure",
+    "tree_map",
+    "tree_map_",
+    "tree_map_only",
+    "tree_map_only_",
+    "tree_all",
+    "tree_any",
+    "tree_all_only",
+    "tree_any_only",
+    "treespec_pprint"
+  ],
   "torch": [
     "BFloat16Storage",
     "BFloat16Tensor",
