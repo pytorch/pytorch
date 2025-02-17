@@ -880,7 +880,6 @@ class CachingAutotuner(KernelInterface):
         return config2launcher.get(best_config)
 
     def run(
-        # TODO(jansel): is kwargs used?
         self,
         *args,
         stream,
@@ -888,9 +887,7 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         if self.triton_interpret:
-            grid = kwargs.pop("grid", None) or self._compute_grid_slow(
-                args, self.configs[0]
-            )
+            grid = self._compute_grid_slow(args, self.configs[0])
             return self.fn[grid](
                 *args,
                 **kwargs,
@@ -1069,8 +1066,17 @@ class TritonCompileResult:
         self.__dict__.update(state)
         self.kernel = kernel
 
-    def get_call_def_args(self):
-        """Compute the args needed by launcher and the args needed by the underlying kernel"""
+    def make_launcher(self) -> LauncherType:
+        """
+        Launching triton kernels is performance sensitive, we compile
+        a custom Python function get the grid() and reorder the args to
+        the underlying wrapper.
+        """
+        cfg = self.config
+        compile_meta = self.compile_meta
+        binary = self.kernel
+        fn = binary.src.fn
+        binary._init_handles()
         """
         https://github.com/pytorch/pytorch/issues/115344
 
@@ -1085,9 +1091,6 @@ class TritonCompileResult:
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        cfg = self.config
-        compile_meta = self.compile_meta
-        fn = self.kernel.src.fn
         known_constants = OrderedSet(
             arg for i, arg in enumerate(fn.arg_names) if i in fn.constexprs
         )
@@ -1113,19 +1116,6 @@ class TritonCompileResult:
                 for name in fn.arg_names
                 if name not in cfg_dict and name not in none_args
             ]
-        return call_args, def_args
-
-    def make_launcher(self) -> LauncherType:
-        """
-        Launching triton kernels is performance sensitive, we compile
-        a custom Python function get the grid() and reorder the args to
-        the underlying wrapper.
-        """
-        cfg = self.config
-        binary = self.kernel
-        fn = binary.src.fn
-        binary._init_handles()
-        call_args, def_args = self.get_call_def_args()
 
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
@@ -2204,58 +2194,66 @@ def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
 
 @dataclasses.dataclass
 class GridExpr:
+    """Generate code for grid size expressions in launcher"""
+
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
     prefix: Sequence[str] = ()
-    x_grid: str = "1"
-    y_grid: str = "1"
-    z_grid: str = "1"
+    x_grid: Union[str, int] = 1
+    y_grid: Union[str, int] = 1
+    z_grid: Union[str, int] = 1
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
 
-    def ceildiv(self, numel: Union[str, int], block: Union[None, int, str]) -> str:
-        if block is None or str(block) == "1":
-            return str(numel)
+    def ceildiv(
+        self, numel: Union[str, int], block: Union[None, int, str]
+    ) -> Union[str, int]:
+        if block is None or block == 1:
+            return numel
         if isinstance(numel, int) and isinstance(block, int):
-            return str(ceildiv(numel, block))
+            return ceildiv(numel, block)  # constant fold
         if isinstance(block, int) and next_power_of_2(block) == block:
             # convert div to a shift when we have power of 2 block size
             shift = block.bit_length() - 1
-            return f"(({numel} + {block - 1}) >> {shift})"
-        return self._ceildiv_str(str(numel), str(block))
-
-    def _ceildiv_str(self, numel: str, block: str) -> str:
+            return f"((({numel}) + {block - 1}) >> {shift})"
         if self.mode == "python":
             return f"-(({numel}) // -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
-    def _assign_tmp(self, name: str, expr: str) -> str:
+    def maximum(self, seq: list[Union[int, str]]) -> Union[int, str]:
+        """Codegen for max function with constant folding, constants are represented as int"""
+        items = self._constant_fold(max, seq)
+        if len(items) <= 1:
+            return items[0]
+        if self.mode == "python":
+            return f"max({', '.join(map(str, items))})"
+        assert self.mode == "cpp"
+        return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
+
+    def summation(self, seq: list[Union[int, str]]) -> Union[int, str]:
+        """Codegen for sum function with constant folding, constants are represented as int"""
+        items = self._constant_fold(sum, seq)
+        if len(items) <= 1:
+            return items[0]
+        return " + ".join(map(str, items))
+
+    def _constant_fold(
+        self, fn: Callable[[list[int]], int], seq: list[Union[int, str]]
+    ) -> list[Union[int, str]]:
+        items: list[Union[int, str]] = [x for x in seq if not isinstance(x, int)]
+        const_items: list[int] = [x for x in seq if isinstance(x, int)]
+        if const_items:
+            items.append(fn(const_items))
+        return items
+
+    def assign_tmp(self, name: str, expr: Union[str, int]) -> str:
         if self.mode == "python":
             return f"{name} = {expr}"
         if self.mode == "cpp":
             return f"uint32_t {name} = {expr};"
         raise AssertionError(f"invalid mode {self.mode}")
-
-    def _folding_max(self, seq: list[Union[int, str]]) -> Union[int, str]:
-        """Codegen for max function with constant folding, constants are represented as int"""
-        const_items = [x for x in seq if isinstance(x, int)]
-        dyn_items = [x for x in seq if not isinstance(x, int)]
-        if const_items:
-            if not dyn_items:
-                return max(const_items)
-            dyn_items.append(str(max(const_items)))
-        return self._max_fn(dyn_items)
-
-    def _max_fn(self, items: list[str]) -> str:
-        if len(items) <= 1:
-            assert items
-            return items[0]
-        if self.mode == "python":
-            return f"max({', '.join(items)})"
-        assert self.mode == "cpp"
-        return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
 
     @staticmethod
     def from_meta(
@@ -2294,8 +2292,8 @@ class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.prefix = [
-            self._assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self._assign_tmp(
+            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
+            self.assign_tmp(
                 "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
             ),
         ]
@@ -2372,18 +2370,18 @@ class ComboKernelGrid(GridExpr):
 
         self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
         if combo_meta["min_blocks"]:
-            self.x_grid = self._max_fn([self.x_grid, str(combo_meta["min_blocks"])])
+            self.x_grid = self.maximum([self.x_grid, str(combo_meta["min_blocks"])])
         if ynumels:
-            self.y_grid = self.ceildiv(self._folding_max(ynumels), meta.get("YBLOCK"))
+            self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
         if znumels:
-            self.z_grid = self.ceildiv(self._folding_max(znumels), meta.get("ZBLOCK"))
+            self.z_grid = self.ceildiv(self.maximum(znumels), meta.get("ZBLOCK"))
 
     def combo_x_grid(
         self,
         xnumels: list[Union[int, str]],
         no_x_dims: list[bool],
         meta: dict[str, int],
-    ) -> str:
+    ) -> Union[str, int]:
         raise NotImplementedError
 
 
@@ -2393,9 +2391,9 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         xnumels: list[Union[int, str]],
         no_x_dims: list[bool],
         meta: dict[str, int],
-    ) -> str:
+    ) -> Union[str, int]:
         assert len(xnumels) == len(no_x_dims)
-        return " + ".join(
+        return self.summation(
             [
                 self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
                 for x, no_x_dim in zip(xnumels, no_x_dims)
@@ -2414,11 +2412,9 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
         xnumels_no_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
         xnumels_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if not no_x_dim]
-        exprs = []
+        exprs: list[Union[str, int]] = []
         if xnumels_no_x_dim:
-            exprs.append(str(self._folding_max(xnumels_no_x_dim)))
+            exprs.append(self.maximum(xnumels_no_x_dim))
         if xnumels_x_dim:
-            exprs.append(
-                self.ceildiv(self._folding_max(xnumels_x_dim), meta.get("XBLOCK"))
-            )
-        return f"({self._max_fn(exprs)}) * {num_kernels}"
+            exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
+        return f"({self.maximum(exprs)}) * {num_kernels}"
