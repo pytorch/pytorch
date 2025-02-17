@@ -2577,8 +2577,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: exp_out
-    MPS: exp_out_mps
+    CPU, CUDA, MPS: exp_out
   tags: pointwise
 
 - func: exp2(Tensor self) -> Tensor
@@ -5020,8 +5019,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: round_decimals_out
-    CUDA: round_decimals_out
+    CPU, CUDA, MPS: round_decimals_out
   tags: pointwise
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
@@ -5383,8 +5381,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sinc_out
-    MPS: sinc_out_mps
+    CPU, CUDA, MPS: sinc_out
   tags: pointwise
 
 - func: sinh(Tensor self) -> Tensor
@@ -6056,8 +6053,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: tanh_out
-    MPS: tanh_out_mps
+    CPU, CUDA, MPS: tanh_out
     SparseCPU, SparseCUDA: tanh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr_out
   tags: pointwise
@@ -7070,11 +7066,13 @@
 - func: _scaled_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
+    CPU: _scaled_mm_cpu
     CUDA: _scaled_mm_cuda
 
 - func: _scaled_mm.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
+    CPU: _scaled_mm_out_cpu
     CUDA: _scaled_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
@@ -9612,8 +9610,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: erfinv_out
-    MPS: erfinv_out_mps
+    CPU, CUDA, MPS: erfinv_out
     SparseCPU, SparseCUDA: erfinv_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erfinv_sparse_csr_out
   tags: pointwise
