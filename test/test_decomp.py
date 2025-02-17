@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -555,7 +554,7 @@ class TestDecomp(TestCase):
     # NB: This actually overlaps with test_comprehensive, but it only
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
-    @onlyNativeDeviceTypes
+
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops)
@@ -563,7 +562,6 @@ class TestDecomp(TestCase):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
     @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
@@ -587,7 +585,6 @@ class TestDecomp(TestCase):
             self.check_decomposed(aten_name, mode)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     @skipOps("TestDecomp", "test_comprehensive", comprehensive_failures)
     @suppress_warnings
@@ -1019,7 +1016,6 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
@@ -1033,7 +1029,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
         size = (2, 4, 3, 3)
@@ -1098,7 +1093,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(a.stride(), b.stride())
             self.assertEqual(a.dtype, b.dtype)
 
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_elu_backward(self, device):
         size = (2, 4, 3, 3)
@@ -1110,7 +1104,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_threshold_backward_dtype(self, device):
         grad = torch.randint(10, (4,), device=device)
@@ -1120,7 +1113,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
-    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
         g = torch.randn((3, 10, 10), device=device)
