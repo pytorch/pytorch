@@ -29,7 +29,7 @@ from torch.overrides import (
 
 
 _P = ParamSpec("_P")
-_TensorLike = TypeVar("_TensorLike")
+_TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
