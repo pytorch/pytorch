@@ -120,7 +120,7 @@ else()
 
   append_torchlib_if_found(sleef asmjit)
 
-  if(@USE_MPS@ AND @CAN_COMPILE_METAL@)
+  if(@INSTALL_NEEDS_METALLIBS@)
     add_library(torch_metallibs INTERFACE)
     set(_torch_compiled_metallibs "@COMPILED_METALLIBS@")
     set(_torch_metallib_sections "@METALLIB_SECTION_NAMES@")
