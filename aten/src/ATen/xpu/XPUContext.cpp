@@ -16,7 +16,6 @@ namespace {
  * requested for a device.
  */
 DeviceIndex num_gpus = -1;
-c10::once_flag init_flag;
 std::deque<c10::once_flag> device_prop_flags;
 std::vector<DeviceProp> device_properties;
 
@@ -24,11 +23,14 @@ std::deque<c10::once_flag> device_global_idx_flags;
 std::vector<int32_t> device_global_idxs;
 
 void initXPUContextVectors() {
-  num_gpus = c10::xpu::device_count();
-  device_prop_flags.resize(num_gpus);
-  device_properties.resize(num_gpus);
-  device_global_idx_flags.resize(num_gpus);
-  device_global_idxs.resize(num_gpus);
+  static bool init_flag [[maybe_unused]] = []() {
+    num_gpus = c10::xpu::device_count();
+    device_prop_flags.resize(num_gpus);
+    device_properties.resize(num_gpus);
+    device_global_idx_flags.resize(num_gpus);
+    device_global_idxs.resize(num_gpus);
+    return true;
+  }();
 }
 
 void initDeviceProperty(DeviceIndex device) {
@@ -57,7 +59,7 @@ DeviceProp* getCurrentDeviceProperties() {
 }
 
 DeviceProp* getDeviceProperties(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUContextVectors);
+  initXPUContextVectors();
   if (device == -1)
     device = c10::xpu::current_device();
   check_device_index(device);
@@ -68,7 +70,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 // Return the global index enumerated by sycl::device::get_devices based on the
 // index of a XPU device in the framework.
 int32_t getGlobalIdxFromDevice(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUContextVectors);
+  initXPUContextVectors();
   check_device_index(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];
