@@ -100,8 +100,8 @@ __all__ = [
     "autocast",
     "chunk",
     "compile",
-    "delayed_compile"
     "cond",
+    "delayed_compile",
     "enable_grad",
     "export",
     "get_default_device",
