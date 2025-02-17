@@ -1184,6 +1184,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._special.special_betainc",
         "torch._C._special.special_betaincinv",
         "torch._C._special.special_betaln",
+        "torch._special_betainc_partials",
+        "torch._special_betaincinv_partials",
         "torch._C._special.special_bessel_j0",
         "torch._C._special.special_bessel_j1",
         "torch._C._special.special_bessel_y0",
