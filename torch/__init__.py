@@ -2561,13 +2561,26 @@ def compile(
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    return torch._dynamo.optimize(
+    compiled_fn = torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
     )(model)  # type: ignore[return-value]
 
+    def wrapped_fn(*args, **kwargs):
+        # Check positional arguments for meta tensors.
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.device.type == "meta":
+                return model(*args, **kwargs)
+        # Check keyword arguments for meta tensors.
+        for arg in kwargs.values():
+            if isinstance(arg, torch.Tensor) and arg.device.type == "meta":
+                return model(*args, **kwargs)
+        # Otherwise, use the compiled version.
+        return compiled_fn(*args, **kwargs)
+
+    return wrapped_fn
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
