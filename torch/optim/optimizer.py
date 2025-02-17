@@ -925,7 +925,7 @@ class Optimizer:
             r"""Copy values only for Tensors and deepcopy otherwise
             """
             if isinstance(data, torch.Tensor):
-                self_data.data = data
+                self_data.copy_(data)
             elif isinstance(data, dict):
                 for k, v in data.items():
                     if not _contain_tensor(v):
