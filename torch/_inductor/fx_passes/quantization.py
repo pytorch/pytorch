@@ -11,7 +11,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
-from torch.utils._ordered_set import OrderedSet
 
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
@@ -3078,13 +3077,11 @@ def _register_qlinear_post_op_fusion_pass(
         # Output QParams
         o_inv_scale = (
             kwargs["o_inv_scale"]
-            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            if (output_dtype in [torch.uint8, torch.int8])
             else 1.0
         )
         o_zero_point = (
-            kwargs["o_zp"]
-            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
-            else 0
+            kwargs["o_zp"] if (output_dtype in [torch.uint8, torch.int8]) else 0
         )
         assert (
             kwargs["postop_name"] == "none"
