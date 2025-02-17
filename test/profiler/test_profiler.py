@@ -2933,7 +2933,7 @@ aten::mm""",
 
         with _scoped_library("aten", "IMPL") as my_lib:
             my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
-            with profile() as prof:
+            with profile(activities=[ProfilerActivity.CPU]) as prof:
                 torch.add(1, 5)
 
             # Expected format
