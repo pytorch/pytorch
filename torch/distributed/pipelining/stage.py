@@ -13,7 +13,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.pytree.python import tree_map_only
+from torch.utils.pytree import tree_map_only
 
 from ._backward import stage_backward, stage_backward_input, stage_backward_weight
 from ._debug import map_debug_info

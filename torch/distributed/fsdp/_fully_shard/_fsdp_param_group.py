@@ -11,7 +11,7 @@ from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicat
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
-from torch.utils.pytree.python import tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_unflatten
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (

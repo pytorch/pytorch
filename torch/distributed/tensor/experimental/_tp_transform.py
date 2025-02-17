@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from typing import Any, cast, Optional
 
 import torch
-import torch.utils.pytree.python as pytree
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -25,6 +24,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import Node
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.utils.pytree import tree_map_only
 
 
 __all__ = ["tensor_parallel_transformation"]
@@ -323,9 +323,7 @@ def _generate_default_output_sharding(
 
     new_op_schema = OpSchema(
         op=op_schema.op,
-        args_schema=pytree.tree_map_only(
-            DTensorSpec, update_arg_spec, op_schema.args_schema
-        ),
+        args_schema=tree_map_only(DTensorSpec, update_arg_spec, op_schema.args_schema),
         kwargs_schema=op_schema.kwargs_schema,
     )
 
@@ -341,9 +339,7 @@ def _generate_default_output_sharding(
         )
 
     return OutputSharding(
-        output_spec=pytree.tree_map_only(
-            FakeTensor, create_output_spec, node.meta["val"]
-        ),
+        output_spec=tree_map_only(FakeTensor, create_output_spec, node.meta["val"]),
         redistribute_schema=new_op_schema,
         needs_redistribute=True,
     )
@@ -508,7 +504,7 @@ def _get_op_schema(
     """
     Util function to construct the operator schema of a node.
     """
-    args_schema_list = pytree.tree_map_only(
+    args_schema_list = tree_map_only(
         Node, lambda arg: placement_strategies[arg].output_specs, node.args
     )
     op_schema = OpSchema(

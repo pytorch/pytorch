@@ -11,7 +11,6 @@ from typing import Any, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.utils.pytree.python as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
@@ -25,6 +24,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils.pytree import tree_map_only
 
 
 def two_tensor_fsdp_pre_all_gather_v1(
@@ -144,13 +144,9 @@ class BFloat16AllGatherTensor(torch.Tensor):
                 assert pad_in_pre_all_gather == x._pad_in_pre_all_gather
             return x._data
 
-        out = func(
-            *pytree.tree_map_only(cls, unwrap, args),
-            **pytree.tree_map_only(cls, unwrap, kwargs),
-        )
-        return pytree.tree_map_only(
-            torch.Tensor, lambda x: cls(x, pad_in_pre_all_gather), out
-        )
+        args, kwargs = tree_map_only(cls, unwrap, (args, kwargs))
+        out = func(*args, **kwargs)
+        return tree_map_only(torch.Tensor, lambda x: cls(x, pad_in_pre_all_gather), out)
 
     def __tensor_flatten__(self):
         return ["_data"], None

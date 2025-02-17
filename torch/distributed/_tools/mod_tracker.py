@@ -9,7 +9,7 @@ from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
-from torch.utils.pytree.python import tree_flatten
+from torch.utils.pytree import tree_iter
 
 
 __all__ = ["ModTracker"]
@@ -210,7 +210,7 @@ class ModTracker:
         self._get_append_fn(w_mod, name, False)()
         if self._user_pre_fw_hook is not None:
             self._user_pre_fw_hook(mod, input)
-        args, _ = tree_flatten(input)
+        args = tree_iter(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if not self.is_bw and tensors:
             register_multi_grad_hook(tensors, self._get_pop_fn(w_mod, name, True))
@@ -221,7 +221,7 @@ class ModTracker:
         if self._user_post_fw_hook is not None:
             self._user_post_fw_hook(mod, input, output)
         self._get_pop_fn(w_mod, name, False)()
-        args, _ = tree_flatten(output)
+        args = tree_iter(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if not self.is_bw and tensors:
             register_multi_grad_hook(tensors, self._get_append_fn(w_mod, name, True))

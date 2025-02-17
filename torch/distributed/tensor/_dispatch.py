@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+import torch.utils.pytree as pytree
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
@@ -33,10 +34,6 @@ from torch.distributed.tensor.placement_types import Partial, Placement, Replica
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
-try:
-    from torch.utils import _cxx_pytree as pytree
-except ImportError:
-    import torch.utils.pytree.python as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)

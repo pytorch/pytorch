@@ -6,7 +6,6 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-import torch.utils.pytree.python as pytree
 from torch import rand, randn, Tensor
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -32,6 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils.pytree import tree_leaves
 
 
 class TestViewOps(DTensorTestBase):
@@ -139,7 +139,7 @@ class TestViewOps(DTensorTestBase):
         dim_map = dim_maps[op]
         rules = dim_map(*args, **kwargs)
         outputs = op(*args, **kwargs)
-        flat_args = pytree.arg_tree_leaves(*args)
+        flat_args = tree_leaves(args)
         in_shape = flat_args[0].shape
 
         no_shard_dims = set()

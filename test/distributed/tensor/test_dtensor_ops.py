@@ -7,7 +7,6 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-import torch.utils.pytree.python as pytree
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
@@ -20,7 +19,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
-from torch.utils.pytree.python import tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 
 # rewrite common size variables to sth can be sharded evenly
@@ -535,8 +534,8 @@ class TestDTensorOps(DTensorOpTestBase):
         self.check_dtensor_func(test, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
-        flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
-        flat_rs = pytree.tree_leaves(rs)
+        flat_dtensor_rs = tree_leaves(dtensor_rs)
+        flat_rs = tree_leaves(rs)
         self.assertEqual(len(flat_dtensor_rs), len(flat_rs))
         for dtensor_r, r in zip(flat_dtensor_rs, flat_rs):
             if not isinstance(r, torch.Tensor):
@@ -600,7 +599,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/tau/issues/470
                         # TODO remove this once issue above fixed.
-                        flat_args = pytree.tree_leaves(dtensor_rs)
+                        flat_args = tree_leaves(dtensor_rs)
                         if any(
                             isinstance(e, torch.Tensor) and e.numel() == 0
                             for e in flat_args

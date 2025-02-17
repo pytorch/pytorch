@@ -2,7 +2,7 @@
 from typing import Optional
 
 import torch
-import torch.utils.pytree.python as pytree
+from torch.utils.pytree import tree_map_
 
 
 def _basic_validation(op, args=(), kwargs=None):
@@ -22,8 +22,8 @@ def _basic_validation(op, args=(), kwargs=None):
         if isinstance(e, ShardedTensor):
             has_distributed_tensor = True
 
-    pytree.tree_map_(is_distributed_tensor, args)
-    pytree.tree_map_(is_distributed_tensor, kwargs)
+    tree_map_(is_distributed_tensor, args)
+    tree_map_(is_distributed_tensor, kwargs)
 
     if not has_distributed_tensor:
         raise TypeError(
@@ -44,8 +44,8 @@ def _basic_validation(op, args=(), kwargs=None):
                 )
             cur_pg = e._process_group
 
-    pytree.tree_map_(validate_pg, args)
-    pytree.tree_map_(validate_pg, kwargs)
+    tree_map_(validate_pg, args)
+    tree_map_(validate_pg, kwargs)
 
 
 def _register_default_op(op, decorator):

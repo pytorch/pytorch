@@ -2,23 +2,18 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import Placement
+from torch.utils.pytree import tree_leaves, tree_map_only
 
 
-try:
-    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
-except ImportError:
-    from torch.utils.pytree.python import (  # type: ignore[no-redef, assignment]
-        tree_leaves,
-        tree_map_only,
-        TreeSpec,
-    )
+if TYPE_CHECKING:
+    from torch.utils.pytree import PyTreeSpec
 
 
 # Common type aliases
@@ -452,7 +447,7 @@ class OpInfo:
     flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: dict[str, object]
-    args_tree_spec: Optional[TreeSpec] = None
+    args_tree_spec: Optional["PyTreeSpec"] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None

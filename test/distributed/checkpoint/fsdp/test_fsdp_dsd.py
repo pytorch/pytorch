@@ -28,7 +28,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-from torch.utils.pytree.python import tree_all_only
+from torch.utils.pytree import tree_all_only
 
 
 class TestFullyShardWithDistributedStateDict(FSDPTest):
