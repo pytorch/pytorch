@@ -1,5 +1,5 @@
 # Use UBI 9.3 as base image
-FROM registry.access.redhat.com/ubi9/ubi:9.3
+FROM registry.access.redhat.com/ubi9/ubi:9.5
 
 # Install necessary dependencies
 RUN dnf install -y \
