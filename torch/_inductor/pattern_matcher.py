@@ -527,10 +527,15 @@ class _TargetExpr(PatternExpr):
         raise NotImplementedError
 
     def _match_fns(self, node: torch.fx.Node) -> bool:
+        current_node = extract_target(node)
+        synonym_node = current_node
+        if (current_node == torch.ops.aten._unsafe_view.default or 
+            current_node == torch.ops.aten.view.default):
+            synonym_node = extract_synonym_target(current_node)
         return (
             isinstance(node, torch.fx.Node)
             and node.op == self.op
-            and extract_target(node) in self.fns_set
+            and ((current_node in self.fns_set) or (synonym_node in self.fns_set))
         )
 
     def _match_users(self, node: torch.fx.Node, ctx: MatchContext) -> bool:
@@ -549,6 +554,18 @@ class _TargetExpr(PatternExpr):
             and self.users == other.users
         )
 
+def extract_synonym_target(node: torch.fx.node.Target) -> torch.fx.node.Target:
+    """
+    currently this function is only specific to view op, we will create a graph node of 
+    both view and _unsafe_view op, return the node.target
+    """
+    graph = torch.fx.Graph()
+    view_node = graph.create_node('call_function', torch.ops.aten.view.default,)
+    _unsafe_view_node = graph.create_node('call_function', torch.ops.aten._unsafe_view.default,)
+    if node == view_node.target:
+        return _unsafe_view_node.target
+    else :
+        return view_node.target
 
 _SimpleSpec = tuple[Any, ...]
 
