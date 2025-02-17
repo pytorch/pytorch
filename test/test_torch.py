@@ -8572,6 +8572,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+        # self.assertIsInstance((4, 5) + x, torch.Size)
+        # self.assertIsInstance((4, 5, 6) + x, torch.Size)
+
     def test_Size_scalar(self):
         three = torch.tensor(3)
         two = torch.tensor(2)
