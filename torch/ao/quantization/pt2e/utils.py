@@ -4,6 +4,7 @@ import types
 from typing import Any, Callable, Optional, Union
 
 import torch
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
 
 # Makes sure that quantized_decomposed ops are registered
@@ -13,7 +14,6 @@ from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.utils._pytree import LeafSpec
-
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
