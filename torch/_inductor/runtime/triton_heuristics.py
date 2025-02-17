@@ -2243,7 +2243,7 @@ class GridExpr:
         self, fn: Callable[[list[int]], int], seq: list[Union[int, str]]
     ) -> list[Union[int, str]]:
         items: list[Union[int, str]] = [x for x in seq if not isinstance(x, int)]
-        const_items: list[int] = [x for x in seq if isinstance(x, int)]
+        const_items = [x for x in seq if isinstance(x, int)]
         if const_items:
             items.append(fn(const_items))
         return items
@@ -2325,23 +2325,14 @@ class FixedGrid(GridExpr):
         }
 
     def generate(self, meta: dict[str, int]) -> None:
-        x, y, z = (
-            self.inductor_meta.get(f"fixed_grid_{self.mode}")
-            or self.inductor_meta["fixed_grid"]
-        )
-        self.x_grid = str(x)
-        self.y_grid = str(y)
-        self.z_grid = str(z)
+        self.x_grid, self.y_grid, self.z_grid = self.inductor_meta["fixed_grid"]
 
 
 class PrecomputedGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         for candidate in self.inductor_meta["precomputed_grids"]:
             if all(meta.get(k) == v for k, v in candidate["config"].items()):
-                x, y, z = candidate[self.mode]
-                self.x_grid = str(x)
-                self.y_grid = str(y)
-                self.z_grid = str(z)
+                self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
                 return
         raise AssertionError(
             f"Precomputed grid not found for {meta} in {self.inductor_meta['precomputed_grids']}"
@@ -2370,7 +2361,7 @@ class ComboKernelGrid(GridExpr):
 
         self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
         if combo_meta["min_blocks"]:
-            self.x_grid = self.maximum([self.x_grid, str(combo_meta["min_blocks"])])
+            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
         if ynumels:
             self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
         if znumels:
@@ -2410,11 +2401,8 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
     ) -> str:
         assert len(xnumels) == len(no_x_dims)
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
-        xnumels_no_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
+        exprs = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
         xnumels_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if not no_x_dim]
-        exprs: list[Union[str, int]] = []
-        if xnumels_no_x_dim:
-            exprs.append(self.maximum(xnumels_no_x_dim))
         if xnumels_x_dim:
             exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
         return f"({self.maximum(exprs)}) * {num_kernels}"

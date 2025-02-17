@@ -3632,7 +3632,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
     def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
-        n = len(self.range_trees) - 1
+        n = sum([int(not tree.is_reduction) for tree in self.range_trees])
         if self.cooperative_reduction:
             assert n == 1
             return triton_heuristics.CooperativeReductionGrid

@@ -85,12 +85,20 @@ class DeferredTritonCallWrapper:
         else:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
+        # tensors can be RAIIAtenTensorHandle or ConstantHandle, so make them template types
+        tensor_types = [
+            f"typename {name}_type_"
+            for name, arg_type in zip(def_args, arg_types)
+            if isinstance(arg_type, torch_dtype)
+        ]
+        if tensor_types:
+            prefix.writeline(f"template <{', '.join(tensor_types)}>")
         prefix.writeline(f"static inline void {self.wrapper_name}(")
         with prefix.indent():
             assert len(def_args) == len(arg_types), (def_args, arg_types)
             for name, arg_type in zip(def_args, arg_types):
                 if isinstance(arg_type, torch_dtype):
-                    prefix.writeline(f"const RAIIAtenTensorHandle& {name},")
+                    prefix.writeline(f"const {name}_type_& {name},")
                 elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
                     prefix.writeline(f"int64_t {name},")
                 elif arg_type is float:
@@ -161,24 +169,17 @@ class DeferredTritonCallWrapper:
             prefix, call_args, arg_types, arg_signatures
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
-
-        # add debug printer code for all triton kernel related calls
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(
-            call_args, self.kernel_name, arg_types, None
-        )
-        with debug_printer_manager:
-            launch_kernel_args = [
-                kernel_var_name,
-                "grid_0",
-                "grid_1",
-                "grid_2",
-                str(params["num_warps"]),
-                str(params["shared_mem"]),
-                "kernel_args_",
-                "stream_",
-            ]
-            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+        launch_kernel_args = [
+            kernel_var_name,
+            "grid_0",
+            "grid_1",
+            "grid_2",
+            str(params["num_warps"]),
+            str(params["shared_mem"]),
+            "kernel_args_",
+            "stream_",
+        ]
+        prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
 
 
 class CppWrapperGpu(CppWrapperCpu):
@@ -446,12 +447,22 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if triton:
             call_args = self.prepare_triton_kernel_call(call_args)
-            fn_name = self.define_triton_kernel_call_wrapper(kernel_name, arg_types)
+            wrapper_name = f"call_{kernel_name}"
+            if wrapper_name not in self._triton_call_wrappers:
+                self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
+                    wrapper_name, kernel_name, arg_types
+                )
             call_args.append(stream)
             if V.graph.aot_mode:
                 call_args.append("kernels")
                 call_args.append("this->cubin_dir_")
-            self.writeline(f"{fn_name}({', '.join(call_args)});")
+
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.set_printer_args(
+                call_args[: len(arg_types)], kernel_name, arg_types, None
+            )
+            with debug_printer_manager:
+                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
             for arg_type, arg in zip(arg_types, call_args):
@@ -461,18 +472,6 @@ class CppWrapperGpu(CppWrapperCpu):
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
-
-    def define_triton_kernel_call_wrapper(
-        self,
-        kernel_name: str,
-        arg_types: list[str],
-    ) -> str:
-        wrapper_name = f"call_{kernel_name}"
-        if wrapper_name not in self._triton_call_wrappers:
-            self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
-                wrapper_name, kernel_name, arg_types
-            )
-        return wrapper_name
 
     def make_zero_buffer(self, name):
         return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get()));"
