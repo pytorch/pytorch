@@ -1,16 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/erfinv_native.h>
-#include <ATen/ops/exp_native.h>
-#include <ATen/ops/sinc_native.h>
-#include <ATen/ops/tanh_native.h>
-#endif
 
 #include <fmt/format.h>
 
@@ -69,26 +61,30 @@ static void exec_unary_kernel(const Tensor& self,
     output_.copy_(outputTensor);
   }
 }
-TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support erfinv op with scalar type: Double");
-  exec_unary_kernel(self, output_, "erfinv");
+
+static void erfinv_kernel(TensorIteratorBase& iter) {
+  exec_unary_kernel(iter.input(0), iter.output(0), "erfinv");
 }
 
-TORCH_IMPL_FUNC(exp_out_mps)(const Tensor& self, const Tensor& output_) {
-  exec_unary_kernel(self, output_, "exp");
+static void exp_kernel(TensorIteratorBase& iter) {
+  exec_unary_kernel(iter.input(0), iter.output(0), "exp");
 }
 
-TORCH_IMPL_FUNC(sinc_out_mps)(const Tensor& self, const Tensor& output_) {
-  exec_unary_kernel(self, output_, "sinc");
+static void sinc_kernel(TensorIteratorBase& iter) {
+  exec_unary_kernel(iter.input(0), iter.output(0), "sinc");
 }
 
-TORCH_IMPL_FUNC(tanh_out_mps)(const Tensor& self, const Tensor& output_) {
-  exec_unary_kernel(self, output_, "tanh");
+static void tanh_kernel(TensorIteratorBase& iter) {
+  exec_unary_kernel(iter.input(0), iter.output(0), "tanh");
 }
 
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   exec_unary_kernel(iter.input(0), iter.output(0), "round_decimals", decimals);
 }
 
+REGISTER_DISPATCH(exp_stub, exp_kernel);
+REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
+REGISTER_DISPATCH(sinc_stub, sinc_kernel);
+REGISTER_DISPATCH(tanh_stub, tanh_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 } // namespace at::native
