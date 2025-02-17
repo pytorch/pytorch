@@ -452,4 +452,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 };
 
+void getGlobalRankStartAndStride(
+    const std::vector<uint64_t>& globalRanksInGroup,
+    int& globalRankStart,
+    int& globalRankStride);
+
 } // namespace c10d
