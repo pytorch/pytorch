@@ -52,6 +52,8 @@
 namespace sdp {
 namespace {
 
+bool _priority_order_init = false;
+
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
@@ -60,9 +62,11 @@ bool check_prefer_cudnn_attention() {
   // return false;
 #if defined(CUDNN_VERSION)
 
-#if CUDNN_VERSION > 90000
+#if CUDNN_VERSION > 90700
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  return dprops->major >= 9;
+  const auto major = dprops->major;
+  const auto minor = dprops->minor;
+  return !minor && (major == 9 || major == 10);
 #else
   return false;
 #endif
@@ -73,7 +77,24 @@ bool check_prefer_cudnn_attention() {
 }
 
 // flash_attention V2 is universally faster than efficient_attention and Math
+// default priority is given as in aten/src/ATen/Context.h
+//   std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
+//      at::SDPBackend::flash_attention,
+//      at::SDPBackend::efficient_attention,
+//      at::SDPBackend::math,
+//      at::SDPBackend::cudnn_attention};
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
+  if (!_priority_order_init) {
+    _priority_order_init = true;
+    if (check_prefer_cudnn_attention()) {
+        const std::vector<int64_t> cudnn_order = {static_cast<int64_t>(at::SDPBackend::cudnn_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::flash_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::efficient_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::math)};
+        at::globalContext().setSDPPriorityOrder(cudnn_order);
+    }
+  }
+
   return at::globalContext().sDPPriorityOrder();
 }
 
