@@ -67,6 +67,7 @@ RUN --mount=type=cache,target=/opt/ccache \
 FROM conda as torch-packages
 ARG INSTALL_CHANNEL=whl/nightly
 ARG CUDA_PATH=cu121
+ARG PYTORCH_VERSION=2.7.0.dev20250217 #we need to set this 
 ARG TARGETPLATFORM
 
 # Install necessary tools for dependency extraction
@@ -81,45 +82,54 @@ ENV PACKAGES="torch torchvision torchaudio"
 RUN set -eux; \
     # Determine PIP_PRE_FLAG based on INSTALL_CHANNEL
     if echo "${INSTALL_CHANNEL}" | grep -q "nightly"; then \
-    PIP_PRE_FLAG="--pre"; \
+        PIP_PRE_FLAG="--pre"; \
     else \
-    PIP_PRE_FLAG=""; \
+        PIP_PRE_FLAG=""; \
     fi; \
     # Determine EXTRA_INDEX_URL based on TARGETPLATFORM
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-    EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu/"; \
+        EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu/"; \
     else \
-    EXTRA_INDEX_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH%.}/"; \
+        EXTRA_INDEX_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH%.}/"; \
     fi; \
     echo "Using EXTRA_INDEX_URL=${EXTRA_INDEX_URL} with PIP_PRE_FLAG=${PIP_PRE_FLAG}"; \
     # Create a temporary directory to store dependencies
     TEMP_DIR=$(mktemp -d); \
     trap 'rm -rf "$TEMP_DIR"' EXIT; \
-    # Initialize an empty requirements file for dependencies
     DEP_REQUIREMENTS="${TEMP_DIR}/dependencies.txt"; \
     touch "$DEP_REQUIREMENTS"; \
+    # Convert e.g. "3.11" to "311" for wheel filename
+    PY_DOTLESS="$(echo "${PYTHON_VERSION}" | tr -d '.')"; \
+    echo "PYTHON_VERSION=${PYTHON_VERSION} -> PY_DOTLESS=${PY_DOTLESS}"; \
     # Iterate over each package to collect dependencies
     for PACKAGE in $PACKAGES; do \
-    echo "Fetching dependencies for $PACKAGE"; \
-    # Fetch package metadata from PyPI
-    curl -s https://pypi.org/pypi/${PACKAGE}/json -o "${TEMP_DIR}/${PACKAGE}.json"; \
-    \
-    # Extract requires_dist entries, preserving environment markers
-    jq -r '.info.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.json" >> "$DEP_REQUIREMENTS"; \
-    \
-    rm -f "${TEMP_DIR}/${PACKAGE}.json"; \
+        echo "Fetching dependencies for $PACKAGE"; \
+        if echo "${INSTALL_CHANNEL}" | grep -E '(nightly|test)' > /dev/null; then \
+            METADATA_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/${PACKAGE}-${PYTORCH_VERSION}+${CUDA_PATH}-cp${PY_DOTLESS}-cp${PY_DOTLESS}-manylinux_2_28_x86_64.whl.metadata"; \
+            echo "Attempting to fetch .whl.metadata from: ${METADATA_URL}"; \
+            if curl -fsSL "${METADATA_URL}" -o "${TEMP_DIR}/${PACKAGE}.metadata"; then \
+                # Parse the .whl.metadata to extract requires_dist
+                jq -r '.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.metadata" >> "$DEP_REQUIREMENTS"; \
+                rm -f "${TEMP_DIR}/${PACKAGE}.metadata"; \
+        else \
+            # Fallback: stable or whl release channel => PyPI
+            curl -fsSL "https://pypi.org/pypi/${PACKAGE}/json" -o "${TEMP_DIR}/${PACKAGE}.json"; \
+            jq -r '.info.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.json" >> "$DEP_REQUIREMENTS"; \
+            rm -f "${TEMP_DIR}/${PACKAGE}.json"; \
+        fi; \
     done; \
     \
-    # Remove duplicate dependencies while preserving environment markers
+    # Remove duplicates while preserving environment markers
     sort -u "$DEP_REQUIREMENTS" -o "$DEP_REQUIREMENTS"; \
     \
     # Install dependencies using pip with the requirements file
     if [ -s "$DEP_REQUIREMENTS" ]; then \
-    echo "Installing dependencies from $DEP_REQUIREMENTS"; \
-    pip install --no-cache-dir $PIP_PRE_FLAG --extra-index-url "$EXTRA_INDEX_URL" -r "$DEP_REQUIREMENTS"; \
+        echo "Installing dependencies from $DEP_REQUIREMENTS"; \
+        pip install --no-cache-dir $PIP_PRE_FLAG --extra-index-url "$EXTRA_INDEX_URL" -r "$DEP_REQUIREMENTS"; \
     else \
-    echo "No dependencies to install."; \
+        echo "No dependencies to install."; \
     fi;
+
 # Step 2: Install Torch packages without dependencies
 RUN set -eux; \
     if echo "${INSTALL_CHANNEL}" | grep -q "nightly"; then \
