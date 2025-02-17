@@ -111,7 +111,7 @@ class CoordescTuner:
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
-        if name == "waves_per_eu"
+        if name == "waves_per_eu":
             return val > 8
 
         return False
