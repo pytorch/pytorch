@@ -1036,14 +1036,23 @@
   b: grad * (at::digamma(b) - at::digamma(a + b))
   result: (at::digamma(a_p) - at::digamma(a_p + b_p)) * a_t + (at::digamma(b_p) - at::digamma(a_p + b_p)) * b_t
 
+
 - name: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
-  a, b, x: special_betainc_backward(grad, a, b, x)
-  result: "[&]() { auto [g_a, g_b, g_x] = betainc_partials(a_p, b_p, x_p);
+  a, b, x: "[&]() {
+            if (!grad.defined())
+              return std::make_tuple(Tensor(), Tensor(), Tensor());
+            auto [g_a, g_b, g_x] = at::GradMode::is_enabled() ? at::native::_special_betainc_partials(a, b, x) : _special_betainc_partials(a, b, x);
+            return std::make_tuple(grad * g_a, grad * g_b, grad * g_x); }()"
+  result: "[&]() { auto [g_a, g_b, g_x] = at::GradMode::is_enabled() ? at::native::_special_betainc_partials(a_p, b_p, x_p) : _special_betainc_partials(a_p, b_p, x_p);
                    return g_a * a_t + g_b * b_t + g_x * x_t; }()"
 
 - name: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
-  a, b, y: special_betaincinv_backward(grad, a, b, y)
-  result: "[&]() { auto [g_a, g_b, g_y] = betaincinv_partials(a_p, b_p, y_p);
+  a, b, y: "[&]() {
+            if (!grad.defined())
+              return std::make_tuple(Tensor(), Tensor(), Tensor());
+            auto [g_a, g_b, g_y] = at::GradMode::is_enabled() ? at::native::_special_betaincinv_partials(a, b, y) : _special_betaincinv_partials(a, b, y);
+            return std::make_tuple(grad * g_a, grad * g_b, grad * g_y); }()"
+  result: "[&]() { auto [g_a, g_b, g_y] = at::GradMode::is_enabled() ? at::native::_special_betaincinv_partials(a_p, b_p, y_p) : _special_betaincinv_partials(a_p, b_p, y_p);
                    return g_a * a_t + g_b * b_t + g_y * y_t; }()"
 
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
