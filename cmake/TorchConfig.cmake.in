@@ -119,6 +119,18 @@ else()
   endif()
 
   append_torchlib_if_found(sleef asmjit)
+
+  if(@USE_MPS@ AND @CAN_COMPILE_METAL@)
+    add_library(torch_metallibs INTERFACE)
+    set(_torch_compiled_metallibs "@COMPILED_METALLIBS@")
+    set(_torch_metallib_sections "@METALLIB_SECTION_NAMES@")
+    foreach(_torch_metallib _torch_section IN ZIP_LISTS _torch_compiled_metallibs _torch_metallib_sections)
+      target_link_options(torch_metallibs INTERFACE
+        "-Wl,-sectcreate,__TEXT,${_torch_section},${TORCH_INSTALL_PREFIX}/lib/${_torch_metallib}"
+      )
+    endforeach()
+    list(APPEND TORCH_LIBRARIES torch_metallibs)
+  endif()
 endif()
 
 if(@USE_KINETO@)
