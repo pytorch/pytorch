@@ -276,10 +276,10 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
   // Device Invariants
   // 4.1
   TORCH_CHECK(
-      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kMeta,
+      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kXPU || values.device().type() == kMeta,
       "device type of values (",
       values.device().type(),
-      ") must be CPU or CUDA or Meta");
+      ") must be CPU or CUDA or XPU or Meta");
   // 4.2, 4.3, 4.4
   TORCH_CHECK(
       compressed_indices.get_device() == values.get_device(),
