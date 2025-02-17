@@ -1415,6 +1415,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
+TEST_MKLDNN_BF16 = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
@@ -1584,6 +1585,8 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+def xfailIfAarch64(func):
+    return unittest.expectedFailure(func) if IS_ARM64 else func
 
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
