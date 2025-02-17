@@ -12,7 +12,11 @@ import pytorch_openreg._C  # noqa: F401  # usort: skip
 
 # Module used for our backend
 class _OpenRegMod:
-    pass
+    def is_initialized(self):
+        return True
+
+    def current_device(self):
+        return torch.accelerator.current_device_index()
 
 
 # Set all the appropriate state on PyTorch
