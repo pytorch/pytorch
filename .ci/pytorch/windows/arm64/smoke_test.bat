@@ -12,9 +12,6 @@ exit /b 1
 :wheel
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
-goto smoke_test
-
-:smoke_test
 python -c "import torch"
 if ERRORLEVEL 1 exit /b 1
 
@@ -25,6 +22,17 @@ if errorlevel 1 exit /b 1
 echo Checking that basic CNN works...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
+
+push %PYTORCH_ROOT%\test
+
+set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
+
+for /L %%i in (1,1,%1) do (
+    for %%t in (%CORE_TEST_LIST%) do (
+        echo Running test: %%t
+        python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
+    )
+)
 
 goto end
 
