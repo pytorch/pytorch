@@ -747,4 +747,11 @@ DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2, float8_e5m2)
 
 #endif
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
+
 #endif // AOTI_TORCH_SHIM
