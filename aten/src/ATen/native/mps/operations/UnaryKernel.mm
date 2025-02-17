@@ -14,26 +14,25 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
-static void exec_unary_kernel(const Tensor& self,
-                              const Tensor& output_,
+static void exec_unary_kernel(TensorIteratorBase& iter,
                               const std::string& name,
                               std::optional<int64_t> extra = std::nullopt) {
-  Tensor inputTensor = self.contiguous();
-  Tensor outputTensor = output_;
+  auto inputTensor = iter.input(0).contiguous();
+  auto outputTensor = iter.output(0);
   bool needs_output_copy = false;
-  uint32_t length = output_.numel();
+  uint32_t length = outputTensor.numel();
   if (length == 0) {
     return;
   }
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    if (c10::isComplexType(self.scalar_type())) {
-      auto scalarStr = self.scalar_type() == kComplexFloat ? "float" : "half";
+    if (c10::isComplexType(inputTensor.scalar_type())) {
+      auto scalarStr = inputTensor.scalar_type() == kComplexFloat ? "float" : "half";
       cplState = lib.getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
     } else {
       cplState = lib.getPipelineStateForFunc(
-          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)));
+          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
     }
 
     if (!outputTensor.is_contiguous()) {
@@ -45,7 +44,7 @@ static void exec_unary_kernel(const Tensor& self,
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, name, {self});
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
       mtl_setArgs(computeEncoder, outputTensor, inputTensor);
@@ -58,28 +57,28 @@ static void exec_unary_kernel(const Tensor& self,
     });
   }
   if (needs_output_copy) {
-    output_.copy_(outputTensor);
+    iter.output(0).copy_(outputTensor);
   }
 }
 
 static void erfinv_kernel(TensorIteratorBase& iter) {
-  exec_unary_kernel(iter.input(0), iter.output(0), "erfinv");
+  exec_unary_kernel(iter, "erfinv");
 }
 
 static void exp_kernel(TensorIteratorBase& iter) {
-  exec_unary_kernel(iter.input(0), iter.output(0), "exp");
+  exec_unary_kernel(iter, "exp");
 }
 
 static void sinc_kernel(TensorIteratorBase& iter) {
-  exec_unary_kernel(iter.input(0), iter.output(0), "sinc");
+  exec_unary_kernel(iter, "sinc");
 }
 
 static void tanh_kernel(TensorIteratorBase& iter) {
-  exec_unary_kernel(iter.input(0), iter.output(0), "tanh");
+  exec_unary_kernel(iter, "tanh");
 }
 
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  exec_unary_kernel(iter.input(0), iter.output(0), "round_decimals", decimals);
+  exec_unary_kernel(iter, "round_decimals", decimals);
 }
 
 REGISTER_DISPATCH(exp_stub, exp_kernel);
