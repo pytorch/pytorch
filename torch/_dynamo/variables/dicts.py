@@ -511,6 +511,22 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
+        elif name == "__or__":
+            assert len(args) == 1
+            if not isinstance(args[0], ConstDictVariable):
+                raise TypeError(f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'")
+
+            self.install_dict_keys_match_guard()
+            tx.output.side_effects.mutation(self)
+            new_self = self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
+
+            # NB - Guard on all the keys of the other dict to ensure
+            # correctness.
+            args[0].install_dict_keys_match_guard()
+            new_self.items.update(args[0].items)
+            return new_self
         else:
             return super().call_method(tx, name, args, kwargs)
 
