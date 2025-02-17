@@ -2561,24 +2561,35 @@ def compile(
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    compiled_fn = torch._dynamo.optimize(
-        backend=backend,
-        nopython=fullgraph,
-        dynamic=dynamic,
-        disable=disable,
-    )(model)  # type: ignore[return-value]
+    try:
+        compiled_fn = torch._dynamo.optimize(
+            backend=backend,
+            nopython=fullgraph,
+            dynamic=dynamic,
+            disable=disable,
+        )(model)  # type: ignore[return-value]
+    except torch._dynamo.exc.BackendCompilerFailed as e:
+        # If the error message indicates a meta-related issue, fall back to eager mode.
+        if "meta" in str(e):
+            return model
+        else:
+            raise
 
     def wrapped_fn(*args, **kwargs):
-        # Check positional arguments for meta tensors.
+        # Pre-check: if any input tensor is on the "meta" device, immediately fallback.
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.device.type == "meta":
                 return model(*args, **kwargs)
-        # Check keyword arguments for meta tensors.
         for arg in kwargs.values():
             if isinstance(arg, torch.Tensor) and arg.device.type == "meta":
                 return model(*args, **kwargs)
-        # Otherwise, use the compiled version.
-        return compiled_fn(*args, **kwargs)
+        # Try calling the compiled function; if a lowering error occurs, fallback to eager.
+        try:
+            return compiled_fn(*args, **kwargs)
+        except torch._dynamo.exc.BackendCompilerFailed as e:
+            if "meta" in str(e):
+                return model(*args, **kwargs)
+            raise
 
     return wrapped_fn
 
