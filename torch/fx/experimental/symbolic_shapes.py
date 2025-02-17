@@ -112,6 +112,12 @@ class GuardOnDataDependentSymNode(RuntimeError):
         super().__init__(*args)
         self.cond = cond
 
+class GuardOnDataDependentSymNodeStrict(RuntimeError):
+    cond: sympy.Basic
+
+    def __init__(self, cond: sympy.Basic, *args: Any) -> None:
+        super().__init__(*args)
+        self.cond = cond
 
 class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
@@ -5947,6 +5953,8 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+        if config.unbacked_strict:
+            return GuardOnDataDependentSymNodeStrict(expr, msg)
         return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(
