@@ -3,11 +3,12 @@
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.base import BaseTensorSubclass
-from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(BaseTensorSubclass):
+    INNER_TENSORS = ["a", "b"]
+
     @staticmethod
     def __new__(cls, a, b, outer_size=None, outer_stride=None):
         if outer_size is None:
@@ -41,22 +42,9 @@ class TwoTensor(BaseTensorSubclass):
         self.a = a
         self.b = b
 
-    def __repr__(self):
-        a_repr = repr(self.a)
-        b_repr = repr(self.b)
-        return f"TwoTensor({a_repr}, {b_repr})"
-
-    def __tensor_flatten__(self):
-        return ["a", "b"], None
-
-    @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
-        a, b = inner_tensors["a"], inner_tensors["b"]
-        if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
-        return TwoTensor(a, b, outer_size, outer_stride)
+    # @classmethod
+    # def torch_function_prologue(cls, func, types, args=(), kwargs=None):
+    #    print(f"torch_fn_prologue {cls} {func}")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):

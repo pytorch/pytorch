@@ -873,6 +873,7 @@ metadata incorrectly.
             temp_plain = x.a + y.b
             res = temp.sum() + temp_plain.sum()
             return x.sin().cos() + res
+
         x = torch.ones(4, requires_grad=True)
         x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
@@ -6413,6 +6414,17 @@ metadata incorrectly.
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
+
+    def test_sc_base(self):
+        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2))
+        print(f"XXX t:{t}")
+
+        def fn(x):
+            return x + 2
+
+        y = fn(t)
+
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
 
 
 # entries in here don't work and need to be fixed.
