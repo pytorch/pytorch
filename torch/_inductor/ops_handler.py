@@ -555,6 +555,9 @@ class OpsHandler(Generic[T]):
     def airy_ai(self, x: T) -> T:
         raise NotImplementedError
 
+    def betainc(self, a: T, b: T, x: T) -> T:
+        raise NotImplementedError
+
     def bessel_j0(self, x: T) -> T:
         raise NotImplementedError
 
