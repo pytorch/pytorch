@@ -1335,7 +1335,7 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
-def largeTensorTest(size, device=None):
+def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
     size may be a number of bytes, a string of the form "N GB", or a callable
@@ -1361,11 +1361,7 @@ def largeTensorTest(size, device=None):
 
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
             # an additional array of the same size as the input.
-            if (
-                TEST_WITH_TORCHINDUCTOR
-                and torch._inductor.config.cpp_wrapper
-                and _device != "cpu"
-            ):
+            if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
 
             if not _has_sufficient_memory(_device, size_bytes):
