@@ -97,9 +97,6 @@ UNIMPLEMENTED_XFAILIST = {
     "put": MPSSkipInfo(UNIMPLEMENTED),
     "nn.functional.conv_transpose3d": MPSSkipInfo(UNIMPLEMENTED),
     "round": [
-        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_neg_3"),
-        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_3"),
-        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_0"),
         # round not working properly for float16 and bfloat16
         MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
     ],
@@ -124,7 +121,6 @@ UNIMPLEMENTED_XFAILIST = {
     "index_reduce": MPSSkipInfo(UNIMPLEMENTED),
     "kthvalue": MPSSkipInfo(UNIMPLEMENTED),
     "lcm": MPSSkipInfo(UNIMPLEMENTED),
-    "linalg.cholesky_ex": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.cond": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.eigh": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.eigvalsh": MPSSkipInfo(UNIMPLEMENTED),
