@@ -2789,7 +2789,7 @@ def _automatic_dynamic(
                         )
                 else:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
-            if marked_strict_unbacked:
+            elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
                 if automatic_dynamic_size:
