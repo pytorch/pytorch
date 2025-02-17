@@ -111,7 +111,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
 
     def get_fake_func(name: str) -> Callable[..., int]:
-        def func1(*args: Unpack[Ts]) -> int:
+        def func1(*args: Any) -> int:
             return 0
 
         func1.__name__ = name
@@ -473,7 +473,7 @@ class DebugContext:
                 return None
         else:
 
-            def ignored(*args: Unpack[Ts], **kwargs: Any) -> None:
+            def ignored(*args: Any, **kwargs: Any) -> None:
                 pass
 
             return ignored
