@@ -76,6 +76,7 @@ DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS: dict[Callable, Any] = {
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS: dict[Callable, Any] = {
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
+    nn.BatchNorm1d: nnq.BatchNorm1d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.Dropout: nnq.Dropout,
@@ -103,6 +104,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS: dict[Callable, Any] = {
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.BNReLU1d: nniq.BNReLU1d,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
     nni.ConvReLU1d: nniq.ConvReLU1d,
