@@ -417,6 +417,21 @@ class HipBlasLtMatmulDescriptor : public HipBlasLtDescriptor<
   }
 };
 
+// Add helper function to cache device properties
+static bool IsGfx950Device() {
+  static bool initialized = false;
+  static bool is_gfx950 = false;
+  
+  if (!initialized) {
+    hipDeviceProp_t prop;
+    TORCH_CHECK(hipSuccess == hipGetDeviceProperties(&prop, at::cuda::current_device()));
+    is_gfx950 = (std::string(prop.gcnArchName) == "gfx950");
+    initialized = true;
+  }
+  
+  return is_gfx950;
+}
+
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 class HipblasltGemmOp : public Callable<ParamsT> {
   public:
@@ -485,6 +500,21 @@ class HipblasltGemmOp : public Callable<ParamsT> {
           // swapped
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          
+#if ROCM_VERSION >= 60500
+          // Check if device is gfx950 using cached result
+          if (IsGfx950Device()) {
+            // MX-format : Set Scale block sizes for matrix A and B (only available on gfx950 with ROCm 6.5+)
+            constexpr int32_t required_block_size = 32;
+            TORCH_CHECK(params->m % required_block_size == 0 && params->k % required_block_size == 0,
+                       "Block sizes must be 32. Got m=", params->m, ", k=", params->k);
+            
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
+          }
+#endif
         }
         else
 #endif
