@@ -1,4 +1,20 @@
 # mypy: allow-untyped-defs
+
+"""Common utilities for testing Dynamo's minifier functionality.
+
+This module provides the base infrastructure for running minification tests in Dynamo.
+It includes:
+- MinifierTestResult: A dataclass for storing and processing minifier test results
+- MinifierTestBase: A base test class with utilities for:
+  - Running tests in isolated environments
+  - Managing temporary directories and configurations
+  - Executing minifier launcher scripts
+  - Running and validating reproduction scripts
+  - Supporting both compile-time and runtime error testing
+
+The minifier helps reduce failing Dynamo compilations to minimal reproductions.
+"""
+
 import dataclasses
 import io
 import logging
@@ -171,7 +187,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
+    def _run_minifier_launcher(
+        self, repro_dir, isolate, *, minifier_args=(), repro_after=None
+    ):
         self.assertIsNotNone(repro_dir)
         launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
         with open(launch_file) as f:
@@ -179,7 +197,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         self.assertTrue(os.path.exists(launch_file))
 
         args = ["python3", launch_file, "minify", *minifier_args]
-        if not isolate:
+        if not isolate and repro_after != "aot_inductor":
+            # AOTI minifier doesn't have --no-isolate flag.
+            # Everything in AOTI minifier is in no-isolate mode.
             args.append("--no-isolate")
         launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
         print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
@@ -209,20 +229,24 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
     def _gen_test_code(self, run_code, repro_after, repro_level):
-        repro_after_line = (
-            f"""\
+        repro_after_line = ""
+        if repro_after == "aot_inductor":
+            repro_after_line = (
+                "torch._inductor.config.aot_inductor.dump_aoti_minifier = True"
+            )
+        elif repro_after:
+            repro_after_line = f"""\
 torch._dynamo.config.repro_after = "{repro_after}"
-"""
-            if repro_after
-            else ""
-        )
+        """
         return f"""\
 import torch
 import torch._dynamo
+import torch._inductor
 {_as_posix_path(torch._dynamo.config.codegen_config())}
 {_as_posix_path(torch._inductor.config.codegen_config())}
 {repro_after_line}
 torch._dynamo.config.repro_level = {repro_level}
+torch._inductor.config.aot_inductor.repro_level = {repro_level}
 torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}
 """
@@ -258,8 +282,11 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
-        minifier_proc, minifier_code = self._run_minifier_launcher(
-            repro_dir, isolate=isolate, minifier_args=minifier_args
+        _minifier_proc, minifier_code = self._run_minifier_launcher(
+            repro_dir,
+            isolate=isolate,
+            minifier_args=minifier_args,
+            repro_after=repro_after,
         )
         print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)

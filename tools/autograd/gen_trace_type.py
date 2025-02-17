@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import DispatcherSignature
@@ -9,6 +9,10 @@ from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Note [Manual Backend kernels]

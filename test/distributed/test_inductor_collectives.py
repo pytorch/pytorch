@@ -411,7 +411,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -695,13 +695,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("buf0 = empty_strided")
-            .check("buf5 = empty_strided")
-            .check(".run(arg0_1, buf0, buf5, 16")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("buf1 = buf0")
             .check("buf6 = empty_strided")
-            .check(".run(buf6, 16")
-            .check("return (buf0, buf5, buf6")
+            .check(".run(buf1, arg0_1, buf6, 16")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("buf7 = empty_strided")
+            .check(".run(buf7, 16")
+            .check("return (buf1, buf6, buf7")
             .run(code)
         )
         out = compiled(inputs, **self.get_world_trs())

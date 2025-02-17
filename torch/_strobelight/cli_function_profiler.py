@@ -6,9 +6,11 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Sequence
 from threading import Lock
 from timeit import default_timer as timer
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 
 logger = logging.getLogger("strobelight_function_profiler")
@@ -22,6 +24,9 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class StrobelightCLIProfilerError(Exception):
@@ -73,8 +78,8 @@ class StrobelightCLIFunctionProfiler:
         run_user_name: str = "pytorch-strobelight-ondemand",
         timeout_wait_for_running_sec: int = 60,
         timeout_wait_for_finished_sec: int = 60,
-        recorded_env_variables: Optional[List[str]] = None,
-        sample_tags: Optional[List[str]] = None,
+        recorded_env_variables: Optional[list[str]] = None,
+        sample_tags: Optional[list[str]] = None,
         stack_max_len: int = 127,
         async_stack_max_len: int = 127,
     ):
@@ -87,7 +92,7 @@ class StrobelightCLIFunctionProfiler:
         # Results of the most recent run.
         # Tracks the strobelight run id of the most recent run
         self.current_run_id: Optional[int] = None
-        self.profile_result: Optional[List[str]] = None
+        self.profile_result: Optional[list[str]] = None
         self.sample_tags = sample_tags
 
     def _run_async(self) -> None:
@@ -230,7 +235,7 @@ class StrobelightCLIFunctionProfiler:
                 return
 
             self._get_results()
-        except Exception as error:
+        except Exception:
             logger.warning("error during stop_strobelight", exc_info=True)
 
     # Return true if strobelight started and is running. Never throw.
@@ -244,13 +249,15 @@ class StrobelightCLIFunctionProfiler:
             logger.info("strobelight profiling running")
             return True
 
-        except Exception as error:
+        except Exception:
             logger.warning("error during start_strobelight:", exc_info=True)
             if strobelight_started:
                 self._stop_strobelight_no_throw(collect_results=False)
             return False
 
-    def profile(self, work_function: Any, *args: Any, **kwargs: Any) -> Any:
+    def profile(
+        self, work_function: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
+    ) -> Optional[_R]:
         self.current_run_id = None
         self.profile_result = None
 
@@ -288,6 +295,7 @@ class StrobelightCLIFunctionProfiler:
                 self._stop_strobelight_no_throw(collect_results=False)
                 StrobelightCLIFunctionProfiler._lock.release()
                 raise error
+        return None
 
 
 # A function decorator that wraps profile, if no profiler is provided one with
@@ -297,13 +305,15 @@ class StrobelightCLIFunctionProfiler:
 # @strobelight(stop_at_error=True,...)
 def strobelight(
     profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
-) -> Any:
+) -> Callable[[Callable[_P, _R]], Callable[_P, Optional[_R]]]:
     if not profiler:
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
-    def strobelight_inner(work_function: Any) -> Any:
+    def strobelight_inner(
+        work_function: Callable[_P, _R]
+    ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
-        def wrapper_function(*args: Any, **kwargs: Any) -> Any:
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function

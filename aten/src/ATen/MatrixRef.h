@@ -94,6 +94,7 @@ class MatrixRef {
   template <typename U>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   std::enable_if_t<std::is_same_v<U, T>, MatrixRef<T>>& operator=(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.

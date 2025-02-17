@@ -149,7 +149,7 @@ class CreateBackendTest(TestCase):
                 )
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
-        store = TCPStore(  # type: ignore[call-arg] # noqa: F841
+        TCPStore(  # type: ignore[call-arg]
             self._expected_endpoint_host, self._expected_endpoint_port, is_master=True
         )
 
@@ -165,7 +165,7 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend_if_is_host_is_not_specified_and_store_already_exists(
         self,
     ) -> None:
-        store = TCPStore(  # type: ignore[call-arg] # noqa: F841
+        TCPStore(  # type: ignore[call-arg]
             self._expected_endpoint_host, self._expected_endpoint_port, is_master=True
         )
 

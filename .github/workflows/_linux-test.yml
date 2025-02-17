@@ -54,7 +54,7 @@ on:
           since we are investigating the behaviour of the monitor script with different tests.
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -81,7 +81,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
+        if: ${{ !contains(matrix.runner, 'gcp.a100') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -95,9 +95,10 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
-        if : ${{ inputs.aws-role-to-assume != '' }}
+        if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -107,11 +108,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -121,6 +124,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -151,13 +155,25 @@ jobs:
           nvidia-smi
         if: ${{ contains(matrix.runner, 'a100') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
         shell: bash
         continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
@@ -166,6 +182,7 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ inputs.use-gha }}
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -174,13 +191,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
@@ -228,9 +238,9 @@ jobs:
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
+          # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -253,9 +263,32 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
+          # Leaving 1GB for the runner and other things
+          TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+          # comes from https://github.com/pytorch/test-infra/pull/6058
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
+
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            SHM_OPTS=
+            JENKINS_USER=
+            # ensure that docker container cleanly exits in 12 hours
+            # if for some reason cleanup action doesn't stop container
+            # when job is cancelled
+            DOCKER_SHELL_CMD="sleep 12h"
+
+            # since some steps are skipped on s390x, if they are necessary, run them here
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          else
+            SHM_OPTS="--shm-size=${SHM_SIZE}"
+            JENKINS_USER="--user jenkins"
+            DOCKER_SHELL_CMD=
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
+          # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -290,7 +323,6 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
-            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
@@ -301,22 +333,30 @@ jobs:
             -e DASHBOARD_TAG \
             -e IS_A100_RUNNER \
             -e ARTIFACTS_FILE_SUFFIX \
+            --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
+            --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --ipc=host \
-            --shm-size="${SHM_SIZE}" \
+            ${SHM_OPTS} \
             --tty \
             --detach \
             --name="${container_name}" \
-            --user jenkins \
+            ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
+            "${DOCKER_IMAGE}" \
+            ${DOCKER_SHELL_CMD}
           )
           # Propagate download.pytorch.org IP to container
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
+
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
+          fi
+
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
@@ -375,6 +415,17 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
@@ -456,3 +507,11 @@ jobs:
             echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
             .github/scripts/stop_runner_service.sh
           fi
+
+      - name: Cleanup docker
+        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          docker stop -a || true
+          docker kill -a || true

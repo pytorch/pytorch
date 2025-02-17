@@ -2,16 +2,15 @@
 import copy
 import itertools
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
-try:
-    import triton
-except ImportError:
-    triton = None
+if TYPE_CHECKING:
+    from .triton_compat import triton
+
 
 log = logging.getLogger(__name__)
 
@@ -85,10 +84,11 @@ class CoordescTuner:
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
-            # NOTE: we should not tune RBLOCK for persistent reduction.
+            # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
-            # does not have the RBLOCK field to guarantee that.
-            "RBLOCK",
+            # does not have the R0_BLOCK field to guarantee that.
+            "R0_BLOCK",
+            "R1_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -101,8 +101,10 @@ class CoordescTuner:
         return out
 
     def value_too_large(self, name: str, val: int) -> bool:
-        if name in {"XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"}:
-            return val > self.get_config_max(name[0].lower())
+        block_suffix = "BLOCK"
+        if name.endswith(block_suffix):
+            prefix = name.strip(block_suffix).lower()
+            return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
 
@@ -245,7 +247,7 @@ class CoordescTuner:
 
             for name in tunable_fields:
                 cur_val = get_field(best_config, name)
-                # some kernel don't have RBLOCK/YBLOCK/ZBLOCK. So cur_val may be None
+                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
                 if cur_val is None:
                     continue
 

@@ -11,6 +11,8 @@ import os
 import sys
 from typing import Optional, TYPE_CHECKING
 
+from torch.utils._config_module import Config, install_config_module
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -27,13 +29,22 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
+# See # NOTE [Export custom triton op]
+decompose_custom_triton_ops = True
+
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
 cse = True
 
+from torch._inductor.config import is_fbcode
 
-enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+enable_autograd_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_autograd_cache",
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
+    default=True,
+)
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -63,13 +74,12 @@ enable_remote_autograd_cache = remote_autograd_cache_default()
 # eventually: either default this config to false completely
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
-from torch._inductor.config import is_fbcode
 
 
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
 # serializable before enabling warm cache with this config turned on.
-view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
+view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -211,8 +221,6 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
-
-from torch.utils._config_module import install_config_module
 
 
 # adds patch, save_config, invalid config checks, etc

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 
 import enum
-from typing import Tuple
 
 import torch
 import torch.distributed.rpc as rpc
@@ -55,7 +54,7 @@ class ModuleCreationMode(enum.Enum):
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
@@ -64,13 +63,13 @@ class MyModuleInterface:
 class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
     def forward_async(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Future[Tuple[str, int, Tensor]]:
+    ) -> Future[tuple[str, int, Tensor]]:
         pass
 
 
@@ -81,7 +80,7 @@ class MyModule(nn.Module):
 
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         return word, number, tensor
 
 

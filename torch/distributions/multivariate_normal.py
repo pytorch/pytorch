@@ -2,6 +2,7 @@
 import math
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
@@ -206,40 +207,40 @@ class MultivariateNormal(Distribution):
         return new
 
     @lazy_property
-    def scale_tril(self):
+    def scale_tril(self) -> Tensor:
         return self._unbroadcasted_scale_tril.expand(
             self._batch_shape + self._event_shape + self._event_shape
         )
 
     @lazy_property
-    def covariance_matrix(self):
+    def covariance_matrix(self) -> Tensor:
         return torch.matmul(
             self._unbroadcasted_scale_tril, self._unbroadcasted_scale_tril.mT
         ).expand(self._batch_shape + self._event_shape + self._event_shape)
 
     @lazy_property
-    def precision_matrix(self):
+    def precision_matrix(self) -> Tensor:
         return torch.cholesky_inverse(self._unbroadcasted_scale_tril).expand(
             self._batch_shape + self._event_shape + self._event_shape
         )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (
             self._unbroadcasted_scale_tril.pow(2)
             .sum(-1)
             .expand(self._batch_shape + self._event_shape)
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)

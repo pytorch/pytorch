@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -22,9 +22,9 @@ from .ns_types import NSNodeTargetType
 toq = torch.ops.quantized
 
 
-def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
+def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
     # note: this set is modified below by items from backend_config
-    sets_of_related_ops: List[Set[NSNodeTargetType]] = [
+    sets_of_related_ops: list[set[NSNodeTargetType]] = [
         # conv modules
         {
             nn.Conv1d,
@@ -357,7 +357,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # backend_config
     backend_config = get_native_backend_config()
 
-    new_connections: List[Tuple[Callable, Callable]] = [
+    new_connections: list[tuple[Callable, Callable]] = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
@@ -443,19 +443,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
                 set_of_related_ops.add(item2)
                 break
 
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] = {}
 
-    counter = 0
-    for set_of_related_ops in sets_of_related_ops:
+    for counter, set_of_related_ops in enumerate(sets_of_related_ops):
         base_name = str(counter)
-        counter += 1
         base_name_to_sets_of_related_ops[base_name] = set_of_related_ops
 
     return base_name_to_sets_of_related_ops
 
 
 def get_base_name_for_op(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
 ) -> Optional[str]:
     for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
@@ -465,7 +463,7 @@ def get_base_name_for_op(
 
 
 def add_op_to_sets_of_related_ops(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
     related_op: Optional[NSNodeTargetType],
 ) -> None:
@@ -484,8 +482,8 @@ def add_op_to_sets_of_related_ops(
 
 
 # TODO(future PR): clean this up
-def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
-    FUNS_IO_TYPE_FP32: Set[NSNodeTargetType] = {
+def get_node_type_to_io_type_map() -> dict[str, set[NSNodeTargetType]]:
+    FUNS_IO_TYPE_FP32: set[NSNodeTargetType] = {
         F.linear,
         F.conv1d,
         F.conv2d,
@@ -507,9 +505,9 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.prelu,
     }
 
-    FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
+    FUNS_IO_TYPE_FP16: set[NSNodeTargetType] = set()
 
-    FUNS_IO_TYPE_INT8: Set[NSNodeTargetType] = {
+    FUNS_IO_TYPE_INT8: set[NSNodeTargetType] = {
         toq.linear,
         toq.linear_relu,
         toq.conv1d,
@@ -532,7 +530,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         # toq.mul,
     }
 
-    FUNS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
+    FUNS_IO_TYPE_FP32_OR_INT8: set[NSNodeTargetType] = {
         F.relu,
         F.tanh,
         torch.tanh,
@@ -573,7 +571,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         operator.add,
     }
 
-    MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = {
+    MODS_IO_TYPE_FP32: set[NSNodeTargetType] = {
         nn.Linear,
         nnqat.Linear,
         nnqatd.Linear,
@@ -638,7 +636,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvAddReLU2d,
     }
 
-    MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = {
+    MODS_IO_TYPE_INT8: set[NSNodeTargetType] = {
         nnq.Linear,
         nnq.Conv1d,
         nnq.Conv2d,
@@ -672,7 +670,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniq.ConvAddReLU2d,
     }
 
-    MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
+    MODS_IO_TYPE_FP32_OR_INT8: set[NSNodeTargetType] = {
         nn.ReLU,
         nn.Tanh,
         nn.Sigmoid,
@@ -694,7 +692,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.ReLU6,
     }
 
-    METHS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
+    METHS_IO_TYPE_FP32_OR_INT8: set[NSNodeTargetType] = {
         "sigmoid_",
         "sigmoid",
         "tanh_",
@@ -717,17 +715,17 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
     }
 
 
-def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
-    FUNS_UNMATCHABLE: Set[NSNodeTargetType] = {
+def get_unmatchable_types_map() -> dict[str, set[NSNodeTargetType]]:
+    FUNS_UNMATCHABLE: set[NSNodeTargetType] = {
         torch.quantize_per_tensor,
         operator.getitem,
     }
 
-    MODS_UNMATCHABLE: Set[NSNodeTargetType] = {
+    MODS_UNMATCHABLE: set[NSNodeTargetType] = {
         nn.Identity,
     }
 
-    METHS_UNMATCHABLE: Set[NSNodeTargetType] = {
+    METHS_UNMATCHABLE: set[NSNodeTargetType] = {
         "to",
         "dequantize",
         "reshape",

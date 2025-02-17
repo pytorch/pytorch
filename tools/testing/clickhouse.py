@@ -1,7 +1,7 @@
 import json
 import os
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any
 
 import clickhouse_connect  # type: ignore[import]
 
@@ -11,8 +11,7 @@ def get_clickhouse_client() -> Any:
     endpoint = os.environ["CLICKHOUSE_ENDPOINT"]
     # I cannot figure out why these values aren't being handled automatically
     # when it is fine in the lambda
-    if endpoint.startswith("https://"):
-        endpoint = endpoint[len("https://") :]
+    endpoint = endpoint.removeprefix("https://")
     if endpoint.endswith(":8443"):
         endpoint = endpoint[: -len(":8443")]
     return clickhouse_connect.get_client(
@@ -25,12 +24,12 @@ def get_clickhouse_client() -> Any:
     )
 
 
-def query_clickhouse(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+def query_clickhouse(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Queries ClickHouse.  Returns datetime in YYYY-MM-DD HH:MM:SS format.
     """
 
-    def convert_to_json_list(res: bytes) -> List[Dict[str, Any]]:
+    def convert_to_json_list(res: bytes) -> list[dict[str, Any]]:
         rows = []
         for row in res.decode().split("\n"):
             if row:

@@ -20,7 +20,7 @@ import types
 import typing
 import warnings
 import weakref
-from typing import (
+from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by torch.jit.annotations
     Any,
     Callable,
     Dict,
@@ -31,7 +31,6 @@ from typing import (
     List,
     Optional,
     Tuple,
-    Type,
     Union,
 )
 
@@ -48,10 +47,9 @@ from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
 
-IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
 
-BuiltinUnionType: Union[Type, Tuple[Type, ...]]
+BuiltinUnionType: Union[type, tuple[type, ...]]
 if sys.version_info >= (3, 10):
     # NOTE: IS_PY310_PLUS doesn't work with mypy.
     # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
@@ -59,7 +57,7 @@ if sys.version_info >= (3, 10):
 else:
     BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
 
-LockType: Type
+LockType: type
 try:
     import _thread
 
@@ -71,7 +69,7 @@ except ImportError:
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched: "weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]" = (
+boolean_dispatched: "weakref.WeakKeyDictionary[Callable, dict[str, Callable]]" = (
     weakref.WeakKeyDictionary()
 )  # noqa: T484
 
@@ -225,7 +223,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
-    def parseNestedExpr(expr, module) -> Tuple[Any, int]:
+    def parseNestedExpr(expr, module) -> tuple[Any, int]:
         i = 0
         while i < len(expr) and expr[i] not in (",", "[", "]"):
             i += 1
@@ -425,7 +423,7 @@ def can_compile_class(cls) -> bool:
     return all(has_code)
 
 
-def get_callable_argument_names(fn) -> List[str]:
+def get_callable_argument_names(fn) -> list[str]:
     """
     Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
     Returns an empty list when other types of arguments are present.
@@ -467,7 +465,7 @@ def get_annotation_str(annotation):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if IS_PY39_PLUS else annotation.slice.value  # type: ignore[attr-defined]
+        subscript_slice = annotation.slice
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
@@ -957,7 +955,7 @@ def copy_torchscript_modifier(orig, new) -> None:
 # so that they can be imported in nn/functional.py without an import cycle
 
 # qualified_name => list[overload_functions]
-_overloaded_fns: Dict[str, List[Callable]] = {}  # noqa: T484
+_overloaded_fns: dict[str, list[Callable]] = {}  # noqa: T484
 
 
 _OVERLOAD_EXAMPLE = """
@@ -993,7 +991,7 @@ def get_overload_no_implementation_error_message(kind, obj):
 def _check_overload_body(func):
     try:
         parsed_def = parse_def(func)
-    except OSError as e:
+    except OSError:
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
@@ -1042,11 +1040,11 @@ def _clear_fn_overloads(qual_name) -> None:
     del _overloaded_fns[qual_name]
 
 
-def get_class_name_lineno(method) -> Tuple[str, int]:
+def get_class_name_lineno(method) -> tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
-    for i in range(2):
+    for _ in range(2):
         assert (
             current_frame is not None
         )  # assert current frame is not an Optional[FrameType]
@@ -1068,11 +1066,11 @@ def get_class_name_lineno(method) -> Tuple[str, int]:
 # when modules of the same name are in the same file
 
 # qualified_name => class name => list[overload_functions]
-_overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
+_overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
+_overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -1126,7 +1124,8 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann) -> bool:
-    if ann is Tuple:
+    # Check for typing.Tuple missing args (but `tuple` is fine)
+    if ann is typing.Tuple:  # noqa: UP006
         raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -1134,35 +1133,31 @@ def is_tuple(ann) -> bool:
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is tuple
 
 
 def is_list(ann) -> bool:
-    if ann is List:
+    # Check for typing.List missing args (but `list` is fine)
+    if ann is typing.List:  # noqa: UP006
         raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, "__module__"):
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is list
 
 
 def is_dict(ann) -> bool:
-    if ann is Dict:
+    # Check for typing.Dict missing args (but `dict` is fine)
+    if ann is typing.Dict:  # noqa: UP006
         raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, "__module__"):
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is dict
 
 
 def is_union(ann):
@@ -1324,8 +1319,8 @@ def _get_named_tuple_properties(
 def _create_named_tuple(
     t,
     unqual_name: str,
-    field_names: List[str],
-    defaults: Tuple[Any, ...],
+    field_names: list[str],
+    defaults: tuple[Any, ...],
 ):
     TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
@@ -1342,6 +1337,7 @@ def _disable_emit_hooks():
 
 
 def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
+    # noqa: F841
     def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)
@@ -1371,11 +1367,11 @@ def raise_error_container_parameter_missing(target_type) -> None:
 
 
 def check_args_exist(target_type) -> None:
-    if target_type is List or target_type is list:
+    if target_type is typing.List or target_type is list:  # noqa: UP006
         raise_error_container_parameter_missing("List")
-    elif target_type is Tuple or target_type is tuple:
+    elif target_type is typing.Tuple or target_type is tuple:  # noqa: UP006
         raise_error_container_parameter_missing("Tuple")
-    elif target_type is Dict or target_type is dict:
+    elif target_type is typing.Dict or target_type is dict:  # noqa: UP006
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
         raise_error_container_parameter_missing("Optional")
@@ -1399,7 +1395,7 @@ def container_checker(obj, target_type) -> bool:
     check_args_exist(target_type)
     if origin_type is None:
         return False
-    elif origin_type is list or origin_type is List:
+    elif origin_type is list or origin_type is typing.List:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
@@ -1413,7 +1409,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, arg_type):
                 return False
         return True
-    elif origin_type is Dict or origin_type is dict:
+    elif origin_type is typing.Dict or origin_type is dict:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
@@ -1430,7 +1426,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(val, val_type):
                 return False
         return True
-    elif origin_type is Tuple or origin_type is tuple:
+    elif origin_type is typing.Tuple or origin_type is tuple:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
@@ -1486,7 +1482,7 @@ def _isinstance(obj, target_type) -> bool:
 
 
 class _TensorExtractor(pickle.Pickler):
-    def __init__(self, *args, tensors: List[torch.Tensor], **kwargs):
+    def __init__(self, *args, tensors: list[torch.Tensor], **kwargs):
         super().__init__(*args, **kwargs)
         self.tensors = tensors
 
@@ -1522,7 +1518,7 @@ def _extract_tensors(obj):
 
     It extracts the tensors contained in the given object, through pickling.
     """
-    tensors: List[torch.Tensor] = []
+    tensors: list[torch.Tensor] = []
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors

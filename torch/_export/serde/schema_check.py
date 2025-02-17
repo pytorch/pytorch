@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
+from typing import Annotated, Any, ForwardRef, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -20,39 +20,37 @@ def _check(x, msg):
         raise SchemaUpdateError(msg)
 
 
-def _staged_schema():
-    yaml_ret: Dict[str, Any] = {}
-    defs = {}
-    cpp_enum_defs: Dict[str, str] = {}
-    cpp_class_defs: Dict[str, str] = {}
-    cpp_type_decls: List[str] = []
-    cpp_json_defs: List[str] = []
-    thrift_enum_defs: List[str] = []
-    thrift_type_defs: Dict[str, str] = {}
+_CPP_TYPE_MAP = {
+    str: "std::string",
+    int: "int64_t",
+    float: "F64",
+    bool: "bool",
+}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t, level: int) -> Tuple[str, str, str]:
-            CPP_TYPE_MAP = {
-                str: "std::string",
-                int: "int64_t",
-                float: "double",
-                bool: "bool",
-            }
-            THRIFT_TYPE_MAP = {
-                str: "string",
-                int: "i64",
-                float: "double",
-                bool: "bool",
-            }
-            if isinstance(t, type):
-                if t.__name__ in cpp_enum_defs:
-                    return t.__name__, "int64_t", t.__name__
-                else:
-                    return (
-                        t.__name__,
-                        CPP_TYPE_MAP.get(t, t.__name__),
-                        THRIFT_TYPE_MAP.get(t, t.__name__),
-                    )
+_THRIFT_TYPE_MAP = {
+    str: "string",
+    int: "i64",
+    float: "double",
+    bool: "bool",
+}
+
+
+def _staged_schema():
+    yaml_ret: dict[str, Any] = {}
+    defs = {}
+    cpp_enum_defs: dict[str, str] = {}
+    cpp_class_defs: dict[str, str] = {}
+    cpp_type_decls: list[str] = []
+    cpp_json_defs: list[str] = []
+    thrift_enum_defs: list[str] = []
+    thrift_type_defs: dict[str, str] = {}
+
+    def _handle_aggregate(ty) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def dump_type(t, level: int) -> tuple[str, str, str]:
+            if getattr(t, "__name__", None) in cpp_enum_defs:
+                return t.__name__, "int64_t", t.__name__
+            elif t in _CPP_TYPE_MAP:
+                return (t.__name__, _CPP_TYPE_MAP[t], _THRIFT_TYPE_MAP[t])
             elif isinstance(t, str):
                 assert t in defs
                 assert t not in cpp_enum_defs
@@ -80,15 +78,6 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == tuple:
-                    if typing.get_args(t) == ():
-                        return "Tuple[()]", "std::tuple<>", "bool"
-                    yaml_head, cpp_head, thrift_head, thrift_tail = (
-                        "Tuple",
-                        "std::tuple",
-                        "bool",
-                        "",
-                    )
                 elif o == Union:
                     assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
@@ -111,8 +100,8 @@ def _staged_schema():
                     (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
                     f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
-            elif t == ():
-                return "()", "", ""
+            elif isinstance(t, type):
+                return (t.__name__, t.__name__, t.__name__)
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
@@ -136,7 +125,7 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
@@ -190,6 +179,19 @@ def _staged_schema():
 enum class {name} {{
 {chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
 }};
+
+inline std::string_view printEnum(const {name}& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::{x.name}: return {chr(34)}{x.name}{chr(34)};" for x in ty])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.name}{chr(34)}) {{ t = {name}::{x.name}; return; }}" for x in ty])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
 """
         thrift_enum_defs.append(
             f"""
@@ -214,10 +216,18 @@ enum {name} {{
   {type_name} get_{name}() const {{
     return static_cast<{type_name}>({name});
   }}
+
+  void set_{name}({type_name} def) {{
+    {name} = static_cast<int64_t>(def);
+  }}
 """
             return f"""
   const {ty}& get_{name}() const {{
     return {name};
+  }}
+
+  void set_{name}({ty} def) {{
+    {name} = std::move(def);
   }}
 """
 
@@ -267,6 +277,11 @@ struct {name} {{
             return f"""
   const {ty}& get_{name}() const {{
     return std::get<{idx + 1}>(variant_);
+  }}
+
+  void set_{name}({ty} def) {{
+    variant_.emplace<{idx + 1}>(std::move(def));
+    tag_ = Tag::{name.upper()};
   }}
 """
 
@@ -320,6 +335,20 @@ class {name} {{
 {from_json_branches}
   }}
 }};
+
+inline std::string_view printEnum(const {name}::Tag& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::Tag::{x.upper()}: return {chr(34)}{x.upper()}{chr(34)};" for x in cpp_fields])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}::Tag& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.upper()}{chr(34)}) {{ t = {name}::Tag::{x.upper()}; return; }}" for x in cpp_fields])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
+
 """
         cpp_type_decls.append(f"class {name};")
 
@@ -368,6 +397,7 @@ union {name} {{
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -421,6 +451,7 @@ class ForwardRef {{
   ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
+    return *this;
   }}
   const T& operator*() const {{
     return *ptr_;
@@ -446,6 +477,44 @@ void to_json(nlohmann::json& j, const ForwardRef<T>& p) {{
 template <typename T>
 void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
   p.emplace(j.template get<T>());
+}}
+
+class F64 {{
+ public:
+  double get() const {{
+    return value_;
+  }}
+
+  void set(double value) {{
+    value_ = value;
+  }}
+
+ private:
+  double value_;
+}};
+
+inline void to_json(nlohmann::json& j, const F64& f) {{
+  if (std::isinf(f.get())) {{
+    j = "Infinity";
+  }} else if (std::isinf(-f.get())) {{
+    j = "-Infinity";
+  }} else if (std::isnan(f.get())) {{
+    j = "NaN";
+  }} else {{
+    j = f.get();
+  }}
+}}
+
+inline void from_json(const nlohmann::json& j, F64& f) {{
+  if (j == "Infinity") {{
+    f.set(std::numeric_limits<double>::infinity());
+  }} else if (j == "-Infinity") {{
+    f.set(-std::numeric_limits<double>::infinity());
+  }} else if (j == "NaN") {{
+    f.set(std::numeric_limits<double>::quiet_NaN());
+  }} else {{
+    f.set(j.get<double>());
+  }}
 }}
 
 {chr(10).join(cpp_type_decls)}
@@ -535,12 +604,12 @@ def _hash_content(s: str):
 
 @dataclasses.dataclass
 class _Commit:
-    result: Dict[str, Any]
+    result: dict[str, Any]
     checksum_next: str
     yaml_path: str
-    additions: Dict[str, Any]
-    subtractions: Dict[str, Any]
-    base: Dict[str, Any]
+    additions: dict[str, Any]
+    subtractions: dict[str, Any]
+    base: dict[str, Any]
     checksum_head: Optional[str]
     cpp_header: str
     cpp_header_path: str
@@ -561,9 +630,11 @@ def update_schema():
         assert match is not None
         checksum_head = match.group(1)
 
-        thrift_content = importlib.resources.read_text(__package__, "schema.thrift")
+        thrift_content = importlib.resources.read_text(
+            __package__, "export_schema.thrift"
+        )
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
-        _check(match is not None, "checksum not found in schema.thrift")
+        _check(match is not None, "checksum not found in export_schema.thrift")
         assert match is not None
         thrift_checksum_head = match.group(1)
         thrift_content = thrift_content.splitlines()
@@ -584,7 +655,7 @@ def update_schema():
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
-    thrift_schema_path = __package__.replace(".", "/") + "/schema.thrift"
+    thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check
     assert thrift_schema_path.startswith(torch_prefix)  # sanity check
@@ -618,7 +689,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             kind = commit.result[k]["kind"]
             fields = v["fields"]
             for f, d in fields.items():
-                if "default" not in d and kind == "struct":
+                if kind == "struct" and "default" not in d:
                     reason += (
                         f"Field {k}.{f} is added to schema.py without a default value as an incomparible change "
                         + "which requires major version bump.\n"

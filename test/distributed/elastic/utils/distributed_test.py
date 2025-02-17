@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    skipIfRocm,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -115,6 +116,7 @@ class DistributedUtilTest(TestCase):
                 timeout=1,
             )
 
+    @skipIfRocm
     def test_create_store_timeout_on_worker(self):
         with self.assertRaises(DistNetworkError):
             # use any available port (port 0) since timeout is expected
@@ -173,6 +175,7 @@ class DistributedUtilTest(TestCase):
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
 
+    @skipIfRocm
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
         with closing(sock):

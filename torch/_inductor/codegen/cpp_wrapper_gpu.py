@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
-import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Hashable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -14,7 +13,7 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import IRNode, TensorBox
-from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
+from ..utils import cache_on_self, DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -38,8 +37,8 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
-        additional_files: List[str],
+        keys: tuple[str, ...],
+        additional_files: list[str],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
@@ -94,7 +93,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[list[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -188,10 +187,13 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+        self._load_kernel_cache: dict[Hashable, str] = {}
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -203,14 +205,11 @@ class CppWrapperGpu(CppWrapperCpu):
             return
 
         super().write_header()
-
-        self.header.splice("#include <filesystem>")
-        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
 
-    @functools.lru_cache(None)  # noqa: B019
+    @cache_on_self
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
@@ -230,10 +229,13 @@ class CppWrapperGpu(CppWrapperCpu):
         # See Note: [Input Alignment handling in Inductor]
         #
         # JIT Inductor does not guard on input alignment. It relies on copy_misaligned_inputs to
-        # copy misaligned inputs to aligned buffers. For AOTInductor, we expect users to use it
-        # as non-Python deployment for its best performance, so implicitly copying misaligned inputs
-        # to aligned buffers is going to bring a surprising performance hit. Instead, we check input
-        # alignment and throw an error if any input is misaligned.
+        # copy misaligned inputs to aligned buffers. For AOTInductor, we need to do the same in cpp.
+
+        if config.is_fbcode():
+            # TODO: This is added because FC. Remove this once the newly added shim symbols,
+            # e.g. aoti_torch_clone_preserve_strides, have landed
+            return super().codegen_inputs()
+
         if V.graph.aot_mode and V.graph.inputs_to_check:
             for idx in V.graph.inputs_to_check:
                 input_name = V.graph.graph_input_names[idx]
@@ -244,10 +246,18 @@ class CppWrapperGpu(CppWrapperCpu):
                 assert isinstance(
                     value, TensorBox
                 ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                warn_msg = (
+                    f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
+                    "but it is not aligned at run time. Copying to an aligned tensor "
+                    "to guarantee correctness, but expect a performance hit."
+                )
                 self.prefix.splice(
                     f"""
                     if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
-                        throw std::runtime_error("{input_name} is not aligned to {GPU_ALIGN_BYTES} bytes");
+                        AOTI_TORCH_WARN("{warn_msg}");
+                        AtenTensorHandle {input_name}_aligned;
+                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
                 )
@@ -293,8 +303,8 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -364,14 +374,18 @@ class CppWrapperGpu(CppWrapperCpu):
         args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
         self.writeline(f"{fn}({args});")
 
-    @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
     ):
-        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
+        cache_key = (kernel_name, graph)
+        if cache_key in self._load_kernel_cache:
+            return self._load_kernel_cache[cache_key]
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+        self._load_kernel_cache[cache_key] = kernel_var_name
+
+        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
         deferred_gpu_kernel_line = DeferredGpuKernelLine(
             kernel_name,
@@ -448,7 +462,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid_args: List[Any],
+        grid_args: list[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
         **grid_extra_kwargs,
@@ -503,7 +517,8 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if (
-            config.triton.autotune_at_compile_time
+            triton
+            and config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
@@ -602,7 +617,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
-                casted.append(f"({arg_type}){new_arg}")
+                casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
