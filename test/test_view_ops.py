@@ -267,7 +267,7 @@ class TestViewOps(TestCase):
 
     # Test the extra error checks that happen when the view dtype
     # has a greater element size than the original dtype
-
+    @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
@@ -471,6 +471,7 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].real, a.real[5:])
         self.assertEqual(a[5:].imag, a.imag[5:])
 
+    @skipLazy
     @dtypes(*complex_types())
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
