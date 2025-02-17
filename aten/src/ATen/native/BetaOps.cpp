@@ -993,7 +993,7 @@ std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials_meta(
   at::ScalarType dtype_orig = at::promoteTypes(
       at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
   auto vec = at::broadcast_tensors({a, b, x});
-   
+
   return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
       at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
       at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
@@ -1008,7 +1008,7 @@ std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials_meta(
       at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
 
   auto vec = at::broadcast_tensors({a, b, y});
-   
+
   return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
       at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
       at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
