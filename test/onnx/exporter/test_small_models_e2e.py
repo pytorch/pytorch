@@ -180,7 +180,7 @@ class DynamoExporterTest(common_utils.TestCase):
         ep = torch.export.export(model, (x,))
         for node in ep.graph.nodes:
             assert not isinstance(
-                node.target, OpOverload
+                node.target, torch._ops.OpOverload
             ) or node.target == torch.ops.mylib.onnx_test_numpy_sin.default
 
         op = onnxscript.opset18
