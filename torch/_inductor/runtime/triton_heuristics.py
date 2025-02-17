@@ -968,7 +968,6 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
-
         if self.save_cache_hook:
             self.save_cache_hook(launcher.config, self.autotune_time_taken_ns, triton_cache_hash=launcher.cache_hash,)
 
