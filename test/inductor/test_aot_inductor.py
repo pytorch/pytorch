@@ -749,7 +749,7 @@ class AOTInductorTestsTemplate:
                 super().__init__()
                 self.out_dtype = dtype
 
-            def forward(self, x, weight, bias, scale_a, scale_b):
+            def forward(self, x, weight, input_bias, scale_a, scale_b):
                 weight = weight.to(torch.float8_e4m3fn)
                 output = torch._scaled_mm(
                     x,
@@ -797,7 +797,7 @@ class AOTInductorTestsTemplate:
                 self.out_dtype = dtype
                 self.weight = weight
 
-            def forward(self, x, bias, scale_a, scale_b):
+            def forward(self, x, input_bias, scale_a, scale_b):
                 # test: do the view inside of the graph,
                 # AOTI needs to materialize this view before passing
                 # it into the scaled_mm extern kernel
