@@ -471,6 +471,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.bw_donated_idxs = get_donated_idxs()
 
+    def freeze_runtime_asserts(self) -> None:
+        self._shape_env.freeze_runtime_asserts()
+
     def get_allocation_size(
         self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
     ) -> Sequence[Expr]:
