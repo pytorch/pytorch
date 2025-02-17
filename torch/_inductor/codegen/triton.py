@@ -3622,10 +3622,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         elif n == 1:
             return triton_heuristics.Grid1D
         elif n == 2:
-            # TODO(jansel): need to implement overflow grid
+            if any(self.needs_yz_grid_overflow(entry) for entry in self.range_trees):
+                return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
         elif n == 3:
             return triton_heuristics.Grid3D
+        raise ValueError(f"Unsupported number of dimensions: {n}")
 
     def add_numel_to_call_args(self, name, call_args, arg_types):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
@@ -3714,12 +3716,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         key = f"tl.program_id({entry.grid_dim})"
         # y_grid has a limit, so express it in terms of y and z in case of overflow.
         # z grid is only exercised when max_tiles == 3 (off by default).
-        if (
-            entry.grid_dim == 1
-            and not entry.has_zdim
-            and not self.cooperative_reduction
-            and not V.graph.sizevars.statically_known_leq(entry.numel, get_max_y_grid())
-        ):
+        if self.needs_yz_grid_overflow(entry):
             # For ynumel larger than max_ygrid, we need to use zdim.
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
             # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
@@ -3728,6 +3725,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"
         return pid
+
+    def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
+        return (
+            entry.grid_dim == 1
+            and not entry.has_zdim
+            and not self.cooperative_reduction
+            and not V.graph.sizevars.statically_known_leq(entry.numel, get_max_y_grid())
+        )
 
     def max_block(self, prefix: str) -> int:
         if self.fixed_config:

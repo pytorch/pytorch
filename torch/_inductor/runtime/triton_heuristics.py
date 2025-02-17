@@ -472,6 +472,12 @@ class CachingAutotuner(KernelInterface):
                 if k in cfg_kwargs:
                     compile_meta[k] = cfg_kwargs.pop(k)
         compile_meta["constants"].update(cfg_kwargs)
+        for i in self.fn.constexprs:
+            arg_name = self.fn.arg_names[i]
+            if arg_name not in compile_meta["constants"] and (
+                arg_name == "num_warps" or arg_name == "num_stages"
+            ):
+                compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -787,7 +793,7 @@ class CachingAutotuner(KernelInterface):
             ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
-            "config": launcher.config.kwargs,
+            "config": config_to_dict(launcher.config),
             "inductor_meta": self.inductor_meta,
             "triton_meta": self.triton_meta,
             "def_args": launcher.def_args,
@@ -877,7 +883,7 @@ class CachingAutotuner(KernelInterface):
     ):  # type:ignore[override]
         if self.triton_interpret:
             grid = kwargs.pop("grid", None) or self._compute_grid_slow(
-                args, self.configs[0].kwargs
+                args, self.configs[0]
             )
             return self.fn[grid](
                 *args,
@@ -944,13 +950,11 @@ class CachingAutotuner(KernelInterface):
             )
 
     def _compute_grid_slow(
-        self, args: tuple[Any, ...], meta: dict[str, int]
+        self, args: tuple[Any, ...], cfg: Config
     ) -> tuple[int, int, int]:
         """Slow fallback that is only used in interpret mode."""
-        grid_obj = globals()[self.inductor_meta["grid_type"]](self.inductor_meta)
-        assert isinstance(grid_obj, GridExpr)
-        grid_obj.generate(meta)
         scope = dict(zip(self.fn.arg_names, args))
+        grid_obj = GridExpr.from_meta(self.inductor_meta, cfg)
         for line in grid_obj.prefix:
             exec(line, scope)
         exec(f"grid_0 = {grid_obj.x_grid}", scope)
@@ -1097,10 +1101,11 @@ class TritonCompileResult:
                 for i, arg in enumerate(fn.arg_names)
                 if i not in fn.constexprs and arg not in none_args
             ]
+            cfg_dict = config_to_dict(cfg)
             def_args = [
                 name
                 for name in fn.arg_names
-                if name not in cfg.kwargs and name not in none_args
+                if name not in cfg_dict and name not in none_args
             ]
         return call_args, def_args
 
@@ -1194,12 +1199,12 @@ class TritonCompileResult:
                 *call_args,
             ]
 
+        if "extra_launcher_args" in self.inductor_meta:
+            def_args.extend(self.inductor_meta["extra_launcher_args"])
+
         if self.inductor_meta["grid_type"]:
-            grid_cls = globals()[self.inductor_meta["grid_type"]]
-            assert issubclass(grid_cls, GridExpr)
-            grid = grid_cls(self.inductor_meta)
-            grid.generate(cfg.kwargs)
             lines = [f"def launcher({', '.join(def_args)}, stream):"]
+            grid = GridExpr.from_meta(self.inductor_meta, cfg)
             for line in grid.prefix:
                 lines.append(f"    {line}")
             lines.extend(
@@ -1221,8 +1226,6 @@ class TritonCompileResult:
             ]
         )
         exec("\n".join(lines), scope)
-        print("\n".join(lines))
-        print(cfg.kwargs)
 
         launcher = scope["launcher"]
         launcher.config = cfg
@@ -2144,6 +2147,19 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     return popped
 
 
+def config_to_dict(config: Config) -> dict[str, Any]:
+    return {
+        **config.kwargs,
+        "num_warps": config.num_warps,
+        "num_stages": config.num_stages,
+    }
+
+
+def config_from_dict(config: dict[str, Any]) -> Config:
+    config = {**config}
+    return Config(config, **_pop_config_kwargs(config))
+
+
 def fixed_config(config, filename, triton_meta, inductor_meta):
     """
     Used when the configuration is already decided at compile time
@@ -2168,10 +2184,7 @@ def user_autotune(
     if len(configs) == 0:
         configs = [triton.Config({})]
     else:
-        configs = [
-            triton.Config(c.get("kwargs", {}), **_pop_config_kwargs({**c}))
-            for c in configs
-        ]
+        configs = [*map(config_from_dict, configs)]
     return cached_autotune(
         None,
         configs,
@@ -2250,6 +2263,20 @@ class GridExpr:
         assert self.mode == "cpp"
         return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
 
+    @staticmethod
+    def from_meta(
+        inductor_meta: dict[str, Any],
+        cfg: Union[Config, dict[str, int]],
+        mode: Literal["python", "cpp"] = "python",
+    ) -> GridExpr:
+        grid_cls = globals()[inductor_meta["grid_type"]]
+        assert issubclass(grid_cls, GridExpr)
+        grid = grid_cls(inductor_meta=inductor_meta, mode=mode)
+        if isinstance(cfg, Config):
+            cfg = config_to_dict(cfg)
+        grid.generate(cfg)
+        return grid
+
 
 class Grid1D(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
@@ -2295,10 +2322,29 @@ class SplitScanGrid(GridExpr):
         self.y_grid = "xnumel"
 
 
-class MMGrid(GridExpr):
+class FixedGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
-        self.x_grid = self.ceildiv("rnumel", meta.get("R0_BLOCK"))
-        self.y_grid = "xnumel"
+        x, y, z = (
+            self.inductor_meta.get(f"fixed_grid_{self.mode}")
+            or self.inductor_meta["fixed_grid"]
+        )
+        self.x_grid = str(x)
+        self.y_grid = str(y)
+        self.z_grid = str(z)
+
+
+class PrecomputedGrid(GridExpr):
+    def generate(self, meta: dict[str, int]) -> None:
+        for candidate in self.inductor_meta["precomputed_grids"]:
+            if all(meta.get(k) == v for k, v in candidate["config"].items()):
+                x, y, z = candidate[self.mode]
+                self.x_grid = str(x)
+                self.y_grid = str(y)
+                self.z_grid = str(z)
+                return
+        raise AssertionError(
+            f"Precomputed grid not found for {meta} in {self.inductor_meta['precomputed_grids']}"
+        )
 
 
 class ComboKernelGrid(GridExpr):

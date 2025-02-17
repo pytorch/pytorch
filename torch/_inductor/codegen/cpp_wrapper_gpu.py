@@ -4,7 +4,8 @@ from __future__ import annotations
 import dataclasses
 import re
 from itertools import count, zip_longest
-from typing import Any, Optional, Self, Union
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import sympy
 
@@ -14,7 +15,7 @@ from torch._inductor.runtime.runtime_utils import dynamo_timed
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import IRNode, TensorBox
+from ..ir import TensorBox
 from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -52,7 +53,7 @@ class DeferredTritonCallWrapper:
 
     wrapper_name: str
     kernel_name: str
-    arg_types: list[str]
+    arg_types: list[Any]
     device_index: int
     has_grid_arg: bool
 
@@ -64,7 +65,17 @@ class DeferredTritonCallWrapper:
         params = CudaKernelParamCache.get(self.kernel_name)
         assert params, f"CudaKernelParamCache not populated for {self.kernel_name}"
         def_args = params["def_args"]
+        arg_types = self.arg_types
         inductor_meta = params["inductor_meta"]
+
+        if "extra_launcher_args" in inductor_meta and len(def_args) > len(arg_types):
+            # extra_launcher_args should already be in def_args
+            assert len(def_args) == len(arg_types) - len(
+                inductor_meta["extra_launcher_args"]
+            )
+            arg_types = arg_types + [SymbolicCallArg] * len(
+                inductor_meta["extra_launcher_args"]
+            )
 
         if not V.graph.aot_mode:
             prefix.writeline(
@@ -74,21 +85,27 @@ class DeferredTritonCallWrapper:
             )
             kernel_var_name = self.kernel_name
         else:
-            kernel_var_name = f"kernels.{self.kernel_name}"
+            kernel_var_name = f"kernels_.{self.kernel_name}"
 
         prefix.writeline(f"static inline void {self.wrapper_name}(")
         with prefix.indent():
-            assert len(def_args) == len(self.arg_types), (def_args, self.arg_types)
-            for name, arg_type in zip(def_args, self.arg_types):
+            assert len(def_args) == len(arg_types), (def_args, arg_types)
+            for name, arg_type in zip(def_args, arg_types):
                 if isinstance(arg_type, torch_dtype):
                     prefix.writeline(f"const RAIIAtenTensorHandle& {name},")
-                elif arg_type is SymbolicCallArg:
+                elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
                     prefix.writeline(f"int64_t {name},")
+                elif arg_type is float:
+                    prefix.writeline(f"float {name},")
+                elif arg_type is bool:
+                    prefix.writeline(f"bool {name},")
                 else:
                     raise ValueError(f"Unexpected arg type {arg_type}")
             if self.has_grid_arg:
                 prefix.writeline("int grid_0, int grid_1, int grid_2,")
             prefix.writeline("cudaStream_t stream_,")
+            if V.graph.aot_mode:
+                prefix.writeline("AOTInductorModelKernels& kernels_,")
             prefix.writeline(
                 "const std::optional<std::string>& cubin_dir_ = std::nullopt"
             )
@@ -106,12 +123,9 @@ class DeferredTritonCallWrapper:
         params: dict[str, Any],
     ):
         if not self.has_grid_arg:
-            from ..runtime import triton_heuristics
+            from ..runtime.triton_heuristics import GridExpr
 
-            grid_cls = getattr(triton_heuristics, inductor_meta["grid_type"])
-            assert issubclass(grid_cls, triton_heuristics.GridExpr)
-            grid = grid_cls(inductor_meta, mode="cpp")
-            grid.generate(params["config"])
+            grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
             for line in grid.prefix:
                 prefix.writeline(line)
             prefix.splice(
@@ -139,23 +153,14 @@ class DeferredTritonCallWrapper:
 
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
         triton_meta = params["triton_meta"]
-        arg_types = self.arg_types
-
-        # args with value 1 are added into equal_to_1 and constants
-        # in triton_meta (in the Python codegen) which makes them
-        # inlined in the PTX and compiled CUBIN
-        equal_to_1 = triton_meta["configs"][0].equal_to_1
-        call_args = [
-            arg for i, arg in enumerate(params["def_args"]) if i not in equal_to_1
-        ]
-        arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-        # extract the arg signatures from triton_meta
-        arg_signatures = triton_meta["signature"].values()
-        arg_signatures = [
-            v for i, v in enumerate(arg_signatures) if i not in equal_to_1
-        ]
-        assert call_args == params["call_args"], (call_args, params["call_args"])
-        assert len(call_args) == len(arg_types) == len(arg_signatures)
+        assert len(self.arg_types) == len(params["def_args"]), (
+            self.arg_types,
+            params["def_args"],
+        )
+        arg_type_loookup = dict(zip(params["def_args"], self.arg_types))
+        call_args = params["call_args"]
+        arg_types = [arg_type_loookup[name] for name in call_args]
+        arg_signatures = [triton_meta["signature"][name] for name in call_args]
 
         call_args_str = wrapper.generate_args_decl(
             prefix, call_args, arg_types, arg_signatures
@@ -290,65 +295,21 @@ class CppWrapperGpu(CppWrapperCpu):
         with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             return super().generate(is_inference)
 
+    def generate_aot_mode_prefix(self):
+        pass  # will be handled in finalize_prefix
+
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
         self.prefix = IndentedBuffer()
+        self.prefix.writeline("namespace torch::aot_inductor {")
+        super().generate_aot_mode_prefix()
         super().finalize_prefix()
         for kernel in self._triton_call_wrappers.values():
             self.prefix.writeline("\n")
             kernel.generate(self)
-        self.prefix.writeline("\n")
+        self.prefix.writeline("\n} // namespace torch::aot_inductor")
         self.prefix.splice(old_prefix)
-
-    def generate_user_defined_triton_kernel(
-        self,
-        kernel_name: str,
-        raw_args: list[Any],
-        grid: list[Any],
-        configs,
-        triton_meta,
-        constexprs,
-    ):
-        if (
-            config.triton.autotune_at_compile_time
-            and kernel_name not in self.kernel_autotune_names
-        ):
-            # Call PythonWrapperCodegen to create the autotune code block
-            PythonWrapperCodegen.generate_user_defined_triton_kernel(
-                self,
-                kernel_name,
-                raw_args,
-                grid,
-                configs,
-                triton_meta,
-                constexprs,
-            )
-
-        # in C++ wrapper, we don't pass constexpr args, as they don't
-        # get added as parameters to the PTX code compiled from the
-        # user-defined Triton kernel (only non-constexpr args do)
-        raw_args = [
-            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
-        ]
-        args = [self.val_to_arg_str(v) for v in raw_args]
-        arg_types = [
-            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
-            for arg in raw_args
-        ]
-
-        # Call self.generate_kernel_call to generate the real kernel call in cpp
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            raw_args=raw_args,
-            grid=grid,
-            gpu=True,
-            triton=True,
-            triton_meta=triton_meta,
-            autotune_configs=configs,
-        )
 
     def generate_tma_descriptor(self, desc):
         self.write_tma_descriptor_helpers_once()
@@ -510,6 +471,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
             call_args.append(stream)
             if V.graph.aot_mode:
+                call_args.append("kernels")
                 call_args.append("this->cubin_dir_")
             self.writeline(f"{fn_name}({', '.join(call_args)});")
         else:

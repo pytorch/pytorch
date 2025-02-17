@@ -998,6 +998,7 @@ class TritonTemplateKernel(TritonKernel):
             # symbolic values. The wrapper will use cexpr to print out C++ code
             # appropriately for the grid configs.
             assert static_grid, "cpp_wrapper requires static grid size"
+            # TODO(jansel): support dynamic grid by tracing through grid_fn
             wrapper.generate_kernel_call(
                 name,
                 call_args,
