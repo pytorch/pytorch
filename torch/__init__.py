@@ -32,6 +32,7 @@ from typing import (
     Union as _Union,
 )
 from typing_extensions import ParamSpec as _ParamSpec
+from packaging import version
 
 
 if TYPE_CHECKING:
@@ -290,7 +291,11 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
                 os.path.join(path, lib_folder, "lib", lib_name)
             )
         # Try to get newest version:
-        candidate_lib_paths = sorted(candidate_lib_paths, key=lambda x: os.path.basename(x), reverse=True)
+        if len(candidate_lib_paths) > 1:
+            try:
+                candidate_lib_paths = sorted(candidate_lib_paths, key=lambda x: version.parse(os.path.basename(x).split('.so.')[1]), reverse=True)
+            except version.InvalidVersion:
+                candidate_lib_paths = sorted(candidate_lib_paths, key=lambda x: os.path.basename(x), reverse=True)
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
