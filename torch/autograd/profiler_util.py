@@ -677,9 +677,9 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.device_time_total: int = 0
         self.self_cpu_time_total: int = 0
         self.self_device_time_total: int = 0
-        self.input_shapes: Optional[List[List[int]]] = None
+        self.input_shapes: Optional[list[list[int]]] = None
         self.overload_name: Optional[str] = None
-        self.stack: Optional[List] = None
+        self.stack: Optional[list] = None
         self.scope: Optional[int] = None
         self.cpu_memory_usage: int = 0
         self.device_memory_usage: int = 0
