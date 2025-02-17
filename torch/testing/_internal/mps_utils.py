@@ -666,14 +666,37 @@ MACOS_13_XFAILLIST = {
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
 
+    # Unsupported dtype pre MacOS14
+    "isin": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16],
+        upper=14.0,
+    ),
+
     # Precision issues
+    "atan2": MPSSkipInfo(
+        TEST_OUTPUT_MATCH,
+        dtypes=[torch.uint8, torch.int8, torch.int16],
+        upper=14.0
+    ),
     "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
+    "cumsum": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "matmul": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
+    "isin": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
     "linalg.vander": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
     "log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
+    "masked.cumsum": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "masked.log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "masked.softmin": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
+    "masked.softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "cumulative_trapezoid": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
     "dot": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
-    "nn.functional.max_pool2d": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
+    "nn.functional.max_pool2d": MPSSkipInfo(
+        TEST_OUTPUT_MATCH,
+        upper=14.0,
+        dtypes=[torch.uint8],
+    ),
+    "tan": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
 }
 
 """Other uncategorized xfails"""
