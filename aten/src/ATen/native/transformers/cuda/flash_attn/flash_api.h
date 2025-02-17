@@ -1,10 +1,11 @@
 #pragma once
 #include <cstddef>
 
+#include <namespace_config.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 
-namespace pytorch_flash {
+namespace FLASH_NAMESPACE {
 
 TORCH_API
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -18,6 +19,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         bool is_causal,
         int window_size_left,
         int window_size_right,
+        const float softcap,
         const bool return_softmax,
         std::optional<at::Generator> gen_);
 
@@ -39,6 +41,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                bool is_causal,
                int window_size_left,
                int window_size_right,
+               const float softcap,
                const bool return_softmax,
                std::optional<at::Generator> gen_);
 
@@ -59,6 +62,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const bool is_causal,
         int window_size_left,
         int window_size_right,
+        const float softcap,
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset);
@@ -84,8 +88,9 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const bool is_causal,
                int window_size_left,
                int window_size_right,
+               const float softcap,
                const bool deterministic,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset);
 
-} // namespace pytorch_flash
+} // namespace FLASH_NAMESPACE
