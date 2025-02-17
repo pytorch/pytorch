@@ -53,11 +53,13 @@ from .codegen.triton import (
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
+from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -441,7 +443,9 @@ class TritonTemplateKernel(TritonKernel):
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **TritonKernel.inductor_meta_common(),
+            **FixedGrid.setup_grid_as_args(),
         }
+
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -985,43 +989,32 @@ class TritonTemplateKernel(TritonKernel):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
+        if all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
+            # optimization to compute grid at compile time
+            static_grid = self.grid_fn(*map(int, self.call_sizes), self.meta)
+            assert len(static_grid) == 3, "grid_fn should return 3 values"
+            call_args.extend(static_grid)
+            arg_types.extend(map(type, static_grid))
+        else:
+            assert not V.graph.cpp_wrapper, "cpp_wrapper requires static grid size"
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            meta = wrapper.add_meta_once(self.meta)
+            fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
+            call_args.append(
+                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})"
+            )
+            arg_types.append(None)
+
         # Handle workspace allocation
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)
-
-        if V.graph.cpp_wrapper:
-            # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
-            # if any dynamic dimension is involved. We rely on the Python version
-            # of the grid function to generate those grid configs, which may contain
-            # symbolic values. The wrapper will use cexpr to print out C++ code
-            # appropriately for the grid configs.
-            grid = self.call_sizes + [self.meta]
-            wrapper.generate_kernel_call(
-                name,
-                call_args,
-                grid=self.grid_fn(*grid),
-                # Calling self.grid_fn(*grid) already computes grid as a tuple,
-                # so we need to explicitly set grid_fn as empty here. Otherwise, the
-                # generated wrapper code will wrap the tuple as grid(tuple), which can
-                # cause incorrect grid computation in some corner cases.
-                grid_fn="",
-                arg_types=arg_types,
-                triton_meta=self.triton_meta,
-            )
-        else:
-            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
-            meta = wrapper.add_meta_once(self.meta)
-            grid = self.call_sizes + [meta]
-            wrapper.generate_kernel_call(
-                name,
-                call_args,
-                grid=grid,
-                grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
-                arg_types=arg_types,
-                triton_meta=self.triton_meta,
-                gpu="cpu" not in V.graph.device_types,
-            )
-
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            triton=True,
+        )
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
@@ -1205,8 +1198,7 @@ class TritonTemplate(KernelTemplate):
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
-            grid=grid,
-            extra_args=extra_args,
+            extra_args=[*extra_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
@@ -1323,7 +1315,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.log_info.update(
             {
                 "backend": "Triton",
-                "grid": str(self.bmreq.grid),
                 "num_stages": self.bmreq.num_stages,
                 "num_warps": self.bmreq.num_warps,
             }
@@ -2044,6 +2035,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
+                    raise
                     raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
