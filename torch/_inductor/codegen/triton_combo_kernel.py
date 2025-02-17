@@ -937,8 +937,6 @@ class ComboKernel(Kernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            V.graph.get_current_device_or_throw().index,
-            gpu=True,
             triton=True,
             arg_types=arg_types,
         )

@@ -53,11 +53,13 @@ from .codegen.triton import (
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
+from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -439,10 +441,11 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta = triton_meta
 
         inductor_meta = {
-            "grid_type": None,
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **TritonKernel.inductor_meta_common(),
+            **FixedGrid.setup_grid_as_args(),
         }
+
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -771,7 +774,10 @@ class TritonTemplateKernel(TritonKernel):
                         if value_dtype != V.graph.get_buffer(name).dtype:
                             value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
 
-                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
+                        # TODO: we should have intermediary var shapes
+                        V.kernel.compute.writeline(
+                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                        )
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -821,6 +827,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
+                    assert load_code is not None
                     self.body.writeline(load_code)
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
@@ -982,51 +989,32 @@ class TritonTemplateKernel(TritonKernel):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
+        if all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
+            # optimization to compute grid at compile time
+            static_grid = self.grid_fn(*map(int, self.call_sizes), self.meta)
+            assert len(static_grid) == 3, "grid_fn should return 3 values"
+            call_args.extend(static_grid)
+            arg_types.extend(map(type, static_grid))
+        else:
+            assert not V.graph.cpp_wrapper, "cpp_wrapper requires static grid size"
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            meta = wrapper.add_meta_once(self.meta)
+            fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
+            call_args.append(
+                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})"
+            )
+            arg_types.append(None)
+
         # Handle workspace allocation
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)
-
-        if all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
-            static_grid = self.grid_fn(*map(int, self.call_sizes), self.meta)
-        else:
-            static_grid = None
-
-        if V.graph.cpp_wrapper:
-            # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
-            # if any dynamic dimension is involved. We rely on the Python version
-            # of the grid function to generate those grid configs, which may contain
-            # symbolic values. The wrapper will use cexpr to print out C++ code
-            # appropriately for the grid configs.
-            assert static_grid, "cpp_wrapper requires static grid size"
-            # TODO(jansel): support dynamic grid by tracing through grid_fn
-            wrapper.generate_kernel_call(
-                name,
-                call_args,
-                # Calling self.grid_fn(*grid) already computes grid as a tuple,
-                # so we need to explicitly set grid_fn as empty here. Otherwise, the
-                # generated wrapper code will wrap the tuple as grid(tuple), which can
-                # cause incorrect grid computation in some corner cases.
-                arg_types=arg_types,
-                triton_meta=self.triton_meta,
-                grid_arg=static_grid,
-            )
-        else:
-            if static_grid:
-                grid_arg = repr(static_grid)
-            else:
-                wrapper.add_import_once(f"import {self.grid_fn.__module__}")
-                meta = wrapper.add_meta_once(self.meta)
-                grid = [*map(str, self.call_sizes), meta]
-                grid_arg = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid)})"
-            wrapper.generate_kernel_call(
-                name,
-                call_args,
-                arg_types=arg_types,
-                triton_meta=self.triton_meta,
-                gpu="cpu" not in V.graph.device_types,
-                grid_arg=grid_arg,
-            )
-
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            triton=True,
+        )
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
@@ -1210,8 +1198,7 @@ class TritonTemplate(KernelTemplate):
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
-            grid=grid,
-            extra_args=extra_args,
+            extra_args=[*extra_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
@@ -1328,7 +1315,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.log_info.update(
             {
                 "backend": "Triton",
-                "grid": str(self.bmreq.grid),
                 "num_stages": self.bmreq.num_stages,
                 "num_warps": self.bmreq.num_warps,
             }
@@ -1774,11 +1760,8 @@ class AlgorithmSelectorCache(PersistentCache):
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            initial_stdout = sys.stdout
-            initial_stderr = sys.stderr
-
             def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                with restore_stdout_stderr():
                     choice.precompile()
 
             def on_complete(future):
@@ -1811,7 +1794,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     futures[future] = c
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr(initial_stdout, initial_stderr)
+            @restore_stdout_stderr()
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 for future in as_completed(

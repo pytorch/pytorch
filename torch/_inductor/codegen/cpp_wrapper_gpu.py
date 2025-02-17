@@ -54,8 +54,6 @@ class DeferredTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    device_index: int
-    has_grid_arg: bool
 
     def generate(self, wrapper: CppWrapperGpu):
         prefix = wrapper.prefix
@@ -101,8 +99,6 @@ class DeferredTritonCallWrapper:
                     prefix.writeline(f"bool {name},")
                 else:
                     raise ValueError(f"Unexpected arg type {arg_type}")
-            if self.has_grid_arg:
-                prefix.writeline("int grid_0, int grid_1, int grid_2,")
             prefix.writeline("cudaStream_t stream_,")
             if V.graph.aot_mode:
                 prefix.writeline("AOTInductorModelKernels& kernels_,")
@@ -122,19 +118,18 @@ class DeferredTritonCallWrapper:
         inductor_meta: dict[str, Any],
         params: dict[str, Any],
     ):
-        if not self.has_grid_arg:
-            from ..runtime.triton_heuristics import GridExpr
+        from ..runtime.triton_heuristics import GridExpr
 
-            grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
-            for line in grid.prefix:
-                prefix.writeline(line)
-            prefix.splice(
-                f"""\
-                uint32_t grid_0 = {grid.x_grid};
-                uint32_t grid_1 = {grid.y_grid};
-                uint32_t grid_2 = {grid.z_grid};
-                """
-            )
+        grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
+        for line in grid.prefix:
+            prefix.writeline(line)
+        prefix.splice(
+            f"""\
+            uint32_t grid_0 = {grid.x_grid};
+            uint32_t grid_1 = {grid.y_grid};
+            uint32_t grid_2 = {grid.z_grid};
+            """
+        )
         prefix.writeline("if (grid_0 == 0 || grid_1 == 0 || grid_2 == 0) return;")
 
     def generate_load_kernel(self, prefix, kernel_var_name, params):
@@ -400,35 +395,30 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         call_args,
-        device_index=None,
-        gpu=True,
+        *,
+        device=None,
         triton=True,
         arg_types=None,
         raw_args=None,
         triton_meta=None,
-        autotune_configs=None,
-        *,
-        grid_arg=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
         generate_kernel_call can still be called with gpu=False because of
         a mix of cpu kernels and gpu kernels.
         """
-        if not gpu:
+        device = device or V.graph.get_current_device_or_throw()
+        if device.type == "cpu":
             # Even in CppWrapperGpu, we may see cpp kernels
             return CppWrapperCpu.generate_kernel_call(
                 self,
                 kernel_name,
                 call_args,
-                device_index,
-                gpu,
-                triton,
-                arg_types,
-                raw_args,
-                triton_meta,
-                autotune_configs,
-                grid_arg=grid_arg,
+                device=device,
+                triton=triton,
+                arg_types=arg_types,
+                raw_args=raw_args,
+                triton_meta=triton_meta,
             )
 
         if (
@@ -441,34 +431,22 @@ class CppWrapperGpu(CppWrapperCpu):
                 self,
                 kernel_name,
                 call_args,
-                device_index,
-                gpu,
-                triton,
-                arg_types,
-                raw_args,
-                triton_meta,
-                autotune_configs,
-                grid_arg=grid_arg,
+                device=device,
+                triton=triton,
+                arg_types=arg_types,
+                raw_args=raw_args,
+                triton_meta=triton_meta,
             )
-
-        if device_index is None:
-            current_device = V.graph.get_current_device_or_throw()
-            device_index = current_device.index
 
         stream = (
             "stream"
             if V.graph.aot_mode
-            else self.write_get_raw_stream(device_index, V.graph)
+            else self.write_get_raw_stream(device.index, V.graph)
         )
 
         if triton:
             call_args = self.prepare_triton_kernel_call(call_args)
-            if grid_arg:  # only be set for templates/user-defined kernels
-                assert len(grid_arg) == 3, grid_arg
-                call_args.extend(map(str, grid_arg))
-            fn_name = self.define_triton_kernel_call_wrapper(
-                kernel_name, arg_types, device_index, bool(grid_arg)
-            )
+            fn_name = self.define_triton_kernel_call_wrapper(kernel_name, arg_types)
             call_args.append(stream)
             if V.graph.aot_mode:
                 call_args.append("kernels")
@@ -488,13 +466,11 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         arg_types: list[str],
-        device_index: int,
-        has_grid_arg: bool,
     ) -> str:
         wrapper_name = f"call_{kernel_name}"
         if wrapper_name not in self._triton_call_wrappers:
             self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
-                wrapper_name, kernel_name, arg_types, device_index, has_grid_arg
+                wrapper_name, kernel_name, arg_types
             )
         return wrapper_name
 

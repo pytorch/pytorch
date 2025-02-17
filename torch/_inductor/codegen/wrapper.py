@@ -1043,8 +1043,13 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
-    ):
+        self,
+        kernel: str,
+        out: str,
+        out_view: Optional[str],
+        args: list[str],
+        device: str,
+    ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -1702,11 +1707,7 @@ class PythonWrapperCodegen(CodeGen):
 
         if len(grids) == 1:
             # compute the grid in the wrapper and pass it in as an arg
-            inductor_meta: dict[str, Any] = {
-                "grid_type": FixedGrid.__name__,
-                "fixed_grid": ["_grid_0", "_grid_1", "_grid_2"],
-                "extra_launcher_args": ["_grid_0", "_grid_1", "_grid_2"],
-            }
+            inductor_meta: dict[str, Any] = FixedGrid.setup_grid_as_args()
             extra_launcher_call_args = [*map(sympy.sympify, grids[0])]
         else:
 
@@ -2021,39 +2022,28 @@ class PythonWrapperCodegen(CodeGen):
         self,
         kernel_name: str,
         call_args,
-        device_index=None,
-        gpu=True,
+        *,
+        device=None,
         triton=True,
         arg_types=None,
         raw_args=None,
         triton_meta=None,
-        autotune_configs=None,
-        *,
-        grid_arg=None,
     ):
         """
         Generates kernel call code.
 
-        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
-
         triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
                 and C++ when gpu=False.
         """
-        if not (triton or gpu):
+        device = device or V.graph.get_current_device_or_throw()
+        if not (triton or device.type != "cpu"):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 
-        if grid_arg:
-            maybe_grid = f", grid={grid_arg}"
-        else:
-            maybe_grid = ""
-
-        if device_index is None:
-            device_index = V.graph.get_current_device_or_throw().index
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
         stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, device_index, V.graph
+            self, device.index, V.graph
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
@@ -2109,7 +2099,7 @@ class PythonWrapperCodegen(CodeGen):
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             self.kernel_autotune_calls.writeline(
-                f"{kernel_name}.run({', '.join(all_args)}{maybe_grid}, stream={stream_name})"
+                f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
                 f"del {', '.join(arg for arg in tensor_args.values())}\n",
@@ -2123,9 +2113,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
-            self.writeline(
-                f"{kernel_name}.run({call_args_str}{maybe_grid}, stream={stream_name})"
-            )
+            self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
 
     def writeline(self, line):
         self.lines.append(line)

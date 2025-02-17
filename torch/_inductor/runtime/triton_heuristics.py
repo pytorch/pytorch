@@ -67,6 +67,10 @@ from .triton_compat import (
 )
 
 
+class NoTritonConfigsError(RuntimeError):
+    pass
+
+
 if TYPE_CHECKING:
     from collections.abc import Container, Hashable, Sequence
 
@@ -283,7 +287,7 @@ class CachingAutotuner(KernelInterface):
             return
         assert not self.launchers
         if not self.configs:
-            raise RuntimeError("No triton configs are available")
+            raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
         exc = None
@@ -293,7 +297,9 @@ class CachingAutotuner(KernelInterface):
             except (OutOfResources, PTXASError) as e:
                 exc = e
         if len(compile_results) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            raise NoTritonConfigsError(
+                f"No valid triton configs. {type(exc).__name__}: {exc}"
+            )
         self.compile_results = compile_results
         self.configs = None
 
@@ -1202,29 +1208,15 @@ class TritonCompileResult:
         if "extra_launcher_args" in self.inductor_meta:
             def_args.extend(self.inductor_meta["extra_launcher_args"])
 
-        if self.inductor_meta["grid_type"]:
-            lines = [f"def launcher({', '.join(def_args)}, stream):"]
-            grid = GridExpr.from_meta(self.inductor_meta, cfg)
-            for line in grid.prefix:
-                lines.append(f"    {line}")
-            lines.extend(
-                [
-                    f"    grid_0 = {grid.x_grid}",
-                    f"    grid_1 = {grid.y_grid}",
-                    f"    grid_2 = {grid.z_grid}",
-                ]
-            )
-        else:
-            lines = [
-                f"def launcher({', '.join(def_args)}, *, grid, stream):",
-                "    grid_0, grid_1, grid_2 = grid",
-            ]
-        lines.extend(
-            [
-                f"    runner({', '.join(runner_args)})",
-                "    return bin",
-            ]
-        )
+        grid = GridExpr.from_meta(self.inductor_meta, cfg)
+        lines = [
+            f"def launcher({', '.join(def_args)}, stream):",
+            *[f"    {line}" for line in grid.prefix],
+            f"    grid_0 = {grid.x_grid}",
+            f"    grid_1 = {grid.y_grid}",
+            f"    grid_2 = {grid.z_grid}",
+            f"    runner({', '.join(runner_args)})",
+        ]
         exec("\n".join(lines), scope)
 
         launcher = scope["launcher"]
@@ -2323,6 +2315,15 @@ class SplitScanGrid(GridExpr):
 
 
 class FixedGrid(GridExpr):
+    @staticmethod
+    def setup_grid_as_args() -> dict[str, Any]:
+        """Inductor meta so the launcher takes three extra grid arguments"""
+        return {
+            "grid_type": FixedGrid.__name__,
+            "fixed_grid": ["_grid_0", "_grid_1", "_grid_2"],
+            "extra_launcher_args": ["_grid_0", "_grid_1", "_grid_2"],
+        }
+
     def generate(self, meta: dict[str, int]) -> None:
         x, y, z = (
             self.inductor_meta.get(f"fixed_grid_{self.mode}")
