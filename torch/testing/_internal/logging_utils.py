@@ -211,3 +211,33 @@ def logs_to_string(module, log_option):
         return exit_stack
 
     return log_stream, ctx_manager
+
+
+def multiple_logs_to_string(module, *log_options):
+    """Example:
+    multiple_logs_to_string("torch._inductor.compile_fx", "pre_grad_graphs", "post_grad_graphs")
+    returns the output of TORCH_LOGS="pre_graph_graphs, post_grad_graphs" from the
+    torch._inductor.compile_fx module.
+    It returns a tuple of (list[io.StringIO], contextmanager).
+    """
+    assert isinstance(log_options, (list, tuple))
+    log_streams = [io.StringIO() for _ in range(len(log_options))]
+    handlers = [logging.StreamHandler(stream=log_stream) for log_stream in log_streams]
+
+    @contextlib.contextmanager
+    def tmp_redirect_logs():
+        loggers = [torch._logging.getArtifactLogger(module, option) for option in log_options]
+        try:
+            for logger, handler in zip(loggers, handlers):
+                logger.addHandler(handler)
+            yield
+        finally:
+            for logger, handler in zip(loggers, handlers):
+                logger.removeHandler(handler)
+
+    def ctx_manager():
+        exit_stack = log_settings(", ".join(log_options))
+        exit_stack.enter_context(tmp_redirect_logs())
+        return exit_stack
+
+    return log_streams, ctx_manager
