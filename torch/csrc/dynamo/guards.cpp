@@ -188,7 +188,8 @@ std::string TensorCheck::check_verbose(
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
-                << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
+                << c10::DispatchKeySet(
+                       c10::DispatchKeySet::RAWDATA, dispatch_key_)
                 << ", actual " << state.apply(v.key_set());
     return fail_reason.str();
   } else if (dtype_ != v.dtype().toScalarType()) {

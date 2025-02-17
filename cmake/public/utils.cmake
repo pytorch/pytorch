@@ -197,7 +197,7 @@ macro(caffe2_interface_library SRC DST)
     target_link_libraries(${DST} INTERFACE
         $<TARGET_PROPERTY:${SRC},LINK_LIBRARIES>)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU" AND NOT AIX)
       target_link_libraries(${DST} INTERFACE
           "-Wl,--no-as-needed,\"$<TARGET_FILE:${SRC}>\" -Wl,--as-needed")
     else()
@@ -208,6 +208,8 @@ macro(caffe2_interface_library SRC DST)
     # property of the target.
     target_link_libraries(${DST} INTERFACE
         $<TARGET_PROPERTY:${SRC},INTERFACE_LINK_LIBRARIES>)
+  elseif(${__src_target_type} STREQUAL "OBJECT_LIBRARY")
+    target_link_libraries(${DST} INTERFACE ${SRC})
   else()
     message(FATAL_ERROR
         "You made a CMake build file error: target " ${SRC}
@@ -421,7 +423,7 @@ function(torch_compile_options libname)
     endforeach()
   endif()
 
-  if(NOT WIN32 AND NOT USE_ASAN)
+  if(NOT WIN32 AND NOT USE_ASAN AND NOT AIX)
     # Enable hidden visibility by default to make it easier to debug issues with
     # TORCH_API annotations. Hidden visibility with selective default visibility
     # behaves close enough to Windows' dllimport/dllexport.
