@@ -265,7 +265,15 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
-      - name: Get directory perms
+      - name: Get directory perms (inside)
+        if: always()
+        run: |
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "ls /var/lib/jenkins/workspace"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "ls /var/lib/jenkins/workspace/test/test-reports"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "ls /var/lib/jenkins/pytorch"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "ls /var/lib/jenkins/pytorch/test/test-reports"
+
+      - name: Get directory perms (outside)
         if: always()
         run: |
           ls -la /home/runner/_work
