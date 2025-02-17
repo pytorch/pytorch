@@ -458,11 +458,32 @@ def _process_python_sequences(
     return named_inputs
 
 
+def _determine_output_number(
+    signature: _schemas.OpSignature, named_attrs: Mapping[str, ValidAttributeType]
+) -> int:
+    """Determine the number of outputs for the node with heuristics."""
+    if signature.domain == "":
+        if signature.name == "BatchNormalization":
+            if not named_attrs.get("training_mode", 0):
+                return 1
+        if signature.name == "Split":
+            num_outputs = named_attrs.get("num_outputs")
+            if num_outputs is not None and isinstance(num_outputs, int):
+                return num_outputs
+            else:
+                raise ValueError(
+                    "Could not determine the number of outputs for Split. "
+                    "num_outputs must be provided"
+                )
+    return len(signature.outputs)
+
+
 def _construct_node(
     signature: _schemas.OpSignature,
     named_inputs: Mapping[str, ir.Value | None],
     named_attrs: Mapping[str, ValidAttributeType],
     opset: onnxscript.values.Opset,
+    num_outputs: int,
 ) -> ir.Node:
     """Construct the node with the inputs and attributes.
 
@@ -476,6 +497,7 @@ def _construct_node(
             are not used in this function. The data structure is passed in for
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
+        num_outputs: The number of outputs for the node.
     """
     inputs: list[ir.Value | None] = []
     # Flatten variadic inputs
@@ -497,7 +519,7 @@ def _construct_node(
         for attr in ir_convenience.convert_attributes(named_attrs)
         if attr.value is not None
     ]
-    outputs = [_tensors.SymbolicTensor(opset) for _ in signature.outputs]
+    outputs = [_tensors.SymbolicTensor(opset) for _ in range(num_outputs)]
     return ir.Node(
         signature.domain,
         signature.name,
@@ -526,6 +548,7 @@ class OpRecorder(evaluator.Evaluator):
         op_signature: _schemas.OpSignature,
         named_inputs: dict[str, AllowedArgType],
         named_attrs: dict[str, ValidAttributeType],
+        num_outputs: int,
     ) -> Sequence[_tensors.SymbolicTensor]:
         """Record nodes for the given opschema and arguments.
 
@@ -556,7 +579,11 @@ class OpRecorder(evaluator.Evaluator):
         try:
             self.nodes.append(
                 node := _construct_node(
-                    op_signature, converted_named_inputs, named_attrs, self.opset
+                    op_signature,
+                    converted_named_inputs,
+                    named_attrs,
+                    self.opset,
+                    num_outputs,
                 )
             )
         except Exception as e:
@@ -599,7 +626,10 @@ class OpRecorder(evaluator.Evaluator):
                         # Create a Cast node
                         return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
 
-            outputs = self._call_op(op_signature, named_inputs, named_attrs)
+            num_outputs = _determine_output_number(op_signature, named_attrs)
+            outputs = self._call_op(
+                op_signature, named_inputs, named_attrs, num_outputs
+            )
             if len(outputs) == 1:
                 return outputs[0]
             return outputs
@@ -615,6 +645,7 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
+            # TODO(justinchuby): Remove this once IsScalar and Rank are removed
             # Special cases for handling IsScalar and Rank
             if function.name == "IsScalar":
                 if len(args) != 1:
@@ -653,10 +684,9 @@ class OpRecorder(evaluator.Evaluator):
                     # Python constants are scalars
                     return 0
 
-            # NOTE: signature is written to function in the registration process
-            # TODO: Upstream signature to ONNX Function
-            if hasattr(function, "signature"):
-                op_signature = function.signature
+            # NOTE: signature should be written to function in the registration process
+            if hasattr(function, "_pt_onnx_signature"):
+                op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]
             else:
                 op_signature = _schemas.OpSignature.from_function(
                     function,
@@ -664,11 +694,13 @@ class OpRecorder(evaluator.Evaluator):
                     function.name,
                     opset_version=function.opset.version,
                 )
+                function._pt_onnx_signature = op_signature  # type: ignore[attr-defined]
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
             )
 
+            # TODO(after torchlib migration): Remove traceable function handling
             # NOTE: We need to call traceable functions after the _construct_named_inputs_and_attrs
             # call because it will filter out the unexpected kwargs for us.
             if function.traceable:
@@ -705,6 +737,7 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature,
                 named_inputs,
                 named_attrs,
+                len(op_signature.outputs),
             )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function
