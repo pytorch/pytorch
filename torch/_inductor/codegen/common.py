@@ -1233,8 +1233,8 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 
 
 def is_buffer_removed(name: str) -> bool:
-    return not all(
-        name not in x
+    return any(
+        name in x
         for x in (
             V.graph.removed_buffers,
             V.kernel.removed_buffers,
