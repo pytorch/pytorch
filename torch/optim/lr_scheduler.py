@@ -177,34 +177,6 @@ class LRScheduler:
         """Compute learning rate using chainable form of the scheduler."""
         raise NotImplementedError
 
-    def print_lr(
-        self,
-        is_verbose: bool,
-        group: dict[str, Any],
-        lr: float,
-        epoch: Optional[int] = None,
-    ):
-        """Display the current learning rate.
-
-        .. deprecated:: 2.4
-            ``print_lr()`` is deprecated. Please use ``get_last_lr()`` to access the
-            learning rate.
-        """
-        warnings.warn(
-            "`LRScheduler.print_lr()` is being deprecated. To fetch the learning rate, "
-            "please use `get_last_lr()` instead. For more details, "
-            "see https://github.com/pytorch/pytorch/issues/99270.",
-            UserWarning,
-        )
-        if is_verbose:
-            if epoch is None:
-                print(f"Adjusting learning rate of group {group} to {lr:.4e}.")
-            else:
-                epoch_str = ("%.2f" if isinstance(epoch, float) else "%.5d") % epoch
-                print(
-                    f"Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}."
-                )
-
     def step(self, epoch: Optional[int] = None):
         """Perform a step."""
         # Raise a warning if old pattern is detected
