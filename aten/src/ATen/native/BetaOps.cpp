@@ -62,6 +62,24 @@
 #include <ATen/ops/eq.h>
 #include <ATen/ops/eq_native.h>
 
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/special_digamma.h>
+#include <ATen/ops/special_digamma_native.h>
+#include <ATen/ops/digamma.h>
+#include <ATen/ops/digamma_native.h>
+#include <ATen/ops/unbind.h>
+#include <ATen/ops/unbind_native.h>
+
+
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/scalar_tensor_native.h>
+
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/broadcast_tensors.h>
+#include <ATen/ops/broadcast_tensors_native.h>
+
 #endif
 
 namespace at::meta {
@@ -421,5 +439,581 @@ TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& a, const Tensor& b, const
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
 }
+
+
+static inline std::tuple<Tensor, Tensor> _betainc_even_partial_numerator(
+    const int32_t iteration,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  // Even partial numerator used in the continued fraction for betainc.
+  /*
+   * This function computes the partial numerator d_{2m} that is specified
+   * here: https://dlmf.nist.gov/8.17.E23
+   */
+  auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
+  const Tensor two = at::scalar_tensor(2.0, options);
+  int32_t m = iteration;
+  Tensor a_plus_2m = a + two * m;
+  Tensor a_plus_2m_minus_one = a_plus_2m - 1.0;
+  Tensor denominator = a_plus_2m * a_plus_2m_minus_one;
+
+  Tensor db = m * x / denominator;
+  Tensor value = db * (b - m);
+  Tensor da = -value * (a_plus_2m + a_plus_2m_minus_one) / denominator;
+
+  return std::make_tuple(
+      std::move(value), at::cat({std::move(da), std::move(db)}, -1));
+}
+
+static inline std::tuple<Tensor, Tensor> _betainc_odd_partial_numerator(
+    const int32_t iteration,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  // Odd partial numerator used in the continued fraction for betainc.
+  /*
+   * This function computes the partial numerator d_{2m + 1} that is specified
+   * here: https://dlmf.nist.gov/8.17.E23
+   */
+  int32_t m = iteration;
+  Tensor a_plus_m = a + m;
+  Tensor a_plus_2m = a_plus_m + m;
+  Tensor a_plus_2m_plus_one = a_plus_2m + 1.0;
+  Tensor a_plus_b_plus_m = a_plus_m + b;
+  Tensor denominator = a_plus_2m * a_plus_2m_plus_one;
+
+  Tensor db = -a_plus_m * x / denominator;
+  Tensor value = db * a_plus_b_plus_m;
+  Tensor da = -value * ((a_plus_2m + a_plus_2m_plus_one) / denominator) -
+      x * (2.0 * a_plus_m + b) / denominator;
+
+  return std::make_tuple(
+      std::move(value), at::cat({std::move(da), std::move(db)}, -1));
+}
+
+static inline std::tuple<Tensor, Tensor, Tensor> _betainc_modified_lentz_method(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x,
+    const Tensor& use_continued_fraction) {
+  // Returns the continued fraction for betainc by modified Lentz's method.
+  /*
+   * This function implements the method described in the appendix of [1] for
+   * evaluating continued fractions.
+   * [1] Thompson, Ian J., and A. Ross Barnett.
+   *     Coulomb and Bessel functions of complex arguments and order.
+   *     Journal of Computational Physics 64.2 (1986): 490-509.
+   *     https://www.fresco.org.uk/papers/Thompson-JCP64p490.pdf
+   */
+  // a, b, and x have same dtype
+  auto [eps, tiny] = AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      x.scalar_type(),
+      "__betainc_modified_lentz_method_eps_tiny",
+      [&]() -> std::tuple<Tensor, Tensor> {
+        Tensor eps = at::scalar_tensor(
+            std::numeric_limits<
+                at::scalar_value_type<scalar_t>::type>::epsilon(),
+            x.options());
+        Tensor tiny = at::scalar_tensor(
+            std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(),
+            x.options()); // min == lowest, tiny == min
+        return std::make_tuple(std::move(eps), std::move(tiny));
+      });
+
+  const Tensor _true = at::scalar_tensor(true, x.device());
+
+  // max_iterations and tolerance were taken from Cephes.
+  int32_t max_iterations = 100; // at::kFloat
+  Tensor tolerance = eps;
+
+  if (x.scalar_type() == at::kDouble) {
+    max_iterations = 300;
+    tolerance *= 3.0;
+  }
+  Tensor small = at::sqrt(tiny);
+  /* Assume all input Tensors have the same shape. The extra dimension is
+   * needed to compute the gradients with respect to a and b. */
+  const Tensor& _a = a.unsqueeze(-1);
+  const Tensor& _b = b.unsqueeze(-1);
+  const Tensor& _x = x.unsqueeze(-1);
+  const Tensor& _use_continued_fraction = use_continued_fraction.unsqueeze(-1);
+
+  auto __continued_fraction_step =
+      [&](int32_t iteration,
+          const std::vector<Tensor>& values,
+          const std::vector<Tensor>& gradients,
+          const std::function<std::tuple<Tensor, Tensor>(
+              const int32_t, const Tensor&, const Tensor&, const Tensor&)>&
+              partial_numerator_fn)
+      -> std::tuple<std::vector<Tensor>, std::vector<Tensor>, Tensor> {
+    const Tensor& ratio_numerators = values.at(0);
+    const Tensor& ratio_denominators = values.at(1);
+    const Tensor& convergent = values.at(2);
+    const Tensor& dratio_numerators = gradients.at(0);
+    const Tensor& dratio_denominators = gradients.at(1);
+    const Tensor& dconvergent = gradients.at(2);
+    const auto&& [partial_numerator, dpartial_numerator] =
+        partial_numerator_fn(iteration, _a, _b, _x);
+
+    // new_ratio_numerators = C_n = A_n / A_{n - 1}
+    Tensor new_ratio_numerators = 1.0 + partial_numerator / ratio_numerators;
+    new_ratio_numerators = at::where(
+        at::abs(new_ratio_numerators) < small, small, new_ratio_numerators);
+
+    // new_ratio_denominators = D_n = B_{n - 1} / B_n
+    Tensor new_ratio_denominators =
+        1.0 + partial_numerator * ratio_denominators;
+    new_ratio_denominators = at::where(
+        at::abs(new_ratio_denominators) < small, small, new_ratio_denominators);
+    new_ratio_denominators = at::reciprocal(new_ratio_denominators);
+
+    // new_convergent = h_n = A_n / B_n = h_{n - 1} * C_n * D_n;
+    Tensor delta = new_ratio_numerators * new_ratio_denominators;
+    Tensor new_convergent = convergent * delta;
+
+    Tensor new_dratio_numerators =
+        (dpartial_numerator * ratio_numerators -
+         partial_numerator * dratio_numerators);
+    new_dratio_numerators =
+        new_dratio_numerators / at::square(ratio_numerators);
+    Tensor new_dratio_denominators =
+        (dpartial_numerator * ratio_denominators +
+         partial_numerator * dratio_denominators);
+    new_dratio_denominators =
+        -new_dratio_denominators * at::square(new_ratio_denominators);
+
+    Tensor new_dconvergent = dconvergent * delta +
+        (convergent * new_dratio_numerators * new_ratio_denominators);
+    new_dconvergent = new_dconvergent +
+        (convergent * new_dratio_denominators * new_ratio_numerators);
+
+    std::vector<Tensor> new_values = {
+        std::move(new_ratio_numerators),
+        std::move(new_ratio_denominators),
+        std::move(new_convergent)};
+    std::vector<Tensor> new_gradients = {
+        std::move(new_dratio_numerators),
+        std::move(new_dratio_denominators),
+        std::move(new_dconvergent)};
+
+    return std::make_tuple(
+        std::move(new_values), std::move(new_gradients), std::move(delta));
+  };
+
+  auto __continued_fraction_evaluation =
+      [&](const Tensor& should_stop,
+          int32_t iteration,
+          const std::vector<Tensor>& values,
+          const std::vector<Tensor>& gradients)
+      -> std::tuple<Tensor, int32_t, std::vector<Tensor>, std::vector<Tensor>> {
+    // We run two steps of modified Lentz's method per iteration.
+    // First step of the iteration: the even one.
+    auto [_new_values, _new_gradients, _delta] = __continued_fraction_step(
+        iteration, values, gradients, _betainc_even_partial_numerator);
+
+    // Second step of the iteration: the odd one.
+    auto [new_values, new_gradients, delta] = __continued_fraction_step(
+        iteration, _new_values, _new_gradients, _betainc_odd_partial_numerator);
+    Tensor stop = should_stop | (at::abs(delta - 1.0) < tolerance);
+    return std::make_tuple(
+        std::move(stop),
+        iteration + 1,
+        std::move(new_values),
+        std::move(new_gradients));
+  };
+
+  Tensor apb = _a + _b;
+  Tensor ap1 = _a + 1.0;
+  // Initialization and first step of modified Lentz's method.
+  Tensor initial_ratio_numerators = at::ones_like(_x);
+  Tensor initial_ratio_denominators = 1.0 - apb * _x / ap1;
+  initial_ratio_denominators = at::where(
+      at::abs(initial_ratio_denominators) < small,
+      small,
+      initial_ratio_denominators);
+  initial_ratio_denominators = at::reciprocal(initial_ratio_denominators);
+  Tensor initial_convergent = initial_ratio_denominators;
+  std::vector<Tensor> values = {
+      std::move(initial_ratio_numerators),
+      std::move(initial_ratio_denominators),
+      std::move(initial_convergent)};
+
+  Tensor initial_dratio_denominators =
+      at::cat({1.0 - _b, ap1}, -1) * _x / at::square(_x * apb - ap1);
+  Tensor initial_dratio_numerators =
+      at::zeros_like(initial_dratio_denominators);
+  Tensor initial_dconvergent = initial_dratio_denominators;
+  std::vector<Tensor> gradients = {
+      std::move(initial_dratio_numerators),
+      std::move(initial_dratio_denominators),
+      std::move(initial_dconvergent)};
+
+  Tensor stop = ~_use_continued_fraction;
+
+  for (int32_t i = 0; i < max_iterations; i++) {
+    std::tuple<Tensor, int32_t, std::vector<Tensor>, std::vector<Tensor>> ret =
+        __continued_fraction_evaluation(stop, i + 1, values, gradients);
+    stop = std::get<0>(ret);
+    values = std::get<2>(ret);
+    gradients = std::get<3>(ret);
+    if (stop.all().equal(_true)) // TODO: It can be bottleneck..
+      break;
+  }
+
+  // Remove the previously added extra dimension: it is no longer needed.
+  Tensor convergent = values.back().squeeze(-1);
+  std::vector<Tensor> convergent_grads = at::unbind(gradients.back(), -1);
+
+  return std::make_tuple(
+      std::move(convergent),
+      std::move(convergent_grads.at(0)),
+      std::move(convergent_grads.at(1)));
+}
+
+static inline std::tuple<Tensor, Tensor> _betainc_der_continued_fraction(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x,
+    const Tensor& use_continued_fraction) {
+  // Returns the partial derivatives of betainc with respect to a and b.
+  /*
+   * This function evaluates betainc(a, b, x) by its continued fraction
+   * expansion given here: https://dlmf.nist.gov/8.17.E22
+   * We apply this function when the input (a, b, x) does not belong to the
+   * proper region of computation of `_betainc_der_power_series`.
+   */
+
+  /* This continued fraction expansion of betainc converges rapidly
+   * for x < (a - 1) / (a + b - 2). For x >= (a - 1) / (a + b - 2),
+   * we can obtain an equivalent computation by using the symmetry
+   * relation given here: https://dlmf.nist.gov/8.17.E4
+   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
+  Tensor use_symmetry_relation = (x >= (a - 1.0) / (a + b - 2.0));
+  const Tensor& _a = at::where(use_symmetry_relation, b, a);
+  const Tensor& _b = at::where(use_symmetry_relation, a, b);
+  const Tensor& _x = at::where(use_symmetry_relation, 1.0 - x, x);
+
+  const auto&& [cf, cf_grad_a, cf_grad_b] =
+      _betainc_modified_lentz_method(_a, _b, _x, use_continued_fraction);
+
+  Tensor normalization = at::exp(
+      at::xlogy(_a, _x) + at::special_xlog1py(_b, -_x) - at::log(_a) -
+      at::special_betaln(_a, _b));
+  Tensor digamma_apb = at::special_digamma(_a + _b);
+  Tensor grad_a = normalization *
+      (cf_grad_a +
+       cf * (at::log(_x) - at::reciprocal(_a) + digamma_apb - at::digamma(_a)));
+  Tensor grad_b = normalization *
+      (cf_grad_b + cf * (at::log1p(-_x) + digamma_apb - at::digamma(_b)));
+
+  Tensor grad_a_orig = grad_a;
+  grad_a = at::where(use_symmetry_relation, -grad_b, grad_a);
+  grad_b = at::where(use_symmetry_relation, -grad_a_orig, grad_b);
+
+  return std::make_tuple(std::move(grad_a), std::move(grad_b));
+}
+
+static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x,
+    const Tensor& use_power_series) {
+  // Returns the partial derivatives of betainc with respect to a and b.
+  /*
+   * This function evaluates betainc(a, b, x) by its series representation:
+   *   x ** a * 2F1(a, 1 - b; a + 1; x) / (a * B(a, b)) ,
+   * where 2F1 is the Gaussian hypergeometric function.
+   * We apply this function when the input (a, b, x) satisfies at least one
+   * of the following conditions:
+   *   C1: (x < a / (a + b)) & (b * x <= 1) & (x <= 0.95)
+   *   C2: (x >= a / (a + b)) & (a * (1 - x) <= 1) & (x >= 0.05)
+   */
+  // a, b and x have same dtype.
+  const Tensor eps = AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      x.scalar_type(),
+      "__betainc_der_power_series_eps",
+      [&]() -> Tensor {
+        return at::scalar_tensor(
+            std::numeric_limits<
+                at::scalar_value_type<scalar_t>::type>::epsilon(),
+            x.options());
+      });
+  auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
+  const Tensor one = at::scalar_tensor(1.0, options);
+  const Tensor half = at::scalar_tensor(0.5, options);
+  const Tensor _true = at::scalar_tensor(true, x.device());
+
+  // Avoid returning NaN or infinity when the input does not satisfy either C1
+  // or C2.
+  Tensor safe_a = at::where(use_power_series, a, half);
+  Tensor safe_b = at::where(use_power_series, b, half);
+  Tensor safe_x = at::where(use_power_series, x, half);
+
+  /* When x >= a / (a + b), we must apply the symmetry relation given here:
+   * https://dlmf.nist.gov/8.17.E4
+   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
+  Tensor use_symmetry_relation = (safe_x >= safe_a / (safe_a + safe_b));
+  Tensor safe_a_orig = safe_a;
+
+  safe_a = at::where(use_symmetry_relation, safe_b, safe_a);
+  safe_b = at::where(use_symmetry_relation, safe_a_orig, safe_b);
+  safe_x = at::where(use_symmetry_relation, 1.0 - safe_x, safe_x);
+  // max_iterations was set by experimentation and tolerance was taken from
+  // Cephes.
+  int32_t max_iterations = 300; // at::kFloat
+
+  if (x.scalar_type() == at::kDouble) {
+    max_iterations = 600;
+  }
+
+  Tensor tolerance = eps / safe_a;
+  /* Evaluate the series that defines the following expression:
+   *   2F1(a, 1 - b; a + 1; x) / a */
+  auto __power_series_evaluation = [&](const Tensor& should_stop,
+                                       const std::vector<Tensor>& values,
+                                       const std::vector<Tensor>& gradients)
+      -> std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> {
+    const Tensor& n = values.at(0);
+    const Tensor& product = values.at(1);
+    const Tensor& series_sum = values.at(2);
+    const Tensor& product_grad_b = gradients.at(0);
+    const Tensor& da = gradients.at(1);
+    const Tensor& db = gradients.at(2);
+
+    Tensor x_div_n = safe_x / n;
+    Tensor factor = (n - safe_b) * x_div_n;
+    Tensor apn = safe_a + n;
+
+    Tensor new_product = product * factor;
+    Tensor term = new_product / apn;
+    Tensor new_product_grad_b = factor * product_grad_b - product * x_div_n;
+    Tensor new_da = da - new_product / at::square(apn);
+    Tensor new_db = db + new_product_grad_b / apn;
+
+    Tensor stop = should_stop | (at::abs(term) <= tolerance);
+    std::vector<Tensor> new_values = {
+        n + 1.0, std::move(new_product), series_sum + term};
+    std::vector<Tensor> new_gradients = {
+        std::move(new_product_grad_b), std::move(new_da), std::move(new_db)};
+
+    return std::make_tuple(
+        std::move(stop), std::move(new_values), std::move(new_gradients));
+  };
+
+  Tensor initial_n = one;
+  Tensor initial_product = at::ones_like(safe_a);
+  Tensor initial_series_sum = one / safe_a;
+  std::vector<Tensor> values = {
+      std::move(initial_n),
+      std::move(initial_product),
+      std::move(initial_series_sum)};
+
+  Tensor initial_product_grad_b = at::zeros_like(safe_b);
+  Tensor initial_da = -at::reciprocal(at::square(safe_a));
+  Tensor initial_db = initial_product_grad_b;
+  std::vector<Tensor> gradients = {
+      std::move(initial_product_grad_b),
+      std::move(initial_da),
+      std::move(initial_db)};
+
+  Tensor stop = ~use_power_series;
+
+  for (int32_t i = 0; i < max_iterations; i++) {
+    std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> ret =
+        __power_series_evaluation(stop, values, gradients);
+    stop = std::get<0>(ret);
+    values = std::get<1>(ret);
+    gradients = std::get<2>(ret);
+    if (stop.all().equal(_true)) // TODO: It can be bottleneck..
+      break;
+  }
+
+  const Tensor& series_sum = values.back();
+  const Tensor& series_grad_a = gradients.at(1);
+  const Tensor& series_grad_b = gradients.at(2);
+
+  Tensor normalization =
+      at::exp(at::xlogy(safe_a, safe_x) - at::special_betaln(safe_a, safe_b));
+  Tensor digamma_apb = at::digamma(safe_a + safe_b);
+  Tensor grad_a = normalization *
+      (series_grad_a +
+       series_sum * (digamma_apb - at::digamma(safe_a) + at::log(safe_x)));
+  Tensor grad_b = normalization *
+      (series_grad_b + series_sum * (digamma_apb - at::digamma(safe_b)));
+
+  Tensor grad_a_orig = grad_a;
+  grad_a = at::where(use_symmetry_relation, -grad_b, grad_a);
+  grad_b = at::where(use_symmetry_relation, -grad_a_orig, grad_b);
+
+  return std::make_tuple(std::move(grad_a), std::move(grad_b));
+}
+
+static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  // Reference: https://github.com/tensorflow/probability/blob/
+  // b14ae1d79de4a52d834a3ba2dc88f7e5d849e6c7/tensorflow_probability/python/math/special.py#L432-L491
+  at::ScalarType dtype_origin = at::promoteTypes(
+      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
+  /* We promote bfloat16 and float16 to float32 to make this function consistent
+   * with betainc */
+  bool should_promote_dtype = ((dtype_origin == at::ScalarType::BFloat16) |
+                               (dtype_origin == at::ScalarType::Half))
+      ? true
+      : false;
+  at::ScalarType dtype =
+      should_promote_dtype ? at::ScalarType::Float : dtype_origin;
+
+  const Tensor& _a = a.to(dtype);
+  const Tensor& _b = b.to(dtype);
+  const Tensor& _x = x.to(dtype);
+
+  /* The partial derivative of betainc with respect to x can be obtained
+   * directly by using the expression given here:
+   * http://functions.wolfram.com/06.21.20.0001.01 */
+  Tensor grad_x = at::exp(
+      at::xlogy(_a - 1.0, _x) + at::special_xlog1py(_b - 1.0, -_x) -
+      at::special_betaln(_a, _b));
+
+  /* The partial derivatives of betainc with respect to a and b are computed
+   * by using forward mode. */
+  Tensor use_power_series =
+      (((_x < _a / (_a + _b)) & (_b * _x <= 1.0) & (_x <= 0.95)) |
+       ((_x >= _a / (_a + _b)) & (_a * (1.0 - _x) <= 1.0) & (_x >= 0.05)));
+  const auto&& [ps_grad_a, ps_grad_b] =
+      _betainc_der_power_series(_a, _b, _x, use_power_series);
+
+  const auto&& [cf_grad_a, cf_grad_b] =
+      _betainc_der_continued_fraction(_a, _b, _x, ~use_power_series);
+
+  Tensor grad_a = at::where(use_power_series, ps_grad_a, cf_grad_a);
+  Tensor grad_b = at::where(use_power_series, ps_grad_b, cf_grad_b);
+
+  /* According to the code accompanying [1], grad_a = grad_b = 0 when x is
+   * equal to 0 or 1.
+   * [1] R. Boik, J. Robinson-Cox,
+   *    Derivatives of the Incomplete Beta Function
+   *    https://www.jstatsoft.org/article/view/v003i01/beta.der.pdf */
+  Tensor grads_a_and_b_should_be_zero = (_x == 0.0) | (_x == 1.0);
+
+  grad_a = at::where(grads_a_and_b_should_be_zero, 0.0, grad_a);
+  grad_b = at::where(grads_a_and_b_should_be_zero, 0.0, grad_b);
+
+  // Determine if the inputs are out of range (should return NaN output).
+  Tensor result_is_nan = (a <= 0.0) | (b <= 0.0) | (x < 0.0) | (x > 1.0);
+  const Tensor nan = AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      x.scalar_type(),
+      "__betainc_partials_nan",
+      [&]() -> Tensor {
+        return at::scalar_tensor(
+            std::numeric_limits<
+                at::scalar_value_type<scalar_t>::type>::quiet_NaN(),
+            x.options());
+      });
+
+  grad_a = at::where(result_is_nan, nan, grad_a);
+  grad_b = at::where(result_is_nan, nan, grad_b);
+  grad_x = at::where(result_is_nan, nan, grad_x);
+
+  /* If we promoted the dtype, then we have to convert the gradients back to the
+   * original dtype. */
+  if (should_promote_dtype) {
+    grad_a = grad_a.to(dtype_origin);
+    grad_b = grad_b.to(dtype_origin);
+    grad_x = grad_x.to(dtype_origin);
+  }
+  return std::make_tuple(
+      std::move(grad_a), std::move(grad_b), std::move(grad_x));
+}
+
+std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  return _betainc_partials(a, b, x);
+}
+
+static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  at::ScalarType dtype_orig = at::promoteTypes(
+      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
+  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) |
+                               (dtype_orig == at::ScalarType::Half))
+      ? true
+      : false;
+  at::ScalarType dtype =
+      should_promote_dtype ? at::ScalarType::Float : dtype_orig;
+  Tensor _y = y.to(dtype_orig);
+  Tensor _a = a.to(dtype_orig);
+  Tensor _b = b.to(dtype_orig);
+
+  if (should_promote_dtype) {
+    _y = _y.to(dtype);
+    _a = _a.to(dtype);
+    _b = _b.to(dtype);
+  }
+
+  Tensor _x = at::special_betaincinv(_a, _b, _y);
+  auto [g_a, g_b, g_x] = _betainc_partials(_a, _b, _x);
+  g_a = -g_a / g_x;
+  g_b = -g_b / g_x;
+  Tensor g_y = at::reciprocal(g_x);
+
+  if (should_promote_dtype) {
+    g_a = g_a.to(dtype_orig);
+    g_b = g_b.to(dtype_orig);
+    g_y = g_y.to(dtype_orig);
+  }
+
+  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
+}
+
+std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  return _betaincinv_partials(a, b, y);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials_meta(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  at::ScalarType dtype_orig = at::promoteTypes(
+      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
+  auto vec = at::broadcast_tensors({a, b, x});
+   
+  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
+      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
+      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials_meta(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  at::ScalarType dtype_orig = at::promoteTypes(
+      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
+
+  auto vec = at::broadcast_tensors({a, b, y});
+   
+  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
+      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
+      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
+
+}
+
 
 } // namespace at::native
