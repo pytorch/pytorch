@@ -179,6 +179,10 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.view_as_real.default": {},
     "aten.view.dtype": {},
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
+    "aten._special_betainc_partials.default": {},
+    "aten.special_betaincinv.default": {},
+    "aten._special_betaincinv_partials.default": {},
+    "aten.special_betaln.default": {},
 }
 
 # `python torchgen/gen.py --update-aoti-c-shim` will automatically generate
