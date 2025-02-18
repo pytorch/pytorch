@@ -1179,7 +1179,7 @@ def gen_pyi(
             "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
-                "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
+                "def map_(self, other: Tensor, callable: Callable) -> Tensor: ..."
             ],
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
@@ -1228,12 +1228,12 @@ def gen_pyi(
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
-                "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
+                "def copy_(self, other: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
+                "def set_(self, source: Union[Storage, TypedStorage, UntypedStorage], "
+                "storage_offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
+                "def set_(self, source: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
