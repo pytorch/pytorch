@@ -4,9 +4,7 @@ from typing import Optional
 
 
 # [@compile_ignored: debug] Fails hard instead of graph breaking on guard on data dependent errors.
-unbacked_strict = (
-    os.environ.get("TORCHDYNAMO_UNBACKED_STRICT", "0") == "1"
-)
+unbacked_strict = os.environ.get("TORCHDYNAMO_UNBACKED_STRICT", "0") == "1"
 # [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"

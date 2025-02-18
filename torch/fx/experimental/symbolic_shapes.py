@@ -112,12 +112,14 @@ class GuardOnDataDependentSymNode(RuntimeError):
         super().__init__(*args)
         self.cond = cond
 
+
 class GuardOnDataDependentSymNodeStrict(RuntimeError):
     cond: sympy.Basic
 
     def __init__(self, cond: sympy.Basic, *args: Any) -> None:
         super().__init__(*args)
         self.cond = cond
+
 
 class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
@@ -1511,8 +1513,6 @@ class DimDynamic(Enum):
     INFER_STRIDE = 4
     # Like SIZE_LIKE_UNBACKED, but there's a hint
     OBLIVIOUS_SIZE = 5
-    # Like SIZE_LIKE_UNBACKED, but we will error if specialoized
-    STRICT_SIZE_LIKE_UNBACKED = 6
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -4421,11 +4421,7 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim in (
-            DimDynamic.SIZE_LIKE_UNBACKED,
-            DimDynamic.OBLIVIOUS_SIZE,
-            DimDynamic.STRICT_SIZE_LIKE_UNBACKED,
-        ):
+        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
@@ -5914,7 +5910,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
-    ) -> GuardOnDataDependentSymNode:
+    ) -> Union[GuardOnDataDependentSymNode, GuardOnDataDependentSymNodeStrict]:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
