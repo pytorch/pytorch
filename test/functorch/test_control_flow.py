@@ -1,16 +1,13 @@
 # Owner(s): ["module: functorch"]
 import contextlib
-import copy
 import functools
 import unittest
-import warnings
 
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._dynamo.testing import normalize_gm
-from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -36,49 +33,11 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
-    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
 )
-
-
-@contextlib.contextmanager
-def check_cudagraphs_not_skipped(test_case):
-    old_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
-    try:
-        yield
-    finally:
-        # reset before the assert, because otherwise the reset is skipped
-        new_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
-        counters["inductor"]["cudagraph_skips"] = old_cudagraph_skips
-        test_case.assertEqual(
-            counters["inductor"]["cudagraph_skips"], new_cudagraph_skips
-        )
-
-
-def _check_compile_cudagraph(test_case, fn, args):
-    # test cudagraphs backend
-    cudagraphs_compiled_fn = torch.compile(fn, backend="cudagraphs")
-    # We run 3 times.
-    # This is what cuda graph trees does for the first 3 runs:
-    # 1) run in eager mode, for warmup.
-    # 2) do stream capture followed by graph replay.
-    # 3 and beyond) do graph replay
-    # So we need to get to iteration 3 to test all ways of running.
-    outputs = []
-    for i in range(3):
-        with check_cudagraphs_not_skipped(test_case):
-            outputs.append(
-                pytree.tree_map(
-                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
-                    cudagraphs_compiled_fn(*args),
-                )
-            )
-    eager_res = fn(*args)
-    for output in outputs:
-        test_case.assertEqual(eager_res, output)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -274,9 +233,7 @@ def _while_loop_tests():
                     return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
 
                 i1, j1, x1, y1 = while_loop(
-                    cond_fn_nested,
-                    body_fn_nested,
-                    (i1, j1, x1, y1),
+                    cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
                 )
                 return i1 - 1, j1.clone(), x1 * 2, y1 / 2
 
@@ -440,7 +397,6 @@ def _while_loop_tests():
             const_and_symint_output,
             (torch.randn(2, 3, requires_grad=True),),
         ),
-        # I need to add a test here that uses just a dictionary and see what happens.
     }
 
 
@@ -534,23 +490,21 @@ class TestControlFlow(TestCase):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
 
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -578,22 +532,20 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -689,25 +641,21 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x, y, x)
+        gm = make_fx(f)(pred, x, y, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1, y_1, z_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1, sym_size_int, sym_size_int_1));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1, sym_size_int, sym_size_int_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = sym_size_int = sym_size_int_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  getitem_2 = None
-    getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
+    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -1234,22 +1182,20 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -4386,24 +4332,6 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
                 torch.randn(2, 3),
             )
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_traced_not_nested_cudagraphs(self):
-        def true_fn(x):
-            return x.sin()
-
-        def false_fn(x):
-            return x.cos()
-
-        def f(x, y):
-            return cond(y, true_fn, false_fn, [x])
-
-        x = torch.randn(4)
-        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(True).cuda()])
-        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(False).cuda()])
-
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
@@ -4650,43 +4578,6 @@ def forward(self, arg0_1):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         self._check_compile(fn, inp, backend=backend)
 
-    @parametrize(
-        "while_loop_test",
-        set(WHILE_LOOP_TESTS.keys())
-        - {"const_and_symint_output", "int_carry", "pytree_int_carry"},
-    )
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_cuda_stream_capture(self, while_loop_test):
-        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-
-        if isinstance(fn, torch.nn.Module):
-            fn = copy.deepcopy(fn)
-            fn.cuda()
-        inp = pytree.tree_map(lambda x: x.cuda(), inp)
-
-        _check_compile_cudagraph(self, fn, inp)
-
-    @unittest.expectedFailure
-    @parametrize(
-        "while_loop_test", {"const_and_symint_output", "int_carry", "pytree_int_carry"}
-    )
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_cuda_stream_capture_fails(self, while_loop_test):
-        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-
-        if isinstance(fn, torch.nn.Module):
-            fn = copy.deepcopy(fn)
-            fn.cuda()
-        inp = pytree.tree_map(lambda x: x.cuda(), inp)
-
-        _check_compile_cudagraph(self, fn, inp)
-
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
@@ -4896,13 +4787,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             f(x, torch.tensor(True), torch.tensor(True)),
         )
 
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
-            )
-
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -4915,9 +4799,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         def f(x):
             pred = x.shape[0] == 1
             return cond(pred, true_fn, false_fn, [x])
-
-        def f_(x, y):
-            return cond(y, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = torch.func.functionalize(f)
@@ -4936,10 +4817,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
 
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
-            _check_compile_cudagraph(self, f_, [torch.ones(4, 5).cuda(), pred])
 
     def test_cond_accepts_torch_function_as_inputs(self):
         a = torch.randn(3, 4)
@@ -5128,7 +5005,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5169,7 +5046,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5203,7 +5080,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5231,7 +5108,7 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5264,7 +5141,7 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException, "One of torch.cond branch"
+                torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5282,12 +5159,10 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
@@ -5305,7 +5180,7 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException,
+                torch._dynamo.exc.TorchRuntimeError,
                 "One of torch.cond branch might be aliasing",
             ):
                 f(example_input_func)
@@ -5336,7 +5211,7 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
+            torch._dynamo.exc.TorchRuntimeError,
             "One of torch.cond branch might be aliasing",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
@@ -5459,13 +5334,6 @@ def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return (mul,)""",
         )
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-            )
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -7783,99 +7651,11 @@ class TestHopSchema(TestCase):
         self.assertEqual(schema.parse(str(schema)), schema)
 
 
-class DynamicCondModel(torch.nn.Module):
-    def __init__(self, input_size=16, hidden_size=64, output_size=10):
-        super().__init__()
-        self.fc1_0 = torch.nn.Linear(input_size, hidden_size)
-        self.fc1_1 = torch.nn.Linear(input_size, 32)
-        self.fc1_2 = torch.nn.Linear(32, hidden_size)
-        self.relu = torch.nn.ReLU()
-        self.fc2 = torch.nn.Linear(hidden_size, output_size)
-
-    def forward(self, x):
-        def true_fn(x):
-            return self.fc1_0(x)
-
-        def false_fn(x):
-            x = self.fc1_1(x)
-            return self.fc1_2(x)
-
-        # use PyTorch control flow API
-        pred = torch.tensor(x.sum() > 0, device="cuda")
-        x = cond(pred, true_fn, false_fn, [x])
-
-        x = self.relu(x)
-        x = self.fc2(x)
-
-        return x
-
-
-@unittest.skipIf(
-    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-)
-class TestControlFlowNN(TestCase):
-    def test_cond_in_NN(self):
-        model = DynamicCondModel().cuda()
-
-        x = torch.randn(16, device="cuda")
-        _check_compile_cudagraph(self, model, [x])
-
-
-@unittest.skipIf(
-    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-)
-class TestControlFlowAndRNG(TestCase):
-    @parametrize("rng_func", ["custom_generator", "default_generator"])
-    def test_rng_with_conditional_nodes_warns(self, rng_func):
-        pred = torch.tensor(True, device="cuda")
-        x = torch.ones(10, dtype=torch.float32, device="cuda")
-
-        if rng_func == "custom_generator":
-            self.skipTest(
-                "randn() currently does not work with a generator argument in dynamo."
-            )
-            generator = torch.Generator("cuda")
-
-            def custom_generator(x):
-                return x + torch.randn(
-                    *x.shape, generator=generator, dtype=x.dtype, device=x.device
-                )
-
-            rng_func = custom_generator
-        elif rng_func == "default_generator":
-
-            def default_generator(x):
-                return x + torch.randn(*x.shape, dtype=x.dtype, device=x.device)
-
-            rng_func = default_generator
-
-        def func(pred, x):
-            return torch.cond(pred, rng_func, lambda x: 2 * x, [x])
-
-        compiled_func = torch.compile(func, backend="cudagraphs")
-
-        with warnings.catch_warnings(record=True) as warning_objs:
-            for i in range(3):
-                compiled_func(pred, x)
-
-        # Warn first for conditional node warmup, warn second for the
-        # graph capture that we will actually use.
-        self.assertEqual(len(warning_objs), 2)
-
-        warning_message = "You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph."  # noqa: B950
-        for warning in warning_objs:
-            self.assertTrue(warning_message in str(warning.message))
-
-
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
-
-instantiate_parametrized_tests(TestControlFlowAndRNG)
 
 if __name__ == "__main__":
     run_tests()
