@@ -4036,9 +4036,17 @@ class Scheduler:
         V.graph.wrapper_code.codegen_partition_call(
             graph_partition_id, input_names_to_free, output_nodes
         )
+        V.graph.wrapper_code.allocated.update(
+            [node.get_name() for node in output_nodes]
+        )
 
     def _codegen_partitions(self) -> None:
         partitions, input_nodes, output_nodes = self.graph_partition()
+
+        # If there is only one partition, we don't need to create a subgraph
+        if len(partitions) == 1:
+            self._codegen(partitions[0])
+            return
 
         for partition, input_node, output_node in zip(
             partitions, input_nodes, output_nodes

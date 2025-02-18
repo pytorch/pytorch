@@ -13796,6 +13796,30 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
+        @requires_gpu()
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+            self.assertEqual(eager_out, compiled_out)
+
+            _, code = run_and_get_code(f_compiled, x_cloned, y_cloned)
+
+            FileCheck().check("def partition_0(args):").check(
+                "(buf0, buf1) = self.partitions[0](partition0_args)"
+            ).check("recursively_apply_fns = runner.recursively_apply_fns").run(code[0])
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 

@@ -2510,7 +2510,6 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
     def codegen_partition_call(self, partition_id, input_names_to_free, output_nodes):
-        breakpoint()
         inputs = ", ".join(input_names_to_free.keys()) + (
             "," if len(input_names_to_free) == 1 else ""
         )
