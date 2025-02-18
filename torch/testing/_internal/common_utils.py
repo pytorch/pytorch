@@ -102,7 +102,7 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx942")
+MI300_ARCH = ("gfx942",)
 
 
 def freeze_rng_state(*args, **kwargs):
