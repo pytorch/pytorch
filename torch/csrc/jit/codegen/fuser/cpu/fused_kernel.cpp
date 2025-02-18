@@ -145,9 +145,9 @@ static void activate() {
 
 intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  const wchar_t* comspec = _wgetenv(L"COMSPEC");
+  wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
-    comspec = L"C:\\Windows\\System32\\cmd.exe";
+    comspec = const_cast<wchar_t*>(L"C:\\Windows\\System32\\cmd.exe");
   }
   // Constructing the command line
   auto wCmd = c10::u8u16(cmd);
