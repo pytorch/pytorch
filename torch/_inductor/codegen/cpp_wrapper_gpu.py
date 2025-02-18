@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
-import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Hashable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -14,7 +13,7 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import IRNode, TensorBox
-from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
+from ..utils import cache_on_self, DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -188,10 +187,13 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+        self._load_kernel_cache: dict[Hashable, str] = {}
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -203,14 +205,11 @@ class CppWrapperGpu(CppWrapperCpu):
             return
 
         super().write_header()
-
-        self.header.splice("#include <filesystem>")
-        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
 
-    @functools.lru_cache(None)  # noqa: B019
+    @cache_on_self
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
@@ -375,14 +374,18 @@ class CppWrapperGpu(CppWrapperCpu):
         args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
         self.writeline(f"{fn}({args});")
 
-    @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
     ):
-        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
+        cache_key = (kernel_name, graph)
+        if cache_key in self._load_kernel_cache:
+            return self._load_kernel_cache[cache_key]
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+        self._load_kernel_cache[cache_key] = kernel_var_name
+
+        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
         deferred_gpu_kernel_line = DeferredGpuKernelLine(
             kernel_name,
