@@ -28,39 +28,24 @@ from torch.testing._internal.common_utils import (
 
 @contextlib.contextmanager
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_matmul_precision = torch.get_float32_matmul_precision()
     try:
         yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.set_float32_matmul_precision(old_matmul_precision)
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_matmul_precision = torch.get_float32_matmul_precision()
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
         self.precision = tf32_precision
         yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.set_float32_matmul_precision(old_matmul_precision)
         self.precision = old_precision
-
-
-@contextlib.contextmanager
-def tf32_enabled():
-    """
-    Context manager to temporarily enable TF32 for XPU matmul.
-    Restores the previous TF32 state after exiting the context.
-    """
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        yield
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
