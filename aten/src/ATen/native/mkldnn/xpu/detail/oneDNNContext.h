@@ -28,7 +28,7 @@ struct TORCH_XPU_API GpuEngineManager {
   dnnl::engine& get_engine(
       DeviceIndex device_index = c10::xpu::current_device()) {
     c10::xpu::check_device_index(device_index);
-    return *engine_pool[device.index()];
+    return *engine_pool[device_index];
   }
 
   dnnl::engine& get_engine(const Device& device) {
