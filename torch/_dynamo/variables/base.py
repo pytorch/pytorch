@@ -1,15 +1,30 @@
 # mypy: ignore-errors
 
+"""
+Core variable tracking functionality for Dynamo. This module defines the fundamental
+classes and systems used to track and manage variables during Dynamo's operation.
+
+The module provides:
+1. VariableTracker - The base class for tracking variables during compilation
+2. MutationType system - Classes for tracking and managing mutations to variables
+3. Source type management - Utilities for tracking variable origins and scope
+4. Variable state management - Tools for managing variable state and transformations
+
+These components form the foundation of Dynamo's variable handling system,
+enabling accurate tracking and transformation of Python code into optimized
+computations.
+"""
+
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
@@ -227,7 +242,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[Dict[int, Any]] = None,
+        cache: Optional[dict[int, Any]] = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -356,10 +371,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen):
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def force_unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -379,17 +394,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
-    def inspect_parameter_names(self) -> List[str]:
+    def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"call_function {self} {args} {kwargs}")
 
@@ -397,8 +414,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
@@ -410,6 +427,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
+        elif (
+            name in cmp_name_to_op_mapping
+            and len(args) == 1
+            and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
+            and not kwargs
+        ):
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(self, type(other)):
+                return variables.ConstantVariable.create(NotImplemented)
+            if (
+                not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
+                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](
+                    self.as_python_constant(), other.as_python_constant()
+                )
+            )
         unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def set_name_hint(self, name):

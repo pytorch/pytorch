@@ -12,7 +12,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -815,7 +815,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Initialize gradient buffers and register all reduce hook
         self._delay_grad_buffer: Optional[torch.Tensor] = None
-        self._delay_grad_views: List[torch.Tensor] = []
+        self._delay_grad_views: list[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
             self._register_delay_all_reduce_hook(
@@ -853,13 +853,13 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
-        self._comm_hooks: List[Tuple[Callable, object]] = []
+        self._comm_hooks: list[tuple[Callable, object]] = []
 
         if self.mixed_precision is not None:
             _setup_mixed_precision_params(self.mixed_precision, self.module)
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
-            self._mp_stream = torch.cuda.Stream()
+            self._mp_stream = torch.Stream()
             self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
@@ -885,7 +885,7 @@ class DistributedDataParallel(Module, Joinable):
 
             upcast_hook_state = _AllreduceUpcastHookState(
                 ddp_weakref=weakref.ref(self),
-                upcast_stream=torch.cuda.Stream(),
+                upcast_stream=torch.Stream(),
             )
             self.register_comm_hook(
                 upcast_hook_state,
@@ -907,7 +907,7 @@ class DistributedDataParallel(Module, Joinable):
         # Register the AccumulateGrad post hooks if optimize_ddp is
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
-        self._accum_grad_hooks: List[RemovableHandle] = []
+        self._accum_grad_hooks: list[RemovableHandle] = []
         optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
         self._use_python_reducer = optimize_ddp in (
             "python_reducer",
@@ -1078,7 +1078,7 @@ class DistributedDataParallel(Module, Joinable):
         # may have populated some events for modules that didn't end up being
         # used.
         self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
-        with torch.cuda.stream(self._mp_stream):
+        with self._mp_stream:
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
                     # Do not cast DDP ignored parameters.
@@ -1102,7 +1102,7 @@ class DistributedDataParallel(Module, Joinable):
                                 self.mixed_precision.param_dtype  # type: ignore[union-attr]
                             )
                     param.data = param._mp_param
-                copy_event = torch.cuda.Event()
+                copy_event = torch.Event()
                 copy_event.record()
                 self._submodule_to_event[submodule].append(copy_event)
 
@@ -1119,7 +1119,7 @@ class DistributedDataParallel(Module, Joinable):
             # copy event has already been waited on
             return
 
-        event.wait(stream=torch.cuda.current_stream())
+        event.wait(stream=torch.accelerator.current_stream())
         for p in module.parameters(recurse=False):
             # Don't register hooks if param does not require grad
             if not p.requires_grad or (hasattr(p, "_ddp_ignored") and p._ddp_ignored):
@@ -1614,7 +1614,7 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders: List[Optional[torch.Tensor]] = [
+            output_placeholders: list[Optional[torch.Tensor]] = [
                 None for _ in range(len(output_tensor_list))
             ]
             # Do not touch tensors that have no grad_fn, which can cause issues
@@ -2046,7 +2046,7 @@ class DistributedDataParallel(Module, Joinable):
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
-    def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
+    def _register_fused_optim(self, optim: type, *args, optim_params=None, **kwargs):
         r"""
         Register an optimizer in DDP to optimize parameter immediately after its gradient reduction.
 
@@ -2240,23 +2240,27 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in [
-            "bf16_compress_hook",
-            "bf16_compress_wrapper_hook",
-        ] and (
-            (torch.version.cuda is None and torch.version.hip is None)
-            or (
+        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
+            cuda_supported = (
                 torch.version.cuda is not None
-                and int(torch.version.cuda.split(".")[0]) < 11
+                and int(torch.version.cuda.split(".")[0]) >= 11
+            ) or torch.version.hip is not None
+            nccl_supported = (
+                dist.is_available()
+                and dist.is_nccl_available()
+                and torch.cuda.nccl.version() >= (2, 10)
             )
-            or not dist.is_available()
-            or not dist.is_nccl_available()
-            or torch.cuda.nccl.version() < (2, 10)
-        ):
-            self._log_and_throw(
-                TypeError,
-                "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+.",
+            xpu_xccl_supported = (
+                dist.is_available()
+                and dist.is_xccl_available()
+                and torch.xpu.is_available()
             )
+
+            if not ((cuda_supported and nccl_supported) or xpu_xccl_supported):
+                self._log_and_throw(
+                    TypeError,
+                    "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+ or XPU and XCCL",
+                )
 
     @property
     def _distributed_rank(self):

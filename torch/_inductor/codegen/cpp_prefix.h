@@ -21,6 +21,8 @@
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -48,6 +50,8 @@ typedef at::BFloat16 bfloat16;
 
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
+typedef at::Float8_e4m3fnuz float8_e4m3fnuz;
+typedef at::Float8_e5m2fnuz float8_e5m2fnuz;
 
 template <typename T>
 struct Welford {
@@ -587,13 +591,13 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }

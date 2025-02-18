@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 
 import torch
 
@@ -33,7 +33,15 @@ if triton is not None:
     try:
         from triton.backends.compiler import GPUTarget
     except ImportError:
-        GPUTarget = None
+
+        def GPUTarget(
+            backend: str,
+            arch: Union[int, str],
+            warp_size: int,
+        ) -> Any:
+            if torch.version.hip:
+                return [backend, arch, warp_size]
+            return (backend, arch)
 
     # In the latest triton, math functions were shuffled around into different modules:
     # https://github.com/openai/triton/pull/3172
@@ -94,6 +102,17 @@ else:
         dtype = Any
 
 
+def cc_warp_size(cc: Union[str, int]) -> int:
+    if torch.version.hip:
+        cc_str = str(cc)
+        if "gfx10" in cc_str or "gfx11" in cc_str:
+            return 32
+        else:
+            return 64
+    else:
+        return 32
+
+
 try:
     autograd_profiler = torch.autograd.profiler
 except AttributeError:  # Compile workers only have a mock version of torch
@@ -115,4 +134,5 @@ __all__ = [
     "libdevice",
     "math",
     "triton",
+    "cc_warp_size",
 ]
