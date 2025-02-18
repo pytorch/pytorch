@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import gc
 import typing
 
@@ -133,11 +132,6 @@ class graph:
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
             actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
             unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
-        collect_garbage (bool, optional): If True, call torch.cuda.synchronize() followed by gc.collect() to free
-            memory before starting graph capture. Users almost always this to be True, but since the introduction of
-            conditional nodes in cuda graphs, it is possible that more than one stream may be capturing at once.
-            Since cudaDeviceSynchronize() synchronizes all streams, including capturing streams, previously started
-            stream captures will be invalidated. This is not desirable.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -153,7 +147,11 @@ class graph:
     default_capture_stream: typing.Optional["torch.cuda.Stream"] = None
 
     def __init__(
-        self, cuda_graph, pool=None, stream=None, capture_error_mode: str = "global"
+        self,
+        cuda_graph,
+        pool=None,
+        stream=None,
+        capture_error_mode: str = "global",
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -171,7 +169,7 @@ class graph:
         self.capture_error_mode = capture_error_mode
 
     def __enter__(self):
-        # Free as much memory as we can for the graph.
+        # Free as much memory as we can for the graph
         torch.cuda.synchronize()
         gc.collect()
         torch.cuda.empty_cache()
@@ -188,30 +186,6 @@ class graph:
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(exc_type, exc_value, traceback)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
-
-
-@contextlib.contextmanager
-def _graph_no_gc(cuda_graph, pool, stream, capture_error_mode):
-    """This is an internal function used to do stream capture without
-    calling torch.cuda.synchronize(), gc.collect(), and
-    torch.cuda.empty_cache(). Unfortunately, cudagraph trees runs its
-    eager warmup inside of the context manager
-    _use_cuda_memory_pool_manager(), which makes captures_underway in
-    CUDACachingAllocator.cpp non-empty. We need this in order to
-    warmup conditional higher order operators, like torch.cond() and
-    torch.while_loop(). torch.cuda.empty_cache() will fail if
-    captures_underway is non-empty. Removing torch.cuda.synchronize()
-    and gc.collect() is not strictly speaking required, but they are
-    expensive an unnecessary operations.
-    """
-    stream_ctx = torch.cuda.stream(stream)
-    pool = () if pool is None else (pool,)
-    with stream_ctx:
-        cuda_graph.capture_begin(*pool, capture_error_mode=capture_error_mode)
-        try:
-            yield
-        finally:
-            cuda_graph.capture_end()
 
 
 def make_graphed_callables(
@@ -514,46 +488,3 @@ def make_graphed_callables(
         return ret[0]
 
     return tuple(ret)
-
-
-@contextlib.contextmanager
-def thread_cuda_stream_capture_mode(new_mode):
-    r"""Changes current thread's stream capture mode to `new_mode` upon __enter__ and resets the mode upon __exit__.
-
-    The only documentation on a thread's stream capture mode is here:
-    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-
-    However, it is a little bit inadequate, so here is a more in-depth description.
-
-    Both CPU threads and capturing cuda streams have a capture mode. A
-    cuda stream's capture mode is set at cudaStreamBeginCapture() and
-    can never be changed. Meanwhile all CPU threads start with a capture
-    mode of cudaStreamCaptureModeGlobal, which can be changed at any
-    time.
-
-    Whenever a thread executes an unsafe CUDA action while CUDA
-    streams are capturing, it follows the following logic to determine
-    whether to invalidate those streams:
-
-    if capture_mode_this_thread == cudaStreamCaptureModeRelaxed:
-        never invalidate any capturing cuda streams whatsoever.
-    elif capture_mode_this_thread == cudaStreamCaptureModeThreadLocal:
-        invalidate any cuda streams for which cudaStreamBeginCapture() was called by this
-        thread, except for streams whose capture mode is cudaStreamCaptureModeRelaxed.
-    elif capture_mode_this_thread == cudaStreamCaptureModeGlobal:
-        invalidate all cuda streams that are currently capturing on any thread,
-        except for streams whose capture mode is cudaStreamCaptureModeRelaxed and for
-        streams for which cudaStreamCaptureBegin() was called with
-        cudaStreamCaptureModeThreadLocal on a thread other than this one.
-
-    In practice, changed the current capture mode to
-    cudaStreamCaptureModeRelaxed in particular is helpful for enabling
-    developers to do "unsafe" things that we know are safe in our
-    case.
-    """
-    cudart = torch.cuda.cudart()
-    old_mode = cudart.cudaThreadExchangeStreamCaptureMode(new_mode)
-    try:
-        yield
-    finally:
-        cudart.cudaThreadExchangeStreamCaptureMode(old_mode)
