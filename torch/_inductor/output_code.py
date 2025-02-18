@@ -38,6 +38,7 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
@@ -91,10 +92,6 @@ class OutputCode:
 
 
 _StrideExprStr: TypeAlias = str
-
-
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -368,7 +365,7 @@ class CompiledFxGraph(OutputCode):
             self.constants = {}
             self.frozen_param_names = {}
             for k, v in graph.constants.items():
-                if k.startswith("_frozen_param"):
+                if is_frozen_param(v):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
@@ -440,7 +437,7 @@ class CompiledFxGraph(OutputCode):
                 assert len(output.args) == 1
                 stack_traces = [
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
+                    for arg in output.args[0]  # type: ignore[union-attr]
                 ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
@@ -549,11 +546,6 @@ class CompiledFxGraph(OutputCode):
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        from .graph import GraphLowering
-
-        # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(code)
-
         try:
             with dynamo_timed(
                 "PyCodeCache.load_by_key_path",
@@ -570,10 +562,6 @@ class CompiledFxGraph(OutputCode):
             raise
 
         return artifact_path
-
-
-def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass
@@ -597,10 +585,6 @@ class CompiledAOTI(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
-
-
-def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass

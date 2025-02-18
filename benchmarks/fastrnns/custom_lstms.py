@@ -277,7 +277,7 @@ class BidirLSTMLayer(jit.ScriptModule):
             out, out_state = direction(input, state)
             outputs += [out]
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return torch.cat(outputs, -1), output_states
 
 
@@ -310,7 +310,7 @@ class StackedLSTM(jit.ScriptModule):
             state = states[i]
             output, out_state = rnn_layer(output, state)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 
@@ -341,7 +341,7 @@ class StackedLSTM2(jit.ScriptModule):
             state = states[i]
             output, out_state = rnn_layer(output, state)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 
@@ -383,7 +383,7 @@ class StackedLSTMWithDropout(jit.ScriptModule):
             if i < self.num_layers - 1:
                 output = self.dropout_layer(output)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 

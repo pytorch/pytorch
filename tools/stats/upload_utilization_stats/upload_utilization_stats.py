@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from __future__ import annotations
 
 import os
@@ -13,13 +15,13 @@ import argparse
 import json
 import zipfile
 from dataclasses import asdict
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd  # type: ignore[import]
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
     OssCiUtilizationTimeSeriesV1,
@@ -58,7 +60,7 @@ class SegmentGenerator:
                 for process in (record.cmd_names or [])
             ]
         )
-        df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s")
+        df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s", utc=True)
 
         # get unique cmd names
         unique_cmds_df = pd.DataFrame(df[cmd_col_name].unique(), columns=[cmd_col_name])
@@ -80,8 +82,8 @@ class SegmentGenerator:
                 segment = OssCiSegmentV1(
                     level=CMD_PYTHON_LEVEL,
                     name=value,
-                    start_at=row["start_time"].timestamp(),
-                    end_at=row["end_time"].timestamp(),
+                    start_at=int(row["start_time"].timestamp()),
+                    end_at=int(row["end_time"].timestamp()),
                     extra_info={},
                 )
                 segments.append(segment)
@@ -124,7 +126,7 @@ class UtilizationDbConverter:
         self.metadata = metadata
         self.records = records
         self.segments = segments
-        self.created_at = datetime.now().timestamp()
+        self.created_at = getTsNow()
         self.info = info
         end_time_stamp = max([record.timestamp for record in records])
         self.end_at = end_time_stamp
@@ -176,7 +178,7 @@ class UtilizationDbConverter:
             job_id=self.info.job_id,
             workflow_name=self.info.workflow_name,
             job_name=self.info.job_name,
-            json_data=str(asdict(record.data) if record.data else {}),
+            json_data=str(record.data.to_json() if record.data else {}),
         )
 
 
@@ -214,9 +216,6 @@ class UploadUtilizationData:
         db_metadata, db_records = UtilizationDbConverter(
             self.info, metadata, valid_records, segments
         ).convert()
-        print(
-            f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata), indent=4)}"
-        )
 
         if len(db_records) > 0:
             print(
@@ -338,8 +337,6 @@ class UploadUtilizationData:
         if len(lines) < 2:
             print("Expected at least two records from log file")
             return None, [], []
-        print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
-        print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
 
         try:
             metadata = UtilizationMetadata.from_json(lines[0])
@@ -365,12 +362,6 @@ def unzip_file(path: Path, file_name: str) -> str:
     except Exception as e:
         print(f"::warning trying to download test log {object} failed by: {e}")
         return ""
-
-
-def get_datetime_string(timestamp: float) -> str:
-    dt = datetime.fromtimestamp(timestamp, timezone.utc)
-    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-    return dt_str
 
 
 def parse_args() -> argparse.Namespace:
