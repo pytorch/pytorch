@@ -458,6 +458,7 @@ def mark_unbacked(t, index, strict=False):
             if not hasattr(t, "_dynamo_strict_unbacked_indices"):
                 t._dynamo_strict_unbacked_indices = set()
             t._dynamo_strict_unbacked_indices.add(index)
+            return
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()

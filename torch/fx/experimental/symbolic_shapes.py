@@ -4413,10 +4413,7 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim in (
-            DimDynamic.SIZE_LIKE_UNBACKED,
-            DimDynamic.OBLIVIOUS_SIZE
-        ):
+        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
