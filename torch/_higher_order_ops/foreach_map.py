@@ -2,10 +2,10 @@
 # mypy: allow-untyped-defs
 from typing import Any, Callable
 
-from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
+from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
 
 
-class ForeachMap(PrimHOPBase):
+class ForeachMap(BaseHOP):
     def __init__(self):
         super().__init__("foreach_map")
 

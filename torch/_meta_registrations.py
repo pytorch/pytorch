@@ -223,8 +223,12 @@ def logcumsumexp(self, dim):
     return torch.empty_like(self).contiguous()
 
 
-# Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
-def _exec_fft(out, self, out_sizes, dim, forward):
+# Stride-related code from _exec_fft in aten/src/ATen/native/mkl/SpectralOps.cpp
+# and aten/src/ATen/cuda/SpectralOps.cpp
+#
+# Although the actual FFT launch is different, all the permuting code appears
+# to be the same
+def _exec_fft(out, self, out_sizes, dim, *, forward):
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
@@ -258,12 +262,12 @@ def _exec_fft(out, self, out_sizes, dim, forward):
 
     batch_size = input.size(0)
     batched_sizes[0] = batch_size
-    batched_out_sizes = batched_sizes
+    batched_out_sizes = list(batched_sizes)
     for i in range(len(dim)):
         batched_out_sizes[i + 1] = out_sizes[dim[i]]
-    out = out.reshape(batched_out_sizes)
+    out.resize_(batched_out_sizes, memory_format=torch.contiguous_format)
 
-    # Reshaping to original batch shape and inverting the dimension permutation
+    # Inplace reshaping to original batch shape and inverting the dimension permutation
     out_strides = [0 for _ in range(ndim)]
     batch_numel = 1
     i = batch_dims - 1
@@ -273,7 +277,18 @@ def _exec_fft(out, self, out_sizes, dim, forward):
         i -= 1
     for i in range(batch_dims, ndim):
         out_strides[dim_permute[i]] = out.stride(1 + (i - batch_dims))
-    return out.as_strided(out_sizes, out_strides, out.storage_offset())
+    out.as_strided_(out_sizes, out_strides, out.storage_offset())
+
+    return out
+
+
+def _sort_dims(self: Tensor, dim: list[int], exclude_last: bool = False):
+    sorted_dims = list(dim)
+    self_strides = self.stride()
+    sorted_dims[: len(sorted_dims) - int(exclude_last)].sort(
+        key=lambda i: self_strides[i]
+    )
+    return sorted_dims
 
 
 # See _fft_c2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
@@ -281,36 +296,89 @@ def _exec_fft(out, self, out_sizes, dim, forward):
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
-    assert self.dtype.is_complex
-
-    out_sizes = self.shape
-    output = self.new_empty(out_sizes)
-
+    torch._check(self.dtype.is_complex)
     if not dim:
-        return output
+        return self.clone()
 
-    sorted_dims = dim[:]
-    self_strides = self.stride()
-    sorted_dims.sort(key=lambda x: self_strides[x], reverse=True)
-    output = _exec_fft(output, self, out_sizes, sorted_dims, forward)
+    sorted_dims = _sort_dims(self, dim)
+    out = self.new_empty(self.size())
+    return _exec_fft(out, self, self.size(), sorted_dims, forward=forward)
 
-    return output
+
+cufft_max_ndim = 3
+
+
+def use_optimized_cufft_path(dim: list[int]):
+    if len(dim) > cufft_max_ndim or (len(dim) >= 2 and dim[0] == 0 and dim[1] == 1):
+        return False
+    else:
+        return True
 
 
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
 @out_wrapper()
 def meta_fft_r2c(self, dim, normalization, onesided):
-    assert self.dtype.is_floating_point
-    output_sizes = list(self.size())
+    torch._check(self.dtype.is_floating_point)
+    input_sizes = list(self.size())
+    out_sizes = list(input_sizes)
+    last_dim = dim[-1]
+    last_dim_halfsize = input_sizes[last_dim] // 2 + 1
+    onesided_sizes = list(input_sizes)
+    onesided_sizes[last_dim] = last_dim_halfsize
 
     if onesided:
-        last_dim = dim[-1]
-        last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
-        output_sizes[last_dim] = last_dim_halfsize
+        out_sizes[last_dim] = last_dim_halfsize
 
-    return self.new_empty(
-        output_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
-    )
+    if device_hint(self) == "cuda":
+        # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+        output = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+
+        working_tensor = self
+        if use_optimized_cufft_path(dim):
+            _exec_fft(output, working_tensor, out_sizes, dim, forward=True)
+        else:
+            # First do the R2C transform on the last dimension
+            target_sizes = out_sizes if len(dim) == 1 else onesided_sizes
+            _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=True)
+            if len(dim) > 1:
+                working_tensor = self.new_empty(
+                    out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+                )
+
+            # Then any remaining C2C transforms
+            sorted_dims = dim[:-1]
+            while sorted_dims:
+                output, working_tensor = working_tensor, output
+                strides = working_tensor.stride()
+                sorted_dims.sort(
+                    key=lambda i: strides[i], reverse=True
+                )  # NB reverse!  Not sure if this is og bug
+                max_dims = min(cufft_max_ndim, len(sorted_dims))
+                last_dims = sorted_dims[len(sorted_dims) - max_dims :]
+                _exec_fft(
+                    output, working_tensor, onesided_sizes, last_dims, forward=True
+                )
+                sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
+
+        if not onesided:
+            if output.size(last_dim) != out_sizes[last_dim]:
+                working_tensor.resize_(out_sizes, memory_format=torch.contiguous_format)
+                output = working_tensor
+
+        return output
+
+    elif device_hint(self) == "xpu":
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        out = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
+    else:
+        return self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
 
 
 @register_meta(aten.randperm.generator_out)
@@ -375,11 +443,43 @@ def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
-def meta_fft_c2r(self, dim, normalization, lastdim):
-    assert self.dtype.is_complex
-    output_sizes = list(self.size())
-    output_sizes[dim[-1]] = lastdim
-    return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):
+    # _fft_c2r_mkl
+    torch._check(self.dtype.is_complex)
+
+    if device_hint(self) == "cuda":
+        out_sizes = list(self.size())
+        out_sizes[dim[-1]] = lastdim
+
+        output = self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
+
+        if use_optimized_cufft_path(dim):
+            return _exec_fft(
+                output,
+                self.clone(memory_format=torch.contiguous_format),
+                out_sizes,
+                dim,
+                forward=False,
+            )
+        else:
+            # First complete any C2C transforms
+            if len(dim) > 1:
+                temp = meta_fft_c2c(self, dim[:-1], 0, lastdim)  # fft_norm_mode::none
+            else:
+                temp = self.clone(memory_format=torch.contiguous_format)
+            return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
+
+    else:
+        input = self
+        if len(dim) > 1:
+            c2c_dims = dim[:-1]
+            input = meta_fft_c2c(self, c2c_dims, normalization, forward=False)
+            dim = dim[-1:]
+
+        out_sizes = list(input.size())
+        out_sizes[dim[-1]] = lastdim
+        out = self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
+        return _exec_fft(out, input, out_sizes, dim, forward=False)
 
 
 @register_meta(aten.copy_.default)
@@ -2483,7 +2583,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2563,6 +2663,25 @@ if torch._C._has_mkldnn:
             device=input.device,
             memory_format=memory_format,
         )
+
+    @register_meta(torch.ops.quantized.int4mm_packed_weight_cpu)
+    def meta_int4mm_packed_weight_cpu(x, w, q_group_size, q_scale_and_zeros):
+        torch._check(x.dim() == 2, f"x must be a 2D tensor, got {x.dim()}D")
+        torch._check(w.dim() == 2, f"w must be a 2D tensor, got {w.dim()}D")
+        torch._check(
+            x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+            f"expected x to be f32/f16/bf16, got {x.dtype}",
+        )
+        torch._check(w.dtype == torch.uint8, f"expected w to be uint8, got {w.dtype}")
+        torch._check(
+            q_group_size.dtype == torch.int64,
+            f"q_group_size must be int64, got {q_group_size.dtype}",
+        )
+        torch._check(
+            q_scale_and_zeros.dtype == x.dtype,
+            f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
+        )
+        return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -3149,7 +3268,7 @@ def meta_complex(real, imag):
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
-def nonzero_static(self, *, size: int, fill_value: int = -1):
+def nonzero_static(self, *, size, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
@@ -6394,7 +6513,8 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+    torch._check_is_size(k)
+    torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
     if len(topKSize) > 0:
@@ -6972,10 +7092,11 @@ def lerp(start, end, weight):
     )
     args = [start, end]
     if isinstance(weight, TensorLike):
-        torch._check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
-        )
+        if weight.ndim != 0:
+            torch._check(
+                start.dtype == weight.dtype,
+                lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
+            )
         args.append(weight)
     return elementwise_meta(
         *args, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT

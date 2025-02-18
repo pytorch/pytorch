@@ -172,9 +172,18 @@ def generate_ttir(
     """
     import sympy
     import triton
+    import triton.runtime.jit
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
+
+    from torch._inductor.utils import (
+        get_triton_attrs_descriptor_version,
+        triton_version_uses_attrs_dict,
+        TritonAttrsDescriptorVersion,
+    )
+
+    triton_version = get_triton_attrs_descriptor_version()
 
     import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
@@ -225,26 +234,78 @@ def generate_ttir(
     ]
 
     def _get_specialization(args):  # type: ignore[no-untyped-def]
-        try:
+        # Support multiple triton versions.
+        # This code basically copies JITFunction.run() logic to get the attrs to construct an ASTSource.
+        if triton_version == TritonAttrsDescriptorVersion.V1_COMPILER:
+            return kernel._get_config(*args)
+        elif triton_version in {
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
             from triton.backends.compiler import AttrsDescriptor  # noqa: F401
 
             target = triton.runtime.driver.active.get_current_target()
-            backend = triton.compiler.compiler.make_backend(target)
-            return backend.get_attrs_descriptor(args, kernel.params)
-        except ImportError:
-            return kernel._get_config(*args)
+            backend_ = triton.compiler.compiler.make_backend(target)
+            return backend_.get_attrs_descriptor(args, kernel.params)
+        else:
+            assert (
+                get_triton_attrs_descriptor_version()
+                == TritonAttrsDescriptorVersion.V4_DICT
+            )
+            from triton._utils import find_paths_if, get_iterable_path
+            from triton.runtime.jit import specialize_impl
+
+            # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
+            attrvals = []
+            for arg, kp in zip(args, kernel.params):
+                if kp.is_constexpr:
+                    attrvals.append(arg)
+                else:
+                    spec = specialize_impl(
+                        arg,
+                        specialize_extra=backend.get_arg_specialization,
+                        is_const=kp.is_const,
+                        specialize_value=not kp.do_not_specialize,
+                        align=not kp.do_not_specialize_on_alignment,
+                    )
+                    attrvals.append(spec[1])
+
+            attrs = find_paths_if(attrvals, lambda _, x: isinstance(x, str))
+            attrs = {
+                k: backend.parse_attr(get_iterable_path(attrvals, k)) for k in attrs
+            }
+            return attrs
 
     specialization = _get_specialization(ordered_args.values())
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
 
-    # Build kernel signature -- doesn't include constexpr arguments.
-    signature = {
-        name: kernel._type_of(kernel._key_of(arg))
-        for i, (name, arg) in enumerate(ordered_args.items())
-        if i not in kernel.constexprs
-    }
+    if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
+
+        def get_signature_value(idx: int, arg: Any) -> str:
+            if kernel.params[idx].is_constexpr:
+                return "constexpr"
+            return mangle_type(arg)
+
+    else:
+
+        def get_signature_value(idx: int, arg: Any) -> str:
+            return kernel._type_of(kernel.key_of(arg))
+
+    if triton_version_uses_attrs_dict():
+        # In newer versions of Triton, the signature includes constexpr args
+        signature = {
+            name: get_signature_value(i, arg)
+            for i, (name, arg) in enumerate(ordered_args.items())
+        }
+    else:
+        # In older versions of Triton, the signature does not include constexpr args
+        signature = {
+            name: get_signature_value(i, arg)
+            for i, (name, arg) in enumerate(ordered_args.items())
+            if i not in kernel.constexprs
+        }
 
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
@@ -254,13 +315,17 @@ def generate_ttir(
     # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
     # backward compatibility here.
     make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
+    get_codegen_implementation_sig_params = len(
+        inspect.signature(backend.get_codegen_implementation).parameters
+    )
     if make_ir_sig_params == 2:
         ttir_module = src.make_ir(options, context)
     elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
     else:
-        codegen_fns = backend.get_codegen_implementation()
+        codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
+        codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
         ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     if not ttir_module.verify():
@@ -1135,25 +1200,23 @@ class TritonHOPifier:
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
+
+            def defaults_ok(
+                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+            ) -> bool:
+                if attr not in defaults:
+                    return True
+                value = torch._dynamo.utils.get_first_attr(kernel, attr, *alternates)
+                if value == defaults[attr].default:
+                    return True
+                return value in values
+
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
                 and (
-                    (
-                        "warmup" in defaults
-                        and defaults["warmup"].default
-                        != torch._dynamo.utils.get_first_attr(
-                            kernel, "num_warmups", "warmup"
-                        )
-                    )
-                    or (
-                        "rep" in defaults
-                        and defaults["rep"].default
-                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                    )
-                    or (
-                        "use_cuda_graph" in defaults
-                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
-                    )
+                    not defaults_ok("num_warmups", ("warmup",), (25, None))
+                    or not defaults_ok("num_reps", ("rep",), (100, None))
+                    or not defaults_ok("use_cuda_graph", (), (False,))
                 )
             ):
                 self.raise_unsupported(

@@ -861,9 +861,8 @@ class DecisionEvaluator:
         """
 
         y_true = self.df["actual_winner"] if self.ranking else self.df["winner"]
-        i = 0
-        for pred, true, prob, leaf_id in zip(
-            self.predictions, y_true, self.probas, self.leaf_ids
+        for i, (pred, true, prob, leaf_id) in enumerate(
+            zip(self.predictions, y_true, self.probas, self.leaf_ids)
         ):
             avail_choices = self.df["avail_choices"].iloc[i]
             top_k_choices = self.top_k_classes(
@@ -884,7 +883,6 @@ class DecisionEvaluator:
                 i,
             )
             self.eval_ranking_prediction(true, top_k_choices, i)
-            i += 1
 
         total = len(self.predictions)
         if return_safe_proba:
