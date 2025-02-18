@@ -3485,6 +3485,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
 
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
+    torch._dynamo.reset()
     runner.args = args
 
     args.filter = args.filter or [r"."]

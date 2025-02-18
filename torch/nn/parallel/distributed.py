@@ -859,7 +859,7 @@ class DistributedDataParallel(Module, Joinable):
             _setup_mixed_precision_params(self.mixed_precision, self.module)
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
-            self._mp_stream = torch.cuda.Stream()
+            self._mp_stream = torch.Stream()
             self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
@@ -885,7 +885,7 @@ class DistributedDataParallel(Module, Joinable):
 
             upcast_hook_state = _AllreduceUpcastHookState(
                 ddp_weakref=weakref.ref(self),
-                upcast_stream=torch.cuda.Stream(),
+                upcast_stream=torch.Stream(),
             )
             self.register_comm_hook(
                 upcast_hook_state,
@@ -1078,7 +1078,7 @@ class DistributedDataParallel(Module, Joinable):
         # may have populated some events for modules that didn't end up being
         # used.
         self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
-        with torch.cuda.stream(self._mp_stream):
+        with self._mp_stream:
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
                     # Do not cast DDP ignored parameters.
@@ -1102,7 +1102,7 @@ class DistributedDataParallel(Module, Joinable):
                                 self.mixed_precision.param_dtype  # type: ignore[union-attr]
                             )
                     param.data = param._mp_param
-                copy_event = torch.cuda.Event()
+                copy_event = torch.Event()
                 copy_event.record()
                 self._submodule_to_event[submodule].append(copy_event)
 
@@ -1119,7 +1119,7 @@ class DistributedDataParallel(Module, Joinable):
             # copy event has already been waited on
             return
 
-        event.wait(stream=torch.cuda.current_stream())
+        event.wait(stream=torch.accelerator.current_stream())
         for p in module.parameters(recurse=False):
             # Don't register hooks if param does not require grad
             if not p.requires_grad or (hasattr(p, "_ddp_ignored") and p._ddp_ignored):
@@ -2240,23 +2240,27 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in [
-            "bf16_compress_hook",
-            "bf16_compress_wrapper_hook",
-        ] and (
-            (torch.version.cuda is None and torch.version.hip is None)
-            or (
+        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
+            cuda_supported = (
                 torch.version.cuda is not None
-                and int(torch.version.cuda.split(".")[0]) < 11
+                and int(torch.version.cuda.split(".")[0]) >= 11
+            ) or torch.version.hip is not None
+            nccl_supported = (
+                dist.is_available()
+                and dist.is_nccl_available()
+                and torch.cuda.nccl.version() >= (2, 10)
             )
-            or not dist.is_available()
-            or not dist.is_nccl_available()
-            or torch.cuda.nccl.version() < (2, 10)
-        ):
-            self._log_and_throw(
-                TypeError,
-                "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+.",
+            xpu_xccl_supported = (
+                dist.is_available()
+                and dist.is_xccl_available()
+                and torch.xpu.is_available()
             )
+
+            if not ((cuda_supported and nccl_supported) or xpu_xccl_supported):
+                self._log_and_throw(
+                    TypeError,
+                    "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+ or XPU and XCCL",
+                )
 
     @property
     def _distributed_rank(self):
