@@ -11,8 +11,6 @@ UNIMPLEMENTED = "unimplemented"
 TEST_OUTPUT_MATCH = "test_output_match"
 TEST_OUTPUT_GRAD_MATCH = "test_output_grad_match"
 TEST_ERROR_INPUTS = "test_error_inputs"
-
-
 COMMON = "TestCommon"
 ERROR_INPUTS = "TestErrorInputs"
 
