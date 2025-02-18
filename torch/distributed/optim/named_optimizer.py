@@ -83,6 +83,8 @@ class _NamedOptimizer(optim.Optimizer):
             **kwargs,
         )
         self.module = module
+        self.defaults = self._optimizer.defaults
+
         if param_groups is None:
             self.ordered_param_keys = list(self.named_parameters.keys())
         else:
