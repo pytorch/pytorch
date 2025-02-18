@@ -2,7 +2,7 @@ add_loop_eager,compile_time_instruction_count,3121000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5813000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,6446000000,0.025
 
 
 
@@ -10,7 +10,7 @@ add_loop_inductor,compile_time_instruction_count,30000000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44000000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,46470000000,0.025
 
 
 
@@ -18,7 +18,7 @@ add_loop_inductor_gpu,compile_time_instruction_count,26040000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,977200000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,976400000,0.015
 
 
 
@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11000000
 
 
 
-update_hint_regression,compile_time_instruction_count,1708000000,0.02
+update_hint_regression,compile_time_instruction_count,1787000000,0.02
 
 
 
@@ -42,7 +42,7 @@ sum_floordiv_regression,compile_time_instruction_count,1055000000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3360000000,0.015
+symint_sum,compile_time_instruction_count,3345000000,0.015
 
 
 
