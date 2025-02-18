@@ -92,6 +92,21 @@ _GUARD_SOURCE_FSDP_MODULE = {
 }
 
 
+def cache_source(reconstruct_fn):
+    def inner(source, codegen):
+        if saved_var := codegen._tempsources.get(source, None):
+            codegen.append_output(codegen.create_load(saved_var))
+            return
+
+        reconstruct_fn(source, codegen)
+
+        if source in codegen._tempsources:
+            assert codegen._tempsources[source] is None
+            codegen.add_cache_source(source)
+
+    return inner
+
+
 def is_constant_source(source):
     if isinstance(source, ConstantSource):
         return True
@@ -223,6 +238,7 @@ class AttrSource(ChainedSource):
             )
             object.__setattr__(self, "member", member_parts[-1])
 
+    @cache_source
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
         codegen.extend_output(codegen.create_load_attrs(self.member))
@@ -263,6 +279,7 @@ class LocalCellSource(Source):
 class GradSource(ChainedSource):
     member: str = "grad"
 
+    @cache_source
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
         codegen.extend_output(codegen.create_load_attrs(self.member))
@@ -338,6 +355,7 @@ class TensorPropertySource(ChainedSource):
         else:
             assert self.idx is not None
 
+    @cache_source
     def reconstruct(self, codegen):
         codegen.add_push_null(
             lambda: codegen.load_import_from(
@@ -505,6 +523,7 @@ class GetItemSource(ChainedSource):
             super().__setattr__("index", self.index.__reduce__())
             super().__setattr__("index_is_slice", True)
 
+    @cache_source
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
         if self.index_is_slice:
@@ -539,9 +558,12 @@ class ConstDictKeySource(ChainedSource):
     def guard_source(self):
         return self.base.guard_source()
 
+    @cache_source
     def reconstruct(self, codegen):
         codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
+            lambda: codegen.load_import_from(
+                utils.__name__, "dict_keys_getitem", add_cache=True
+            )
         )
         self.base.reconstruct(codegen)
         codegen.append_output(codegen.create_load_const(self.index))
@@ -573,12 +595,15 @@ class DictGetItemSource(ChainedSource):
     def guard_source(self):
         return self.base.guard_source()
 
+    @cache_source
     def reconstruct(self, codegen):
         # reconstruct dict.__getitem__(dct, key)
 
         # Load dict.__getitem__
         codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "dict_getitem")
+            lambda: codegen.load_import_from(
+                utils.__name__, "dict_getitem", add_cache=True
+            )
         )
 
         # Load dict
@@ -605,13 +630,16 @@ class ListGetItemSource(GetItemSource):
     Same as GetItemSource with reconstruct and name overridden to be list specific.
     """
 
+    @cache_source
     def reconstruct(self, codegen):
         # Reconstruct list.__getitem__(lst, index) to avoid any side effects
         # from possibly overridden __getitem__.
 
         # Load list.__getitem__
         codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "list_getitem")
+            lambda: codegen.load_import_from(
+                utils.__name__, "list_getitem", add_cache=True
+            )
         )
 
         # Load the list
@@ -642,9 +670,12 @@ class ListGetItemSource(GetItemSource):
 
 @dataclasses.dataclass(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
+    @cache_source
     def reconstruct(self, codegen):
         codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
+            lambda: codegen.load_import_from(
+                utils.__name__, "tuple_iterator_getitem", add_cache=True
+            )
         )
         self.base.reconstruct(codegen)
         codegen.append_output(codegen.create_load_const(self.index))
@@ -659,8 +690,11 @@ class TypeSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 
+    @cache_source
     def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "type", add_cache=True)
+        )
         self.base.reconstruct(codegen)
         codegen.extend_output(create_call_function(1, False))
 
@@ -673,6 +707,7 @@ class TypeSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class OptimizerSource(ChainedSource):
+    @cache_source
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
 
@@ -685,6 +720,7 @@ class OptimizerSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class NNModuleSource(ChainedSource):
+    @cache_source
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
 
@@ -773,7 +809,9 @@ class NumpyTensorSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch", "as_tensor", add_cache=True)
+        )
         self.base.reconstruct(codegen)
         codegen.extend_output(create_call_function(1, False))
 

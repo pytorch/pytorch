@@ -88,6 +88,7 @@ class PyCodegen:
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
         self.value_from_source: bool = True
+        self._tempsources = {}
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
@@ -319,6 +320,12 @@ class PyCodegen:
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
+    def add_cache_source(self, source):
+        var = self.new_var()
+        self._tempsources[source] = var
+        self._output.append(create_dup_top())
+        self._output.append(self.create_store(var))
+
     def foreach(self, items):
         for i in items:
             self(i)
@@ -531,7 +538,27 @@ class PyCodegen:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
+        from collections import defaultdict
+
+        source_uses = defaultdict(lambda: 0)
+
+        def collect_temp_sources(source):
+            from .source import ChainedSource
+
+            source_uses[source] += 1
+
+            if isinstance(source, ChainedSource):
+                collect_temp_sources(source.base)
+
         graphargs = self.tx.output.graphargs
+        for arg in graphargs:
+            if not arg.pass_arg_as_tensor and arg.source is not None:
+                collect_temp_sources(arg.source)
+
+        for source, count in source_uses.items():
+            if count > 1:
+                self._tempsources[source] = None
+
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
@@ -549,8 +576,11 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def load_import_from(self, module_name, object_name) -> None:
-        self(AttrSource(self.tx.import_source(module_name), object_name))
+    def load_import_from(self, module_name, object_name, add_cache=False) -> None:
+        new_source = AttrSource(self.tx.import_source(module_name), object_name)
+        if add_cache and new_source not in self._tempsources:
+            self._tempsources[new_source] = None
+        self(new_source)
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
