@@ -11953,6 +11953,34 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=2,
+                rank=0,
+                store=FakeStore(),
+            )
+
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        finally:
+            torch.distributed.destroy_process_group()
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -12523,39 +12551,6 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
-
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
-    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
-    @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
-    @testing.expectedFailureRetraceabilityNonStrict
-    @testing.expectedFailureLegacyExportNonStrict
-    def test_distributed_all_reduce(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 3)
-
-            def forward(self, x):
-                y = self.linear(x).abs().clamp(max=1.0) * 2
-                torch.distributed.all_reduce(y)
-                return y
-
-        try:
-            torch.distributed.init_process_group(
-                backend="fake",
-                world_size=2,
-                rank=0,
-                store=FakeStore(),
-            )
-
-            m = Foo()
-            ep = export(m, (torch.randn(4, 4),))
-            inp = (torch.randn(4, 4),)
-            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
-
-        finally:
-            torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):
