@@ -3,7 +3,7 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -11,7 +11,7 @@ import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed.fsdp import FSDPModule, fully_shard
-from torch.fx.node import map_aggregate
+from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils._pytree import tree_map_only
 
@@ -538,12 +538,7 @@ class _PipelineStageBase(ABC):
             else:
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
-        tensors = map_aggregate(
-            recv_infos,  # type: ignore[arg-type]
-            get_recv_tensor,
-        )
-
-        return tensors
+        return map_aggregate(cast(Argument, recv_infos), get_recv_tensor)
 
     def _retrieve_recv_activations(self, fwd_chunk_id: int):
         """
@@ -1371,7 +1366,13 @@ class PipelineStage(_PipelineStageBase):
                 self.stage_index - 1,
             )
             dist.recv_object_list(
-                objects, src=self.prev_rank, group=self.group, device=self.device
+                objects,
+                src=dist.get_global_rank(
+                    self.group or dist.distributed_c10d._get_default_group(),
+                    self.stage_index_to_group_rank[self.stage_index - 1],
+                ),
+                group=self.group,
+                device=self.device,
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1431,7 +1432,10 @@ class PipelineStage(_PipelineStageBase):
             )
             dist.send_object_list(
                 [outputs_meta],
-                dst=self.next_rank,
+                dst=dist.get_global_rank(
+                    self.group or dist.distributed_c10d._get_default_group(),
+                    self.stage_index_to_group_rank[self.stage_index + 1],
+                ),
                 group=self.group,
                 device=self.device,
             )
