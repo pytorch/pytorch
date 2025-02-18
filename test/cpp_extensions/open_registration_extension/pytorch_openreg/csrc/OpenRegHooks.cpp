@@ -12,8 +12,8 @@
 namespace openreg {
 
 namespace {
-// Python dictionary where real implementations can be found
-PyObject* py_registry;
+// Python factory function where real implementations can be found
+PyObject* py_factory;
 
 using host_ptr_t = uint64_t;
 
@@ -344,15 +344,12 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 } // anonymous namspaces
 
 // Setter for the python dictionary with implementations
-void set_impl_registry(PyObject* registry) {
-  py_registry = registry;
+void set_impl_factory(PyObject* factory) {
+  py_factory = factory;
 }
 
 py::function get_method(const char* name) {
-  auto dict = py::cast<py::dict>(py_registry);
-    TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
-        "an implementation for '", name, "' make sure to add it in the __init__.py "
-      "file and register it.")
-  return dict[name];
+  auto factory = py::cast<py::function>(py_factory);
+  return factory(name);
 }
 } // openreg

@@ -839,7 +839,7 @@ class TestFlopCounter(TestCase):
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "Does not support fp8 (pre-SM90 hardware on CUDA)",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
         dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
