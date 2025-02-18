@@ -1,4 +1,25 @@
 # mypy: ignore-errors
+
+"""
+This file contains a collection of context manager classes used by Dynamo for tracking
+and managing various PyTorch runtime states during graph compilation. These context
+managers handle different aspects of PyTorch's execution environment, including:
+
+- Autograd states (grad mode, inference mode)
+- CUDA streams and events
+- Profiling contexts
+- Deterministic algorithms
+- Forward/backward AD modes
+- SDPA (Scaled Dot Product Attention) kernels
+- FSDP (Fully Sharded Data Parallel) states
+- AMP (Automatic Mixed Precision) autocast states
+
+The context managers ensure proper state transitions during graph compilation by
+tracking enter/exit points and managing cleanup operations. They help maintain
+consistency between eager execution and compiled graph behavior by capturing and
+restoring state changes.
+"""
+
 import dataclasses
 import inspect
 import sys
@@ -34,7 +55,7 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass
-class ContextMangerState:
+class ContextManagerState:
     """
     Mutating `self` in VariableTracker is not allowed because we copy
     them.  This is a mutable container pointed to by context managers
@@ -69,7 +90,7 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextMangerState() if state is None else state
+        self.state = ContextManagerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -1171,6 +1192,9 @@ class StreamVariable(VariableTracker):
         self.value = value
         self.device = device
 
+    def python_type(self):
+        return torch.Stream
+
     def call_method(
         self,
         tx,
@@ -1179,15 +1203,8 @@ class StreamVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1211,8 +1228,17 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy
