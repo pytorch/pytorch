@@ -1,4 +1,3 @@
-warning: Selection `RUF030` has no effect because preview is not enabled.
 # Owner(s): ["oncall: jit"]
 # ruff: noqa: F841
 import contextlib
