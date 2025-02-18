@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #include <ATen/AccumulateType.h>
@@ -691,7 +692,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
   using namespace mps;
 
-  if (self.numel() == 0) {
+  if (self.numel() == 0 || mask.numel() == 0) {
     return self;
   }
   TORCH_CHECK(self.device() == mask.device(),
@@ -708,8 +709,29 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:fillPSO];
-      mtl_setArgs(
-          computeEncoder, self, mask, value.toFloat(), self.sizes(), self.strides(), mask.strides(), self.ndimension());
+      AT_DISPATCH_V2(self.scalar_type(),
+                     "masked_fill__mps",
+                     AT_WRAP([&] {
+                       mtl_setArgs(computeEncoder,
+                                   self,
+                                   mask,
+                                   value.to<scalar_t>(),
+                                   self.sizes(),
+                                   self.strides(),
+                                   mask.strides(),
+                                   self.ndimension());
+                     }),
+                     kFloat,
+                     kHalf,
+                     kInt,
+                     kLong,
+                     kShort,
+                     kByte,
+                     kChar,
+                     kBool,
+                     kBFloat16,
+                     kComplexFloat,
+                     kComplexHalf);
       mtl_dispatch1DJob(computeEncoder, fillPSO, self.numel());
     }
   });
