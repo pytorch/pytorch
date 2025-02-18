@@ -174,7 +174,7 @@ def test_cuda_gds_errors_captured() -> None:
     try:
         print("Testing test_cuda_gds_errors_captured")
         with NamedTemporaryFile() as f:
-            torch.cuda.gds._GdsFile(f.name, os.O_CREAT | os.O_RDWR)
+            torch.cuda.gds.GdsFile(f.name, os.O_CREAT | os.O_RDWR)
     except RuntimeError as e:
         expected_error = "cuFileHandleRegister failed"
         if re.search(expected_error, f"{e}"):
