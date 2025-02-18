@@ -234,7 +234,16 @@ Tensor max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
 
-  // TODO Add mkldnn_max_pool3d pass to get better performance
+#if AT_MKLDNN_ENABLED()
+#if !defined(C10_MOBILE)
+  // Use mkldnn_max_pool3d to get better performance
+  if (use_mkldnn_maxpool(self, dilation, /*is_3d*/ true)) {
+    return at::mkldnn_max_pool3d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+#endif
+#endif
+
   auto output_and_indices = at::max_pool3d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);
