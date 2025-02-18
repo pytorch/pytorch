@@ -29,7 +29,12 @@ from torch.testing._internal.common_pruning import (
     SimpleConv2d,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    skipIfTorchDynamo,
+    TEST_CUDA,
+    TEST_HPU,
+    TestCase,
+)
 
 
 logging.basicConfig(
@@ -38,8 +43,9 @@ logging.basicConfig(
 
 DEVICES = {
     torch.device("cpu"),
-    torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
-}
+    torch.device("cuda") if TEST_CUDA else None,
+    torch.device("hpu") if TEST_HPU else None,
+} - {None}
 
 
 class SimplePruner(BaseStructuredSparsifier):
