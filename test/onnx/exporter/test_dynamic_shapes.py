@@ -514,7 +514,7 @@ class TestDynamicShapes(common_utils.TestCase):
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
         )
         self.assertEqual(dynamic_shapes_with_export_dim, dynamic_shapes)
-        self.assertFalse(need_axis_mapping)
+        self.assertTrue(need_axis_mapping)
 
         # 2. Tuple
         dynamic_shapes = (
