@@ -390,7 +390,6 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
@@ -500,7 +499,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tracer.update_parent_exn_vt_stack(tx)
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -653,9 +651,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer = self._get_inline_tracer(tx)
             try:
                 self._setup_exception(tx, args[0])
-            except ObservedException:
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tracer.update_parent_exn_vt_stack(tx)
                 raise
 
             retval = self.next_variable(tx)
@@ -728,9 +725,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tracer.update_parent_exn_vt_stack(tx)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
