@@ -15,7 +15,7 @@ PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 typedef struct {
-    int active_dynamo_threads;
+  int active_dynamo_threads;
 } ModuleState;
 
 // static int active_dynamo_threads = 0;
@@ -205,27 +205,17 @@ static PyObject* (*previous_eval_frame)(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) = NULL;
 
-#if PY_VERSION_HEX >= 0x03090000
 static PyObject* dynamo_custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
-#else
-static PyObject* dynamo_custom_eval_frame_shim(
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag) {
-  PyThreadState* tstate = PyThreadState_GET();
-  return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
-}
-#endif
 
 static PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
-#if PY_VERSION_HEX >= 0x03090000
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
@@ -234,13 +224,9 @@ static PyObject* dynamo_eval_frame_default(
   } else {
     return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
   }
-#else
-  return _PyEval_EvalFrameDefault(frame, throw_flag);
-#endif
 }
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {
-#if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &dynamo_custom_eval_frame_shim) {
     DEBUG_CHECK(previous_eval_frame == NULL);
@@ -248,28 +234,15 @@ static void enable_eval_frame_shim(PyThreadState* tstate) {
     _PyInterpreterState_SetEvalFrameFunc(
         tstate->interp, &dynamo_custom_eval_frame_shim);
   }
-#else
-  if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
-    // First call
-    tstate->interp->eval_frame = &custom_eval_frame_shim;
-  }
-#endif
 }
 
 static void enable_eval_frame_default(PyThreadState* tstate) {
-#if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       previous_eval_frame) {
     DEBUG_CHECK(previous_eval_frame != NULL);
     _PyInterpreterState_SetEvalFrameFunc(tstate->interp, previous_eval_frame);
     previous_eval_frame = NULL;
   }
-#else
-  if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
-    // First call
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  }
-#endif
 }
 
 static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -700,7 +673,6 @@ static PyObject* dynamo__custom_eval_frame(
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
-  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -831,7 +803,9 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
@@ -844,11 +818,13 @@ static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
-      if (state->active_dynamo_threads > 0) {
+    if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
       if (state->active_dynamo_threads == 0) {
         enable_eval_frame_default(tstate);
@@ -859,7 +835,10 @@ static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate, PyObject* module) {
+static PyObject* set_eval_frame(
+    PyObject* new_callback,
+    PyThreadState* tstate,
+    PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -982,13 +961,13 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static int clear_state(PyObject *module) {
-    ModuleState* state = PyModule_GetState(module);
-    if (state) {
-        state->active_dynamo_threads = 0;
-        return 0;
-    }
-    return -1;
+static int clear_state(PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+  if (state) {
+    state->active_dynamo_threads = 0;
+    return 0;
+  }
+  return -1;
 }
 
 static PyMethodDef _methods[] = {

@@ -1,5 +1,28 @@
 # mypy: ignore-errors
 
+"""
+This module implements variable tracking for PyTorch nn.Module instances during Dynamo tracing.
+
+It provides specialized handling for different types of nn.Module instances through several key classes:
+
+- NNModuleVariable: Handles instance-specific module tracing, specializing on module id() and placing
+  parameters directly on the torch.fx.GraphModule. This creates one graph per module instance.
+
+- UnspecializedNNModuleVariable: Provides class-level module tracing, treating nn.Modules like other
+  user-defined objects and passing parameters as inputs to the FX graph. This creates one graph per
+  module class.
+
+- UnspecializedBuiltinNNModuleVariable: Specifically handles built-in PyTorch modules (e.g. nn.Linear)
+  with appropriate optimizations.
+
+- FSDPManagedNNModuleVariable: Special handling for FSDP-wrapped modules with modified guarding behavior
+  and parameter handling.
+
+The module integrates with Dynamo's broader tracing functionality to handle module method calls,
+parameter access, hooks, and other nn.Module behaviors while maintaining proper scoping and guarding
+of module state.
+"""
+
 import functools
 import inspect
 import itertools
@@ -193,7 +216,9 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -286,8 +311,11 @@ class NNModuleVariable(VariableTracker):
                 )
                 if result is not None:
                     return result
-                # if we can't find a __getattr__, just raise the AttributeError
-                raise
+                # if we can't find a __getattr__, we can't parse this, raise attribute error
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                )
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
