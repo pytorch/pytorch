@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import re
-import sysconfig
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -558,7 +557,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -1033,6 +1032,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         def mm(a, b):
             return torch.mm(a, b.to(torch.half))
@@ -1090,16 +1090,6 @@ class TestCutlassBackend(TestCase):
             command = cuda_standalone_runner_compile_command(
                 Path(cu_file.name), Path(exe_file.name)
             )
-
-            if config.is_fbcode():
-                # hack to bypass the following error:
-                # error while loading shared libraries: IX}: invalid mode for dlopen(): Invalid argument
-                platform_path = sysconfig.get_config_var("LIBDIR")
-                link_str = " ".join(
-                    [f"-L{platform_path}", "-Xlinker", f"-rpath={platform_path}"]
-                )
-                command = command.replace(link_str, " ")
-
             retcode = os.system(command)
             assert retcode == 0
 
@@ -1129,6 +1119,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
+                # needed for log searching
                 "force_disable_caches": True,
             }
         ):
