@@ -1003,6 +1003,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # Release the inputs for memory reuse.
         wrapper_body += """
                     args.clear()
+                    del input_tensors
         """
 
         # unwrap output tensor back to python scalar
