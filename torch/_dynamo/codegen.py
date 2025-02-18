@@ -35,7 +35,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import IncorrectUsage, unimplemented_v2
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -293,7 +293,12 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure",
+                    context=str(value),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for variable {value}.",
+                    hints=[],
+                )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
