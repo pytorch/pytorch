@@ -887,7 +887,7 @@ class CppMicroBrgemm(CppMicroGemmF16Abstract):
 #include <ATen/Context.h>
 {{declare_kernel}} {
 {%- if pack_vnni_B_locally %}
-    {{template.codegen_allocate_buffer("packed_B_buf", input2_t, f"K * N")}}
+    {{template.codegen_allocate_buffer("packed_B_buf", input2_t, "K * N")}}
     pack_vnni2(B, packed_B_buf, ldb, K, N);
 {%- endif %}
     at::native::cpublas::brgemm(
