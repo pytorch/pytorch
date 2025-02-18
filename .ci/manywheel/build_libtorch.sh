@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # meant to be called only from the neighboring build.sh and build_cpu.sh scripts
 
+export USE_STATIC_MKL=1
+
 set -e pipefail
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
