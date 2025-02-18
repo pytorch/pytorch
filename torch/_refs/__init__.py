@@ -4968,6 +4968,14 @@ def new_full(
     )
 
 
+@aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def empty_out(
+    size: TensorLikeType,
+    out: TensorLikeType,
+) -> TensorLikeType:
+    return out
+
+
 @register_decomposition(aten.empty_like)
 @out_wrapper()
 def empty_like(

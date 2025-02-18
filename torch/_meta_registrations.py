@@ -4783,6 +4783,38 @@ def zeros_like(
     return res
 
 
+@register_meta([aten.ones.default, aten.ones.out])
+@out_wrapper()
+def meta_ones(
+    self,
+    dtype=None,
+    layout=None,
+    device=None,
+):
+    return torch.empty(
+            self,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+        )
+
+
+@register_meta([aten.zeros.default, aten.zeros.out])
+@out_wrapper()
+def meta_zeros(
+    self,
+    dtype=None,
+    layout=None,
+    device=None,
+):
+    return torch.empty(
+            self,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+        )
+
+
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     ndim = self.dim()
