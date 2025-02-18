@@ -66,6 +66,7 @@ from .simd_kernel_features import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
+import re
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -2052,18 +2053,35 @@ class SIMDScheduling(BaseScheduling):
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
         indirect_broadcast = False
-        indirect_dims = []
+        indirect_dims = set()
         other_dims = []
         
         if len(node_schedule) == 1:
+            
+            indices = set()
             for index, read in enumerate(node_schedule[0].read_writes.reads):
                 if hasattr(read, 'indirect_broadcast') and read.indirect_broadcast:
                     indirect_broadcast = True
-                    indirect_dims.append(index)
+                    for asymbol in read.index.free_symbols:
+                        is_indirect = re.compile(r"indirect|tmp").search
+                        if not is_indirect(asymbol.name):
+                            indirect_dims.add(asymbol)
+                indices.update(read.var_names)
+            
+            # index = list(node_schedule[0].read_writes.var_ranges.keys())
+            indices = list(indices)
+            indices.sort(key=lambda d:d.name)
+            assert len(indices) == len(node_schedule[0]._body.iter_vars), (indices, node_schedule[0]._body.iter_vars)
+            assert all(
+                v not in node_schedule[0]._body.iter_vars for v in indices
+            ), f"{node_schedule[0]._body.iter_vars=}, {indices=}"
+
+            mem_dep_iter_vars_to_ir_iter_vars_replacements = dict(zip(indices, node_schedule[0]._body.iter_vars))
+            indirect_dims = [mem_dep_iter_vars_to_ir_iter_vars_replacements[iter_var] for iter_var in indirect_dims]
+            other_dims = [iter_var for iter_var in node_schedule[0]._body.iter_vars if iter_var not in indirect_dims]
             if indirect_broadcast and len(node_schedule) == 1:
-                indirect_dims.sort(key=lambda d: V.graph.sizevars.size_hint(node_schedule[0]._body.sizes[0][d]))
-                other_dims = [d for d in range(len(node_schedule[0]._body.sizes[0])) if d not in indirect_dims]
-                new_order = indirect_dims + other_dims
+                indirect_dims.sort(key=lambda iter_var: node_schedule[0]._body.var_ranges[iter_var])
+                new_order = [node_schedule[0]._body.iter_vars.index(dim) for dim in indirect_dims] + [node_schedule[0]._body.iter_vars.index(dim) for dim in other_dims]
                 if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
                     node_schedule[0].apply_new_loop_order(new_order)
 
