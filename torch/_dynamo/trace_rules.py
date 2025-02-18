@@ -3183,10 +3183,8 @@ def _as_posix_path(path):
 
 
 def _strip_init_py(s):
-    # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
-    if s.endswith(suffix):
-        s = s[: -len(suffix)]
+    s = s.removesuffix(suffix)
     return _as_posix_path(s)
 
 
