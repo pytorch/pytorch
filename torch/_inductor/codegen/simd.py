@@ -2057,9 +2057,8 @@ class SIMDScheduling(BaseScheduling):
         other_dims = []
         
         if len(node_schedule) == 1:
-            
             indices = set()
-            for index, read in enumerate(node_schedule[0].read_writes.reads):
+            for read in node_schedule[0].read_writes.reads:
                 if hasattr(read, 'indirect_broadcast') and read.indirect_broadcast:
                     indirect_broadcast = True
                     for asymbol in read.index.free_symbols:
@@ -2068,7 +2067,6 @@ class SIMDScheduling(BaseScheduling):
                             indirect_dims.add(asymbol)
                 indices.update(read.var_names)
             
-            # index = list(node_schedule[0].read_writes.var_ranges.keys())
             indices = list(indices)
             indices.sort(key=lambda d:d.name)
             assert len(indices) == len(node_schedule[0]._body.iter_vars), (indices, node_schedule[0]._body.iter_vars)
