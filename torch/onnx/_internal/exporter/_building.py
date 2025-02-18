@@ -645,7 +645,24 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
-            # Special cases for handling Rank
+            # TODO(justinchuby): Remove this once IsScalar and Rank are removed
+            # Special cases for handling IsScalar and Rank
+            if function.name == "IsScalar":
+                if len(args) != 1:
+                    raise TypeError(
+                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
+                    )
+                if isinstance(args[0], _tensors.SymbolicTensor):
+                    if args[0].rank is not None:
+                        return args[0].rank == 0
+                    else:
+                        # Fall to call add_function_call
+                        pass
+                elif isinstance(args[0], Sequence):
+                    return False
+                else:
+                    # Python constants are scalars
+                    return True
             if function.name == "Rank":
                 if len(args) != 1:
                     raise TypeError(
@@ -682,6 +699,39 @@ class OpRecorder(evaluator.Evaluator):
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
             )
+
+            # TODO(after torchlib migration): Remove traceable function handling
+            # NOTE: We need to call traceable functions after the _construct_named_inputs_and_attrs
+            # call because it will filter out the unexpected kwargs for us.
+            if function.traceable:
+                # Trace the function call instead of adding the function as a node
+                # Turn the ir.Attr objects into Python constants first
+                named_attrs = {
+                    name: attr.value if isinstance(attr, ir.Attr) else attr
+                    for name, attr in named_attrs.items()
+                }
+
+                # Use the type binding to resolve the dtypes of the inputs, and
+                # convert Python constants to Constant nodes
+                type_binding = _resolve_parameter_dtypes(op_signature, named_inputs)
+                try:
+                    # _process_python_sequences is not here because we want to preserve python list
+                    # properties for the function call
+                    converted_named_inputs = _process_python_constants(
+                        op_signature,
+                        named_inputs,
+                        type_binding,
+                        self.constant_farm,
+                        self.opset,
+                    )
+
+                except Exception as e:
+                    raise _errors.GraphConstructionError(
+                        f"Error processing Python constants for operator '{op_signature.domain}::{op_signature.name}'. "
+                        f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
+                    ) from e
+
+                return function.function(**converted_named_inputs, **named_attrs)
 
             outputs = self._call_op(
                 op_signature,

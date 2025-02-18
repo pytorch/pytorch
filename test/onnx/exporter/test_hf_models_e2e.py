@@ -30,11 +30,72 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=dynamic_axes,
-            # TODO(titaiwang): Investigate why ORT fails without optimization
-            optimize=True,
         )
-
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_onnx_export_with_custom_axis_names_in_dynamic_shapes(self):
+        model, kwargs, _, input_names, output_names = _prepare_llm_model_gptj_to_test()
+
+        dynamic_shapes = {
+            "input_ids": {0: "batch_size", 1: "sequence_length"},
+            "past_key_values": [
+                (
+                    {0: "batch_size", 2: "past_sequence_length"},
+                    {0: "batch_size", 2: "past_sequence_length"},
+                ),
+                (
+                    {0: "batch_size", 2: "past_sequence_length"},
+                    {0: "batch_size", 2: "past_sequence_length"},
+                ),
+                (
+                    {0: "batch_size", 2: "past_sequence_length"},
+                    {0: "batch_size", 2: "past_sequence_length"},
+                ),
+                (
+                    {0: "batch_size", 2: "past_sequence_length"},
+                    {0: "batch_size", 2: "past_sequence_length"},
+                ),
+                (
+                    {0: "batch_size", 2: "past_sequence_length"},
+                    {0: "batch_size", 2: "past_sequence_length"},
+                ),
+            ],
+            "attention_mask": {0: "batch_size", 1: "masked_sequence_length"},
+            "position_ids": {0: "batch_size", 1: "sequence_length"},
+        }
+
+        onnx_program = self.export(
+            model,
+            kwargs=kwargs,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_shapes=dynamic_shapes,
+            optimize=False,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+
+        # Check that the dynamic axes are correctly set in the ONNX model
+        for dim, custom_name in zip(
+            onnx_program.model.graph.inputs[0].shape,
+            dynamic_shapes["input_ids"].values(),
+        ):
+            self.assertEqual(dim.value, custom_name)
+        for idx in range(1, 11):
+            shape_value = [
+                dim if isinstance(dim, int) else dim.value
+                for dim in onnx_program.model.graph.inputs[idx].shape
+            ]
+            self.assertEqual(shape_value, ["batch_size", 4, "past_sequence_length", 8])
+        for dim, custom_name in zip(
+            onnx_program.model.graph.inputs[11].shape,
+            dynamic_shapes["attention_mask"].values(),
+        ):
+            self.assertEqual(dim.value, custom_name)
+        for dim, custom_name in zip(
+            onnx_program.model.graph.inputs[12].shape,
+            dynamic_shapes["position_ids"].values(),
+        ):
+            self.assertEqual(dim.value, custom_name)
 
 
 def _prepare_llm_model_gptj_to_test() -> (
@@ -77,9 +138,9 @@ def _prepare_llm_model_gptj_to_test() -> (
     ]
     kwargs = {
         "input_ids": input_ids,
+        "past_key_values": past_key_values,
         "attention_mask": attention_mask,
         "position_ids": position_ids,
-        "past_key_values": past_key_values,
     }
 
     dynamic_axes = {

@@ -418,6 +418,78 @@ class DynamoExporterTest(common_utils.TestCase):
         inputs = {"x": torch.randn(6, 3), "y": torch.randn(6, 3)}
         onnx_testing.assert_onnx_program(onnx_program, kwargs=inputs)
 
+    def test_export_of_rename_dynamic_axes_required_model_with_mixed_type_of_dynamic_shapes(
+        self,
+    ):
+        class NestedModel(torch.nn.Module):
+            def forward(
+                self,
+                x: torch.Tensor,
+                ys: list[torch.Tensor],
+                zs: dict[str, torch.Tensor],
+                c: torch.Tensor,
+            ):
+                y = ys[0] + ys[1] + zs["a"] + zs["b"]
+                w = 5
+                if x.shape[0] < 3 and c.shape[0] != 4:
+                    return x + w, x + y, c
+                else:
+                    return x - w, x - y, c
+
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(6),
+        )
+
+        dynamic_shapes = (
+            {0: torch.export.Dim("dim_x", min=3)},  # _Dim
+            [("custom_name_axis_ys_0",), (torch.export.Dim.AUTO,)],  # custom name
+            {
+                "a": {0: torch.export.Dim.AUTO},
+                "b": ("custom_name_axis_zs_b_0",),
+            },  # _DimHint
+            {0: "custom_name_axis_c_0"},  # custom name
+        )
+
+        # 0. Export the model
+        # 1. Assert the warning message
+        with self.assertWarnsRegex(
+            UserWarning,
+            "# The axis name: .* will not be used, since it shares the same shape constraints with another axis: .*.",
+        ):
+            onnx_program = self.export(
+                NestedModel(), input, dynamic_shapes=dynamic_shapes, optimize=False
+            )
+        # 2. Assert the exported model
+        input = (
+            torch.ones(4),
+            [torch.zeros(4), torch.ones(4)],
+            {"a": torch.zeros(4), "b": torch.ones(4)},
+            torch.ones(5),
+        )
+        onnx_testing.assert_onnx_program(
+            onnx_program,
+            args=input,
+        )
+        # 3. Assert the dynamic axes names
+        # Some names are not respected because they share the same shape constraints,
+        # so they are the same to ExportedProgram.
+        expected_axis_names = [
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "custom_name_axis_c_0",
+        ]
+
+        for expected_axis_name, input in zip(
+            expected_axis_names, onnx_program.model.graph.inputs
+        ):
+            self.assertEqual(input.shape[0].value, expected_axis_name)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

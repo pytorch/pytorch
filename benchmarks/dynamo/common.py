@@ -3229,6 +3229,13 @@ def parse_args(args=None):
         help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
+    parser.add_argument(
+        "--retain-output",
+        action="store_true",
+        help="Enables appending to the already existing output file if it exists \
+            instead of deleting it and creating a new one.",
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3478,6 +3485,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
 
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
+    torch._dynamo.reset()
     runner.args = args
 
     args.filter = args.filter or [r"."]
@@ -4078,7 +4086,11 @@ def run(runner, args, original_dir=None):
             )
     else:
         metrics.purge_old_log_files()
-        if output_filename and os.path.exists(output_filename):
+        if (
+            output_filename
+            and os.path.exists(output_filename)
+            and not args.retain_output
+        ):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
