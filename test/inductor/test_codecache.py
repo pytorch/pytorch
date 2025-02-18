@@ -4,7 +4,7 @@ import pickle
 import shutil
 import tempfile
 import unittest
-from typing import List, Optional, Union
+from typing import Optional, Union
 from unittest import mock
 
 import torch
@@ -1029,6 +1029,29 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    @requires_cuda
+    @unittest.expectedFailure  # TODO: pass in optimize_mem at runtime
+    def test_async_compile_cache(self):
+        class SimpleFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        x = torch.rand([10], requires_grad=True, device="cuda")
+        counters.clear()
+
+        sf = SimpleFunction
+        out = torch.compile(sf.apply)(x)
+        out.sum().backward()
+
+        self.assertEqual(counters["inductor"]["async_compile_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["async_compile_cache_hit"], 1)
+
     @config.patch({"fx_graph_cache": True})
     def test_cache_guard_overspec(self):
         b = torch.tensor([0, 2, 4, 6, 8])
@@ -1127,12 +1150,12 @@ class TestFxGraphCache(TestCase):
 
 
 class TestFxGraphCacheHashing(TestCase):
-    def test_tensor_constants(self):
+    def test_parameter_constants(self):
         """
-        Test the hashing of tensor constants.
+        Test the hashing of parameter constants.
         """
-        small = torch.tensor(list(range(8)))
-        large = torch.tensor(list(range(32)))
+        small = torch.nn.Parameter(torch.rand(8))
+        large = torch.nn.Parameter(torch.rand(32))
 
         self.assertTrue(GraphLowering.can_inline_constant(small))
         self.assertFalse(GraphLowering.can_inline_constant(large))
@@ -1146,8 +1169,13 @@ class TestFxGraphCacheHashing(TestCase):
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
-        # If include_non_inlined=False, we only hash the values of small tensors.
-        pickler = FxGraphCachePickler(gm, False)
+        # For frozen parameters, we only hash the values of small tensors.
+        gm._has_frozen_params = True
+        gm._frozen_param0 = small
+        gm._frozen_param1 = large
+        small._is_frozen_param = True
+        large._is_frozen_param = True
+        pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
@@ -1434,7 +1462,7 @@ class TestCudaCompileCommand(TestCase):
         with mock.patch("subprocess.check_output") as check_output_mock:
             CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
             check_output_mock.assert_called()
-            cmd_parts: List[str] = check_output_mock.call_args[0][0]
+            cmd_parts: list[str] = check_output_mock.call_args[0][0]
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
@@ -1466,6 +1494,9 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Worker processes do not register PatchCaches() properly
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
@@ -1503,6 +1534,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_local_cache": True})
     @config.patch({"autotune_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"compile_threads": 1})
     @config.patch({"max_autotune": True})
     def test_bundled_autotune_remote_cache(self):
         class Model(torch.nn.Module):

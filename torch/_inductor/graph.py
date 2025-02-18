@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import operator
 import os
@@ -23,7 +24,10 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
-from torch._prims_common import make_channels_last_strides_for
+from torch._prims_common import (
+    compute_required_storage_length,
+    make_channels_last_strides_for,
+)
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
@@ -51,6 +55,7 @@ from .codegen.common import (
     get_device_op_overrides,
     get_wrapper_codegen_for_device,
     init_backend_registration,
+    WorkspaceArg,
 )
 from .codegen.wrapper import PythonWrapperCodegen
 from .exc import (
@@ -120,33 +125,6 @@ else:
 
     def log_module_code(*args: Any, **kwargs: Any) -> None:
         pass
-
-
-def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
-    supported_dtype = OrderedSet(
-        [
-            torch.float32,
-            torch.float64,
-            torch.int64,
-            torch.int32,
-            torch.int16,
-            torch.int8,
-            torch.uint8,
-            torch.bool,
-            torch.bfloat16,
-            torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.float16,
-        ]
-    )
-    if device_type == "cuda":
-        supported_dtype.add(torch.float8_e4m3fn)
-        supported_dtype.add(torch.float8_e5m2)
-        supported_dtype.add(torch.float8_e4m3fnuz)
-        supported_dtype.add(torch.float8_e5m2fnuz)
-
-    return dtype in supported_dtype
 
 
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
@@ -383,6 +361,11 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
+
+        # Inplace padding may require Inductor to allocate slightly larger
+        # tensor for padding.
+        self.buffer_to_padded_size: dict[str, list[int]] = {}
+
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
         self.const_output_index: dict[str, int] = (
@@ -473,8 +456,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs = OrderedSet[str]()
+        self.aligned_inputs: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names = OrderedSet[str]()
+
+        self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
+        # more aggressive prologue fusion
+        self.invoke_quant_ops: OrderedSet[str] = OrderedSet()
 
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names = OrderedSet[str]()
@@ -486,6 +473,28 @@ class GraphLowering(torch.fx.Interpreter):
         self.placeholder_idx = -1
 
         self.bw_donated_idxs = get_donated_idxs()
+
+    def get_allocation_size(
+        self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
+    ) -> Sequence[Expr]:
+        if isinstance(node, ir.TensorBox):
+            node = node.data  # type: ignore[assignment]
+        if isinstance(node, ir.StorageBox):
+            node = node.data  # type: ignore[assignment]
+        if (
+            isinstance(node, ir.ComputedBuffer)
+            and node.name in self.buffer_to_padded_size
+        ):
+            return self.buffer_to_padded_size[node.name]
+        else:
+            return node.get_size()
+
+    def get_allocation_storage_size(self, node: Union[ir.Buffer, WorkspaceArg]) -> Expr:
+        layout = node.get_layout()
+        size = self.get_allocation_size(node)  # consider inplace padding
+        stride = layout.stride
+        offset = layout.offset
+        return compute_required_storage_length(size, stride, offset)  # type: ignore[arg-type]
 
     def has_feature(
         self,
@@ -1372,16 +1381,15 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = OrderedSet([n])
+        # origins: OrderedSet[Union[Node, ir.IRNode]] = OrderedSet([n])
+        origins: OrderedSet[Any] = OrderedSet([n])
         is_call_function = n.op == "call_function"
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
+        with ir.IRNode.current_origins(origins), self.set_current_node(
             n
-        ), V.set_current_node(
-            n
-        ):
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1738,20 +1746,8 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodegenError("C++ codegen is disabled")
 
-        if sys.platform not in ["linux", "darwin", "win32"]:
+        if sys.platform not in ("linux", "darwin", "win32"):
             raise CppWrapperCodegenError(f"Unsupported platform {sys.platform}")
-
-        for value in self.graph_inputs.values():
-            dtype = None
-            if isinstance(value, TensorBox):
-                dtype = value.get_dtype()
-            elif isinstance(
-                value, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
-            ):
-                dtype = may_get_constant_buffer_dtype(value)
-
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
-                raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
         self,
@@ -1890,13 +1886,22 @@ class GraphLowering(torch.fx.Interpreter):
             # cpu
             return self.codegen()
 
+    def _update_scheduler(self) -> None:
+        """
+        (Re)initializes the scheduler member.  When initializing the scheduler, no CUBIN
+        files should be generated (to avoid biasing any benchmarks and pessimizing
+        fusion decisions).
+        """
+        from .scheduler import Scheduler
+
+        with config.patch("triton.store_cubin", False):
+            self.scheduler = Scheduler(self.operations)
+
     def codegen(self) -> tuple[str, list[tuple[int, Node]]]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
-            from .scheduler import Scheduler
-
             self.init_wrapper_code()
 
-            self.scheduler = Scheduler(self.operations)
+            self._update_scheduler()
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
@@ -1906,9 +1911,32 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
-
-            # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
-            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            # Dump provenance artifacts for debugging trace
+            provenance_info = (
+                V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            )
+            # provenance_info might be None if config.trace.enabled is not set
+            if provenance_info:
+                (
+                    debug_info,
+                    node_mappings,
+                ) = provenance_info
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "inductor_triton_kernel_to_post_grad_nodes",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(debug_info),
+                )
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "inductor_provenance_tracking_node_mappings",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(node_mappings),
+                )
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
@@ -1925,13 +1953,11 @@ class GraphLowering(torch.fx.Interpreter):
         call), as this will be done in the parent graph's `codegen()`.
         """
         with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):
-            from .scheduler import Scheduler
-
             self.wrapper_code = parent_graph.wrapper_code
             self.device_ops = parent_graph.device_ops
             self.cpp_wrapper = parent_graph.cpp_wrapper
 
-            self.scheduler = Scheduler(self.operations)
+            self._update_scheduler()
             self.scheduler.codegen()
 
     def count_bytes(
@@ -1950,10 +1976,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         return total_bytes, node_counts, node_runtimes
 
-    @staticmethod
-    def save_output_code(code: str) -> None:
-        # No-op to be patched for unit tests
-        pass
+    # No-op to be patched for unit tests
+    save_output_code: Optional[Callable[[str], None]] = None
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
@@ -1979,7 +2003,8 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code)
+        if GraphLowering.save_output_code is not None:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
@@ -2013,7 +2038,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
-        if config.profile_bandwidth_output:
+        if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
             mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029

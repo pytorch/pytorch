@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -9,7 +12,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -19,6 +22,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -75,6 +79,10 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
+
+if TYPE_CHECKING:
+    from .ops_handler import ReductionType
 
 
 _T = TypeVar("_T")
@@ -1008,7 +1016,7 @@ def squeeze(x, dim=None):
     for d, s in enumerate(x.get_size()):
         if not (
             d in dims
-            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
         ):
             new_shape.append(s)
 
@@ -2489,12 +2497,15 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             out_size = list(arg.get_size())
 
             expanded_dims = []
-            if arg.maybe_get_stride() is not None:
-                # We require a dense last dimension, but the other strides
-                # can be expanded, which results in a smaller tensor
-                for i, s in enumerate(arg.get_stride()[0:-1]):
-                    if V.graph.sizevars.statically_known_equals(s, 0):
-                        expanded_dims.append(i)
+            # We require a dense last dimension, but the other strides
+            # can be expanded, which results in a smaller tensor
+            maybe_stride = arg.maybe_get_stride()
+            for i in range(len(arg.get_size()) - 1):
+                if V.graph.sizevars.statically_known_equals(meta_stride_expr[i], 0) or (
+                    maybe_stride is not None
+                    and V.graph.sizevars.statically_known_equals(maybe_stride[i], 0)
+                ):
+                    expanded_dims.append(i)
 
             # Now, pad strides to alignment
             out_strides = [-1] * len(out_size)
@@ -2517,7 +2528,29 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                     stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
 
                 out_strides[i] = stride
-            return ir.ExternKernel.require_exact_strides(arg, out_strides)
+
+            for dim in expanded_dims:
+                arg = slice_(arg, dim, 0, 1)
+
+            # TODO this is too subtle to get right in lowering, should be handled in match_exact_strides
+            out = ir.ExternKernel.require_exact_strides(arg, out_strides)
+            out = expand(TensorBox(out), out_size)
+            out = ir.try_match_insignificant_strides(out, out_strides)
+            return out
+
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
+        if (
+            isinstance(arg, IRNode)
+            and arg.maybe_get_stride() is not None
+            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+        ):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
@@ -3744,7 +3777,7 @@ def scatter_fallback(
         op_overload,
         reduce,
         self.get_dtype(),
-        src.get_dtype() if src_is_tensor else type(src),
+        cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -4029,11 +4062,112 @@ def rev(x, dims):
     )
 
 
+def inplace_constant_pad_nd(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
+    """
+    This optimization changes the semantics of padding from 'clone'
+    style to 'view' style.
+
+    Thanks to functionalization, this change can still maintain numerical
+    correctness.
+    """
+
+    def _padding_can_be_fused():
+        """
+        Conservatively check if padding can be fused with downstream op.
+        1. if the downstream op is a sum, then there is little benefit to
+           do inplace padding
+        2. if the downstream op is a matmul, doing inplace padding can
+           save membw.
+        """
+        current_node = V.graph.current_node
+        if current_node is None:
+            return True  # be conservative
+        users = tuple(current_node.users)
+        if len(users) == 1 and users[0].target in (
+            aten.mm.default,
+            aten.addmm.default,
+        ):
+            return False
+
+        return True  # be conservative
+
+    if _padding_can_be_fused():
+        return None
+
+    # Only handle 2D case for now
+    if len(padding) != 4 or len(x.get_size()) != 2:
+        return None
+
+    # No harm to realize since we already know that
+    # the op can not be fused into the single user.
+    # It need to be realized later anyways.
+    x.realize()
+
+    # If x is a view (e.g. a SliceView), realizing it just realizing the
+    # underlying storage. x itself is still a view.
+    if (
+        not isinstance(x, ir.TensorBox)
+        or not isinstance(x.data, ir.StorageBox)
+        or not (
+            isinstance(x.data.data, ir.ComputedBuffer)
+            or (
+                config.can_inplace_pad_graph_input
+                and isinstance(x.data.data, ir.InputBuffer)
+            )
+        )
+        or not x.data.data.name
+    ):
+        return None
+    x.freeze_layout()
+
+    _, layout = ir.as_storage_and_layout(x)
+    strides = layout.stride
+    if strides[1] != 1:
+        return None
+
+    if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
+        return None
+
+    npad = padding[1]
+    if npad == 0:
+        return None
+
+    stride0 = strides[0]
+    rowsize = layout.size[1]
+
+    if stride0 < rowsize + npad:
+        return None
+
+    bufname = x.data.data.name
+    padded_size = [layout.size[0], layout.size[1] + npad]
+    V.graph.buffer_to_padded_size[bufname] = padded_size
+    resized_x = as_strided(
+        x,
+        padded_size,
+        layout.stride,
+        layout.offset,
+    )
+
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    fill_(sliced_x, fill_value)
+
+    counters["inductor"]["inplace_padding"] += 1
+    return resized_x
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
         return clone(x)
+
+    if config.inplace_padding:
+        out = inplace_constant_pad_nd(x, padding, fill_value)
+        if out:
+            return out
+            # fall through if can not inplace the padding
 
     sizes = x.get_size()
 
@@ -4748,7 +4882,7 @@ fallback_fractional_max_pool2d = fallback_handler(
 )
 
 
-def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
+def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
@@ -4756,10 +4890,10 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
-        sample = samples_loader([*prefix, dim])
+        sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
         alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.floor((i_expr + sample) * alpha_expr) - ops.floor(
+        seq_i = ops.trunc((i_expr + sample) * alpha_expr) - ops.trunc(
             sample * alpha_expr
         )
         seq_i = ops.to_dtype(seq_i, torch.int64)
@@ -4791,6 +4925,7 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
         in_sz=[inp_h, inp_w],
         out_sz=output_size,
         kernel_sz=kernel_size,
+        ndims=2,
     )
 
     h_index_fn = gen_offsets_for_dim(dim=0)
@@ -5502,7 +5637,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     )
 
 
-def make_reduction(reduction_type: str, override_return_dtype=None):
+def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         kwargs = _make_reduction_inner(
             x,
@@ -6586,7 +6721,7 @@ def triton_kernel_wrap_(
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
-@register_lowering(torch.ops.higher_order.cond)
+@register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(pred, true_fn, false_fn, operands):
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
@@ -6598,7 +6733,7 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
-@register_lowering(torch.ops.higher_order.while_loop)
+@register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     if any(
         isinstance(x, IRNode) and is_triton(x)
@@ -6619,9 +6754,45 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
+def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
+    output = None
+    quant_options = V.graph.current_node.meta.get("quant_options", None)
+    assert quant_options is not None
+
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            V.graph.env[node] = operands[i]
+            continue
+        # todo getattr
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+
+            for v in itertools.chain(args, kwargs.values()):
+                v.realize()
+
+                if quant_options.codegen_low_precision:
+                    V.graph.low_precision_codegen_ops.add(v.get_operation_name())
+
+                V.graph.invoke_quant_ops.add(v.get_operation_name())
+
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            V.graph.env[node] = V.graph.run_node(node)
+
+    return output
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
+def associative_scan(
+    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
+):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    if len(additional_inputs) > 0:
+        raise RuntimeError(
+            "Unable to generate code for associative_scan op, because there are lifted arguments"
+        )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
@@ -6635,7 +6806,7 @@ def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
@@ -6699,3 +6870,23 @@ from . import jagged_lowerings
 
 
 jagged_lowerings.register_jagged_ops()
+
+
+@contextlib.contextmanager
+def force_fallback(op: torch._ops.OpOverload):
+    """
+    A context manager to force fallback an op. Used in unit test
+    for FallbackKernel.
+    """
+    assert isinstance(
+        op, torch._ops.OpOverload
+    ), "Only OpOverload to make the clean up easier"
+    old_handler = lowerings.get(op)
+    try:
+        register_lowering(op)(fallback_handler(op))
+        yield
+    finally:
+        if old_handler:
+            lowerings[op] = old_handler
+        else:
+            lowerings.pop(op)

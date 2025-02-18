@@ -379,7 +379,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,  # type: ignore[arg-type]
+            callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -619,6 +619,7 @@ class FakeTensor(Tensor):
     nonzero_memo = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
+    unique_consecutive_memo = SymNumberMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
@@ -721,6 +722,7 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.unique_consecutive_memo = None
         self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
@@ -1087,7 +1089,7 @@ class DispatchCacheInfo:
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
-# tensors alive during `FakeTensorMode`, there will no be no
+# tensors alive during `FakeTensorMode`, there will be no
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
@@ -1997,6 +1999,11 @@ class FakeTensorMode(TorchDispatchMode):
         converter = self.fake_tensor_converter
 
         is_lift_func = func in self.lift_fns
+        device_conversion_skip_const_prop = (
+            func is torch.ops.aten._to_copy.default
+            and isinstance(args[0], torch.Tensor)
+            and args[0].device.type == "meta"
+        )
 
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
@@ -2010,6 +2017,7 @@ class FakeTensorMode(TorchDispatchMode):
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
+            and not device_conversion_skip_const_prop
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
@@ -2223,7 +2231,10 @@ class FakeTensorMode(TorchDispatchMode):
                         real_out,
                     )
                 else:
-                    # make it clear this can override the output only when the flag is True
+                    # the pending unbacked symbols have to be cleared first
+                    if self.shape_env is not None:
+                        self.shape_env.pending_fresh_unbacked_symbols.clear()
+                    # this can override the output only when the flag is True
                     fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
                         func,
                         (args, kwargs),
@@ -2833,7 +2844,7 @@ def _infer_fake_from_real_tensor(
     # We went with the first option.
     fake_strides = [-1] * real_out.dim()
     strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-    strides.sort()
+    strides.sort(key=lambda x: (x[0], -x[1]))
     expected = 1
     fake_stride = expected
     for s, idx in strides:

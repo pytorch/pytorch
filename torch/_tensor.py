@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -27,16 +28,21 @@ from torch.overrides import (
 )
 
 
-def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    assigned = functools.WRAPPER_ASSIGNMENTS
+_P = ParamSpec("_P")
+_TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
-    @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(
+    f: Callable[Concatenate[_TensorLike, _P], "Tensor"],
+) -> Callable[Concatenate[_TensorLike, _P], "Tensor"]:
+    @functools.wraps(f)
+    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
             # See https://github.com/pytorch/pytorch/issues/75462
-            if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args, **kwargs)
-            return f(*args, **kwargs)
+            sargs = self, *args
+            if has_torch_function(sargs):
+                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+            return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
 
@@ -173,8 +179,8 @@ class Tensor(torch._C.TensorBase):
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
-                        Tuple[torch.qscheme, float, int],
-                        Tuple[torch.qscheme, Tensor, Tensor, int],
+                        tuple[torch.qscheme, float, int],
+                        tuple[torch.qscheme, Tensor, Tensor, int],
                     ]
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
@@ -317,7 +323,7 @@ class Tensor(torch._C.TensorBase):
 
         # See Note [Don't serialize hooks]
         warn_if_has_hooks(self)
-        backward_hooks: Dict[Any, Any] = OrderedDict()
+        backward_hooks: dict[Any, Any] = OrderedDict()
 
         skip_data = torch.serialization._serialization_tls.skip_data
         materialize_fake_tensors = (
@@ -386,7 +392,7 @@ class Tensor(torch._C.TensorBase):
                 )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
-                Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
+                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
             ]
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
@@ -750,7 +756,7 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
 
         from torch.utils.hooks import RemovableHandle
 
@@ -940,6 +946,7 @@ class Tensor(torch._C.TensorBase):
         normalized: bool = False,
         onesided: Optional[bool] = None,
         return_complex: Optional[bool] = None,
+        align_to_window: Optional[bool] = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -961,6 +968,7 @@ class Tensor(torch._C.TensorBase):
                 normalized=normalized,
                 onesided=onesided,
                 return_complex=return_complex,
+                align_to_window=align_to_window,
             )
         return torch.stft(
             self,
@@ -973,6 +981,7 @@ class Tensor(torch._C.TensorBase):
             normalized,
             onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
 
     def istft(
@@ -1091,25 +1100,32 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
+    def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
+    def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
     )
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other):
+    def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -1120,27 +1136,33 @@ class Tensor(torch._C.TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
+    def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+        # TODO(rec): the superclass says it accepts complex here,
+        # but torch.floor_divide says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
+    def __rfloordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other):
+    def __rlshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other):
+    def __rrshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
+    def __rmatmul__(self, other: "Tensor") -> "Tensor":
         return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive
@@ -1493,7 +1515,7 @@ class Tensor(torch._C.TensorBase):
         return self.to_sparse()
 
     def dim_order(
-        self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
+        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
     ):
         """
         dim_order(ambiguity_check=False) -> tuple
@@ -1501,7 +1523,7 @@ class Tensor(torch._C.TensorBase):
         Returns the uniquely determined tuple of int describing the dim order or
         physical layout of :attr:`self`.
 
-        The dim order represents how dimensions are laid out in memory,
+        The dim order represents how dimensions are laid out in memory of dense tensors,
         starting from the outermost to the innermost dimension.
 
         Note that the dim order may not always be uniquely determined.
@@ -1513,6 +1535,8 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
+
+        Examples::
 
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
@@ -1536,11 +1560,18 @@ class Tensor(torch._C.TensorBase):
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.
+
         .. warning::
             The dim_order tensor API is experimental and subject to change.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        if self.is_sparse:
+            raise AttributeError(
+                f"Can't get dim order on sparse type: {self.type()} "
+                "Use Tensor.to_dense() to convert to a dense tensor first."
+            )
 
         # Sanity check ambiguity_check data types
         if not isinstance(ambiguity_check, bool):
@@ -1725,7 +1756,7 @@ class Tensor(torch._C.TensorBase):
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+    def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
 

@@ -57,12 +57,14 @@ class ShardingPropagator:
             OpOverload,
             Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
-        # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
+        # op map to save static argnum to decide to reuse sharding prop cache or
+        # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
-        # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
+        # op map to save indices of shape (and stride) args which may need to be
+        # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[
             OpOverload, Union[int, tuple[int, int]]
         ] = {
@@ -171,10 +173,12 @@ class ShardingPropagator:
                 # Either error due to ShardingPropagator or due to incorrect OutputSpec
                 if not isinstance(output_tensor_meta, (tuple, list)):
                     raise ValueError(
-                        "ShardingPropagator error: output does not have an associated TensorMeta"
+                        "ShardingPropagator error: output does not have an associated "
+                        "TensorMeta"
                     )
                 raise ValueError(
-                    f"For the op {op.name()}, `output_specs` has 1 output which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has 1 output which does "
+                    "not equal the "
                     f"number of op outputs: {len(output_tensor_meta)}."
                 )
             output_specs.tensor_meta = output_tensor_meta
@@ -183,16 +187,35 @@ class ShardingPropagator:
                 output_specs
             ) != len(output_tensor_meta):
                 raise ValueError(
-                    f"For the op {op.name()}, `output_specs` has {len(output_specs)} outputs which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has {len(output_specs)} "
+                    "outputs which does not equal the "
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
+
             for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
-                        raise ValueError(
-                            f"ShardingPropagator error: output {i} does not have an associated TensorMeta"
-                        )
+                        # NOTE: aten.convolution_backward.default is an exception and it
+                        # needs extra handling because the first Tensor in the output
+                        # tuple can be `None` if the input Tensor to convolution op has
+                        # `requires_grad=False` (e.g. convolution layer is the first
+                        # layer in the model). We explicitly allow its corresponding
+                        # TensorMeta to be `None`.
+                        if (
+                            op == aten.convolution_backward.default
+                            and i == 0
+                            and output_tensor_meta_i is None
+                        ):
+                            assert isinstance(output_specs, list)
+                            output_specs[i] = None
+                            continue
+                        else:
+                            raise ValueError(
+                                f"ShardingPropagator error: output {i} of {op.name()} "
+                                "does not have an associated TensorMeta"
+                            )
+
                     spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
@@ -421,7 +444,7 @@ class ShardingPropagator:
                 raise e
             except Exception as e:
                 raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}.\n" f"Error: {e}"
+                    f"Sharding propagation failed on op {op_schema}.\nError: {e}"
                 ) from e
 
             # step 2. if can't get output_spec from sharding
