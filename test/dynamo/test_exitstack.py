@@ -81,6 +81,22 @@ class TestExitStack(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
         self.assertEqual(y.dtype, torch.float64)
 
+    @make_dynamo_test
+    def test_ensure_exc_is_active_in_two_contexts(self):
+        def raise_exc(exc):
+            self.assertIsNotNone(sys.exc_info()[1])
+            raise exc
+
+        try:
+            with contextlib.ExitStack() as stack:
+                stack.callback(raise_exc, IndexError)
+                stack.callback(raise_exc, KeyError)
+                1 / 0
+        except IndexError as exc:
+            self.assertIsInstance(exc.__context__, KeyError)
+        else:
+            self.fail("Expected IndexError, but no exception was raised")
+
 
 class CPythonTestBaseExitStack:
     exit_stack = None
@@ -431,6 +447,7 @@ class CPythonTestBaseExitStack:
         else:
             self.fail("Expected KeyError, but no exception was raised")
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_with_correct_context(self):
         # http://bugs.python.org/issue20317

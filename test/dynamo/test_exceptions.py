@@ -541,6 +541,105 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[1], res[1])
 
     @unittest.expectedFailure
+    @make_dynamo_test
+    def test_reraise_first_exc(self):
+        def fn():
+            try:
+                1 / 0
+            except ZeroDivisionError:
+                try:
+                    raise ValueError
+                except ValueError:
+                    pass
+                raise
+
+        try:
+            fn()
+        except ZeroDivisionError:
+            pass
+        assert sys.exc_info()[0] is None
+
+    @make_dynamo_test
+    def test_ensure_exception_is_active_after_try_except_block(self):
+        try:
+            try:
+                1 / 0
+            except ZeroDivisionError:
+                for exc in (KeyError, IndexError):
+                    try:
+                        raise exc
+                    except exc:
+                        pass
+                raise
+        except ZeroDivisionError:
+            pass
+
+    @make_dynamo_test
+    def test_ensure_exception_is_active_inside_try_except_block(self):
+        try:
+            try:
+                1 / 0
+            except ZeroDivisionError:
+                for exc in (KeyError, IndexError):
+                    try:
+                        raise exc
+                    except exc as e:
+                        assert isinstance(e.__context__, ZeroDivisionError)
+                raise
+        except ZeroDivisionError:
+            pass
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_handle_all_exceptions(self):
+        def cm():
+            try:
+                yield 1
+            except ValueError:
+                try:
+                    raise TypeError
+                finally:
+                    pass
+
+        try:
+            gen = cm()
+            next(gen)
+            gen.throw(ValueError)
+        except TypeError:
+            pass
+        assert sys.exc_info()[0] is None
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_reraise(self):
+        try:
+            try:
+                raise ValueError
+            except ValueError:  # noqa: TRY203
+                raise
+        except ValueError:
+            pass
+        assert sys.exc_info()[0] is None
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_raise_finally_simple(self):
+        def fn():
+            try:
+                raise ValueError
+            except ValueError:
+                try:
+                    raise TypeError
+                finally:
+                    pass
+
+        try:
+            fn()
+        except TypeError:
+            pass
+        assert sys.exc_info()[0] is None
+
+    @unittest.expectedFailure
     def test_reconstruct___context__(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
