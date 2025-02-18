@@ -60,7 +60,7 @@ struct TORCH_XPU_API GpuEngineManager {
 struct TORCH_XPU_API GpuStreamManager {
   static GpuStreamManager& Instance(); // Singleton
 
-  dnnl::stream get_stream(
+  dnnl::stream& get_stream(
       DeviceIndex device_index = c10::xpu::current_device()) {
     auto stream = c10::xpu::getCurrentXPUStream(device_index);
     auto priority = stream.priority();
