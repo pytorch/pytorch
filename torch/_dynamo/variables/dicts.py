@@ -514,7 +514,9 @@ class ConstDictVariable(VariableTracker):
         elif name == "__or__":
             assert len(args) == 1
             if not isinstance(args[0], ConstDictVariable):
-                raise TypeError(f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'")
+                raise TypeError(
+                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                )
 
             self.install_dict_keys_match_guard()
             tx.output.side_effects.mutation(self)
