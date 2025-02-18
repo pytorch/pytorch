@@ -78,6 +78,7 @@ pexpr = PythonPrinter().doprint
 
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
+INDIRECT_PATTERN = re.compile(r"indirect|tmp")
 
 @dataclasses.dataclass
 class IterationRanges:
@@ -2053,33 +2054,36 @@ class SIMDScheduling(BaseScheduling):
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
         indirect_broadcast = False
-        indirect_dims = set()
+        # save iter vars in indirect broadcast memory reads
+        iter_vars_symbols = set()
         other_dims = []
         
         if len(node_schedule) == 1:
-            indices = set()
+            indices = {
+                var
+                for read in node_schedule[0].read_writes.reads
+                for var in read.var_names
+            }
             for read in node_schedule[0].read_writes.reads:
                 if hasattr(read, 'indirect_broadcast') and read.indirect_broadcast:
                     indirect_broadcast = True
                     for asymbol in read.index.free_symbols:
-                        is_indirect = re.compile(r"indirect|tmp").search
-                        if not is_indirect(asymbol.name):
-                            indirect_dims.add(asymbol)
-                indices.update(read.var_names)
-            
-            indices = list(indices)
-            indices.sort(key=lambda d:d.name)
-            assert len(indices) == len(node_schedule[0]._body.iter_vars), (indices, node_schedule[0]._body.iter_vars)
-            assert all(
-                v not in node_schedule[0]._body.iter_vars for v in indices
-            ), f"{node_schedule[0]._body.iter_vars=}, {indices=}"
-
-            mem_dep_iter_vars_to_ir_iter_vars_replacements = dict(zip(indices, node_schedule[0]._body.iter_vars))
-            indirect_dims = [mem_dep_iter_vars_to_ir_iter_vars_replacements[iter_var] for iter_var in indirect_dims]
-            other_dims = [iter_var for iter_var in node_schedule[0]._body.iter_vars if iter_var not in indirect_dims]
-            if indirect_broadcast and len(node_schedule) == 1:
-                indirect_dims.sort(key=lambda iter_var: node_schedule[0]._body.var_ranges[iter_var])
-                new_order = [node_schedule[0]._body.iter_vars.index(dim) for dim in indirect_dims] + [node_schedule[0]._body.iter_vars.index(dim) for dim in other_dims]
+                        if not INDIRECT_PATTERN.search(asymbol.name):
+                            iter_vars_symbols.add(asymbol)
+            if indirect_broadcast:
+                indices = list(indices)
+                indices.sort(key=lambda d:d.name)
+                assert len(indices) == len(node_schedule[0]._body.iter_vars), (indices, node_schedule[0]._body.iter_vars)
+                assert all(
+                    v not in node_schedule[0]._body.iter_vars for v in indices
+                ), f"{node_schedule[0]._body.iter_vars=}, {indices=}"
+                # map iter vars in mem deps to ir iter vars
+                replacements = dict(zip(indices, node_schedule[0]._body.iter_vars))
+                iter_vars_symbols = [replacements[iter_var] for iter_var in iter_vars_symbols]
+                other_dims = [iter_var for iter_var in node_schedule[0]._body.iter_vars if iter_var not in iter_vars_symbols]
+                iter_vars_symbols.sort(key=lambda iter_var: node_schedule[0]._body.var_ranges[iter_var])
+                new_order = [node_schedule[0]._body.iter_vars.index(dim) for dim in iter_vars_symbols] + [node_schedule[0]._body.iter_vars.index(dim) for dim in other_dims]
+                # we only check iter vars, not reduction vars
                 if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
                     node_schedule[0].apply_new_loop_order(new_order)
 
