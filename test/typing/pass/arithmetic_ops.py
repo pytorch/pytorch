@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Union
 from typing_extensions import assert_type, TypeAlias
 
 from torch import randn, Tensor
@@ -7,7 +7,7 @@ from torch import randn, Tensor
 TENSOR, INT, FLOAT, BOOL = randn(3), 2, 1.5, True
 
 # Test deduced types of arithmetic operations between tensors, ints, floats and bools
-# The expected type should always be `Tensor`: `Any` and `bool` below are wrong.
+# The expected type should always be `Tensor`.
 # See https://github.com/pytorch/pytorch/issues/145838
 
 # Unary ops
@@ -109,9 +109,9 @@ assert_type(INT % TENSOR, Tensor)
 assert_type(INT**TENSOR, Tensor)
 assert_type(INT << TENSOR, Tensor)
 assert_type(INT >> TENSOR, Tensor)
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
+assert_type(INT & TENSOR, Tensor)
+assert_type(INT | TENSOR, Tensor)
+assert_type(INT ^ TENSOR, Tensor)
 
 assert_type(TENSOR == FLOAT, Tensor)
 assert_type(TENSOR != FLOAT, Tensor)
@@ -128,9 +128,11 @@ assert_type(TENSOR % FLOAT, Tensor)
 assert_type(TENSOR**FLOAT, Tensor)
 assert_type(TENSOR << FLOAT, Tensor)
 assert_type(TENSOR >> FLOAT, Tensor)
-assert_type(TENSOR & FLOAT, Tensor)
-assert_type(TENSOR | FLOAT, Tensor)
-assert_type(TENSOR ^ FLOAT, Tensor)
+
+# Bitwise operators shouldn't work on floats!
+assert_type(TENSOR & FLOAT, Tensor)  # type: ignore[operator]
+assert_type(TENSOR | FLOAT, Tensor)  # type: ignore[operator]
+assert_type(TENSOR ^ FLOAT, Tensor)  # type: ignore[operator]
 
 assert_type(FLOAT == TENSOR, bool)
 assert_type(FLOAT != TENSOR, bool)
@@ -147,6 +149,7 @@ assert_type(FLOAT % TENSOR, Tensor)
 assert_type(FLOAT**TENSOR, Tensor)
 assert_type(FLOAT << TENSOR, Tensor)
 assert_type(FLOAT >> TENSOR, Tensor)
+
 assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
 assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
 assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
@@ -373,15 +376,3 @@ assert_type(BOOL**BINARY, Binary)
 assert_type(BOOL >> BINARY, Binary)
 assert_type(BOOL - BINARY, Binary)
 assert_type(BOOL ^ BINARY, Binary)
-
-# Tensor operators whose types could be improved
-# This is the "diff" of the first and second sections.
-
-assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
