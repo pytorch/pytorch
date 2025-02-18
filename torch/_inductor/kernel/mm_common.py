@@ -10,27 +10,11 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, Layout
-from ..utils import (
-    ceildiv as cdiv,
-    get_num_sms,
-    TMA_DESCRIPTOR_SIZE,
-    use_aten_gemm_kernels,
-)
+from ..ir import Layout
+from ..utils import ceildiv as cdiv, get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
-
-
-def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
-    fallback_to_aten: bool = (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    )
-    if fallback_to_aten:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
-    return fallback_to_aten
 
 
 def mm_grid(m, n, meta):
