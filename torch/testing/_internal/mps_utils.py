@@ -498,9 +498,15 @@ XFAILLIST_GRAD = {
     "nn.functional.pairwise_distance": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
     ),
-    "nn.functional.conv1d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], lower=14.0),
-    "nn.functional.conv2d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], lower=14.0),
-    "nn.functional.conv3d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32], lower=14.0),
+    "nn.functional.conv1d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], lower=14.0
+    ),
+    "nn.functional.conv2d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], lower=14.0
+    ),
+    "nn.functional.conv3d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32], lower=14.0
+    ),
     # Uncategorized grad failures
     "nanquantile": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH,
@@ -691,13 +697,27 @@ MACOS_13_XFAILLIST = {
         upper=14.0,
     ),
     # Hard crash on MacOS 13 - failed assertion `destination datatype must be fp32'
-    'nn.functional.pairwise_distance': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv1d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv2d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv3d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv_transpose1d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv_transpose2d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
-    'nn.functional.conv_transpose3d': MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0),
+    "nn.functional.pairwise_distance": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv1d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv2d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv3d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv_transpose1d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv_transpose2d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
+    "nn.functional.conv_transpose3d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+    ),
 }
 
 """Other uncategorized xfails"""
