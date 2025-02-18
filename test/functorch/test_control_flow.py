@@ -3516,8 +3516,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_xs_ = L_xs_
     elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
     select_copy = torch.select_copy(elem, 0, 0)
-    new_carry = l_init_ + select_copy;  new_carry = None
-    add_1 = l_init_ + select_copy;  select_copy = add_1 = None
+    v = l_init_ + select_copy;  v = None
+    x = l_init_ + select_copy;  select_copy = x = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
     getitem = scan[0]
@@ -7180,7 +7180,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
     matmul_1 = matmul @ select_copy;  matmul = select_copy = None
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
-    sum_1 = ret.sum();  ret = sum_1 = None
+    x = ret.sum();  ret = x = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
