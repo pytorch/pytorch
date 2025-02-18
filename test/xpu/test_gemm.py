@@ -47,6 +47,7 @@ def tf32_on(self, tf32_precision=1e-5):
         torch.set_float32_matmul_precision(old_matmul_precision)
         self.precision = old_precision
 
+
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
 # allow_tf32=True, it will use reduced precision as specified by the
