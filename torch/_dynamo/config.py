@@ -1,4 +1,16 @@
 # mypy: allow-untyped-defs
+
+"""
+Configuration module for TorchDynamo compiler and optimization settings.
+
+This module contains various configuration flags and settings that control TorchDynamo's
+behavior, including:
+- Runtime behavior flags (e.g., guard settings, specialization options)
+- Debugging and development options
+- Performance tuning parameters
+- Feature toggles for experimental features
+"""
+
 import getpass
 import os
 import sys
@@ -43,7 +55,7 @@ recompile_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_recompile_limit = 256
 
-# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
 skip_code_recursive_on_recompile_limit_hit = True
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
@@ -57,6 +69,8 @@ cache_size_limit: int = Config(alias="torch._dynamo.config.recompile_limit")
 accumulated_cache_size_limit: int = Config(
     alias="torch._dynamo.config.accumulated_recompile_limit"
 )
+
+# (deprecated: does not do anything)
 skip_code_recursive_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit"
 )

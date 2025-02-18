@@ -1,3 +1,16 @@
+"""This module contains the core type definitions and protocols used throughout Dynamo.
+
+The types defined here fall into several categories:
+- Guard related types (GuardFn, GuardFail, GuardedCode): Used for tracking and managing guards that protect compiled code
+- Frame and cache types (FrameState, CacheEntry): Used for managing interpreter frame state and caching
+- Callback protocols (DynamoCallbackFn): Define the interface for frame evaluation callbacks
+- Hook protocols (DynamoGuardHook, ProfilerStartHook, ProfilerEndHook, BytecodeHook): Define various hook points for
+  instrumentation and customization
+
+These types provide the foundational interfaces that enable Dynamo's dynamic compilation and optimization system,
+ensuring type safety and clear contracts between different components of the system.
+"""
+
 import dataclasses
 import types
 from typing import Any, Callable, NamedTuple, Optional, Protocol, Union

@@ -83,7 +83,7 @@ inline float blockReduceSum(
 
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
-    device int* success [[buffer(1)]],
+    device int* info [[buffer(1)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -142,7 +142,7 @@ kernel void factorDiagonalBlock(
     if (linear_tid == 0) {
       float diagVal = tile[kk][kk] - diagElt;
       if (diagVal <= 0.0f) {
-        success[bid.x] = 0;
+        info[bid.x] = kk + 1;
         return;
       }
       tile[kk][kk] = sqrt(diagVal);
