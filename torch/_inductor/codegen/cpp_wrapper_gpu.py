@@ -23,6 +23,7 @@ from .common import get_device_op_overrides
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
+from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
@@ -89,7 +90,7 @@ class DeferredTritonCallWrapper:
         tensor_types = [
             f"typename {name}_type_"
             for name, arg_type in zip(def_args, arg_types)
-            if isinstance(arg_type, torch_dtype)
+            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
         ]
         if tensor_types:
             prefix.writeline(f"template <{', '.join(tensor_types)}>")
@@ -97,7 +98,7 @@ class DeferredTritonCallWrapper:
         with prefix.indent():
             assert len(def_args) == len(arg_types), (def_args, arg_types)
             for name, arg_type in zip(def_args, arg_types):
-                if isinstance(arg_type, torch_dtype):
+                if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
                     prefix.writeline(f"const {name}_type_& {name},")
                 elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
                     prefix.writeline(f"int64_t {name},")
@@ -349,23 +350,20 @@ class CppWrapperGpu(CppWrapperCpu):
             var_name = f"var_{next(self.arg_var_id)}"
             # ignore nvTmaDesc, as host-side TMA descriptors need
             # to be passed to the compiled Triton kernel by value
-            if isinstance(arg_type, torch_dtype) and arg_signature != "nvTmaDesc":
-                if arg.endswith(".item()"):
-                    # Need to declare a scalar in this case
-                    arg = arg[:-7]
-                    self.codegen_tensor_item(
-                        arg_type,
-                        arg,
-                        var_name,
-                        indented_buffer=code,
+            if isinstance(arg_type, UnwrapUnspecArg) and arg_signature != "nvTmaDesc":
+                self.codegen_tensor_item(
+                    arg_type.dtype,
+                    arg,
+                    var_name,
+                    indented_buffer=code,
+                )
+            elif isinstance(arg_type, torch_dtype) and arg_signature != "nvTmaDesc":
+                device_ptr_type = self.device_codegen.cpp_device_ptr()
+                code.writeline(
+                    maybe_hipify_code_wrapper(
+                        f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                     )
-                else:
-                    device_ptr_type = self.device_codegen.cpp_device_ptr()
-                    code.writeline(
-                        maybe_hipify_code_wrapper(
-                            f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
-                        )
-                    )
+                )
             elif arg_type in (sympy.Integer, int):
                 code.writeline(f"int {var_name} = {cexpr(arg)};")
             elif arg_type in (sympy.Float, float):
@@ -446,7 +444,9 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
         if triton:
-            call_args = self.prepare_triton_kernel_call(call_args)
+            call_args, arg_types = self.prepare_triton_wrapper_args(
+                call_args, arg_types
+            )
             wrapper_name = f"call_{kernel_name}"
             if wrapper_name not in self._triton_call_wrappers:
                 self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
@@ -456,7 +456,6 @@ class CppWrapperGpu(CppWrapperCpu):
             if V.graph.aot_mode:
                 call_args.append("kernels")
                 call_args.append("this->cubin_dir_")
-
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 call_args[: len(arg_types)], kernel_name, arg_types, None
@@ -473,5 +472,34 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
+    @staticmethod
+    def prepare_triton_wrapper_args(
+        call_args: list[Any], arg_types: list[Any]
+    ) -> tuple[list[Any], list[Any]]:
+        assert len(call_args) == len(arg_types), (call_args, arg_types)
+        new_args = []
+        new_args_types = []
+        for arg, arg_type in zip(call_args, arg_types):
+            if isinstance(arg, str):
+                if isinstance(arg_type, torch_dtype) and should_unwrap_unspec_arg(arg):
+                    # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+                    arg_type = UnwrapUnspecArg(dtype=arg_type)
+                new_args.append(arg)
+            elif isinstance(arg, bool):
+                new_args.append(str(arg).lower())
+            elif isinstance(arg, (int, float, SymbolicCallArg)):
+                new_args.append(str(arg))
+            else:
+                new_args.append(cexpr(V.graph.sizevars.simplify(arg)))
+            new_args_types.append(arg_type)
+        return new_args, new_args_types
+
     def make_zero_buffer(self, name):
         return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get()));"
+
+
+@dataclasses.dataclass
+class UnwrapUnspecArg:
+    """Marker that we need to call .item() on the tensor"""
+
+    dtype: torch_dtype

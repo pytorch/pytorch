@@ -5787,9 +5787,11 @@ class UserDefinedTritonKernel(ExternKernel):
 
         args: list[Any] = []
         arg_types: list[Any] = []
+        raw_args_filtered: list[Any] = []
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
                 args.append(arg.codegen_reference())
                 arg_types.append(arg.get_dtype())
@@ -5814,6 +5816,8 @@ class UserDefinedTritonKernel(ExternKernel):
                 if triton_version_uses_attrs_dict():
                     args.append(-1)
                     arg_types.append(int)
+                else:
+                    raw_args_filtered.pop()
             else:
                 raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
 
@@ -5822,7 +5826,7 @@ class UserDefinedTritonKernel(ExternKernel):
             new_name,
             args,
             arg_types=arg_types,
-            raw_args=[*named_args.values(), *extra_launch_args],
+            raw_args=raw_args_filtered,
             triton_meta=triton_meta,
             triton=True,
             device=self.get_device(),

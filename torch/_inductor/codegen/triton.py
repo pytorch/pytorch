@@ -3639,7 +3639,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         elif n == 1:
             return triton_heuristics.Grid1D
         elif n == 2:
-            if any(self.needs_yz_grid_overflow(entry) for entry in self.range_trees):
+            if any(map(self.needs_yz_grid_overflow, self.range_trees)):
                 return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
         elif n == 3:

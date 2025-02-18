@@ -5,7 +5,7 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
@@ -17,7 +17,8 @@ from ..utils import ceildiv as cdiv, get_num_sms, TMA_DESCRIPTOR_SIZE
 log = logging.getLogger(__name__)
 
 
-def mm_grid(m, n, meta):
+@SymbolicGridFn
+def mm_grid(m, n, meta, *, cdiv):
     """
     The CUDA grid size for matmul triton templates.
     """

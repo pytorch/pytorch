@@ -23,7 +23,6 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
-from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -1256,20 +1255,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
-
-    def prepare_triton_kernel_call(self, call_args):
-        def wrap_arg(arg):
-            if isinstance(arg, str):
-                # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-                return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
-            elif isinstance(arg, bool):
-                return str(arg).lower()
-            elif isinstance(arg, (int, float, SymbolicCallArg)):
-                return str(arg)
-            else:
-                return cexpr(V.graph.sizevars.simplify(arg))
-
-        return [wrap_arg(arg) for arg in call_args]
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)

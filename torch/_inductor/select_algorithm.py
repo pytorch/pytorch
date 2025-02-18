@@ -30,6 +30,7 @@ from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_s
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
+from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import (
     TensorMeta,
@@ -61,6 +62,7 @@ from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
+    ceildiv,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -995,8 +997,13 @@ class TritonTemplateKernel(TritonKernel):
             assert len(static_grid) == 3, "grid_fn should return 3 values"
             call_args.extend(static_grid)
             arg_types.extend(map(type, static_grid))
+        elif isinstance(self.grid_fn, SymbolicGridFn):
+            dynamic_grid = self.grid_fn.sympy_call(*self.call_sizes, self.meta)
+            assert len(dynamic_grid) == 3, "grid_fn should return 3 values"
+            call_args.extend(dynamic_grid)
+            arg_types.extend(map(type, dynamic_grid))
         else:
-            assert not V.graph.cpp_wrapper, "cpp_wrapper requires static grid size"
+            assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
@@ -2290,6 +2297,17 @@ def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
+
+
+@dataclasses.dataclass
+class SymbolicGridFn:
+    fn: Callable[..., tuple[int, int, int]]
+
+    def __call__(self, *args, **kwargs) -> tuple[int, int, int]:
+        return self.fn(*args, **kwargs, cdiv=ceildiv)
+
+    def sympy_call(self, *args, **kwargs):
+        return self.fn(*args, **kwargs, cdiv=CeilDiv)
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated
