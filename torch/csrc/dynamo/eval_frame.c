@@ -7,12 +7,11 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
-#include <torch/csrc/dynamo/extra_state.h>
-#include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 typedef struct {
   int active_dynamo_threads;
@@ -31,20 +30,12 @@ static PyObject* eval_frame_callback_get(void) {
   }
 }
 
-static void eval_frame_callback_set(PyObject* obj) {
+void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)
-
-// All the eval APIs change in 3.11 so we need to decide which one to use on the
-// fly https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
-#if IS_PYTHON_3_11_PLUS
-#define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
-#else
-#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
-#endif // IS_PYTHON_3_11_PLUS
 
 // We need to be able to return the _PyInterpreterFrame to python so create
 // a python binding for it
@@ -194,12 +185,6 @@ static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag);
-static PyObject* dynamo__custom_eval_frame(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag,
-    PyObject* callback,
-    int* should_clear_frame);
 static PyObject* (*previous_eval_frame)(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -212,7 +197,7 @@ static PyObject* dynamo_custom_eval_frame_shim(
   return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 
-static PyObject* dynamo_eval_frame_default(
+PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
@@ -245,7 +230,7 @@ static void enable_eval_frame_default(PyThreadState* tstate) {
   }
 }
 
-static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
+const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
@@ -253,7 +238,7 @@ static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
-static PyObject* dynamo_call_callback(
+PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,
@@ -273,7 +258,7 @@ static PyObject* dynamo_call_callback(
   return res;
 }
 
-static void clear_old_frame_if_python_312_plus(
+void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
 #if IS_PYTHON_3_12_PLUS
@@ -496,7 +481,7 @@ static PyObject* dynamo_eval_custom_code_impl(
 }
 
 // This wrapper function adds a profiler event
-static PyObject* dynamo_eval_custom_code(
+PyObject* dynamo_eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -525,258 +510,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
-  int should_clear_frame = 0;
-  PyObject* result = dynamo__custom_eval_frame(
-      tstate, frame, throw_flag, callback, &should_clear_frame);
-  if (should_clear_frame) {
-    clear_old_frame_if_python_312_plus(tstate, frame);
-  }
-  return result;
-}
-
-static PyObject* skip_code_recursive_flag;
-static PyObject* cache_limit_hit_flag;
-bool is_skip_guard_eval_unsafe = false;
-
-// NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
-// clearing/popping the frame, meaning that unless we default evaluate the
-// original frame, we are responsible for clearing it - via
-// clear_old_frame_if_python_312_plus. The should_clear_frame flag is used to
-// indicate whether the frame should be cleared by _custom_eval_frame's caller.
-// Generally should_clear_frame should be set if and only we don't
-// eval_frame_default.
-static PyObject* dynamo__custom_eval_frame(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag,
-    PyObject* callback,
-    int* should_clear_frame) {
-#if IS_PYTHON_3_11_PLUS
-  DEBUG_TRACE(
-      "begin %s %s %i %i",
-      get_frame_name(frame),
-      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
-      F_CODE(frame)->co_firstlineno,
-      _PyInterpreterFrame_LASTI(frame));
-#else
-  DEBUG_TRACE(
-      "begin %s %s %i %i %i",
-      get_frame_name(frame),
-      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
-      frame->f_lineno,
-      frame->f_lasti,
-      frame->f_iblock);
-#endif
-
-  if (throw_flag) {
-    // When unwinding generators, eval frame is called with throw_flag ==
-    // true.  Frame evaluation is supposed to continue unwinding by propagating
-    // the exception.  Dynamo doesn't really know how to do this, nor does it
-    // really want to do this, because there's unlikely any code to capture
-    // (you're going to immediately quit out of the frame, perhaps running
-    // some unwinding logic along the way).  So we just run the default
-    // handler in this case.
-    //
-    // NB: A previous version of this patch returned NULL.  This is wrong,
-    // because returning NULL is *different* from unwinding an exception.
-    // In particular, you will not execute things like context manager
-    // __exit__ if you just return NULL.
-    //
-    // NB: It's /conceivable/ that you might want to actually still call the
-    // Dynamo callback when throw_flag == TRUE, to give Dynamo a chance to
-    // do any stack unwinding code.  But this is not really useful because
-    // (1) Dynamo doesn't actually know how to do stack unwinding, so it would
-    // immediately skip the frame, and (2) even if it did, this would only
-    // be profitable if there was tensor code in the unwinding code.  Seems
-    // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
-    return dynamo_eval_frame_default(tstate, frame, throw_flag);
-  }
-
-  ExtraState* extra = get_extra_state(F_CODE(frame));
-  if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
-    DEBUG_TRACE("skip %s", get_frame_name(frame));
-    return dynamo_eval_frame_default(tstate, frame, throw_flag);
-  }
-  if (extra == SKIP_CODE_RECURSIVE) {
-    DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
-    eval_frame_callback_set(Py_None);
-    PyObject* result = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    eval_frame_callback_set(callback);
-    return result;
-  }
-
-  if (extra == NULL) {
-    extra = init_and_set_extra_state(F_CODE(frame));
-  }
-
-  FrameLocalsMapping* locals = get_framelocals_mapping(frame);
-  PyObject* backend = get_backend(callback);
-
-  // We don't run the current custom_eval_frame behavior for guards.
-  // So we temporarily set the callback to Py_None to drive the correct behavior
-  // in the shim.
-  eval_frame_callback_set(Py_None);
-
-  // A callback of Py_False indicates "run only" mode, the cache is checked, but
-  // we never compile.
-  // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
-  // and skip code recursively if no cache entry is found.
-  if (callback == Py_False || extra_state_cache_limit_hit(extra)) {
-    DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-    _PytorchRecordFunctionState* rf =
-        _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = NULL;
-    const char* trace_annotation = "";
-    lookup(
-        extra,
-        locals,
-        backend,
-        &maybe_cached_code,
-        &trace_annotation,
-        is_skip_guard_eval_unsafe);
-    _pytorch_record_function_exit(rf);
-
-    framelocals_mapping_free(locals);
-
-    if (maybe_cached_code == NULL) {
-      // guard eval failed, keep propagating
-      *should_clear_frame = 1;
-      return NULL;
-    } else if (maybe_cached_code == Py_None) {
-      if (is_skip_guard_eval_unsafe) {
-        PyErr_SetString(
-            PyExc_RuntimeError,
-            "Recompilation triggered with skip_guard_eval_unsafe stance. "
-            "This usually means that you have not warmed up your model "
-            "with enough inputs such that you can guarantee no more recompilations.");
-        return NULL;
-      }
-      DEBUG_TRACE("cache miss %s", get_frame_name(frame));
-      if (extra_state_cache_limit_hit(extra)) {
-        // skip code recursively
-        DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
-        eval_frame_callback_set(Py_None);
-      }
-      PyObject* ret = dynamo_eval_frame_default(tstate, frame, throw_flag);
-      if (extra_state_cache_limit_hit(extra)) {
-        eval_frame_callback_set(callback);
-      }
-      return ret;
-    }
-    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
-    // used cached version
-    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    *should_clear_frame = 1;
-    return dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
-  }
-  DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
-  DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
-
-  _PytorchRecordFunctionState* rf =
-      _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = NULL;
-  const char* trace_annotation = "";
-  lookup(
-      extra,
-      locals,
-      backend,
-      &maybe_cached_code,
-      &trace_annotation,
-      is_skip_guard_eval_unsafe);
-  _pytorch_record_function_exit(rf);
-  if (maybe_cached_code == NULL) {
-    // Python error
-    *should_clear_frame = 1;
-    framelocals_mapping_free(locals);
-    return NULL;
-  } else if (maybe_cached_code != Py_None) {
-    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
-    // used cached version
-    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    *should_clear_frame = 1;
-    framelocals_mapping_free(locals);
-    return dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
-  }
-
-  if (is_skip_guard_eval_unsafe) {
-    PyErr_SetString(
-        PyExc_RuntimeError,
-        "Recompilation triggered with skip_guard_eval_unsafe stance. "
-        "This usually means that you have not warmed up your model "
-        "with enough inputs such that you can guarantee no more recompilations.");
-    return NULL;
-  }
-  // cache miss
-  CacheEntry* cache_entry = extract_cache_entry(extra);
-  FrameState* frame_state = extract_frame_state(extra);
-  PyObject* result =
-      dynamo_call_callback(callback, frame, locals, cache_entry, frame_state);
-  framelocals_mapping_free(locals);
-  if (result == NULL) {
-    // internal exception, returning here will leak the exception into user code
-    // this is useful for debugging -- but we dont want it to happen outside of
-    // testing
-    // NB: we intentionally DO NOT re-enable custom behavior to prevent
-    // cascading failure from internal exceptions.  The upshot is if
-    // Dynamo barfs, that's it for Dynamo, even if you catch the exception
-    // inside the torch.compile block we won't try to Dynamo anything else.
-    *should_clear_frame = 1;
-    return NULL;
-  } else if (result == skip_code_recursive_flag) {
-    // Dynamo returned skip_code_recursive_flag, so we should recursively skip
-    // code.
-    DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
-    set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-    PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    return r;
-  } else if (result == cache_limit_hit_flag) {
-    // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
-    DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
-    set_extra_state_cache_limit_hit(extra, true);
-    PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    return r;
-  } else if (result != Py_None) {
-    DEBUG_TRACE("create cache %s", get_frame_name(frame));
-
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra wont be NULL here.
-    CacheEntry* new_cache_entry = create_cache_entry(extra, result, backend);
-    Py_DECREF(result);
-
-    // Update the existing cache_entry on the extra object. This extra object is
-    // sitting on the extra scratch space, we are just changing the cache_entry
-    // ptr. As a result, extra now becomes the owner of CacheEntry object. This
-    // will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    *should_clear_frame = 1;
-    return dynamo_eval_custom_code(
-        tstate,
-        frame,
-        CacheEntry_get_code(new_cache_entry),
-        CacheEntry_get_trace_annotation(new_cache_entry),
-        throw_flag);
-  } else {
-    DEBUG_TRACE("create skip %s", get_frame_name(frame));
-    Py_DECREF(result);
-    set_extra_state(F_CODE(frame), SKIP_CODE);
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
-    return dynamo_eval_frame_default(tstate, frame, throw_flag);
-  }
+  return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
 #else // !(IS_PYTHON_3_14_PLUS)
@@ -927,8 +661,12 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
     return NULL;
   }
 
-  // set_extra_state destroys the existing object on extra scratch space.
-  set_extra_state((PyCodeObject*)obj, SKIP_CODE);
+  PyCodeObject* code = (PyCodeObject*)obj;
+  ExtraState* extra = get_extra_state(code);
+  if (extra == NULL) {
+    extra = init_and_set_extra_state(code);
+  }
+  extra_state_set_exec_strategy(extra, (FrameExecStrategy){SKIP, DEFAULT});
   Py_RETURN_NONE;
 }
 
@@ -969,6 +707,10 @@ static int clear_state(PyObject* module) {
   }
   return -1;
 }
+
+PyObject* skip_code_recursive_flag = NULL;
+PyObject* cache_limit_hit_flag = NULL;
+bool is_skip_guard_eval_unsafe = false;
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
