@@ -609,6 +609,8 @@ num_guards_executed=0)
         # len(type(foo).__mro__) == 2
         foo_mgr = guard_manager.getitem_manager("foo", "", foo, default_mgr_enum)
         type_manager = foo_mgr.type_manager("", type(foo), default_mgr_enum)
+        self.assertEqual(type_manager.get_parent(), foo_mgr)
+        self.assertEqual(type_manager.get_parent().get_parent(), guard_manager)
         self.assertTrue(isinstance(foo_mgr.get_accessors()[0], TypeGuardAccessor))
         mro_manager = type_manager.getattr_manager(
             "__mro__", "", type(foo).__mro__, default_mgr_enum
