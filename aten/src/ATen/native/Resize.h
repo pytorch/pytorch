@@ -94,14 +94,22 @@ inline void checkInBoundsForStorage(
     T storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  T storage_size_bytes =
-      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+  T storage_size_bytes, storage_size_plus_offset_bytes;
+  if (stride.data()) {
+    storage_size_bytes =
+        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+        size, stride, data_type.itemsize(), storage_offset);
+  } else {
+    storage_size_bytes =
+        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
+        size, data_type.itemsize(), storage_offset);
+  }
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  T storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
-      size, stride, data_type.itemsize(), storage_offset);
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
   TORCH_CHECK(
       storage_size_plus_offset_bytes <= new_storage_size_bytes,
@@ -170,6 +178,20 @@ inline void checkSetStorage(
   // storageOffset
   TORCH_CHECK(
       storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+
+  // set_storage_* will (unsafely) set the storage offset and then call
+  // resize_impl that handles resize the storage appropriately However, resize
+  // will only resize the storage if the sizes/strides changed. For the case
+  // that the sizes/strides remain unchanged, the storage offset is not properly
+  // validated, so we do that here.
+  auto result_tensor_impl = result.unsafeGetTensorImpl();
+  bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
+  bool stride_unchanged =
+      stride.data() ? result_tensor_impl->generic_strides<T>() == stride : true;
+  if (size_unchanged && stride_unchanged) {
+    checkInBoundsForStorage(
+        size, stride, storage_offset, result.dtype(), result.storage());
+  }
 }
 
 /**
