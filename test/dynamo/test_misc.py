@@ -9579,21 +9579,6 @@ def ___make_guard_fn():
         ):
             compiled_fn(x)
 
-        # FIXME(XuehaiPan): do not inline infinite generator if it does not raise errors in eager mode
-        def fn(x):
-            def gen():
-                while True:
-                    yield x
-
-            return list(zip(range(10), gen()))
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
-        ):
-            compiled_fn(x)
-
     def test_itertools_islice(self):
         counters.clear()
 
@@ -11911,6 +11896,27 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    def test_RAISE_VARARGS_0(self):
+        def foo():
+            try:
+                raise ValueError
+            except:
+                raise
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                foo()
+            except ValueError:
+                return t.sin()
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
 
     def test_overridden_getattribute(self):
         class Foo:

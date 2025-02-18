@@ -1,5 +1,10 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+
+"""
+This module provides decorators and utilities for controlling TorchDynamo's behavior during compilation.
+"""
+
 import functools
 import inspect
 import sys
