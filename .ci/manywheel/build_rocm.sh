@@ -10,6 +10,7 @@ export BUILD_DEBUG_INFO=0
 # TODO Are these all used/needed?
 export TH_BINARY_BUILD=1
 export USE_STATIC_CUDNN=1
+export USE_STATIC_MKL=1
 export USE_STATIC_NCCL=1
 export ATEN_STATIC_CUDA=1
 export USE_CUDA_STATIC_LINK=1

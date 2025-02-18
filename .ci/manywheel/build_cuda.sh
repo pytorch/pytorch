@@ -7,6 +7,7 @@ SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
+export USE_STATIC_MKL=1
 export USE_STATIC_CUDNN=1
 export USE_STATIC_NCCL=1
 export ATEN_STATIC_CUDA=1
