@@ -201,7 +201,7 @@ class AutotuneCache:
         config: Config,
         time_taken_ns: int,
         found_by_coordesc: bool = False,
-        triton_cache_hash: Optional[str] = None, 
+        triton_cache_hash: Optional[str] = None,
     ) -> None:
         data = {
             **config.kwargs,
