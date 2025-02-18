@@ -101,6 +101,10 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
+    if (!init_[static_cast<int8_t>(opt_device_type.value())].test_once()) {
+      // If the device is not initialized, no pointer can be pinned for it
+      return false;
+    }
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
 
@@ -329,6 +333,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
+  bool allowTF32OneDNN() const;
+  void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
@@ -337,6 +343,8 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
+  bool allowFP16AccumulationCuBLAS() const;
+  void setAllowFP16AccumulationCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -405,11 +413,7 @@ class TORCH_API Context {
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
   bool benchmark_cudnn = false;
-#endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
@@ -418,7 +422,9 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
+  bool allow_fp16_accumulation_cublas = false;
   bool enabled_mkldnn = true;
+  bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
