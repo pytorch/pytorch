@@ -795,17 +795,15 @@ python setup.py develop
 
 #### Use a faster linker
 
-If you are editing a single file and rebuilding in a tight loop, the time spent
-linking will dominate. The system linker available in most Linux distributions
-(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
 
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
 
-The easiest way to use `lld` this is download the
-[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
-```bash
-ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```sh
+CMAKE_LINKER_TYPE=MOLD python setup.py develop
 ```
 
 #### Use pre-compiled headers

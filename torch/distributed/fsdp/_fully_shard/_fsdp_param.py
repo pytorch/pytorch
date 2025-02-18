@@ -74,6 +74,7 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 @torch.library.impl(lib, "copy_", "CUDA")
 @torch.library.impl(lib, "copy_", "XPU")
 @torch.library.impl(lib, "copy_", "CPU")
+@torch.library.impl(lib, "copy_", "MTIA")
 def copy_(tensor, data):
     tensor.copy_(data)
 

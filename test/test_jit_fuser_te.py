@@ -2499,7 +2499,7 @@ class TestTEFuser(JitTestCase):
 
                     for i, func in enumerate(funcs):
                         num_args = i + 1
-                        for j, gen in enumerate(gen_tensor):
+                        for gen in gen_tensor:
                             inps = (gen(n), gen(n), gen(n))
                             func_s = torch.jit.trace(func, inps, check_trace=False)
                             torch._C._jit_pass_erase_shape_information(func_s.graph)
