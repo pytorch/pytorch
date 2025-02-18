@@ -194,9 +194,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     )
 
 
-def create_fake_tensor_with_dynamic_size(
-    self, x, shape_env, dynamic_sizes, dynamic_strides
-):
+def create_fake_tensor_with_dynamic_size(x, shape_env, dynamic_sizes, dynamic_strides):
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     with FakeTensorMode(shape_env=shape_env) as fake_mode:
