@@ -619,6 +619,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     check_base_legacy_new(dispatch_key, c10::kSparse);
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  Tensor result;
   if (r.idx == 0) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -627,7 +628,8 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     }
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
-    return at::empty({0}, build_options(options, scalar_type, deviceOptional));
+    result =
+        at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -636,7 +638,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return at::unsafeTensorFromTH(cdata, true);
+    auto result = at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -648,7 +650,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
+    auto result = at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -660,7 +662,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+    result = at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -684,8 +686,16 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
           "torch.sparse.SparseTensor(shape, *, device=) is deprecated."
           "  Please use torch.sparse_coo_tensor(shape, dtype=, device=).");
     }
-    return new_with_sizes(
-        options, scalar_type, deviceOptional, r.symintlist(0));
+    result =
+        new_with_sizes(options, scalar_type, deviceOptional, r.symintlist(0));
+  }
+  if (result.defined()) {
+    at::_validate_sparse_coo_tensor_args(
+        result._indices(),
+        result._values(),
+        result.sizes(),
+        result.is_coalesced());
+    return result;
   }
   throw std::runtime_error("new(): invalid arguments");
 }
