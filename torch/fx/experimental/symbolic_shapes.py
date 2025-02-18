@@ -113,14 +113,6 @@ class GuardOnDataDependentSymNode(RuntimeError):
         self.cond = cond
 
 
-class GuardOnDataDependentSymNodeStrict(RuntimeError):
-    cond: sympy.Basic
-
-    def __init__(self, cond: sympy.Basic, *args: Any) -> None:
-        super().__init__(*args)
-        self.cond = cond
-
-
 class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
 
@@ -5910,7 +5902,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
-    ) -> Union[GuardOnDataDependentSymNode, GuardOnDataDependentSymNodeStrict]:
+    ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -5949,8 +5941,6 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
-        if config.unbacked_strict:
-            return GuardOnDataDependentSymNodeStrict(expr, msg)
         return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(
