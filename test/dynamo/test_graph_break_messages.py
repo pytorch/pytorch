@@ -54,7 +54,7 @@ from user code:
 
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
-            return torch.bincount(torch.randint(0, 10, (10,)))
+            return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
 
         with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
             self.assertExpectedInlineMunged(
@@ -62,15 +62,15 @@ from user code:
                 lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
                 """\
 Dynamic shape operator (no meta kernel)
-  Explanation: Operator `aten.bincount.default` does not have a meta kernel that supports dynamic output shapes
+  Explanation: Operator `aten.linalg_lstsq.default` does not have a meta kernel that supports dynamic output shapes
   Hint: Please report an issue to PyTorch
 
-  Developer debug context: aten.bincount.default
+  Developer debug context: aten.linalg_lstsq.default
 
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return torch.bincount(torch.randint(0, 10, (10,)))""",
+    return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))""",
             )
 
     def test_data_dependent_operator(self):
@@ -240,7 +240,7 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `skip` in file `case.py` should not be traced.
+  Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
   Hint: Avoid calling the function `skip`.
   Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
@@ -263,7 +263,7 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
+  Explanation: Dynamo developers have intentionally marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
   Hint: Avoid calling the function `disable`.
 
   Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: <missing reason>
@@ -289,7 +289,7 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Attempted to inline function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `skip` should not be traced.
+  Explanation: Dynamo developers have intentionally marked that the function `skip` should not be traced.
   Hint: Avoid calling the function `skip`.
   Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.

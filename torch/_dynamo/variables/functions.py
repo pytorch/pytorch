@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
-from typing_extensions import Never
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -391,7 +391,6 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
@@ -1170,7 +1169,7 @@ class SkipFunctionVariable(VariableTracker):
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
-                    f"Dynamo developers have manually marked that the function `{self.value.__qualname__}` "
+                    f"Dynamo developers have intentionally marked that the function `{self.value.__qualname__}` "
                     f"in file `{path}` should not be traced."
                 )
                 hints = [
@@ -1633,6 +1632,47 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+
+class TracebackVariable(VariableTracker):
+    # We don't track traceback. A call to any function in this module is a no-op
+    def call_function(self, tx, args, kwargs):
+        ...
+
+
+class SysFunctionVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def exc_info(self, tx):
+        if len(tx.exn_vt_stack):
+            exn = tx.exn_vt_stack[-1]
+            typ = exn.exc_type
+            tb = None
+            items = [
+                VariableTracker.build(tx, typ),
+                exn,
+                VariableTracker.build(tx, tb),
+            ]
+        else:
+            items = [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ]
+        return variables.TupleVariable(items)
+
+    def exception(self, tx):
+        return self.exc_info(tx).items[1]
+
+    def call_function(self, tx, args, kwargs):
+        if self.value is sys.exc_info:
+            return self.exc_info(tx)
+        elif self.value is sys.exception:
+            return self.exception(tx)
+        else:
+            unimplemented(f"sys.{self.value.__name__}")
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
