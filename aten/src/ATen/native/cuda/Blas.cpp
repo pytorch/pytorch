@@ -879,7 +879,7 @@ static bool _scaled_mm_allowed_device() {
 static bool _scaled_mm_is_fnuz() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
