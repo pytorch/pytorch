@@ -22,7 +22,12 @@ from torch._inductor.pattern_matcher import (
 )
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    skipIfXpu,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import requires_gpu
 
 
@@ -179,6 +184,10 @@ class TestInvokeQuantInductor(TestInvokeQuant):
             torch.compile(fn_no_match)(x, y, z)
             self.assertTrue(counter == 1)
 
+    @skipIfXpu(
+        msg="MM Triton template fusion for XPU not work because the fusion"
+        " can not speedup, unskip untill #146568 fixed."
+    )
     @requires_gpu()
     @config.patch(prologue_fusion=True)
     def test_prologue(self):
