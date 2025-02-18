@@ -511,6 +511,18 @@ num_guards_executed=0)
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
 
+    def test_dict_tag_optimization(self):
+        a = torch.randn(5)
+        d = {"a": a}
+
+        def fn(a, d):
+            return a is d["a"], torch.sum(a)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertTrue(opt_fn(a, d)[0])
+        self.assertFalse(opt_fn(torch.ones(5), d)[0])
+
     def test_framelocals_guard_e2e(self):
         def fn(x, y, z):
             return x + y + z[0]

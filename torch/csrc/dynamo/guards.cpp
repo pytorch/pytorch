@@ -2316,8 +2316,15 @@ class GuardManager {
 
  public:
   // For cloning
-  GuardManager(GuardManager* parent, std::string source, bool is_dict)
-      : _parent(parent), _source(std::move(source)), _is_dict(is_dict) {}
+  GuardManager(
+      GuardManager* parent,
+      std::string source,
+      bool is_dict,
+      bool enable_dict_tag_optimization)
+      : _parent(parent),
+        _source(std::move(source)),
+        _is_dict(is_dict),
+        _enable_dict_tag_optimization(enable_dict_tag_optimization) {}
 
   void clone_common(
       GuardManager* cloned_parent,
@@ -2348,8 +2355,8 @@ class GuardManager {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    GuardManager* cloned_mgr =
-        new GuardManager(cloned_parent, _source, _is_dict);
+    GuardManager* cloned_mgr = new GuardManager(
+        cloned_parent, _source, _is_dict, _enable_dict_tag_optimization);
     clone_common(cloned_parent, cloned_mgr, clone_filter_fn);
     return cloned_mgr;
   }
@@ -2439,7 +2446,8 @@ class GuardManager {
         // to avoid early exits when dict_tag matches and the object is
         // immutable.
         new_tag = get_dict_version_unchecked(value);
-        matches_dict_tag = (new_tag == _dict_tag);
+        matches_dict_tag =
+            (new_tag == _dict_tag) && _enable_dict_tag_optimization;
       }
     }
 
@@ -2541,6 +2549,14 @@ class GuardManager {
     return _fail_count;
   }
 
+  bool is_dict() const {
+    return _is_dict;
+  }
+
+  void disable_dict_tag_optimization() {
+    _enable_dict_tag_optimization = false;
+  }
+
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
   virtual std::vector<GuardAccessor*> get_accessors() const {
@@ -2559,6 +2575,18 @@ class GuardManager {
     ret.reserve(_accessors.size());
     for (const auto& accessor : _accessors) {
       ret.emplace_back(accessor->get_guard_manager().get());
+    }
+    return ret;
+  }
+
+  // DEBUG function - Returning raw pointers because we can't return unique_ptr
+  // and pybind does not accept a unique_ptr reference return type.
+  std::vector<GuardManager*> get_ancestor_managers() {
+    std::vector<GuardManager*> ret;
+    GuardManager* m = this;
+    while (m != nullptr) {
+      ret.push_back(m);
+      m = m->get_parent();
     }
     return ret;
   }
@@ -2626,6 +2654,7 @@ class GuardManager {
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   bool _is_dict;
+  bool _enable_dict_tag_optimization{true};
   uint64_t _dict_tag{0};
 };
 
@@ -3120,7 +3149,7 @@ class DictGuardManager : public GuardManager {
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices)
-      : GuardManager(cloned_parent, std::move(source), true),
+      : GuardManager(cloned_parent, std::move(source), true, true),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -4821,7 +4850,8 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
   GuardAccessor* clone(
       GuardManager* cloned_parent,
       const py::function& clone_filter_fn) override {
-    return clone_common<WeakRefCallGuardAccessor>(cloned_parent, clone_filter_fn);
+    return clone_common<WeakRefCallGuardAccessor>(
+        cloned_parent, clone_filter_fn);
   }
 
   void clone_visitor(WeakRefCallGuardAccessor* to) {}
@@ -4985,6 +5015,45 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+static bool is_ancestor_of(GuardManager* p, GuardManager* c) {
+  GuardManager* check = c;
+  while (check != nullptr) {
+    if (check == p) {
+      return true;
+    } else {
+      check = check->get_parent();
+    }
+  }
+  return false;
+}
+
+void disable_dict_tag_optimization_for_ancestors(
+    std::vector<GuardManager*> guard_managers) {
+  for (auto x : guard_managers) {
+    for (auto x_ancestor : x->get_ancestor_managers()) {
+      if (!x_ancestor->is_dict()) {
+        continue;
+      }
+      for (auto y : guard_managers) {
+        if (y == x) {
+          continue;
+        } else if (!is_ancestor_of(x_ancestor, y)) {
+          x_ancestor->disable_dict_tag_optimization();
+        }
+      }
+    }
+  }
+}
+
+void disable_dict_tag_optimization_for_ancestors(
+    const py::list& guard_managers) {
+  std::vector<GuardManager*> cpp_guard_managers;
+  for (const auto& guard_manager : guard_managers) {
+    cpp_guard_managers.push_back(py::cast<GuardManager*>(guard_manager));
+  }
+  disable_dict_tag_optimization_for_ancestors(cpp_guard_managers);
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -5002,6 +5071,7 @@ void install_object_aliasing_guard(
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
   y->add_permitted_leaf_guard(guard);
+  disable_dict_tag_optimization_for_ancestors({x, y});
 }
 
 void install_no_tensor_aliasing_guard(
@@ -5019,9 +5089,11 @@ void install_no_tensor_aliasing_guard(
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
       ->add_relational_guard_resetter(guard);
+
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
   }
+  disable_dict_tag_optimization_for_ancestors(guard_managers);
 }
 
 void install_symbolic_shape_guard(
@@ -5050,6 +5122,7 @@ void install_symbolic_shape_guard(
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
   }
+  disable_dict_tag_optimization_for_ancestors(guard_managers);
 }
 
 void install_storage_overlapping_guard_with_checker(
@@ -5072,6 +5145,7 @@ void install_storage_overlapping_guard_with_checker(
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
   }
+  disable_dict_tag_optimization_for_ancestors(guard_managers);
 }
 
 void install_storage_overlapping_guard(
@@ -5461,6 +5535,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "get_leaf_guards",
           &GuardManager::get_leaf_guards,
+          py::return_value_policy::reference)
+      .def(
+          "get_parent",
+          &GuardManager::get_parent,
           py::return_value_policy::reference)
       .def(
           "add_lambda_guard",
