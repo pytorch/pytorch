@@ -11,7 +11,7 @@
 #include <c10/util/irange.h>
 
 namespace torch::jit {
-std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 namespace mobile {
 
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
@@ -178,7 +178,7 @@ const std::vector<at::Tensor> Module::parameters() const {
 // loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
-  const std::string name = "";
+  const std::string name;
   slot_named_params_recurse(object_, &params, name);
   return params;
 }
