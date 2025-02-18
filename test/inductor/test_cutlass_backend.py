@@ -459,7 +459,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -1021,7 +1021,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "force_disable_caches": True,
             }
         ):
             with log_settings("+inductor"), self.assertLogs(
