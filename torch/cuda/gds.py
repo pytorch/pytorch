@@ -6,7 +6,11 @@ import torch
 from torch.types import Storage
 
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "gds_register_buffer",
+    "gds_deregister_buffer",
+    "GdsFile",
+]
 
 
 def _dummy_fn(name: str) -> Callable:
@@ -31,8 +35,15 @@ if not hasattr(torch._C, "_gds_register_buffer"):
     torch._C.__dict__["_gds_save_storage"] = _dummy_fn("_gds_save_storage")
 
 
-def _gds_register_buffer(s: Storage) -> None:
-    """Registers a buffer.
+def gds_register_buffer(s: Storage) -> None:
+    """Registers a storage on a CUDA device as a cufile buffer.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("gds filesystem requirements")
+        >>> src = torch.randn(1024, device="cuda")
+        >>> s = src.untyped_storage()
+        >>> gds_register_buffer(s)
 
     Args:
         s (Storage): Buffer to register.
@@ -40,8 +51,16 @@ def _gds_register_buffer(s: Storage) -> None:
     torch._C._gds_register_buffer(s)
 
 
-def _gds_deregister_buffer(s: Storage) -> None:
-    """Registers a buffer.
+def gds_deregister_buffer(s: Storage) -> None:
+    """Deregisters a previously registered storage on a CUDA device as a cufile buffer.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("gds filesystem requirements")
+        >>> src = torch.randn(1024, device="cuda")
+        >>> s = src.untyped_storage()
+        >>> gds_register_buffer(s)
+        >>> gds_deregister_buffer(s)
 
     Args:
         s (Storage): Buffer to register.
@@ -49,18 +68,36 @@ def _gds_deregister_buffer(s: Storage) -> None:
     torch._C._gds_deregister_buffer(s)
 
 
-class _GdsFile:
+class GdsFile:
     r"""Wrapper around cuFile.
 
     cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
+
+    See the `cufile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+    for more details.
 
     Args:
         filename (str): Name of the file to open.
         flags (int): Flags to pass to ``os.open`` when opening the file. ``os.O_DIRECT`` will
             be added automatically.
 
-    .. _CUDA GPUDirect Storage Documentation:
-        https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api
+    Example::
+
+        >>> # xdoctest: +SKIP("gds filesystem requirements")
+        >>> src1 = torch.randn(1024, device="cuda")
+        >>> src2 = torch.randn(2, 1024, device="cuda")
+        >>> file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+        >>> file.save_storage(src1.untyped_storage(), offset=0)
+        >>> file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+        >>> dest1 = torch.empty(1024, device="cuda")
+        >>> dest2 = torch.empty(2, 1024, device="cuda")
+        >>> file.load_storage(dest1.untyped_storage(), offset=0)
+        >>> file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        >>> torch.equal(src1, dest1)
+        True
+        >>> torch.equal(src2, dest2)
+        True
+
     """
 
     def __init__(self, filename: str, flags: int):
