@@ -234,7 +234,7 @@ jobs:
             --shm-size="8g" \
             --tty \
             --detach \
-            --user root \
+            --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
