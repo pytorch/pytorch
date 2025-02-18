@@ -18,7 +18,7 @@ import time
 import traceback
 from collections import defaultdict
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
 import torch.utils.dlpack
@@ -74,10 +74,6 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 zip = strict_zip

@@ -228,7 +228,6 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         res.sum().backward()
 
-
     def test_dropout(self):
         @mark_compile_region
         def gn(x):
@@ -244,7 +243,7 @@ class TestInvokeSubgraphCompile(TestCase):
         x = torch.randn(8, requires_grad=True)
         # Difficult to check the results here because we random does not match
         # between eager and Triton.
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)  # noqa: F841
 
     def test_dedupe(self):
         @mark_compile_region
