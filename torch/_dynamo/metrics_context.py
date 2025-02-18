@@ -1,3 +1,18 @@
+"""Metrics collection and management system for Dynamo.
+
+This module provides context managers for gathering and reporting metrics during
+compilation and runtime.
+
+It includes two main components:
+- MetricsContext: A context manager for collecting metrics during compilation, supporting
+  nested contexts and various metric types (counters, sets, key-value pairs)
+- RuntimeMetricsContext: A specialized context for runtime metrics collection that doesn't
+  require explicit context management
+
+The metrics system enables comprehensive monitoring and analysis of both compilation and
+execution performance.
+"""
+
 import time
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias

@@ -33,8 +33,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   DeviceIndex current_device() const override;
-  bool isBuilt() const override {return true;}
-  bool isAvailable() const override {return hasCUDA();}
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;

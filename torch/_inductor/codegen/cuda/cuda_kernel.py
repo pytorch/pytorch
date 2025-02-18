@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
-from sympy import Expr
+from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -277,7 +277,7 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, _, arg_types = self.args.python_argdefs()
 
         layout_args = self.get_layout_args()
-        call_args.extend(map(str, layout_args))
+        call_args.extend(layout_args)  # type: ignore[arg-type]
         arg_types.extend("int" for a in layout_args)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
@@ -404,6 +404,7 @@ class CUDATemplateKernel(CUDAKernel):
         if len(sizes) == 0:
             return str(default_value)
 
+        sizes = [symbols(v) if isinstance(v, str) else v for v in sizes]
         val = sympy_product(sizes)
         return val
 
