@@ -10857,7 +10857,7 @@ fn
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
-    @torch.fx.experimental._config.patch(unbacked_strict=True)
+    @torch.fx.experimental._config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_strict_mode(self):
         @torch.compile()
         def fn(x, y):
