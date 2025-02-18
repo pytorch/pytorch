@@ -292,15 +292,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
-            for dim, dim_size in enumerate(param.shape):
-                if dim_size > largest_dim_size:
-                    largest_dim = dim
-                    largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
-            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
-            return Shard(largest_dim)
+            return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
@@ -769,13 +761,7 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
-            for dim, dim_size in enumerate(param.shape):
-                if dim_size > largest_dim_size:
-                    largest_dim = dim
-                    largest_dim_size = dim_size
-            return Shard(largest_dim)
+            return Shard(param.shape.index(max(param.shape)))
 
         for layer in model.layers:
             fully_shard(layer, shard_placement_fn=shard_placement_fn)
