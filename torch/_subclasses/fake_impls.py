@@ -65,20 +65,12 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.out,
     aten.rand_like.default,
     aten.rand_like.out,
-    aten.rand_like.generator,
-    aten.rand_like.generator_out,
     aten.randn_like.default,
     aten.randn_like.out,
-    aten.randn_like.generator,
-    aten.randn_like.generator_out,
     aten.randint_like.default,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
-    aten.randint_like.generator,
-    aten.randint_like.generator_out,
-    aten.randint_like.generator_with_low_dtype,
-    aten.randint_like.generator_with_low_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -230,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -290,7 +274,15 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 
 def _unique(
-    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+    fake_mode,
+    func,
+    arg,
+    dim,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    *,
+    unique_consecutive=False,
 ):
     if (
         fake_mode.shape_env is None
@@ -299,8 +291,10 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+
     # Do not use a memo for unique_dim
-    if dim is not None or (nnz := arg.unique_memo) is None:
+    if dim is not None or nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -329,7 +323,10 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg.unique_memo = nnz
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz
+            else:
+                arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
@@ -372,6 +369,20 @@ def unique_dim(
         sorted,
         return_inverse,
         return_counts,
+    )
+
+
+@register_op_impl(aten.unique_consecutive.default)
+def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        False,
+        return_inverse,
+        return_counts,
+        unique_consecutive=True,
     )
 
 
@@ -471,7 +482,7 @@ def nonzero(fake_mode, func, arg):
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
@@ -784,6 +795,23 @@ def conv(fake_mode, func, *args, **kwargs):
                 convert(out[1], mem_fmt),
                 convert(out[2], None),
             )
+
+
+@register_op_impl(torch.ops.aten.bincount.default)
+def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_size, min=minlength)
+    return inputs.new_empty(new_size)
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)

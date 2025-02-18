@@ -104,6 +104,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
@@ -208,6 +209,9 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
     c10::complex<float> value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
+    c10::complex<double> value,
     AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
@@ -730,5 +734,12 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
 
 #endif // AOTI_TORCH_SHIM
