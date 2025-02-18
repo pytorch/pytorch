@@ -458,101 +458,13 @@ TORCH_IMPL_FUNC(cat_out_cuda)
 
   auto materialized = tensors.materialize();
 
-  // We parallelize the copy if all 6 conditions pass:
-  //
-  // 1. There is more than one input tensor
-  // 2. The out tensor is 32-bit indexable
-  // 3. The number of dimensions is <= 4
-  // 4. All input tensors are contiguous (output tensor may be non-contig)
-  // 5. All input tensors can use 32-bit indexing
-
-  const bool all32BitIndexable = std::all_of(materialized.begin(), materialized.end(),
-    [] (const Tensor& t) {
-      return at::cuda::detail::canUse32BitIndexMath(t);
-    });
-
-  int nDims = materialized[valid].get().dim();
-
-  // We support the contiguous inputs and non-contiguous input (<=4 dims) in different ways
-  // For contiguous input, we don't need to pass stride meta data to cuda kernel through constant
-  // memory. Therefore, we could pass more inputs to cuda threads.
-  // For non-contiguous, we reduce the number of inputs passed to cuda kernel due to the limitation
-  // of constant memory.
-
-
-
-  if (materialized.size() > 1 &&
-      result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      at::cuda::detail::canUse32BitIndexMath(result) &&
-      all_contiguous &&
-      all32BitIndexable &&
-      all_same_dtype) {
-      if (isBitsType(result.scalar_type())) {
-        AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
-          using dtype = OpaqueType<sizeof(scalar_t)>;
-          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
-        });
-      } else {
-        AT_DISPATCH_V2(
-            result.scalar_type(),
-            "cat_cuda",
-            AT_WRAP([&]() {
-              using dtype = OpaqueType<sizeof(scalar_t)>;
-              parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(
-                  result, materialized, dim, nDims, memory_format);
-            }),
-            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-            kComplexHalf,
-            kHalf,
-            kBool,
-            kBFloat16,
-            AT_EXPAND(AT_FLOAT8_TYPES),
-            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
-      }
-  } else if (materialized.size() > 1 &&
-      result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      at::cuda::detail::canUse32BitIndexMath(result) &&
-      nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      all32BitIndexable &&
-      all_same_dtype &&
-      memory_format == c10::MemoryFormat::Contiguous) {
-      if (isBitsType(result.scalar_type())) {
-        AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
-          using dtype = OpaqueType<sizeof(scalar_t)>;
-          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
-        });
-      } else {
-        AT_DISPATCH_V2(
-            result.scalar_type(),
-            "cat_cuda",
-            AT_WRAP([&]() {
-              using dtype = OpaqueType<sizeof(scalar_t)>;
-              parallel_cat<
-                  dtype,
-                  CAT_ARRAY_BATCH_SIZE / 2,
-                  CAT_ARRAY_BATCH_SIZE / 2>(
-                  result, materialized, dim, nDims, memory_format);
-            }),
-            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-            kComplexHalf,
-            kHalf,
-            kBool,
-            kBFloat16,
-            kFloat8_e4m3fn,
-            kFloat8_e4m3fnuz,
-            kFloat8_e5m2,
-            kFloat8_e5m2fnuz,
-            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
-      }
-  } else {
-    int64_t offset = 0;
-    for (const Tensor& t : materialized) {
-      if (cat_should_skip_tensor(t)) continue;
-      int64_t dimSize = t.size(dim);
-      Tensor nt = at::narrow(result, dim, offset, dimSize);
-      copy_(nt, t);
-      offset += dimSize;
-    }
+  int64_t offset = 0;
+  for (const Tensor& t : materialized) {
+    if (cat_should_skip_tensor(t)) continue;
+    int64_t dimSize = t.size(dim);
+    Tensor nt = at::narrow(result, dim, offset, dimSize);
+    copy_(nt, t);
+    offset += dimSize;
   }
 }
 
