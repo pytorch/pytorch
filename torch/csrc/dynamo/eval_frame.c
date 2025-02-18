@@ -1,7 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <opcode.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
@@ -36,18 +35,6 @@ void eval_frame_callback_set(PyObject* obj) {
 
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)
-
-// We need to be able to return the _PyInterpreterFrame to python so create
-// a python binding for it
-
-typedef struct THPPyInterpreterFrame {
-  PyObject_HEAD
-  THP_EVAL_API_FRAME_OBJECT* frame; // Borrowed reference
-  PyObject* locals;
-} THPPyInterpreterFrame;
-
-THPPyInterpreterFrame* THPPyInterpreterFrame_New(
-    THP_EVAL_API_FRAME_OBJECT* frame);
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -234,28 +221,6 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
-}
-
-// Remember to update the type signature for DynamoCallbackFn.__call__ in
-// torch/_dynamo/types.py if this function's signature changes.
-PyObject* dynamo_call_callback(
-    PyObject* callable,
-    THP_EVAL_API_FRAME_OBJECT* _frame,
-    FrameLocalsMapping* locals,
-    CacheEntry* cache_entry,
-    FrameState* frame_state) {
-  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-  if (frame == NULL) {
-    return NULL;
-  }
-  frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
-
-  PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
-  PyObject* res = PyObject_CallFunction(
-      callable, "OOO", frame, cache_entry_pyobj, frame_state);
-  Py_DECREF(frame);
-  Py_DECREF(cache_entry_pyobj);
-  return res;
 }
 
 void clear_old_frame_if_python_312_plus(
@@ -517,11 +482,6 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 // Fake definitions for everything we removed
 
-typedef struct THPPyInterpreterFrame {
-  PyObject_HEAD
-  _PyInterpreterFrame* frame; // Borrowed reference
-} THPPyInterpreterFrame;
-
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
 
@@ -708,8 +668,6 @@ static int clear_state(PyObject* module) {
   return -1;
 }
 
-PyObject* skip_code_recursive_flag = NULL;
-PyObject* cache_limit_hit_flag = NULL;
 bool is_skip_guard_eval_unsafe = false;
 
 static PyMethodDef _methods[] = {
@@ -766,24 +724,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
           module,
           "_PyInterpreterFrame",
           (PyObject*)&THPPyInterpreterFrameType) != 0) {
-    return NULL;
-  }
-
-  skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
-  if (skip_code_recursive_flag == NULL) {
-    return NULL;
-  }
-  if (PyModule_AddObject(
-          module, "skip_code_recursive_flag", skip_code_recursive_flag) != 0) {
-    return NULL;
-  }
-
-  cache_limit_hit_flag = PyObject_New(PyObject, &PyBaseObject_Type);
-  if (cache_limit_hit_flag == NULL) {
-    return NULL;
-  }
-  if (PyModule_AddObject(
-          module, "cache_limit_hit_flag", cache_limit_hit_flag) != 0) {
     return NULL;
   }
 
