@@ -79,7 +79,7 @@ def key_path_to_source(kp: KeyPath) -> Source:
 
 
 def _is_constant_argument(t):
-    return t is None or isinstance(t, (int, float, bool, str))
+    return t is None or isinstance(t, (float, bool, str))
 
 
 def fakify(
@@ -92,6 +92,14 @@ def fakify(
     source = key_path_to_source(kp)
     if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
+
+    if isinstance(t, int) and kp in t_constraints:
+        symint = mode.shape_env.create_symintnode(
+            mode.shape_env.create_symbol(t, source),
+            hint=t,
+            source=source,
+        )
+        return symint
 
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
@@ -204,10 +212,11 @@ def make_fake_inputs(
         else:
             original_signature = None
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
-        fake_args, fake_kwargs = tree_map_with_path(
+        fake_args = pytree.tree_flatten(tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
-            (args, kwargs),
-        )
+            combined_args,
+        ))[0]
+        fake_kwargs = {}
 
         names: dict[str, tuple[int, int]] = {}
         source_pairs: list[tuple[Source, Source]] = []
@@ -382,6 +391,9 @@ def make_constraints(
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
+            continue
+        if isinstance(node.meta["val"], torch.SymInt):
+            # TODO?
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):

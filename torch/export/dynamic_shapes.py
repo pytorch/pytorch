@@ -785,6 +785,8 @@ def _check_dynamic_shapes(
     def check_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             check_symbols(path, t, dynamic_shape)
+        elif isinstance(t, int):
+            assert isinstance(dynamic_shape, _DimHint)
         else:
             if dynamic_shape is not None:
                 rendered_path = keystr(path)
@@ -957,6 +959,12 @@ def _process_dynamic_shapes(
     def assoc_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             update_symbols(path, t, dynamic_shape)
+        elif isinstance(t, int) and dynamic_shape:
+            if isinstance(dynamic_shape, _DimHint):
+                constraints.append(_RelaxedConstraint(path, None))
+            else:
+                raise NotImplementedError("moo")
+
 
     _tree_map_with_path(assoc_shape, combined_args, dynamic_shapes, tree_name="inputs")
 

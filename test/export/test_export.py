@@ -8917,6 +8917,29 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
+    def test_symint_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y 
+        
+        ep = export(M(), (4, torch.ones(3, 3)))
+
+        inp = (4, torch.randn(3, 3))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+        
+        with self.assertRaisesRegex(RuntimeError, r"to be equal to 4, but got 3"):
+            inp = (3, torch.randn(3, 3))
+            self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+    
+        ep = export(M(), (4, torch.ones(3, 3)), dynamic_shapes={"x": Dim.DYNAMIC, "y": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC}}, strict=False)
+        inp = (4, torch.randn(3, 3))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+        inp = (3, torch.randn(3, 3))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+        print(ep)
+
+        # ep = export(M(), (4, torch.ones(3, 3)), dynamic_shapes={"x": Dim("moo"), "y": None})
+
     def test_unflatten_random_dag_const_preserving_3(self):
         class N2(torch.nn.Module):
             def __init__(self):
