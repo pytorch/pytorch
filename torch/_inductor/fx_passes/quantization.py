@@ -654,6 +654,10 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
     def fn(match):
+        x_meta_value = match.kwargs["x"].meta.get("val")
+        is_xpu_match = x_meta_value.device.type == "xpu"
+        if is_xpu_match:
+            return False
         output_dtype = _get_pattern_output_dtype(match)
         compute_node = filter_nodes(match.nodes, qop)[0]
         # qop_pointwise should only have one user
@@ -3071,8 +3075,14 @@ def _register_qlinear_post_op_fusion_pass(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if (output_dtype in [torch.uint8, torch.int8])
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"] if (output_dtype in [torch.uint8, torch.int8]) else 0
+        )
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase
