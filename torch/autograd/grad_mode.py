@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch.utils._contextlib import (
@@ -386,12 +386,13 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     """
 
-    def __init__(self, tensor: torch.Tensor) -> None:
-        self.tensor = tensor
-        self.prev_version = tensor._version
+    def __init__(self, tensors: Union[torch.Tensor, tuple[torch.Tensor, ...]]) -> None:
+        self.tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tensors
+        assert isinstance(self.tensors, tuple)
+        self.prev_versions = tuple(t._version for t in self.tensors)
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, *args) -> None:
-        torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)
+        torch._C._autograd._unsafe_set_version_counter(self.tensors, self.prev_versions)
