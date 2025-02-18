@@ -10,7 +10,7 @@ class TwoTensor(BaseTensorSubclass):
     INNER_TENSORS = ["a", "b"]
 
     @staticmethod
-    def __new__(cls, a, b, outer_size=None, outer_stride=None):
+    def __new__(cls, a, b, meta, outer_size=None, outer_stride=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
@@ -38,9 +38,17 @@ class TwoTensor(BaseTensorSubclass):
         assert a.storage_offset() == b.storage_offset()
         return out
 
-    def __init__(self, a, b, outer_size=None, outer_stride=None):
+    def __init__(self, a, b, meta, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
+        self.meta = meta
+
+    def get_meta(self):
+        return (self.meta,)
+
+    @staticmethod
+    def meta_init_kwargs(meta):
+        return {"meta": meta[0]}
 
     # @classmethod
     # def torch_function_prologue(cls, func, types, args=(), kwargs=None):
@@ -53,12 +61,23 @@ class TwoTensor(BaseTensorSubclass):
         out_a = cls.func_args_kwargs_attr(func, args, kwargs, "a")
         out_b = cls.func_args_kwargs_attr(func, args, kwargs, "b")
 
+        _meta = None
+
+        def fn(x):
+            nonlocal _meta
+            if not _meta:
+                _meta = x.meta
+
+        pytree.tree_map_only(cls, fn, args)
+        if not _meta:
+            pytree.tree_map_only(cls, fn, kwargs)
+
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         out_flat = [
-            cls(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            cls(o_a, o_b, _meta) if isinstance(o_a, torch.Tensor) else o_a
             for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)

@@ -83,7 +83,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
-from torch.testing._internal.subclasses import WrapperSubclass
+from torch.testing._internal.subclasses import LogTensor, WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -6416,15 +6416,31 @@ metadata incorrectly.
         _test_fn(fn_inplace, check_backward=False)
 
     def test_sc_base(self):
-        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2))
+        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2), "mmmeta")
         print(f"XXX t:{t}")
 
         def fn(x):
-            return x + 2
+            return torch.mul(x, 2)
 
         y = fn(t)
+        print(f"XXX y.meta:{y.meta}")
 
         y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
+        print(f"XXX y.meta:{y.meta}")
+
+    def test_sc_base_log_tensor(self):
+        t = LogTensor(torch.randn(2, 2))
+        print(f"XXX t:{t}")
+
+        def fn(x):
+            x = x + 2
+            return torch.mul(x, 2)
+
+        y = fn(t)
+        print(f"XXX y:{y}")
+
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
+        print(f"XXX compiled y:{y}")
 
 
 # entries in here don't work and need to be fixed.
