@@ -14,7 +14,7 @@ void refcounted_deleter(void* ctx_) {
   }
 }
 
-std::mutex replace_data_ptr_mutex;
+static std::mutex replace_data_ptr_mutex;
 
 void maybeApplyRefcountedDeleter(const c10::Storage& storage) {
   std::lock_guard<std::mutex> guard(replace_data_ptr_mutex);

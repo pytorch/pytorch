@@ -11,8 +11,7 @@ def get_clickhouse_client() -> Any:
     endpoint = os.environ["CLICKHOUSE_ENDPOINT"]
     # I cannot figure out why these values aren't being handled automatically
     # when it is fine in the lambda
-    if endpoint.startswith("https://"):
-        endpoint = endpoint[len("https://") :]
+    endpoint = endpoint.removeprefix("https://")
     if endpoint.endswith(":8443"):
         endpoint = endpoint[: -len(":8443")]
     return clickhouse_connect.get_client(

@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
-import collections
+
+"""
+This module provides Source classes that track the origins of values in PyTorch Dynamo.
+Sources represent where values come from (e.g. local variables, globals, attributes) and
+are used for guard generation and code reconstruction during compilation.
+
+The module includes specialized sources for:
+- Local variables and synthetic locals
+- Global variables and constants
+- Object attributes and method calls
+- NN module specialization (specialized vs unspecialized)
+- Random values and tensor properties
+- Default argument handling
+- FSDP (Fully Sharded Data Parallel) modules
+
+Sources play a key role in Dynamo's guard system by tracking value origins for
+guard generation, and in code reconstruction by providing methods to rebuild
+the code needed to recreate values.
+"""
+
 import dataclasses
 import enum
 from typing import Any, Optional, Union
@@ -8,7 +27,6 @@ from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .utils import enum_repr
 
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
@@ -84,20 +102,6 @@ def is_constant_source(source):
         pass
 
     return False
-
-
-def reconstruct_getitem(
-    source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
-):
-    source.base.reconstruct(codegen)
-    if isinstance(source.index, Source):
-        source.index.reconstruct(codegen)
-    else:
-        if index_is_slice:
-            assert isinstance(source, GetItemSource)
-            codegen.append_output(codegen.create_load_const(source.unpack_slice()))
-        else:
-            codegen.append_output(codegen.create_load_const(source.index))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -364,6 +368,23 @@ class TensorPropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class IndexedSource(ChainedSource):
+    idx: int
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"({self.idx}, {self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
@@ -485,7 +506,11 @@ class GetItemSource(ChainedSource):
             super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
-        reconstruct_getitem(self, codegen, index_is_slice=self.index_is_slice)
+        self.base.reconstruct(codegen)
+        if self.index_is_slice:
+            codegen.append_output(codegen.create_load_const(self.unpack_slice()))
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_instruction("BINARY_SUBSCR"))
 
     def guard_source(self):
@@ -498,28 +523,21 @@ class GetItemSource(ChainedSource):
 
     def name(self):
         # Index can be of following types
-        # 1) ConstDictKeySource
-        # 2) enum.Enum
-        # 3) index is a slice - example 1:4
-        # 4) index is a constant - example string, integer
-        if isinstance(self.index, Source):
-            if not isinstance(self.index, ConstDictKeySource):
-                raise ValueError(
-                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
-                )
-            return f"{self.base.name()}[{self.index.name()}]"
-        elif self.index_is_slice:
+        # 1) index is a slice - example 1:4
+        # 2) index is a constant - example string, integer
+        assert not isinstance(self.index, Source)
+        if self.index_is_slice:
             return f"{self.base.name()}[{self.unpack_slice()!r}]"
-        elif isinstance(self.index, enum.Enum):
-            return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
-class ConstDictKeySource(GetItemSource):
-    def is_dict_key(self):
-        return True
+class ConstDictKeySource(ChainedSource):
+    index: Any
+
+    def guard_source(self):
+        return self.base.guard_source()
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
@@ -531,7 +549,95 @@ class ConstDictKeySource(GetItemSource):
 
     def name(self):
         # The list creation will be CSE'd by PyExprCSEPass
-        return f"list({self.base.name()}.keys())[{self.index!r}]"
+        return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
+
+    def is_dict_key(self):
+        return True
+
+
+# Used to access an item from the dictionary
+@dataclasses.dataclass(frozen=True)
+class DictGetItemSource(ChainedSource):
+    # Key to access in the dictionary. It can be one of the the following types
+    # 1) ConstDictKeySource
+    # 2) constant - like string, integer
+    index: Any
+
+    def __post_init__(self):
+        from .variables import ConstantVariable
+
+        assert isinstance(
+            self.index, ConstDictKeySource
+        ) or ConstantVariable.is_literal(self.index)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        # reconstruct dict.__getitem__(dct, key)
+
+        # Load dict.__getitem__
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dict_getitem")
+        )
+
+        # Load dict
+        self.base.reconstruct(codegen)
+
+        # Load key
+        if isinstance(self.index, Source):
+            self.index.reconstruct(codegen)
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        if isinstance(self.index, ConstDictKeySource):
+            return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
+        else:
+            return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class ListGetItemSource(GetItemSource):
+    """
+    Same as GetItemSource with reconstruct and name overridden to be list specific.
+    """
+
+    def reconstruct(self, codegen):
+        # Reconstruct list.__getitem__(lst, index) to avoid any side effects
+        # from possibly overridden __getitem__.
+
+        # Load list.__getitem__
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "list_getitem")
+        )
+
+        # Load the list
+        self.base.reconstruct(codegen)
+
+        # Load the index
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        # Index can be of following types
+        # 1) index is a slice - example 1:4
+        # 2) index is a constant - example string, integer
+        assert not isinstance(self.index, Source)
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            return f"list.__getitem__({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -563,35 +669,6 @@ class TypeSource(ChainedSource):
 
     def name(self):
         return f"type({self.base.name()})"
-
-
-@dataclasses.dataclass(frozen=True)
-class ODictGetItemSource(ChainedSource):
-    index: Any
-
-    def __post_init__(self):
-        assert self.base is not None
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(collections.OrderedDict.__getitem__)
-            )
-        )
-        reconstruct_getitem(self, codegen, index_is_slice=False)
-        codegen.extend_output(create_call_function(2, False))
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        if isinstance(self.index, type):
-            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
-            return f"___odict_getitem({self.base.name()}, {rep})"
-        elif isinstance(self.index, Source):
-            return f"___odict_getitem({self.base.name()}, {self.index.name()})"
-        else:
-            return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -790,6 +867,23 @@ def is_from_optimizer_source(source: Source):
 def is_from_defaults(source: Source):
     if isinstance(source, DefaultsSource):
         return True
+
+    # Accessed with func.__kwdefaults__["foo"]
+    if (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__kwdefaults__"
+    ):
+        return True
+
+    # Accessed with func.__defaults__[0]
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__defaults__"
+    ):
+        return True
+
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False

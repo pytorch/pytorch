@@ -1,10 +1,24 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for generating Python bytecode in PyTorch's Dynamo system.
+It includes functionality for:
+- Constructing bytecode sequences for Python operations
+- Managing stack operations and variable tracking
+- Handling graph outputs and their conversions
+- Supporting different Python versions (3.11+, 3.12+, 3.13+)
+- Converting high-level operations to low-level bytecode instructions
+- Managing constant loading and attribute access
+- Supporting function creation and closure handling
+"""
+
 import collections
 import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from collections import Counter
+from typing import Optional
 
 import torch.nn
 
@@ -25,7 +39,10 @@ from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
-from .variables.functions import FunctionDecoratedByContextlibContextManagerVariable
+from .variables.functions import (
+    ContextlibContextManagerLocalGeneratorObjectVariable,
+    LocalGeneratorObjectVariable,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -58,8 +75,8 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
-        self._output: List[Instruction] = []
+        self.graph_outputs: dict[int, GraphOutputEntry] = {}
+        self._output: list[Instruction] = []
         # This determines which VariableTracker should be stored as locals, and
         # maps the VariableTracker to the local variable name. Note that it
         # could map to None initially, in which case we'll overwrite it to map
@@ -74,7 +91,7 @@ class PyCodegen:
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
-        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
+        self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prev = self.value_from_source
@@ -161,14 +178,20 @@ class PyCodegen:
                 return
 
         if value.is_realized() and isinstance(
-            value, FunctionDecoratedByContextlibContextManagerVariable
+            value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
             raise IncorrectUsage(
                 "NYI: Returning a @contextmanager object from a torch.compile function"
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
-        if value.source is not None and allow_cache:
+        if (
+            value.source is not None
+            and allow_cache
+            and not (
+                value.is_realized() and isinstance(value, LocalGeneratorObjectVariable)
+            )
+        ):
             # There's a corner case for export: for instance, if the computation
             # graph is just identity on an input tensor, Dynamo would just emit
             # a `LOAD_FAST` from the input source, rather than generating an
@@ -289,7 +312,7 @@ class PyCodegen:
         output = self._output
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
-        output.append(create_instruction("BINARY_SUBSCR"))
+        output.append(self.create_binary_subscr())
 
     def add_cache(self, value):
         var = self.new_var()
@@ -299,6 +322,9 @@ class PyCodegen:
     def foreach(self, items):
         for i in items:
             self(i)
+
+    def create_binary_subscr(self) -> Instruction:
+        return create_instruction("BINARY_SUBSCR")
 
     def setup_globally_cached(self, name, value):
         """Store value in a new global"""
@@ -323,7 +349,7 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self) -> List[Instruction]:
+    def get_instructions(self) -> list[Instruction]:
         return self._output
 
     def create_load(self, name) -> Instruction:
@@ -526,7 +552,7 @@ class PyCodegen:
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
-    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
             assert output[-1].opname == "CALL"

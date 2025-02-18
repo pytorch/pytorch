@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import cast, Dict, List, Tuple
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -105,8 +105,8 @@ def _ring_send_recv_aggregate(grad_in_tensor, d1, d2, left, right, rank, size):
 
 def tp_convolution(
     op_call: torch._ops.OpOverload,
-    local_tensor_args: Tuple[object, ...],
-    local_tensor_kwargs: Dict[str, object],
+    local_tensor_args: tuple[object, ...],
+    local_tensor_kwargs: dict[str, object],
 ) -> object:
     assert op_call == aten.convolution.default
     assert len(local_tensor_args) == 9
@@ -118,7 +118,7 @@ def tp_convolution(
     stride, padding, dilation = local_tensor_args[3:6]
 
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
-    assert isinstance(padding, List)
+    assert isinstance(padding, list)
 
     if not _requires_data_exchange(padding):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -140,7 +140,7 @@ def tp_convolution(
         # step2 feed local input tensor to op_call
         local_tensor_args_list = list(local_tensor_args)
         local_tensor_args_list[0] = in_tensor
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args_list)
+        local_tensor_args = cast(tuple[object, ...], local_tensor_args_list)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
         # step3 remove extra outputs from the results
@@ -158,8 +158,8 @@ def tp_convolution(
 
 def tp_convolution_backward(
     op_call: torch._ops.OpOverload,
-    local_tensor_args: Tuple[object, ...],
-    local_tensor_kwargs: Dict[str, object],
+    local_tensor_args: tuple[object, ...],
+    local_tensor_kwargs: dict[str, object],
 ) -> object:
     assert op_call == aten.convolution_backward.default
     assert len(local_tensor_args) == 11
@@ -172,7 +172,7 @@ def tp_convolution_backward(
     stride, padding, dilation = local_tensor_args[4:7]
 
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
-    assert isinstance(padding, List)
+    assert isinstance(padding, list)
 
     if not _requires_data_exchange(padding):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -210,26 +210,27 @@ def tp_convolution_backward(
         local_tensor_args_list = list(local_tensor_args)
         local_tensor_args_list[0] = grad_out_tensor
         local_tensor_args_list[1] = in_tensor
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args_list)
+        local_tensor_args = cast(tuple[object, ...], local_tensor_args_list)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
         # step4 aggregate gradients for edge pixels
         grad_in_tensor = local_results[0]
-        grad_in_tensor = _ring_send_recv_aggregate(
-            grad_in_tensor, d1, d2, left, right, rank, size
-        )
+        if grad_in_tensor is not None:
+            grad_in_tensor = _ring_send_recv_aggregate(
+                grad_in_tensor, d1, d2, left, right, rank, size
+            )
+            local_results = list(local_results)
+            local_results[0] = grad_in_tensor
 
-        local_results = list(local_results)
-        local_results[0] = grad_in_tensor
-        local_results = cast(Tuple[object, ...], local_results)
+        local_results = cast(tuple[object, ...], local_results)
 
         return local_results
 
 
 def convolution_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
@@ -251,8 +252,8 @@ def convolution_handler(
 
 def convolution_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as input tensor
     args = list(args)

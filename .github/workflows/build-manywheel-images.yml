@@ -11,15 +11,15 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
+      - '.ci/docker/common/*'
       - '.ci/docker/manywheel/*'
       - '.ci/docker/manywheel/build_scripts/*'
-      - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
   pull_request:
     paths:
+      - '.ci/docker/common/*'
       - '.ci/docker/manywheel/*'
       - '.ci/docker/manywheel/build_scripts/*'
-      - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
 
 
@@ -49,7 +49,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.6", "12.4", "12.1", "11.8"]
+        cuda_version: ["12.8", "12.6", "12.4", "11.8"]
     env:
       GPU_ARCH_TYPE: cuda
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -94,7 +94,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.6", "12.4", "12.1", "11.8"]
+        cuda_version: ["12.8", "12.6", "12.4", "11.8"]
     env:
       GPU_ARCH_TYPE: cuda-manylinux_2_28
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -138,7 +138,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.6"]
+        cuda_version: ["12.8", "12.6"]
     env:
       GPU_ARCH_TYPE: cuda-aarch64
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}

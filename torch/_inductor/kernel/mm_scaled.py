@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 
@@ -9,7 +10,7 @@ from torch.utils._triton import has_triton_tma_device
 
 from .. import config as inductor_config
 from ..config import triton as triton_config
-from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
+from ..ir import _IntLike, ChoiceCaller, get_device_type, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -26,14 +27,8 @@ from ..utils import (
     use_ck_gemm_template,
     use_triton_template,
 )
-from .mm_common import (
-    _is_static_problem,
-    mm_args,
-    mm_grid,
-    persistent_mm_grid,
-    scaled_mm_configs,
-    scaled_persistent_mm_configs,
-)
+from ..virtualized import V
+from .mm_common import _is_static_problem, mm_args, mm_grid, persistent_mm_grid
 
 
 log = logging.getLogger(__name__)
@@ -428,7 +423,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -464,7 +459,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -514,12 +509,13 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
+    device_type = get_device_type(mat_a)
 
     check_supported_striding(mat_a, mat_b)
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
-    input_nodes: Tuple[Any, ...]
+    input_nodes: tuple[Any, ...]
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
@@ -533,11 +529,16 @@ def tuned_scaled_mm(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices: List[ChoiceCaller] = []
+    choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
     _, is_nonzero = _is_static_problem(layout)
+
+    scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)
+    scaled_persistent_mm_configs = V.choices.get_scaled_persistent_mm_configs(
+        device_type
+    )
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):

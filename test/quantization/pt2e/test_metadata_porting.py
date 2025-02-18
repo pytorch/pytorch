@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
-from typing import List
 
 import torch
 import torch._export
@@ -35,7 +34,7 @@ class TestHelperModules:
 
 
 def _tag_partitions(
-    backend_name: str, op_name: str, annotated_partitions: List[List[Node]]
+    backend_name: str, op_name: str, annotated_partitions: list[list[Node]]
 ):
     for index, partition_nodes in enumerate(annotated_partitions):
         tag_name = backend_name + "_" + op_name + "_" + str(index)
@@ -61,7 +60,7 @@ class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags
     ):
-        ep = torch.export.export(model, example_inputs)
+        ep = torch.export.export(model, example_inputs, strict=True)
         found_tags = True
         not_found_nodes = ""
         for from_node, tag in from_node_to_tags.items():
