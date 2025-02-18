@@ -921,7 +921,7 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     elif isinstance(a, list):
         result = immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
-        return immutable_dict({k: map_aggregate(v, fn) for k, v in a.items()})
+        return immutable_dict({k: map_aggregate(v, fn) for k, v in a.items()})  # type: ignore[return-value]
     elif isinstance(a, slice):
         result = slice(
             map_aggregate(a.start, fn),
