@@ -82,6 +82,13 @@ def tunableop_matmul(device, dtype):
     C = torch.matmul(A, B)
     del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
 
+def get_tunableop_validators():
+    assert len(torch.cuda.tunable.get_validators()) > 0
+    validators = {}
+    for key, value in torch.cuda.tunable.get_validators():
+        validators[key] = value
+    return validators
+
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
@@ -4603,10 +4610,7 @@ class TestLinalg(TestCase):
             filename3 = "tunableop_results_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results{ordinal}.csv"
-            assert len(torch.cuda.tunable.get_validators()) > 0
-            validators = {}
-            for key, value in torch.cuda.tunable.get_validators():
-                validators[key] = value
+            validators = get_tunableop_validators()
             if torch.version.hip:
                 assert "HIPBLASLT_VERSION" in validators
                 assert re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"])
@@ -4947,6 +4951,11 @@ class TestLinalg(TestCase):
         B = torch.randn(K, M, device=device, dtype=dtype)
         C = torch.matmul(A, B)
         self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
+
+        validators = get_tunableop_validators()
+        if torch.version.hip:
+            assert "ROCBLAS_VERSION" in validators
+            assert re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]) # format: [major].[minor].[patch].[tweak].[commit id] according to https://github.com/ROCm/rocBLAS/blob/160c08b458e06fb2dc223736948695c2212a455c/library/include/internal/rocblas-version.h.in#L29-L33
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
