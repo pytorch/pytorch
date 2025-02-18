@@ -493,42 +493,42 @@ class TestDynamicShapes(common_utils.TestCase):
         _, tree2 = _pytree.tree_flatten(expected_dynamic_shapes)
         self.assertEqual(tree1, tree2)
 
-    def test_convert_str_to_export_dim_returns_the_original_dynamic_shapes_when_there_is_no_str(
+    def test_convert_str_to_export_dim_returns_the_original_dynamic_shapes_when_there_is_no_str_and_dim(
         self,
     ):
         # 1. Dict
         dynamic_shapes = {
             "input_x": [
                 {
-                    0: torch.export.Dim("customx_dim_0"),
+                    0: torch.export.Dim.AUTO,
                     1: torch.export.Dim.AUTO,
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim("customx_dim_1"),
+                    1: torch.export.Dim.AUTO,
                 },
             ],
-            "input_b": {2: torch.export.Dim("customb_dim_0")},
+            "input_b": {2: torch.export.Dim.AUTO},
         }
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
         )
         self.assertEqual(dynamic_shapes_with_export_dim, dynamic_shapes)
-        self.assertTrue(need_axis_mapping)
+        self.assertFalse(need_axis_mapping)
 
         # 2. Tuple
         dynamic_shapes = (
             [
                 {
-                    0: torch.export.Dim("customx_dim_0"),
+                    0: torch.export.Dim.AUTO,
                     1: torch.export.Dim.AUTO,
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim("customx_dim_1"),
+                    1: torch.export.Dim.AUTO,
                 },
             ],
-            {2: torch.export.Dim("customb_dim_0")},
+            {2: torch.export.Dim.AUTO},
         )
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
@@ -536,7 +536,7 @@ class TestDynamicShapes(common_utils.TestCase):
         self.assertEqual(dynamic_shapes_with_export_dim, dynamic_shapes)
         self.assertFalse(need_axis_mapping)
 
-    def test_convert_str_to_export_dim_returns_the_converted_dynamic_shapes_when_there_is_str(
+    def test_convert_str_to_export_dim_returns_the_converted_dynamic_shapes_when_there_is_str_or_dim(
         self,
     ):
         dimx = torch.export.Dim("customx_dim_1")
