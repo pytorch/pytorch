@@ -6,6 +6,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import complex_types
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, TestCase
@@ -43,6 +44,15 @@ class TestComplexTensor(TestCase):
         xc1 = torch.conj(x1)
         x1.copy_(xc1)
         self.assertEqual(x1, torch.tensor([5 - 1j, 2 - 2j], device=device, dtype=dtype))
+
+    @onlyCUDA
+    @dtypes(*complex_types())
+    def test_conj_copy_async_h2d(self, device, dtype):
+        # issue: https://github.com/pytorch/pytorch/issues/146286
+        x1 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype).conj()
+        x2 = torch.zeros_like(x1, device="cpu").pin_memory()
+        x2.copy_(x1, non_blocking=True)
+        self.assertEqual(x1, x2)
 
     @dtypes(*complex_types())
     def test_all(self, device, dtype):
