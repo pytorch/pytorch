@@ -6398,7 +6398,8 @@ See :func:`torch.dsplit`
 add_docstr_all(
     "stft",
     r"""
-stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None,
+ pad_end=0, align_to_window=None) -> Tensor
 
 See :func:`torch.stft`
 """,

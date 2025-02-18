@@ -623,7 +623,7 @@ def _is_computing_meta_flops(x):
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
         return any(
-            type(x) == torch.utils.flop_counter.FlopCounterMode
+            type(x) == torch.utils.flop_counter._FlopCounterMode
             for x in torch_dispatch_mode_stack
         )
     return False

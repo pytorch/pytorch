@@ -1726,6 +1726,41 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
     return decorator
 
 
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(fn)
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+    ) -> None:
+        def dummy(fn: Callable[..., Any]) -> None:
+            fn(self)
+
+        actual = CompileCounter()
+
+        dummy(fn)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn(fn)
+        reset()
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+        )
+
+    return test_fn
+
+
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
@@ -3134,6 +3169,15 @@ class TestCase(expecttest.TestCase):
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
+
+        # We disable size_asserts for test_ops since some tests fail
+        # due to mismatch of strides returned from eager v.s. meta kernels
+        # Only some of the ops has this problem, but since tests in
+        # test_op.py are parametrized, it's hard to do this specifically
+        # for the affected ops.
+        # It's not a big deal since these problems are captured by
+        # test_torchinductor_opinfo.py as well.
+        should_disable_size_asserts = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -3144,9 +3188,10 @@ class TestCase(expecttest.TestCase):
                     if TEST_WITH_TORCHINDUCTOR:
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
+                        should_reset_dynamo = True
 
-                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
-                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
+                        if filename == "test_ops":
+                            should_disable_size_asserts = True
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -3179,34 +3224,49 @@ class TestCase(expecttest.TestCase):
             suppress_errors = not strict_mode
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super_run)
-            elif TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-            elif TEST_WITH_TORCHDYNAMO:
-                # TorchDynamo optimize annotation
-                # Assume eager-generated GraphModules will not error out.
-                # If we do, this is probably a Dynamo bug!
-                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
-                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
-                def expect_failure(f, test_name):
+        maybe_disable_size_asserts = (
+            torch._inductor.config.patch(size_asserts=False)
+            if should_disable_size_asserts
+            else contextlib.nullcontext()
+        )
+
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
+            if TEST_WITH_AOT_EAGER:
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+            elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
+                if TEST_WITH_TORCHINDUCTOR:
+                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                else:
+                    # Assume eager-generated GraphModules will not error out.
+                    # If we do, this is probably a Dynamo bug!
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
+                        raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_expected_failures:
-                    method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method, key))
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_expected_failures"
+                    from .dynamo_test_failures import inductor_expected_failures as expected_failures
+                else:
+                    subdir = "test/dynamo_expected_failures"
+                    from .dynamo_test_failures import dynamo_expected_failures as expected_failures
 
-                def ignore_failure(f, test_name):
+                if key in expected_failures:
+                    method = getattr(self, self._testMethodName)
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, expect_failure(method, file_name))
+
+                def ignore_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
@@ -3217,12 +3277,20 @@ class TestCase(expecttest.TestCase):
                         if getattr(method, "__unittest_expecting_failure__", False):
                             self.skipTest("unexpected success")
                         else:
-                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
+                            self.skipTest(f"This test passed, maybe we can remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_skips:
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_skips"
+                    from .dynamo_test_failures import inductor_skips as skips
+                else:
+                    subdir = "test/dynamo_skips"
+                    from .dynamo_test_failures import dynamo_skips as skips
+
+                if key in skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method, key))
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
             super_run(result=result)
 

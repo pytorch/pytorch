@@ -89,6 +89,52 @@ def _collect_and_set_constant_attrs(
     return constant_attrs
 
 
+def _register_constants_as_buffers(
+    mod: torch.fx.GraphModule, state_dict, non_persistent_buffers
+):
+    # TODO some annoying circular dependency issue
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    temp_registered_constants = set()
+
+    for node in mod.graph.nodes:
+        if node.op == "get_attr":
+            target = torch.fx.graph_module._get_attr(mod, node.target)
+            if isinstance(target, torch.Tensor):
+                # Make sure we also check if the original buffer is
+                # non persistent as well.
+                if (node.target not in state_dict) and (
+                    node.target not in non_persistent_buffers
+                ):
+                    torch.fx.graph_module._del_attr(mod, node.target)
+                    _assign_attr(target, mod, node.target, _AttrKind.BUFFER, False)
+                    temp_registered_constants.add(node.target)
+
+    mod.recompile()
+
+    return temp_registered_constants
+
+
+def _override_graph_signature_for_temp_registered_constants(
+    sig: "ExportGraphSignature", temp_registered_constants
+):
+    for spec in sig.input_specs:
+        if spec.target in temp_registered_constants:
+            spec.kind = InputKind.CONSTANT_TENSOR
+            spec.persistent = None
+
+    for spec in sig.output_specs:
+        if (
+            spec.kind == OutputKind.BUFFER_MUTATION
+            and spec.target in temp_registered_constants
+        ):
+            raise RuntimeError(
+                f"Constant {spec.target} is mutated in the forward method. Pls register it as buffer"
+            )
+
+    return sig
+
+
 def _overwrite_signature_for_non_persistent_buffers(
     old_sig: "ExportGraphSignature", new_sig: "ExportGraphSignature"
 ):

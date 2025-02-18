@@ -1,20 +1,33 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, TYPE_CHECKING
+from typing import Any, Generator, Optional, TYPE_CHECKING
 
 import sympy
+
+import torch
 
 from . import config
 from .codecache import write_text
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .template_heuristics import (
+    BaseConfigHeuristic,
+    CPUConfigHeuristic,
+    CUDAConfigHeuristic,
+    ROCmConfigHeuristic,
+    XPUConfigHeuristic,
+)
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    import torch
+    from functools import partial
+
+    from triton import Config as TritonConfig
+
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
@@ -39,6 +52,80 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
+
+    def get_config_heuristics(
+        self, device_type: Optional[str] = "cuda"
+    ) -> BaseConfigHeuristic:
+        if device_type == "cuda":
+            if torch.version.hip is None:
+                return CUDAConfigHeuristic()
+            else:
+                return ROCmConfigHeuristic()
+        elif device_type == "xpu":
+            return XPUConfigHeuristic()
+        elif device_type == "cpu":
+            return CPUConfigHeuristic()
+        else:
+            return BaseConfigHeuristic()
+
+    # GEMM configs
+    def get_base_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
+            return mm_heuristics.get_mm_configs()
+        else:
+            return mm_heuristics.get_exhaustive_mm_configs()
+
+    def get_extra_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_extra_mm_configs()
+
+    def get_int8_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_int8_mm_configs()
+
+    def get_mixed_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_mixed_mm_configs()
+
+    def get_persistent_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_persistent_mm_configs()
+
+    def get_scaled_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_scaled_mm_configs()
+
+    def get_scaled_persistent_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_scaled_persistent_mm_configs()
+
+    def get_mm_plus_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_mm_plus_mm_configs()
+
+    # Conv configs
+    def get_conv_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        conv_heuristics = self.get_config_heuristics(device_type)
+        return conv_heuristics.get_conv_configs()
 
     def triton_kernel_kwargs(
         self,
@@ -219,7 +306,7 @@ class InductorChoices:
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
-                common_buf_names = (
+                common_buf_names: OrderedSet[str] = (
                     node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
                 )
                 if len(common_buf_names) > 0:
@@ -231,7 +318,7 @@ class InductorChoices:
                             "node2_name": node2.get_name(),
                             "node1_debug_str": write_text(node1.debug_str()),
                             "node2_debug_str": write_text(node2.debug_str()),
-                            "common_buffer_names": list(common_buf_names),
+                            "common_buffer_names": list(common_buf_names),  # type: ignore[dict-item]
                             "failure_reason": scheduler.decide_fusion_fail_reason(
                                 node1, node2, common_buf_names
                             ),

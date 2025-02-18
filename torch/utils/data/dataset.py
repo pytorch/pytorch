@@ -3,8 +3,8 @@ import bisect
 import itertools
 import math
 import warnings
-from collections.abc import Iterable, Sequence
-from typing import cast, Generic, Optional, TypeVar, Union
+from collections.abc import Sequence
+from typing import cast, Generic, Iterable, Optional, TypeVar, Union
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
@@ -115,7 +115,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
         [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
         >>> # xdoctest: +REQUIRES(POSIX)
-        >>> # Mult-process loading with two worker processes
+        >>> # Multi-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))

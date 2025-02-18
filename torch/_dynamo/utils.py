@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+Utility functions and classes used throughout the TorchDynamo system.
+
+This module contains a collection of helper utilities used by various parts of Dynamo for:
+- Performance metrics collection and reporting
+- Compilation timing and debugging
+- Graph manipulation and tensor operations
+- Runtime guards and checks
+- Common data structure operations
+- Testing and development tools
+
+This is an internal module that provides shared functionality used across the Dynamo codebase.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -44,6 +59,7 @@ from typing import (
     Generic,
     Optional,
     overload,
+    Set,
     TypeVar,
     Union,
 )
@@ -379,7 +395,7 @@ class CompileEventLogger:
             chromium_log.add_event_data(event_name, **metadata)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
 
             if event_name != top_event:
                 raise RuntimeError(
@@ -401,7 +417,7 @@ class CompileEventLogger:
         """
         Syntactic sugar for logging to the toplevel event
         """
-        top_event = get_chromium_event_logger().get_top()
+        top_event = get_chromium_event_logger().get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
@@ -423,7 +439,7 @@ class CompileEventLogger:
             chromium_log.increment(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -449,7 +465,7 @@ class CompileEventLogger:
         Increments a value on the toplevel metric. By default, logs to metric.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -471,7 +487,7 @@ class CompileEventLogger:
             chromium_log.add_to_set(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -498,7 +514,7 @@ class CompileEventLogger:
         Defaults to COMPILATION_METRIC log level.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -1007,6 +1023,16 @@ def is_function(value):
     )
 
 
+cmp_name_to_op_mapping = {
+    "__eq__": operator.eq,
+    "__ne__": operator.ne,
+    "__lt__": operator.lt,
+    "__le__": operator.le,
+    "__gt__": operator.gt,
+    "__ge__": operator.ge,
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1186,6 +1212,8 @@ class CompilationMetrics:
     tensorify_float_attempt: Optional[bool] = None
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
+    guard_latency_us: Optional[float] = None
+    recompile_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1281,7 +1309,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
     """
     event_logger = get_chromium_event_logger()
-    event_name = event_logger.get_top()
+    event_name = event_logger.get_outermost_event()
     if not event_name:
         return
     event_logger.add_event_data(
@@ -1317,6 +1345,40 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
+def _get_dynamo_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+            "log_file_name",
+            "verbose",
+            "repro_after",
+            "repro_level",
+            "repro_forward_only",
+            "repro_tolerance",
+            "repro_ignore_non_fp",
+            "same_two_models_use_fp64",
+            "base_dir",
+            "debug_dir_root",
+            "_save_config_ignore",
+            "log_compilation_metrics",
+            "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+            "_autograd_backward_strict_mode_banned_ops",
+            "reorderable_logging_functions",
+            "ignore_logger_methods",
+            "traceable_tensor_subclasses",
+            "_custom_ops_profile",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    config_dict = clean_for_json(config.get_config_copy())
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1331,8 +1393,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    configs_to_scrub_re = r"((^TYPE_CHECKING$)|(.*_progress$)|(.*TESTING.*)|(.*(rocm|halide).*)|(^trace\..*)|(^_))"
-    keys_to_scrub = set()
+    keys_to_scrub: Set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -1340,7 +1401,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
-                if not isinstance(key, str) or re.search(configs_to_scrub_re, key):
+                if not isinstance(key, str):
                     keys_to_scrub.add(key)
                 # Convert set() to list for json.dumps()
                 if isinstance(val, set):
@@ -1370,14 +1431,10 @@ def record_compilation_metrics(
 ):
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
-            from torch._inductor.fb.remote_cache import (
-                FbRemoteFxGraphCache,
-                REMOTE_CACHE_VERSION,
-            )
+            from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
 
             remote_cache_version = REMOTE_CACHE_VERSION
-            backend = FbRemoteFxGraphCache.get_remote_backend()
-            inductor_fx_remote_cache_backend_type = type(backend).__name__
+            inductor_fx_remote_cache_backend_type = "_ManifoldCache"
         except ModuleNotFoundError:
             remote_cache_version = None
             inductor_fx_remote_cache_backend_type = None
@@ -1401,6 +1458,7 @@ def record_compilation_metrics(
         "structured_logging_overhead_us": to_int_us(
             torch._logging.get_structured_logging_overhead()
         ),
+        "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -1482,12 +1540,13 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> Optional[str]:
+    def get_outermost_event(self) -> Optional[str]:
         """
-        Get the top event name or None if the stack is empty.
+        Get the outermost event name (i.e. the longest running event)
+        or None if the stack is empty.
         """
         stack = self.get_stack()
-        return stack[-1] if stack else None
+        return stack[0] if stack else None
 
     def get_pt2_compile_substack(self):
         """
@@ -2165,7 +2224,16 @@ if has_triton_package():
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
+    return isinstance(
+        v,
+        (
+            enum.Enum,
+            type,
+            torch.Size,
+            typing._GenericAlias,  # type: ignore[attr-defined]
+            types.GenericAlias,
+        ),
+    ) or istype(
         v,
         common_constant_types | {slice},
     )
@@ -2301,6 +2369,13 @@ dict_methods = {
     if callable(method)
 }
 
+tuple_new = tuple.__new__
+tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
+list_methods = {method for method in list.__dict__.values() if callable(method)}
+list_getitem = list.__getitem__
+
+str_methods = {method for method in str.__dict__.values() if callable(method)}
+
 
 def builtin_dict_keys(d):
     # Avoids overridden keys method of the dictionary
@@ -2351,8 +2426,15 @@ def to_subclass(t, cls):
     return t.as_subclass(cls)
 
 
+dict_getitem = dict.__getitem__
+
+
 def dict_keys_getitem(d, n):
-    return next(itertools.islice(iter(d), n, n + 1))
+    # Call dict(d) to prevent calling overridden __iter__/keys
+    dict_class = dict
+    if isinstance(d, OrderedDict):
+        dict_class = OrderedDict
+    return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -2528,6 +2610,7 @@ def same(
     ignore_non_fp=False,
     log_error=log.error,
     use_larger_multiplier_for_smaller_tensor=False,
+    force_max_multiplier: bool = False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -2554,6 +2637,7 @@ def same(
                 ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -2573,6 +2657,7 @@ def same(
             ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -2593,6 +2678,7 @@ def same(
                     ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                    force_max_multiplier=force_max_multiplier,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -2685,33 +2771,42 @@ def same(
 
                 res_error = rmse(fp64_ref, res).item()
 
-                # In the case of using AMP (Automatic Mixed Precision), certain models have
-                # failed the benchmark's correctness check. However, the end-to-end model's
-                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
-                # Thus, it's possible that the correctness check failures for these models are
-                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = (
-                    3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
-                )
+                def get_multiplier():
+                    # In some particular cases, we expect high difference in results.
+                    # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
+                    # In case of it the res_error is at least one order of magnitude higher.
+                    if force_max_multiplier:
+                        return 10.0
+                    # In the case of using AMP (Automatic Mixed Precision), certain models have
+                    # failed the benchmark's correctness check. However, the end-to-end model's
+                    # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                    # Thus, it's possible that the correctness check failures for these models are
+                    # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                    multiplier = (
+                        3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
+                    )
 
-                if use_larger_multiplier_for_smaller_tensor and (
-                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
-                ):
-                    multiplier = 10.0
-                elif use_larger_multiplier_for_smaller_tensor and (
-                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
-                ):
-                    multiplier = 5.0
-                elif (
-                    fp64_ref.numel() < 1000
-                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
-                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
-                    or tol >= 2 * 1e-2
-                ):
-                    # In the presence of noise, noise might dominate our error
-                    # metric for smaller tensors.
-                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
-                    multiplier = 3.0
+                    if use_larger_multiplier_for_smaller_tensor and (
+                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                    ):
+                        multiplier = 10.0
+                    elif use_larger_multiplier_for_smaller_tensor and (
+                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                    ):
+                        multiplier = 5.0
+                    elif (
+                        fp64_ref.numel() < 1000
+                        or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                        # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                        or tol >= 2 * 1e-2
+                    ):
+                        # In the presence of noise, noise might dominate our error
+                        # metric for smaller tensors.
+                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        multiplier = 3.0
+                    return multiplier
+
+                multiplier = get_multiplier()
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if (
@@ -2880,6 +2975,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # fake tensor validity is checked inside get_fake_value using
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
+
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
 
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
