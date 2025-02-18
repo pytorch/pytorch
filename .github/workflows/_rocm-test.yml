@@ -276,10 +276,10 @@ jobs:
       - name: Get directory perms (outside)
         if: always()
         run: |
+          ls -la ${GITHUB_WORKSPACE}
+          ls -la ${GITHUB_WORKSPACE}/test/test-reports/
           ls -la /home/runner/_work
           ls -la /home/runner/_work/pytorch
-          ls -la /home/runner/_work/pytorch/pytorch
-          ls -la /home/runner/_work/pytorch/pytorch/test/test-reports/
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
