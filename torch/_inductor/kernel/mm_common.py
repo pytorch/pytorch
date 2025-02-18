@@ -10,7 +10,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Layout
+from ..ir import ChoiceCaller, Layout
 from ..utils import (
     ceildiv as cdiv,
     get_num_sms,
@@ -22,7 +22,7 @@ from ..utils import (
 log = logging.getLogger(__name__)
 
 
-def should_fallback_to_aten(choices) -> bool:
+def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
     fallback_to_aten: bool = (
         len(choices) == 0
         and not use_aten_gemm_kernels()
