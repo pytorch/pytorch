@@ -17,7 +17,7 @@ from tools.testing.target_determination.heuristics.utils import (
 from tools.testing.test_run import TestRun
 
 
-REPO_ROOT = Path(__file__).parent.parent.parent.parent
+REPO_ROOT = Path(__file__).parents[3]
 
 keyword_synonyms: dict[str, list[str]] = {
     "amp": ["mixed_precision"],
@@ -67,8 +67,7 @@ def get_keywords(file: str) -> list[str]:
 
 
 def sanitize_name(folder_name: str) -> str:
-    if folder_name.startswith("_"):
-        folder_name = folder_name[1:]
+    folder_name = folder_name.removeprefix("_")
 
     for syn_rep, syns in keyword_synonyms.items():
         if folder_name in syns or folder_name == syn_rep:

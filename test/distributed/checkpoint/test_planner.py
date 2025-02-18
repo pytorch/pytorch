@@ -30,8 +30,10 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
+from torch.distributed.checkpoint.planner import LoadItemType, SavePlan, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import (
+    _compare_save_plans,
+    _merge_delta_local_plans,
     create_read_items_for_chunk_list,
 )
 from torch.testing._internal.common_utils import (
@@ -336,6 +338,67 @@ class TestPlannerHelpers(TestCase):
 
         self.assertEqual(torch.Size([3]), read_items[1].lengths)
 
+    def test_merge_delta_local_plans(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                return create_default_local_save_plan(state_dict, rank == 0)
+
+        def _validate_plans(plan1: SavePlan, plan2: SavePlan):
+            self.assertEqual(len(plan1.items), len(plan2.items))
+            for item1, item2 in zip(plan1.items, plan2.items):
+                self.assertEqual(item1.index, item2.index)
+                self.assertEqual(item1.type, item2.type)
+                self.assertEqual(item1.tensor_data, item2.tensor_data)
+
+        cached_plans = [create_data(0), create_data(1)]
+        delta_plans = [create_data(2), create_data(3)]
+
+        # Both the plans changed.
+        # Merge plan should have both the plans from the delta plans
+        merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
+        self.assertEqual(2, len(merged_plans))
+        _validate_plans(delta_plans[0], merged_plans[0])
+        _validate_plans(delta_plans[1], merged_plans[1])
+
+        # Only the first plan changed.
+        # Merge plan should have the first plan from the delta plans and the second plan from the cached plans
+        delta_plans = [create_data(2), SavePlan([])]
+        merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
+        _validate_plans(delta_plans[0], merged_plans[0])
+        _validate_plans(cached_plans[1], merged_plans[1])
+
+        # Only the second plan changed.
+        # Merge plan should have the first plan from the cached plans and the second plan from the delta plans
+        delta_plans = [SavePlan([]), create_data(3)]
+        merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
+        _validate_plans(cached_plans[0], merged_plans[0])
+        _validate_plans(delta_plans[1], merged_plans[1])
+
+        # None of the plans changed. Cached plans should be returned
+        delta_plans = [SavePlan([]), SavePlan([])]
+        merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
+        _validate_plans(cached_plans[0], merged_plans[0])
+        _validate_plans(cached_plans[1], merged_plans[1])
+
+    def test_compare_save_plans(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                return create_default_local_save_plan(state_dict, rank == 0)
+
+        plan1 = create_data(0)
+        plan2 = create_data(1)
+        self.assertFalse(_compare_save_plans(plan1, plan2))
+        self.assertTrue(_compare_save_plans(plan1, plan1))
+        self.assertTrue(_compare_save_plans(plan2, plan2))
+
 
 class TestLoadPlanner(TestCase):
     @with_temp_dir
@@ -356,6 +419,19 @@ class TestLoadPlanner(TestCase):
                 state_dict={"module": new_module},
                 checkpoint_id=self.temp_dir,
                 planner=DefaultLoadPlanner(allow_partial_load=False),
+            )
+
+    @with_temp_dir
+    def test_load_different_sizes_throws(self):
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(3, 2)
+        with self.assertRaisesRegex(CheckpointException, "Size mismatch"):
+            dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+                planner=DefaultLoadPlanner(),
             )
 
 

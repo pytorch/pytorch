@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -ex -o pipefail
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -87,7 +87,7 @@ else
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+  if [[ "$ANACONDA_PYTHON_VERSION" = "3.12" || "$ANACONDA_PYTHON_VERSION" = "3.13" ]]; then
     export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
     export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
   fi
@@ -191,7 +191,7 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ "$TORCH_CUDA_ARCH_LIST" == *"8.6"* || "$TORCH_CUDA_ARCH_LIST" == *"8.0"* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
   echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
   echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
   export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
@@ -228,7 +228,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
-# Do not change workspace permissions for ROCm CI jobs
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
@@ -247,10 +247,9 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /v
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e
+  set -e -o pipefail
 
   get_bazel
-  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -279,7 +278,7 @@ else
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
         # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install --pre numpy==2.0.2
+        python -mpip install numpy==2.0.2
       fi
 
       WERROR=1 python setup.py clean
@@ -396,7 +395,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+# don't do this for bazel or s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

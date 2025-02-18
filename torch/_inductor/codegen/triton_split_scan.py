@@ -1,17 +1,21 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict
+from typing import Union
 
 import sympy
 
 from torch._inductor import config
-from torch._inductor.codegen.simd import IterationRangesRoot
-from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
+from torch._inductor.codegen.simd import IterationRangesRoot, prefix_is_reduction
+from torch._inductor.codegen.triton import (
+    triton_compute_type,
+    TritonCSEVariable,
+    TritonKernel,
+)
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
 from ..utils import sympy_product
-from .simd import prefix_is_reduction
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -32,7 +36,7 @@ class TritonSplitScanKernel(TritonKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         pid_cache=None,
         fixed_config=None,
         **kwargs,
@@ -52,25 +56,24 @@ class TritonSplitScanKernel(TritonKernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        prefixes = "yxr"
+        prefixes = ["y", "x", "r0_"]
         assert len(self.numels) <= len(
             prefixes
         ), "z dimension not supported for split scan"
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
-        grid_dims = "rxy"
+        grid_dims = {"r0_": 0, "x": 1, "y": 2}
         for prefix in active_prefixes:
             numel = self.numels[prefix]
-            is_reduction = prefix == "r"
-            tensor_dim = 0 if is_reduction else None
-            grid_dim = grid_dims.find(prefix)
+            tensor_dim = 0 if prefix_is_reduction(prefix) else None
+            grid_dim = grid_dims[prefix]
             self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
                     numel,
                     prefix,
                     grid_dim,
-                    self,
+                    self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
                     is_loop=False,
                     tensor_dim=tensor_dim,
@@ -117,6 +120,7 @@ class TritonSplitScanKernel(TritonKernel):
         )
         max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
+        scratch_base: Union[str, TritonCSEVariable]
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
             scratch_base = cse_load(f"{scratch_base} + {self.index_to_str(offset)}")
@@ -126,7 +130,7 @@ class TritonSplitScanKernel(TritonKernel):
             f"{scratch_elems_per_block} * {runtime_rblocks}"
         )
 
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
@@ -139,7 +143,7 @@ class TritonSplitScanKernel(TritonKernel):
             dtype=dtype,
         )
 
-        combine_helper_fn = self._lift_helper(combine_fn, 1)
+        combine_helper_fn = self._lift_helper(combine_fn, 1, (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
@@ -198,9 +202,6 @@ class TritonSplitScanKernel(TritonKernel):
 
     def _get_heuristic(self):
         return "split_scan"
-
-    def _get_grid_fn_str(self):
-        return "split_scan_grid"
 
     def _get_grid_fn(self):
         return split_scan_grid

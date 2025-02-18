@@ -2,7 +2,6 @@
 import logging
 import math
 from collections import defaultdict
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -252,9 +251,9 @@ class PowerSGDState:
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
-        self.error_dict: Dict[int, torch.Tensor] = {}
-        self.p_memory_dict: Dict[int, torch.Tensor] = {}
-        self.q_memory_dict: Dict[int, torch.Tensor] = {}
+        self.error_dict: dict[int, torch.Tensor] = {}
+        self.p_memory_dict: dict[int, torch.Tensor] = {}
+        self.q_memory_dict: dict[int, torch.Tensor] = {}
         # Iteration/step in the training loop.
         self.iter = 0
         # Compression stats accumulators
@@ -632,6 +631,7 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -844,6 +844,7 @@ def batched_powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838

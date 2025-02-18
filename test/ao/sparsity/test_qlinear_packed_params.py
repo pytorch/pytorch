@@ -30,7 +30,6 @@ class TestQlinearPackedParams(TestCase):
         row_block_size = 1
         col_block_size = 4
         out_features = weight_fp32.shape[0]
-        in_features = weight_fp32.shape[1]
 
         scales = [2.0, 6.0, 12.0]
         zero_points = [
@@ -201,13 +200,10 @@ class TestQlinearPackedParams(TestCase):
         row_block_size = 1
         col_block_size = 4
         out_features = weight_fp32.shape[0]
-        in_features = weight_fp32.shape[1]
 
         scales = [2.0, 3.0, 7.0]
         zero_points = [0 for _ in range(out_features)]
         dtype = torch.qint8
-
-        x = torch.rand(size=(1, weight_fp32.shape[1]))
 
         def make_lin_get_state_weight_bias_and_save():
             weight = torch.quantize_per_tensor(

@@ -6,15 +6,15 @@ import functools
 import math
 import threading
 import unittest
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
-from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -29,7 +29,7 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
-) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+) -> tuple[tuple[torch.Tensor, ...], Any]:
     all_gather_inputs = (self.a, self.b)
     metadata = None
     return all_gather_inputs, metadata
@@ -39,10 +39,10 @@ def two_tensor_fsdp_pre_all_gather_v2(
     self,
     mesh: DeviceMesh,
     outer_size: torch.Size,
-    outer_stride: Tuple[int, ...],
+    outer_stride: tuple[int, ...],
     module: nn.Module,
     mp_policy: MixedPrecisionPolicy,
-) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+) -> tuple[tuple[torch.Tensor, ...], Any]:
     all_gather_inputs = (self.a, self.b)
     metadata = None
     return all_gather_inputs, metadata
@@ -50,12 +50,12 @@ def two_tensor_fsdp_pre_all_gather_v2(
 
 def two_tensor_fsdp_post_all_gather(
     self,
-    all_gather_outputs: Tuple[torch.Tensor, ...],
+    all_gather_outputs: tuple[torch.Tensor, ...],
     metadata: Any,
     param_dtype: torch.dtype,
     *,
     out: Optional[torch.Tensor] = None,
-) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, ...]], None]:
+) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
     assert metadata is None, f"{metadata}"
     a, b = all_gather_outputs
     if out is not None:
@@ -96,10 +96,10 @@ class BFloat16AllGatherTensor(torch.Tensor):
         self,
         mesh: DeviceMesh,
         outer_size: torch.Size,
-        outer_stride: Tuple[int, ...],
+        outer_stride: tuple[int, ...],
         module: nn.Module,
         mp_policy: MixedPrecisionPolicy,
-    ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+    ) -> tuple[tuple[torch.Tensor, ...], Any]:
         assert mesh.ndim == 1, f"{mesh.ndim}"
         mesh_size = mesh.size()
         requires_padding = outer_size[0] % mesh_size != 0
@@ -116,12 +116,12 @@ class BFloat16AllGatherTensor(torch.Tensor):
 
     def fsdp_post_all_gather(
         self,
-        all_gather_outputs: Tuple[torch.Tensor, ...],
+        all_gather_outputs: tuple[torch.Tensor, ...],
         metadata: Any,
         param_dtype: torch.dtype,
         *,
         out: Optional[torch.Tensor] = None,
-    ) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, ...]], None]:
+    ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
         assert metadata is None, f"{metadata}"
         (tensor,) = all_gather_outputs
         assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
@@ -157,7 +157,7 @@ class BFloat16AllGatherTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(
-        inner_tensors, outer_size: torch.Size, outer_stride: Tuple[int, ...]
+        inner_tensors, outer_size: torch.Size, outer_stride: tuple[int, ...]
     ):
         return inner_tensors["_data"]
 
@@ -236,12 +236,12 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((2, 8), device="cuda")
         for iter_idx in range(10):
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
                 if _model is ref_model:
-                    for param_name, param in _model.named_parameters():
+                    for _, param in _model.named_parameters():
                         dist.all_reduce(param.grad)
                         param.grad.detach().div_(self.world_size)
             self.assertEqual(losses[0], losses[1])
@@ -314,10 +314,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self,
             mesh: DeviceMesh,
             outer_size: torch.Size,
-            outer_stride: Tuple[int, ...],
+            outer_stride: tuple[int, ...],
             module: nn.Module,
             mp_policy: MixedPrecisionPolicy,
-        ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
             nonlocal tls
             tls.ran_pre_all_gather = True
             return (self.to(torch.bfloat16),), None
@@ -325,12 +325,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         @torch.no_grad()
         def fsdp_post_all_gather(
             self,
-            all_gather_outputs: Tuple[torch.Tensor, ...],
+            all_gather_outputs: tuple[torch.Tensor, ...],
             metadata: Any,
             param_dtype: torch.dtype,
             *,
             out: Optional[torch.Tensor] = None,
-        ) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, ...]], None]:
+        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
             (tensor,) = all_gather_outputs
             assert metadata is None, f"{metadata}"
             assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
@@ -416,10 +416,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self,
             mesh: DeviceMesh,
             outer_size: torch.Size,
-            outer_stride: Tuple[int, ...],
+            outer_stride: tuple[int, ...],
             module: nn.Module,
             mp_policy: MixedPrecisionPolicy,
-        ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
             nonlocal tls
             tls.mesh = mesh
             return (self,), None
@@ -427,12 +427,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         @torch.no_grad()
         def fsdp_post_all_gather(
             self,
-            all_gather_outputs: Tuple[torch.Tensor, ...],
+            all_gather_outputs: tuple[torch.Tensor, ...],
             metadata: Any,
             param_dtype: torch.dtype,
             *,
             out: Optional[torch.Tensor] = None,
-        ) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, ...]], None]:
+        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
             (tensor,) = all_gather_outputs
             if out is not None:
                 return

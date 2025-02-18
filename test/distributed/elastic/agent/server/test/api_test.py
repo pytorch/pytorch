@@ -14,7 +14,7 @@ import signal
 import unittest
 import uuid
 from multiprocessing.pool import ThreadPool
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import call, patch
 
 import torch.distributed as dist
@@ -135,7 +135,7 @@ class TestAgent(SimpleElasticAgent):
         worker_group.group_world_size = None
         self.stop_workers_call_count += 1
 
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         # crate fake workers; make worker id equal to global rank
         ids = {}
         for worker in worker_group.workers:
@@ -477,7 +477,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(1, mock_monitor_workers.call_count)
         self.assertEqual(spec.max_restarts, agent._remaining_restarts)
 
-    def get_worker_assigned(self, store, role_infos_len, info) -> List[Worker]:
+    def get_worker_assigned(self, store, role_infos_len, info) -> list[Worker]:
         i, role_info = info
         spec = self._get_worker_spec(
             max_restarts=3,

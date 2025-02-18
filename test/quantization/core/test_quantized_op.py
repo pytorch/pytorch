@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 
 import copy
@@ -6,8 +7,9 @@ import itertools
 import numpy as np
 import operator
 import random
+import sys
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import _VF
@@ -23,7 +25,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE, IS_FBCODE
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -52,7 +54,7 @@ class PointwisePostOp(NamedTuple):
     binary_attr : str = "none"
     alpha : float = 1.0
     unary_attr : str = "none"
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -64,6 +66,8 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
+    if sys.version_info >= (3, 13):
+        raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
@@ -3825,10 +3829,12 @@ class TestQuantizedLinear(TestCase):
             if torch.backends.xnnpack.enabled:
                 dtypes.append(torch.qint8)
 
+        if qengine_is_onednn() and IS_ARM64:
+            dtypes.append(torch.qint8)
+
         for dtype in dtypes:
             # No support for channelwise in xnnpack (int8)
-            # ONEDNN does not support qint8
-            if dtype == torch.qint8 and (use_channelwise or qengine_is_onednn()):
+            if dtype == torch.qint8 and use_channelwise:
                 return
 
             nptype = np_dtype[dtype]
@@ -3874,7 +3880,7 @@ class TestQuantizedLinear(TestCase):
                 np.random.rand(output_channels) *
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
-            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
+            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn') and not IS_ARM64:
                 avoid_vpmaddubsw_overflow_linear(
                     batch_size,
                     input_channels,

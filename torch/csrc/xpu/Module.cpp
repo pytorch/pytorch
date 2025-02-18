@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
-#include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -32,8 +31,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_child);
 #endif
 }
 
@@ -376,6 +375,40 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
+static void initXpuMethodBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+#if SYCL_COMPILER_VERSION >= 20250000
+    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
+    auto& device = c10::xpu::get_raw_device(device_index);
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        at::xpu::getDeviceProperties(device_index)->name,
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
+    return std::make_tuple(free, total);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+  });
+  m.def(
+      "_xpu_getStreamFromExternal",
+      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+        sycl::queue* ext_queue =
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<sycl::queue*>(reinterpret_cast<void*>(data_ptr));
+        at::xpu::XPUStream stream =
+            c10::xpu::getStreamFromExternal(ext_queue, device_index);
+        return std::make_tuple(
+            stream.id(), stream.device_index(), stream.device_type());
+      });
+}
+
 // Callback for python part. Used for additional initialization of python
 // classes
 static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
@@ -458,6 +491,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
+  initXpuMethodBindings(module);
 }
 
 } // namespace torch::xpu

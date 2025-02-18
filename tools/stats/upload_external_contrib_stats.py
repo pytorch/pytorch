@@ -6,7 +6,7 @@ import json
 import os
 import time
 import urllib.parse
-from typing import Any, Callable, cast, Dict, List
+from typing import Any, Callable, cast
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -60,7 +60,7 @@ def fetch_json(
             f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items()
         )
     return cast(
-        List[Dict[str, Any]],
+        list[dict[str, Any]],
         _fetch_url(url, headers=headers, data=data, reader=json.load),
     )
 
@@ -79,7 +79,7 @@ def get_external_pr_data(
         responses: list[dict[str, Any]] = []
         while len(responses) > 0 or page == 1:
             response = cast(
-                Dict[str, Any],
+                dict[str, Any],
                 fetch_json(
                     "https://api.github.com/search/issues",
                     params={

@@ -23,11 +23,13 @@ torch.cuda
     get_device_name
     get_device_properties
     get_gencode_flags
+    get_stream_from_external
     get_sync_debug_mode
     init
     ipc_collect
     is_available
     is_initialized
+    is_tf32_supported
     memory_usage
     set_device
     set_stream
@@ -191,6 +193,30 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
     :hidden:
 
     cuda._sanitizer
+
+
+GPUDirect Storage (prototype)
+-----------------------------
+
+The APIs in ``torch.cuda.gds`` provide thin wrappers around certain cuFile APIs that allow
+direct memory access transfers between GPU memory and storage, avoiding a bounce buffer in the CPU. See the
+`cufile api documentation <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+for more details.
+
+These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
+ensure that their system is appropriately configured to use GPUDirect Storage per the
+`GPUDirect Storage documentation <https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html>`_.
+
+See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use these.
+
+.. currentmodule:: torch.cuda.gds
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    gds_register_buffer
+    gds_deregister_buffer
+    GdsFile
 
 
 .. This module needs to be documented. Adding here in the meantime

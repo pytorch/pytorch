@@ -1,4 +1,22 @@
 # mypy: allow-untyped-defs
+
+"""
+Utilities for debugging and reproducing issues in Ahead of Time with Inductor (AOTI) compilation.
+
+This file provides tools and utilities for:
+- Generating minimal reproducible test cases (minification)
+- Handling exported programs and graph modules
+- Creating debug repros for AOTI compilation issues
+- Supporting both accuracy testing and error reproduction
+- Managing configuration and environment for repro cases
+
+The main components include:
+- Minification tools to reduce test cases while preserving errors
+- Repro generation utilities for exported programs
+- Error handling specific to AOTI compilation
+- Command-line interface for running and managing repros
+"""
+
 import argparse
 import functools
 import io
@@ -9,7 +27,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -17,6 +35,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     minifier_dir,
@@ -45,21 +64,51 @@ class AOTIMinifierError(Exception):
 def dump_to_minify(
     exported_program: ExportedProgram,
     compiler_name: str,
-    options: Optional[Dict[str, Any]] = None,
+    command: str = "minify",
+    options: Optional[dict[str, Any]] = None,
 ):
-    out = io.StringIO()
+    """
+    If command is "minify":
+        Dump exported_program to `debug_dir/minifier/minifier_launcher.py`, with minify command.
+    If command is "run":
+        Dump exported_program to `cwd/repro.py`, with run command.
+    """
+    assert command in ["minify", "run"]
+
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro_ep(
-        out,
-        compiler_name,
-        exported_program=exported_program,
-        save_dir=subdir,
-        command="minify",
-        config_patches=options,
-    )
-    return helper_for_dump_minify(out.getvalue())
+
+    if command == "minify":
+        out = io.StringIO()
+        save_graph_repro_ep(
+            out,
+            compiler_name,
+            exported_program=exported_program,
+            save_dir=subdir,
+            command="minify",
+            config_patches=options,
+        )
+        return helper_for_dump_minify(out.getvalue())
+    else:
+        curdir = os.getcwd()
+        file_name = os.path.join(curdir, "repro.py")
+        try:
+            with open(file_name, "w") as fd:
+                save_graph_repro_ep(
+                    fd,
+                    compiler_name,
+                    exported_program=exported_program,
+                    config_patches=options,
+                    save_dir=subdir,
+                    command="run",
+                    module_in_comment=True,
+                )
+            log.warning("Writing repro file to %s", file_name)
+            if use_buck:
+                BuckTargetWriter(file_name).write()
+        except OSError:
+            log.warning("No write permissions for %s", file_name)
 
 
 def get_module_string(gm):
@@ -88,8 +137,8 @@ def save_graph_repro_ep(
     *,
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
-    args: Optional[Tuple[Any]] = None,
-    config_patches: Optional[Dict[str, str]] = None,
+    args: Optional[tuple[Any]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
     command="run",
@@ -187,12 +236,13 @@ def dump_compiler_graph_state(
 def generate_compiler_repro_exported_program(
     exported_program,
     *,
-    options: Optional[Dict[str, str]] = None,
+    options: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 import torch._inductor.inductor_prims
 
@@ -260,21 +310,20 @@ def repro_get_args(options, exported_program, config_patches):
 
 
 def repro_run(options, exported_program, config_patches):
-    from torch._inductor import _aoti_compile_and_package_inner, aoti_load_package
+    from torch._inductor import _aoti_compile_and_package_inner
 
-    mod, args, kwargs = repro_common(options, exported_program)
+    gm, args, kwargs = repro_common(options, exported_program)
 
     from torch.cuda import synchronize
 
-    package_path = _aoti_compile_and_package_inner(
-        mod,
+    _aoti_compile_and_package_inner(
+        gm,
         args,
         kwargs,
-        load_and_run=False,
+        load_and_run=True,
+        check_accuracy=options.accuracy,
         inductor_configs=config_patches,
     )
-    compiled = aoti_load_package(package_path)
-    assert not isinstance(compiled, str)
 
     need_sync = False
 
@@ -282,8 +331,6 @@ def repro_run(options, exported_program, config_patches):
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
             need_sync = True
             break
-
-    compiled(*args)
 
     if need_sync:
         synchronize()  # ensure segfaults are surfaced
@@ -328,8 +375,14 @@ def export_for_aoti_minifier(
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
+    from torch._inductor.compile_fx import _aoti_flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
+
+    # update serialized_in_spec and serialized_out_spec
+    flat_example_inputs, inductor_configs = _aoti_flatten_inputs(
+        mod, args, kwargs, options=config_patches
+    )
     compiler_name = "aot_inductor"
     assert options.minifier_export_mode in ["dynamo", "python"]
     strict = options.minifier_export_mode == "dynamo"
@@ -345,7 +398,7 @@ def repro_minify(options, exported_program, config_patches):
             break
 
     def module_fails(gm, flat_example_inputs, check_str=None):
-        # we have to export first so the in_spec and out_spec are populated
+        # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
         gm = export_for_aoti_minifier(
             gm, tuple_inputs, strict=strict, skip_export_error=skip_export_error
@@ -356,13 +409,15 @@ def repro_minify(options, exported_program, config_patches):
         if gm is None:
             return False
 
+        assert isinstance(gm, torch.fx.GraphModule)
+
         try:
             _aoti_compile_and_package_inner(
                 gm,
                 tuple_inputs,
-                kwargs,
                 load_and_run=True,
-                inductor_configs=config_patches,
+                check_accuracy=options.accuracy,
+                inductor_configs=inductor_configs,
             )
             if need_sync:
                 synchronize()  # ensure segfaults are surfaced
@@ -374,12 +429,13 @@ def repro_minify(options, exported_program, config_patches):
 
     minifier(
         mod,
-        args,
+        flat_example_inputs,
         module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state,
             compiler_name=compiler_name,
             config_patches=config_patches,
+            accuracy=options.accuracy,
             strict=strict,
         ),
         save_dir=options.save_dir,
@@ -393,7 +449,7 @@ def repro_minify(options, exported_program, config_patches):
 def run_repro(
     exported_program,
     *,
-    config_patches: Optional[Dict[str, str]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     command="run",
     accuracy: Union[bool, str] = "",
     save_dir=None,
@@ -411,7 +467,6 @@ def run_repro(
 
     if accuracy is True:
         accuracy = "accuracy"
-        raise NotImplementedError("check for accuracy is not supported yet")
     elif accuracy is False:
         accuracy = ""
 
@@ -432,6 +487,55 @@ default settings on this script:
     )
 
     def common_flags(parser):
+        accuracy_group = parser.add_mutually_exclusive_group()
+        accuracy_group.add_argument(
+            "--no-accuracy",
+            dest="accuracy",
+            action="store_const",
+            const="",
+            default=accuracy,
+            help="do not test accuracy, just run the module and see if it errors",
+        )
+        accuracy_group.add_argument(
+            "--accuracy",
+            action="store_const",
+            const="accuracy",
+            default=accuracy,
+            help="""\
+test if the RMSE between the compiled module and the fp64 reference is greater
+than eager and the fp64 reference. This is usually more reliable than the
+standard allclose test, as we expect numeric differences from compiling, often
+improving accuracy over eager.  RMSE test allows for compiled module to
+diverge greatly from eager, as long as this divergence moves it closer to the
+'true' mathematical value of the network.  Caveats: (1) double precision can
+still suffer from rounding error, so it is not a perfect reference (see for
+example 'Herbie: Automatically Improving Floating Point Accuracy') for
+approaches that detect the necessary working precision and compute it in
+arbitrary precision floating point; unfortunately, this is not practical for
+tensor computation; (2) if there are not enough samples in the output being
+compared, we may get unlucky and have an unlucky greater RMSE than eager; this
+could be overcome by applying a more rigorous statistical test at some
+p-value, which we leave for future work.
+""",
+        )
+        accuracy_group.add_argument(
+            "--strict-accuracy",
+            dest="accuracy",
+            action="store_const",
+            const="strict_accuracy",
+            default=accuracy,
+            help="""\
+by default, when doing accuracy minification we will reject reductions which
+change the divergence from a floating point divergence to a integral/boolean
+divergence.  This is because some operations like ReLU involve temporarily
+sharp boundaries that smooth out again afterwards; without requiring
+divergence on floating point, the minifier will often fixate on divergent
+boolean tensor even though this is not the true source of the divergence.
+However, rejecting these reductions makes it more difficult for the minifier
+to make process.  Using this option will let the minifier progress for ALL
+divergences--you just might not end up with a useful repro in the end.""",
+        )
+
         parser.add_argument(
             "--save-dir",
             type=str,
@@ -448,7 +552,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify,analyze}", required=True
+        dest="command", metavar="{run,minify}", required=True
     )
 
     parser_run = subparsers.add_parser(

@@ -1,4 +1,5 @@
 # Owner(s): ["module: tests"]
+# ruff: noqa: F841
 
 import itertools
 import math
@@ -3470,6 +3471,7 @@ class TestBinaryUfuncs(TestCase):
             weights = [
                 torch.randn(shapes[2], device=device, dtype=dtype),
                 random.random(),
+                torch.randn([], device="cpu", dtype=dtype),
             ]
             if dtype.is_complex:
                 weights += [complex(0, 1), complex(0.4, 1.2)]
@@ -3517,16 +3519,37 @@ class TestBinaryUfuncs(TestCase):
                 expected = torch.lerp(xref, yref, wref).to(dtype)
                 self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_weight_scalar_tensor_promotion(self, device, dtype):
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = torch.rand((), dtype=torch.float, device=device)
+
+        actual = torch.lerp(start, end, weight)
+        expected = start + weight.to(dtype) * (end - start)
+        self.assertEqual(expected, actual)
+
+    @dtypes(torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_weight_tensor_promotion_error(self, device, dtype):
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = torch.rand((5, 5), dtype=torch.float, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected dtype"):
+            torch.lerp(start, end, weight)
+
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
         elif dtype in (torch.complex64, torch.complex128):
             # numpy has not implemented logaddexp for complex
-            def _ref_func(x, y):
-                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            def complex_logaddexp(x1, x2):
+                x = np.stack((x1, x2))
+                amax = np.amax(x, axis=0)
+                amax[~np.isfinite(amax)] = 0
+                return np.log(np.sum(np.exp(x - amax), axis=0)) + np.squeeze(amax)
 
-            ref_func = _ref_func
+            ref_func = complex_logaddexp
             our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp

@@ -204,18 +204,53 @@ with torch.no_grad():
         ep
     )
 """
-        return self._run_full_test(run_code, None, expected_error, isolate=True)
+        return self._run_full_test(
+            run_code, "aot_inductor", expected_error, isolate=False
+        )
 
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch(
-        {
-            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+    # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
+    def _test_aoti_unflattened_inputs(self, device, expected_error):
+        # NB: The program is intentionally quite simple, just enough to
+        # trigger one minification step, no more (dedicated minifier tests
+        # should exercise minifier only)
+
+        # It tests that the minifier can handle unflattened inputs and kwargs
+        run_code = f"""\
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(10, 16)
+        self.relu = torch.nn.ReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, inp, *, k):
+        x = inp["x"]
+        y = inp["y"]
+        x = self.fc1(x)
+        y = self.fc1(y)
+        k = self.fc1(k)
+        x = self.relu(x)
+        x = self.sigmoid(x)
+        return x + y + k
+
+with torch.no_grad():
+    model = Model().to("{device}")
+    val = torch.randn(8, 10).to("{device}")
+    example_inputs = ({{"x": val.clone(), "y": val.clone()}},)
+    kwargs = {{"k": val.clone()}}
+    ep = torch.export.export(
+        model, example_inputs, kwargs
     )
-    def test_aoti_cpu_compile_error(self):
-        res = self._test_aoti("cpu", "CppCompileError")
+    torch._inductor.aoti_compile_and_package(ep)
+"""
+        return self._run_full_test(
+            run_code, "aot_inductor", expected_error, isolate=False
+        )
+
+    def _aoti_check_relu_repro(self, res):
+        assert res is not None
         ep_file_path = res.get_exported_program_path()
+        assert ep_file_path is not None
         gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
             str(gm.code).strip(),
@@ -225,27 +260,57 @@ def forward(self, linear):
     relu = torch.ops.aten.relu.default(linear);  linear = None
     return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch(
+        "cpp.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
+    )
+    def test_aoti_cpu_compile_error(self):
+        res = self._test_aoti("cpu", "CppCompileError")
+        self._aoti_check_relu_repro(res)
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch(
+        "cpp.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
+    )
+    def test_aoti_cpu_compile_error_unflatten(self):
+        res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
+        self._aoti_check_relu_repro(res)
 
     @requires_gpu
     @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
-        {
-            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+        "triton.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
     )
     def test_aoti_gpu_compile_error(self):
         res = self._test_aoti(GPU_TYPE, "SyntaxError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
-        )
+        self._aoti_check_relu_repro(res)
+
+    @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
+    @inductor_config.patch(
+        "triton.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
+    )
+    def test_aoti_gpu_compile_error_unflatten(self):
+        res = self._test_aoti_unflattened_inputs(GPU_TYPE, "SyntaxError")
+        self._aoti_check_relu_repro(res)
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_aoti_cpu_accuracy_error(self):
+        res = self._test_aoti("cpu", "AccuracyError")
+        self._aoti_check_relu_repro(res)
+
+    @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
+    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_aoti_gpu_accuracy_error(self):
+        res = self._test_aoti(GPU_TYPE, "AccuracyError")
+        self._aoti_check_relu_repro(res)
 
 
 if __name__ == "__main__":

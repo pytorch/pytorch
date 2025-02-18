@@ -5,8 +5,6 @@
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <string>
 
-#include <c10/util/CallOnce.h>
-
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #endif
@@ -61,15 +59,14 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-static c10::once_flag log_graph_static_flag;
-
 void Logger::log_if_graph_static(bool is_static) {
-  c10::call_once(log_graph_static_flag, [this, is_static]() {
+  static bool log_graph_static_flag [[maybe_unused]] = [this, is_static]() {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     // It is useful to report the iteration that training finished at.
     ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
-  });
+    return true;
+  }();
 }
 
 // Environment variables
@@ -234,7 +231,7 @@ void Logger::set_event_time(
     Timer& timer,
     Timer::Event event) {
   auto timestamp = timer.getTimestamp(event);
-  if (timestamp != std::nullopt) {
+  if (timestamp.has_value()) {
     // TODO: should we set this as human-readable time instead of unixtime?
     event_time = *timestamp;
   }
