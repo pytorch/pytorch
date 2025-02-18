@@ -246,6 +246,23 @@ extern "C" void __amx_chk_kernel() {
                 return True
         return False
 
+    # check amx_fp16 separately since it is not always supported when amx is supported
+    # amx_fp16 instrinsic compilation need gcc >=13 on platforms which support amx_fp16
+    @functools.lru_cache(None)  # noqa: B019
+    def is_amx_fp16_supported(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if torch.cpu._init_amx() and torch.cpu._is_amx_fp16_supported():
+                self._arch_flags += " -mamx-fp16"
+                if self.check_build(VecAMX._amx_fp16_code):
+                    return True
+                else:
+                    self._arch_flags = (
+                        VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+                    )
+        return False
+
 
 @dataclasses.dataclass
 class VecAVX2(VecISA):
