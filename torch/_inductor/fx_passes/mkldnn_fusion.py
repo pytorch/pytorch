@@ -1100,12 +1100,9 @@ if torch._C._has_mkldnn:
         def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            device_type = add_node.meta.get("val").device.type
-            mkldnn_device_op = _get_mkldnn_device_op(device_type)
-            transpose_weight_node = mkldnn_device_op.get_linear_transpose_weight(
-                linear_node.args[1]
-            )
-            weight_meta = transpose_weight_node.args[0].meta.get("val")
+            packed_weight_node = linear_node.args[1]
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
+            weight_meta = packed_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
             if not isinstance(bias_node, torch.fx.Node):
                 return False
