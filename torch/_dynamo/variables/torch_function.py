@@ -151,10 +151,10 @@ def populate_builtin_to_tensor_fn_map():
             most_recent_func = func
             return func(*args, **kwargs)
 
-    inp0 = torch.ones(1, device="cpu")
-    inp1 = torch.ones(1, device="cpu")
-    inp0_int = torch.ones(1, dtype=torch.int32, device="cpu")
-    inp1_int = torch.ones(1, dtype=torch.int32, device="cpu")
+    inp0 = torch.ones(1)
+    inp1 = torch.ones(1)
+    inp0_int = torch.ones(1, dtype=torch.int32)
+    inp1_int = torch.ones(1, dtype=torch.int32)
     with GetMethodMode():
         setups_and_oplists = [
             (lambda o: o(inp0), un_ops),

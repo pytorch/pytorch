@@ -5,6 +5,7 @@
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -177,6 +178,23 @@ enum class ArgumentKind {
   KEYWORD = 2,
 };
 
+inline std::string_view printEnum(const ArgumentKind& e) {
+  switch (e) {
+    case ArgumentKind::UNKNOWN: return "UNKNOWN";
+    case ArgumentKind::POSITIONAL: return "POSITIONAL";
+    case ArgumentKind::KEYWORD: return "KEYWORD";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, ArgumentKind& t) {
+  if (s == "UNKNOWN") { t = ArgumentKind::UNKNOWN; return; }
+  if (s == "POSITIONAL") { t = ArgumentKind::POSITIONAL; return; }
+  if (s == "KEYWORD") { t = ArgumentKind::KEYWORD; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 enum class Layout {
   Unknown = 0,
   SparseCoo = 1,
@@ -188,6 +206,33 @@ enum class Layout {
   Strided = 7,
 };
 
+inline std::string_view printEnum(const Layout& e) {
+  switch (e) {
+    case Layout::Unknown: return "Unknown";
+    case Layout::SparseCoo: return "SparseCoo";
+    case Layout::SparseCsr: return "SparseCsr";
+    case Layout::SparseCsc: return "SparseCsc";
+    case Layout::SparseBsr: return "SparseBsr";
+    case Layout::SparseBsc: return "SparseBsc";
+    case Layout::_mkldnn: return "_mkldnn";
+    case Layout::Strided: return "Strided";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, Layout& t) {
+  if (s == "Unknown") { t = Layout::Unknown; return; }
+  if (s == "SparseCoo") { t = Layout::SparseCoo; return; }
+  if (s == "SparseCsr") { t = Layout::SparseCsr; return; }
+  if (s == "SparseCsc") { t = Layout::SparseCsc; return; }
+  if (s == "SparseBsr") { t = Layout::SparseBsr; return; }
+  if (s == "SparseBsc") { t = Layout::SparseBsc; return; }
+  if (s == "_mkldnn") { t = Layout::_mkldnn; return; }
+  if (s == "Strided") { t = Layout::Strided; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 enum class MemoryFormat {
   Unknown = 0,
   ContiguousFormat = 1,
@@ -195,6 +240,27 @@ enum class MemoryFormat {
   ChannelsLast3d = 3,
   PreserveFormat = 4,
 };
+
+inline std::string_view printEnum(const MemoryFormat& e) {
+  switch (e) {
+    case MemoryFormat::Unknown: return "Unknown";
+    case MemoryFormat::ContiguousFormat: return "ContiguousFormat";
+    case MemoryFormat::ChannelsLast: return "ChannelsLast";
+    case MemoryFormat::ChannelsLast3d: return "ChannelsLast3d";
+    case MemoryFormat::PreserveFormat: return "PreserveFormat";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, MemoryFormat& t) {
+  if (s == "Unknown") { t = MemoryFormat::Unknown; return; }
+  if (s == "ContiguousFormat") { t = MemoryFormat::ContiguousFormat; return; }
+  if (s == "ChannelsLast") { t = MemoryFormat::ChannelsLast; return; }
+  if (s == "ChannelsLast3d") { t = MemoryFormat::ChannelsLast3d; return; }
+  if (s == "PreserveFormat") { t = MemoryFormat::PreserveFormat; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
 
 enum class ScalarType {
   UNKNOWN = 0,
@@ -215,6 +281,51 @@ enum class ScalarType {
   FLOAT8E4M3FN = 29,
   FLOAT8E5M2 = 30,
 };
+
+inline std::string_view printEnum(const ScalarType& e) {
+  switch (e) {
+    case ScalarType::UNKNOWN: return "UNKNOWN";
+    case ScalarType::BYTE: return "BYTE";
+    case ScalarType::CHAR: return "CHAR";
+    case ScalarType::SHORT: return "SHORT";
+    case ScalarType::INT: return "INT";
+    case ScalarType::LONG: return "LONG";
+    case ScalarType::HALF: return "HALF";
+    case ScalarType::FLOAT: return "FLOAT";
+    case ScalarType::DOUBLE: return "DOUBLE";
+    case ScalarType::COMPLEXHALF: return "COMPLEXHALF";
+    case ScalarType::COMPLEXFLOAT: return "COMPLEXFLOAT";
+    case ScalarType::COMPLEXDOUBLE: return "COMPLEXDOUBLE";
+    case ScalarType::BOOL: return "BOOL";
+    case ScalarType::BFLOAT16: return "BFLOAT16";
+    case ScalarType::UINT16: return "UINT16";
+    case ScalarType::FLOAT8E4M3FN: return "FLOAT8E4M3FN";
+    case ScalarType::FLOAT8E5M2: return "FLOAT8E5M2";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, ScalarType& t) {
+  if (s == "UNKNOWN") { t = ScalarType::UNKNOWN; return; }
+  if (s == "BYTE") { t = ScalarType::BYTE; return; }
+  if (s == "CHAR") { t = ScalarType::CHAR; return; }
+  if (s == "SHORT") { t = ScalarType::SHORT; return; }
+  if (s == "INT") { t = ScalarType::INT; return; }
+  if (s == "LONG") { t = ScalarType::LONG; return; }
+  if (s == "HALF") { t = ScalarType::HALF; return; }
+  if (s == "FLOAT") { t = ScalarType::FLOAT; return; }
+  if (s == "DOUBLE") { t = ScalarType::DOUBLE; return; }
+  if (s == "COMPLEXHALF") { t = ScalarType::COMPLEXHALF; return; }
+  if (s == "COMPLEXFLOAT") { t = ScalarType::COMPLEXFLOAT; return; }
+  if (s == "COMPLEXDOUBLE") { t = ScalarType::COMPLEXDOUBLE; return; }
+  if (s == "BOOL") { t = ScalarType::BOOL; return; }
+  if (s == "BFLOAT16") { t = ScalarType::BFLOAT16; return; }
+  if (s == "UINT16") { t = ScalarType::UINT16; return; }
+  if (s == "FLOAT8E4M3FN") { t = ScalarType::FLOAT8E4M3FN; return; }
+  if (s == "FLOAT8E5M2") { t = ScalarType::FLOAT8E5M2; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
 
 
 class Device {
@@ -324,6 +435,24 @@ class SymExprHint {
   }
 };
 
+inline std::string_view printEnum(const SymExprHint::Tag& e) {
+  switch (e) {
+    case SymExprHint::Tag::AS_INT: return "AS_INT";
+    case SymExprHint::Tag::AS_BOOL: return "AS_BOOL";
+    case SymExprHint::Tag::AS_FLOAT: return "AS_FLOAT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymExprHint::Tag& t) {
+  if (s == "AS_INT") { t = SymExprHint::Tag::AS_INT; return; }
+  if (s == "AS_BOOL") { t = SymExprHint::Tag::AS_BOOL; return; }
+  if (s == "AS_FLOAT") { t = SymExprHint::Tag::AS_FLOAT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class SymExpr {
  private:
   std::string expr_str;
@@ -413,6 +542,22 @@ class SymInt {
   }
 };
 
+inline std::string_view printEnum(const SymInt::Tag& e) {
+  switch (e) {
+    case SymInt::Tag::AS_EXPR: return "AS_EXPR";
+    case SymInt::Tag::AS_INT: return "AS_INT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymInt::Tag& t) {
+  if (s == "AS_EXPR") { t = SymInt::Tag::AS_EXPR; return; }
+  if (s == "AS_INT") { t = SymInt::Tag::AS_INT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class SymFloat {
   struct Void {};
 
@@ -475,6 +620,22 @@ class SymFloat {
   }
 };
 
+inline std::string_view printEnum(const SymFloat::Tag& e) {
+  switch (e) {
+    case SymFloat::Tag::AS_EXPR: return "AS_EXPR";
+    case SymFloat::Tag::AS_FLOAT: return "AS_FLOAT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymFloat::Tag& t) {
+  if (s == "AS_EXPR") { t = SymFloat::Tag::AS_EXPR; return; }
+  if (s == "AS_FLOAT") { t = SymFloat::Tag::AS_FLOAT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class SymBool {
   struct Void {};
 
@@ -536,6 +697,22 @@ class SymBool {
     }
   }
 };
+
+inline std::string_view printEnum(const SymBool::Tag& e) {
+  switch (e) {
+    case SymBool::Tag::AS_EXPR: return "AS_EXPR";
+    case SymBool::Tag::AS_BOOL: return "AS_BOOL";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymBool::Tag& t) {
+  if (s == "AS_EXPR") { t = SymBool::Tag::AS_EXPR; return; }
+  if (s == "AS_BOOL") { t = SymBool::Tag::AS_BOOL; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 
 class TensorMeta {
  private:
@@ -671,6 +848,22 @@ class SymIntArgument {
   }
 };
 
+inline std::string_view printEnum(const SymIntArgument::Tag& e) {
+  switch (e) {
+    case SymIntArgument::Tag::AS_NAME: return "AS_NAME";
+    case SymIntArgument::Tag::AS_INT: return "AS_INT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymIntArgument::Tag& t) {
+  if (s == "AS_NAME") { t = SymIntArgument::Tag::AS_NAME; return; }
+  if (s == "AS_INT") { t = SymIntArgument::Tag::AS_INT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class SymFloatArgument {
   struct Void {};
 
@@ -733,6 +926,22 @@ class SymFloatArgument {
   }
 };
 
+inline std::string_view printEnum(const SymFloatArgument::Tag& e) {
+  switch (e) {
+    case SymFloatArgument::Tag::AS_NAME: return "AS_NAME";
+    case SymFloatArgument::Tag::AS_FLOAT: return "AS_FLOAT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymFloatArgument::Tag& t) {
+  if (s == "AS_NAME") { t = SymFloatArgument::Tag::AS_NAME; return; }
+  if (s == "AS_FLOAT") { t = SymFloatArgument::Tag::AS_FLOAT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class SymBoolArgument {
   struct Void {};
 
@@ -794,6 +1003,22 @@ class SymBoolArgument {
     }
   }
 };
+
+inline std::string_view printEnum(const SymBoolArgument::Tag& e) {
+  switch (e) {
+    case SymBoolArgument::Tag::AS_NAME: return "AS_NAME";
+    case SymBoolArgument::Tag::AS_BOOL: return "AS_BOOL";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, SymBoolArgument::Tag& t) {
+  if (s == "AS_NAME") { t = SymBoolArgument::Tag::AS_NAME; return; }
+  if (s == "AS_BOOL") { t = SymBoolArgument::Tag::AS_BOOL; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 
 class TensorArgument {
  private:
@@ -892,6 +1117,22 @@ class OptionalTensorArgument {
     }
   }
 };
+
+inline std::string_view printEnum(const OptionalTensorArgument::Tag& e) {
+  switch (e) {
+    case OptionalTensorArgument::Tag::AS_TENSOR: return "AS_TENSOR";
+    case OptionalTensorArgument::Tag::AS_NONE: return "AS_NONE";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, OptionalTensorArgument::Tag& t) {
+  if (s == "AS_TENSOR") { t = OptionalTensorArgument::Tag::AS_TENSOR; return; }
+  if (s == "AS_NONE") { t = OptionalTensorArgument::Tag::AS_NONE; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 
 class GraphArgument {
  private:
@@ -1423,6 +1664,68 @@ class Argument {
   }
 };
 
+inline std::string_view printEnum(const Argument::Tag& e) {
+  switch (e) {
+    case Argument::Tag::AS_NONE: return "AS_NONE";
+    case Argument::Tag::AS_TENSOR: return "AS_TENSOR";
+    case Argument::Tag::AS_TENSORS: return "AS_TENSORS";
+    case Argument::Tag::AS_INT: return "AS_INT";
+    case Argument::Tag::AS_INTS: return "AS_INTS";
+    case Argument::Tag::AS_FLOAT: return "AS_FLOAT";
+    case Argument::Tag::AS_FLOATS: return "AS_FLOATS";
+    case Argument::Tag::AS_STRING: return "AS_STRING";
+    case Argument::Tag::AS_STRINGS: return "AS_STRINGS";
+    case Argument::Tag::AS_SYM_INT: return "AS_SYM_INT";
+    case Argument::Tag::AS_SYM_INTS: return "AS_SYM_INTS";
+    case Argument::Tag::AS_SCALAR_TYPE: return "AS_SCALAR_TYPE";
+    case Argument::Tag::AS_MEMORY_FORMAT: return "AS_MEMORY_FORMAT";
+    case Argument::Tag::AS_LAYOUT: return "AS_LAYOUT";
+    case Argument::Tag::AS_DEVICE: return "AS_DEVICE";
+    case Argument::Tag::AS_BOOL: return "AS_BOOL";
+    case Argument::Tag::AS_BOOLS: return "AS_BOOLS";
+    case Argument::Tag::AS_SYM_BOOL: return "AS_SYM_BOOL";
+    case Argument::Tag::AS_SYM_BOOLS: return "AS_SYM_BOOLS";
+    case Argument::Tag::AS_GRAPH: return "AS_GRAPH";
+    case Argument::Tag::AS_OPTIONAL_TENSORS: return "AS_OPTIONAL_TENSORS";
+    case Argument::Tag::AS_CUSTOM_OBJ: return "AS_CUSTOM_OBJ";
+    case Argument::Tag::AS_OPERATOR: return "AS_OPERATOR";
+    case Argument::Tag::AS_SYM_FLOAT: return "AS_SYM_FLOAT";
+    case Argument::Tag::AS_SYM_FLOATS: return "AS_SYM_FLOATS";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, Argument::Tag& t) {
+  if (s == "AS_NONE") { t = Argument::Tag::AS_NONE; return; }
+  if (s == "AS_TENSOR") { t = Argument::Tag::AS_TENSOR; return; }
+  if (s == "AS_TENSORS") { t = Argument::Tag::AS_TENSORS; return; }
+  if (s == "AS_INT") { t = Argument::Tag::AS_INT; return; }
+  if (s == "AS_INTS") { t = Argument::Tag::AS_INTS; return; }
+  if (s == "AS_FLOAT") { t = Argument::Tag::AS_FLOAT; return; }
+  if (s == "AS_FLOATS") { t = Argument::Tag::AS_FLOATS; return; }
+  if (s == "AS_STRING") { t = Argument::Tag::AS_STRING; return; }
+  if (s == "AS_STRINGS") { t = Argument::Tag::AS_STRINGS; return; }
+  if (s == "AS_SYM_INT") { t = Argument::Tag::AS_SYM_INT; return; }
+  if (s == "AS_SYM_INTS") { t = Argument::Tag::AS_SYM_INTS; return; }
+  if (s == "AS_SCALAR_TYPE") { t = Argument::Tag::AS_SCALAR_TYPE; return; }
+  if (s == "AS_MEMORY_FORMAT") { t = Argument::Tag::AS_MEMORY_FORMAT; return; }
+  if (s == "AS_LAYOUT") { t = Argument::Tag::AS_LAYOUT; return; }
+  if (s == "AS_DEVICE") { t = Argument::Tag::AS_DEVICE; return; }
+  if (s == "AS_BOOL") { t = Argument::Tag::AS_BOOL; return; }
+  if (s == "AS_BOOLS") { t = Argument::Tag::AS_BOOLS; return; }
+  if (s == "AS_SYM_BOOL") { t = Argument::Tag::AS_SYM_BOOL; return; }
+  if (s == "AS_SYM_BOOLS") { t = Argument::Tag::AS_SYM_BOOLS; return; }
+  if (s == "AS_GRAPH") { t = Argument::Tag::AS_GRAPH; return; }
+  if (s == "AS_OPTIONAL_TENSORS") { t = Argument::Tag::AS_OPTIONAL_TENSORS; return; }
+  if (s == "AS_CUSTOM_OBJ") { t = Argument::Tag::AS_CUSTOM_OBJ; return; }
+  if (s == "AS_OPERATOR") { t = Argument::Tag::AS_OPERATOR; return; }
+  if (s == "AS_SYM_FLOAT") { t = Argument::Tag::AS_SYM_FLOAT; return; }
+  if (s == "AS_SYM_FLOATS") { t = Argument::Tag::AS_SYM_FLOATS; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class NamedArgument {
  private:
   std::string name;
@@ -1736,6 +2039,28 @@ class ConstantValue {
     }
   }
 };
+
+inline std::string_view printEnum(const ConstantValue::Tag& e) {
+  switch (e) {
+    case ConstantValue::Tag::AS_NONE: return "AS_NONE";
+    case ConstantValue::Tag::AS_INT: return "AS_INT";
+    case ConstantValue::Tag::AS_FLOAT: return "AS_FLOAT";
+    case ConstantValue::Tag::AS_STRING: return "AS_STRING";
+    case ConstantValue::Tag::AS_BOOL: return "AS_BOOL";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, ConstantValue::Tag& t) {
+  if (s == "AS_NONE") { t = ConstantValue::Tag::AS_NONE; return; }
+  if (s == "AS_INT") { t = ConstantValue::Tag::AS_INT; return; }
+  if (s == "AS_FLOAT") { t = ConstantValue::Tag::AS_FLOAT; return; }
+  if (s == "AS_STRING") { t = ConstantValue::Tag::AS_STRING; return; }
+  if (s == "AS_BOOL") { t = ConstantValue::Tag::AS_BOOL; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 
 class InputToConstantInputSpec {
  private:
@@ -2051,6 +2376,32 @@ class InputSpec {
   }
 };
 
+inline std::string_view printEnum(const InputSpec::Tag& e) {
+  switch (e) {
+    case InputSpec::Tag::USER_INPUT: return "USER_INPUT";
+    case InputSpec::Tag::PARAMETER: return "PARAMETER";
+    case InputSpec::Tag::BUFFER: return "BUFFER";
+    case InputSpec::Tag::TENSOR_CONSTANT: return "TENSOR_CONSTANT";
+    case InputSpec::Tag::CUSTOM_OBJ: return "CUSTOM_OBJ";
+    case InputSpec::Tag::TOKEN: return "TOKEN";
+    case InputSpec::Tag::CONSTANT_INPUT: return "CONSTANT_INPUT";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, InputSpec::Tag& t) {
+  if (s == "USER_INPUT") { t = InputSpec::Tag::USER_INPUT; return; }
+  if (s == "PARAMETER") { t = InputSpec::Tag::PARAMETER; return; }
+  if (s == "BUFFER") { t = InputSpec::Tag::BUFFER; return; }
+  if (s == "TENSOR_CONSTANT") { t = InputSpec::Tag::TENSOR_CONSTANT; return; }
+  if (s == "CUSTOM_OBJ") { t = InputSpec::Tag::CUSTOM_OBJ; return; }
+  if (s == "TOKEN") { t = InputSpec::Tag::TOKEN; return; }
+  if (s == "CONSTANT_INPUT") { t = InputSpec::Tag::CONSTANT_INPUT; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
+
 class UserOutputSpec {
  private:
   Argument arg;
@@ -2364,6 +2715,32 @@ class OutputSpec {
     }
   }
 };
+
+inline std::string_view printEnum(const OutputSpec::Tag& e) {
+  switch (e) {
+    case OutputSpec::Tag::USER_OUTPUT: return "USER_OUTPUT";
+    case OutputSpec::Tag::LOSS_OUTPUT: return "LOSS_OUTPUT";
+    case OutputSpec::Tag::BUFFER_MUTATION: return "BUFFER_MUTATION";
+    case OutputSpec::Tag::GRADIENT_TO_PARAMETER: return "GRADIENT_TO_PARAMETER";
+    case OutputSpec::Tag::GRADIENT_TO_USER_INPUT: return "GRADIENT_TO_USER_INPUT";
+    case OutputSpec::Tag::USER_INPUT_MUTATION: return "USER_INPUT_MUTATION";
+    case OutputSpec::Tag::TOKEN: return "TOKEN";
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }
+}
+
+inline void parseEnum(std::string_view s, OutputSpec::Tag& t) {
+  if (s == "USER_OUTPUT") { t = OutputSpec::Tag::USER_OUTPUT; return; }
+  if (s == "LOSS_OUTPUT") { t = OutputSpec::Tag::LOSS_OUTPUT; return; }
+  if (s == "BUFFER_MUTATION") { t = OutputSpec::Tag::BUFFER_MUTATION; return; }
+  if (s == "GRADIENT_TO_PARAMETER") { t = OutputSpec::Tag::GRADIENT_TO_PARAMETER; return; }
+  if (s == "GRADIENT_TO_USER_INPUT") { t = OutputSpec::Tag::GRADIENT_TO_USER_INPUT; return; }
+  if (s == "USER_INPUT_MUTATION") { t = OutputSpec::Tag::USER_INPUT_MUTATION; return; }
+  if (s == "TOKEN") { t = OutputSpec::Tag::TOKEN; return; }
+  throw std::runtime_error("Unknown enum value: " + std::string{s});
+}
+
 
 class GraphSignature {
  private:
