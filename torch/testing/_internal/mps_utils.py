@@ -696,25 +696,46 @@ MACOS_13_XFAILLIST = {
     ),
     # Hard crash on MacOS 13 - failed assertion `destination datatype must be fp32'
     "nn.functional.pairwise_distance": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv1d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv2d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv3d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv_transpose1d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv_transpose2d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16],
+        upper=14.0,
     ),
     "nn.functional.conv_transpose3d": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], upper=14.0
+        TEST_OUTPUT_GRAD_MATCH,
+        skip=unittest.skip("Hard crash on MacOS13"),
+        dtypes=[torch.float16, torch.float32],
+        upper=14.0,
     ),
 }
 
