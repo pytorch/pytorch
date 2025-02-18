@@ -714,11 +714,11 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
                      AT_WRAP([&] {
                        mtl_setArgs(computeEncoder,
                                    self,
-                                   mask,
+                                   *b_mask,
                                    value.to<scalar_t>(),
                                    self.sizes(),
                                    self.strides(),
-                                   mask.strides(),
+                                   b_mask->strides(),
                                    self.ndimension());
                      }),
                      kFloat,

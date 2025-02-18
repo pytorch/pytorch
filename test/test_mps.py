@@ -1061,9 +1061,6 @@ def mps_ops_error_inputs_modifier(ops):
         'scatter',
         'scatter_add',
 
-        # unsupported complex dtypes
-        'masked_fill',
-
         # MPS does not support tensor dimensions > 16
         'amax',
         'amin',
