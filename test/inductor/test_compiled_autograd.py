@@ -132,7 +132,10 @@ class TestCompiledAutograd(TestCase):
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
     def check_cudagraph_skips(self, num_skips: int):
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0 if inductor_config.cpp_wrapper else num_skips)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            0 if inductor_config.cpp_wrapper else num_skips,
+        )
 
     def test_dynamo_flaky_segfault(self):
         script = """
