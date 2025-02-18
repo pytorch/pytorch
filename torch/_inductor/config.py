@@ -39,6 +39,19 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
+def prologue_fusion_enabled() -> bool:
+    ENABLE_PROLOGUE_FUSION_VERSION = 0
+
+    if "TORCHINDUCTOR_PROLOGUE_FUSION" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_PROLOGUE_FUSION") == "1"
+    elif is_fbcode():
+        jk_name = "pytorch/inductor:prologue_fusion_version"
+        version = torch._utils_internal.justknobs_getval_int(jk_name)
+        return version <= ENABLE_PROLOGUE_FUSION_VERSION
+    else:
+        return True
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -167,7 +180,7 @@ benchmark_harness = True
 epilogue_fusion = True
 
 # fuse pointwise into template prologues
-prologue_fusion = False
+prologue_fusion = prologue_fusion_enabled()
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
