@@ -1021,6 +1021,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
+                # needed for log searching
+                "force_disable_cache": True,
             }
         ):
             with log_settings("+inductor"), self.assertLogs(
