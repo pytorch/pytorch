@@ -1,7 +1,9 @@
+#include <c10/metal/indexing.h>
 #include <metal_atomic>
 #include <metal_stdlib>
 
 using namespace metal;
+using namespace c10::metal;
 
 struct IndexAB {
   constant int64_t* indexArray;
@@ -315,3 +317,34 @@ index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
     device void* outputData [[buffer(5)]],
     constant uint32_t& num_indices [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]);
+
+template <typename T>
+kernel void masked_fill_scalar(
+    device T* input_data,
+    constant bool* mask_data,
+    constant T& val,
+    constant long* sizes,
+    constant long* input_strides,
+    constant long* mask_strides,
+    device uint& ndim,
+    uint thread_index [[thread_position_in_grid]]) {
+  ConstStridedTensor<bool> mask(mask_data, sizes, mask_strides, ndim);
+  if (mask[thread_index]) {
+    StridedTensor<T> input(input_data, sizes, input_strides, ndim);
+    input[thread_index] = val;
+  }
+}
+
+#define REGISTER_MASKED_FILL_SCALAR(DTYPE)                         \
+  template [[host_name("masked_fill_scalar_" #DTYPE)]] kernel void \
+  masked_fill_scalar<DTYPE>(                                       \
+      device DTYPE*,                                               \
+      constant bool*,                                              \
+      constant DTYPE&,                                             \
+      constant long*,                                              \
+      constant long*,                                              \
+      constant long*,                                              \
+      device uint&,                                                \
+      uint)
+
+REGISTER_MASKED_FILL_SCALAR(float);
