@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -2515,7 +2515,13 @@ class PythonWrapperCodegen(CodeGen):
         ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
-    def codegen_partition_call(self, partition_id, input_names_to_free, output_nodes):
+    def codegen_partition_call(
+        self,
+        partition_id: int,
+        input_names_to_free: Dict[str, bool],
+        output_nodes: ir.PartitionOutputType,
+    ):
+        # input_names_to_free maps the input names to whether they should be freed during the partition call
         inputs = ", ".join(input_names_to_free.keys()) + (
             "," if len(input_names_to_free) == 1 else ""
         )
@@ -2535,7 +2541,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"del partition{partition_id}_args")
 
-    def codegen_subgraph_lists(self, num_partitions: int):
+    def set_all_partition_names(self, num_partitions: int):
         self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):

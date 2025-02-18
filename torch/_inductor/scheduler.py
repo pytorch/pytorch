@@ -4097,11 +4097,6 @@ class Scheduler:
     def _codegen_partitions(self) -> None:
         partitions, input_nodes, output_nodes = self.graph_partition()
 
-        # If there is only one partition, we don't need to create a subgraph
-        if len(partitions) == 1:
-            self._codegen(partitions[0])
-            return
-
         for partition, input_node, output_node in zip(
             partitions, input_nodes, output_nodes
         ):
@@ -4115,7 +4110,7 @@ class Scheduler:
                 self._codegen(partition)
 
         num_partitions = next(self._graph_partition_counter)
-        V.graph.wrapper_code.codegen_subgraph_lists(num_partitions)
+        V.graph.wrapper_code.set_all_partition_names(num_partitions)
 
     def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
@@ -4152,6 +4147,7 @@ class Scheduler:
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
                     )
+
             self.enter_context(node)
 
             if device := node.get_device():
