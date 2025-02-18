@@ -33,13 +33,11 @@ class WrapperSubclass(BaseTensorSubclass):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        if kwargs is None:
-            kwargs = {}
-        out_a = cls.func_args_kwargs_attr(func, args, kwargs, "a")
-        out_a_flat, spec = pytree.tree_flatten(out_a)
-        out_flat = [
-            cls(o_a) if isinstance(o_a, torch.Tensor) else o_a for o_a in out_a_flat
-        ]
+        out = pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: cls(x),
+            cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
+        )
         return cls._return(func, args, kwargs, out)
 
     def __coerce_same_metadata_as_tangent__(
@@ -54,15 +52,25 @@ class WrapperSubclass(BaseTensorSubclass):
 
 
 class LogTensor(BaseTensorSubclass):
-    INNER_TENSORS = ["a"]
+    _INNER_TENSORS = ["a"]
 
     @staticmethod
-    def __new__(cls, a, outer_size=None, outer_stride=None):
+    def __new__(
+        cls,
+        a: torch.Tensor,
+        outer_size=None,
+        outer_stride=None,
+    ):
         return torch.Tensor._make_wrapper_subclass(
             cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
         )
 
-    def __init__(self, a, outer_size=None, outer_stride=None):
+    def __init__(
+        self,
+        a: torch.Tensor,
+        outer_size=None,
+        outer_stride=None,
+    ):
         self.a = a
 
     @classmethod
@@ -76,6 +84,52 @@ class LogTensor(BaseTensorSubclass):
         out = pytree.tree_map_only(
             torch.Tensor,
             lambda x: cls(x),
+            cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
+        )
+        return cls._return(func, args, kwargs, out)
+
+
+class BaseWithMeta(BaseTensorSubclass):
+    _INNER_TENSORS = ["a"]
+    _META = ["m"]
+
+    @staticmethod
+    def __new__(
+        cls,
+        a: torch.Tensor,
+        m: str,
+        outer_size=None,
+        outer_stride=None,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
+        )
+
+    def __init__(
+        self,
+        a: torch.Tensor,
+        m: str,
+        outer_size=None,
+        outer_stride=None,
+    ):
+        self.a = a
+        self.m = m
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        ms = []
+
+        def add_m(sc):
+            ms.append(sc.m)
+
+        pytree.tree_map_only(cls, add_m, args)
+        pytree.tree_map_only(cls, add_m, kwargs)
+
+        m = ms[0] if ms else "no_m"
+
+        out = pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: cls(x, m),
             cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
         )
         return cls._return(func, args, kwargs, out)

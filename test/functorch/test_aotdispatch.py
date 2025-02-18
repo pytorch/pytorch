@@ -49,6 +49,7 @@ from torch._functorch.aot_autograd import (
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.output_code import MockFXGraphCacheOutput
+from torch._subclasses.base import BaseTensorSubclass, tensor_kwargs_from
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
@@ -83,7 +84,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
-from torch.testing._internal.subclasses import LogTensor, WrapperSubclass
+from torch.testing._internal.subclasses import BaseWithMeta, LogTensor, WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -6415,32 +6416,65 @@ metadata incorrectly.
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
 
-    def test_sc_base(self):
-        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2), "mmmeta")
-        print(f"XXX t:{t}")
-
-        def fn(x):
-            return torch.mul(x, 2)
-
-        y = fn(t)
-        print(f"XXX y.meta:{y.meta}")
-
-        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
-        print(f"XXX y.meta:{y.meta}")
-
     def test_sc_base_log_tensor(self):
         t = LogTensor(torch.randn(2, 2))
-        print(f"XXX t:{t}")
 
         def fn(x):
             x = x + 2
             return torch.mul(x, 2)
 
-        y = fn(t)
-        print(f"XXX y:{y}")
+        fn(t)
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
 
+    def test_sc_base_with_meta(self):
+        t = BaseWithMeta(torch.randn(2, 2), "meta")
+
+        def fn(x):
+            x = torch.add(x, 2)
+            return torch.mul(x, 2)
+
+        y = fn(t)
+        assert y.m == "meta"
         y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
-        print(f"XXX compiled y:{y}")
+        assert y.m == "meta"
+
+    def test_sc_base_local(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "Local subclasses of BaseTensorSubclass are not supported yet"
+        ):
+
+            class SC(BaseTensorSubclass):
+                _INNER_TENSORS = ["a"]
+
+                @staticmethod
+                def __new__(
+                    cls,
+                    a: torch.Tensor,
+                    outer_size=None,
+                    outer_stride=None,
+                ):
+                    return torch.Tensor._make_wrapper_subclass(
+                        cls,
+                        outer_size or a.size(),
+                        **tensor_kwargs_from(a, outer_stride),
+                    )
+
+                def __init__(
+                    self,
+                    a: torch.Tensor,
+                    outer_size=None,
+                    outer_stride=None,
+                ):
+                    self.a = a
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    out = pytree.tree_map_only(
+                        torch.Tensor,
+                        lambda x: cls(x),
+                        cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
+                    )
+                    return cls._return(func, args, kwargs, out)
 
 
 # entries in here don't work and need to be fixed.
