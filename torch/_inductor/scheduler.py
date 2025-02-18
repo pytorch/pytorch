@@ -50,7 +50,13 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
-from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
+from .ir import (
+    ComputedBuffer,
+    get_device_type,
+    MultiOutput,
+    MultiOutputLayout,
+    PartitionOutputType,
+)
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
@@ -76,6 +82,12 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
+
+PartitionType = List["BaseSchedulerNode"]
+
+# Mapping from partition input names to IRNode/Expr, and a boolean for whether
+# deallocating it after the partition
+PartitionInputMetadataType = Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]
 
 
 @dataclasses.dataclass
@@ -3947,7 +3959,7 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def only_gpu_inputs_and_outputs(self, node: BaseSchedulerNode) -> bool:
+    def should_partition(self, node: BaseSchedulerNode) -> bool:
         if not node.is_gpu():
             return True
 
@@ -3962,11 +3974,8 @@ class Scheduler:
 
         return False
 
-    def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
-        return [self.only_gpu_inputs_and_outputs]
-
-    def get_name_to_nodes(self) -> ir.PartitionInputMetadataType:
-        name_to_node: ir.PartitionInputMetadataType = {}
+    def get_name_to_nodes(self) -> ir.PartitionInputType:
+        name_to_node: ir.PartitionInputType = {}
         name_to_node.update(V.graph.graph_inputs)
 
         for node in self.nodes:
@@ -3976,13 +3985,10 @@ class Scheduler:
         return name_to_node
 
     def get_graph_partition_signature(
-        self, partitions: List[List[BaseSchedulerNode]]
-    ) -> Tuple[
-        List[Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]],
-        List[List[ir.IRNode]],
-    ]:
-        inputs: List[Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]] = []
-        outputs: List[List[ir.IRNode]] = []
+        self, partitions: List[PartitionType]
+    ) -> Tuple[List[PartitionInputMetadataType], List[ir.PartitionOutputType],]:
+        inputs: List[PartitionInputMetadataType] = []
+        outputs: List[ir.PartitionOutputType] = []
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
@@ -4027,23 +4033,21 @@ class Scheduler:
     def graph_partition(
         self,
     ) -> Tuple[
-        List[List[BaseSchedulerNode]],
-        List[Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]],
-        List[List[ir.IRNode]],
+        List[PartitionType],
+        List[PartitionInputMetadataType],
+        List[PartitionOutputType],
     ]:
-        partitions: List[List[BaseSchedulerNode]] = []
-        partition_rules = self.get_partition_rules()
+        partitions: List[PartitionType] = []
 
-        cur_partition: List[BaseSchedulerNode] = []
+        cur_partition: PartitionType = []
         for node in self.nodes:
-            for should_partition in partition_rules:
-                if should_partition(node):
-                    if cur_partition:
-                        partitions.append(cur_partition)
-                        cur_partition = []
-                    partitions.append([node])
-                else:
-                    cur_partition.append(node)
+            if self.should_partition(node):
+                if cur_partition:
+                    partitions.append(cur_partition)
+                    cur_partition = []
+                partitions.append([node])
+            else:
+                cur_partition.append(node)
 
         if cur_partition:
             partitions.append(cur_partition)
@@ -4062,9 +4066,9 @@ class Scheduler:
 
     def _codegen_partition_wrapper(
         self,
-        partition: List[BaseSchedulerNode],
-        input_nodes: Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]],
-        output_nodes: List[ir.IRNode],
+        partition: PartitionType,
+        input_nodes: PartitionInputMetadataType,
+        output_nodes: PartitionOutputType,
     ) -> None:
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)

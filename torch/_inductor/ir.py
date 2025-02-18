@@ -177,8 +177,8 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
-PartitionInputMetadataType = Dict[str, Union["IRNode", sympy.Expr]]
-PartitionOutputMetadataType = List["IRNode"]
+PartitionInputType = Dict[str, Union["IRNode", sympy.Expr]]
+PartitionOutputType = List["IRNode"]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:

@@ -12,12 +12,7 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import (
-    IRNode,
-    PartitionInputMetadataType,
-    PartitionOutputMetadataType,
-    TensorBox,
-)
+from ..ir import IRNode, PartitionInputType, PartitionOutputType, TensorBox
 from ..utils import cache_on_self, DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -199,8 +194,8 @@ class CppWrapperGpu(CppWrapperCpu):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[PartitionInputMetadataType] = None,
-        output_nodes: Optional[PartitionOutputMetadataType] = None,
+        input_nodes: Optional[PartitionInputType] = None,
+        output_nodes: Optional[PartitionOutputType] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

@@ -70,8 +70,8 @@ from .ir import (
     FixedLayout,
     get_device_type,
     InputBuffer,
-    PartitionInputMetadataType,
-    PartitionOutputMetadataType,
+    PartitionInputType,
+    PartitionOutputType,
     Pointwise,
     Reduction,
     StorageBox,
@@ -1764,8 +1764,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[PartitionInputMetadataType] = None,
-        output_nodes: Optional[PartitionOutputMetadataType] = None,
+        input_nodes: Optional[PartitionInputType] = None,
+        output_nodes: Optional[PartitionOutputType] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -2110,8 +2110,8 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[PartitionInputMetadataType] = None,
-        output_nodes: Optional[PartitionOutputMetadataType] = None,
+        input_nodes: Optional[PartitionInputType] = None,
+        output_nodes: Optional[PartitionOutputType] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,
