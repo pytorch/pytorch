@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -733,8 +733,8 @@ class PythonWrapperCodegen(CodeGen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[ir.IRNode]] = None,
+        input_nodes: Optional[ir.PartitionInputMetadataType] = None,
+        output_nodes: Optional[ir.PartitionOutputMetadataType] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
@@ -2711,8 +2711,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
         subgraph_name: str,
         parent_wrapper: PythonWrapperCodegen,
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[IRNode]] = None,
+        input_nodes: Optional[ir.PartitionInputMetadataType] = None,
+        output_nodes: Optional[ir.PartitionOutputMetadataType] = None,
     ):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name

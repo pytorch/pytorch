@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from itertools import count
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional
 
 import sympy
 
@@ -66,8 +66,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[ir.IRNode]] = None,
+        input_nodes: Optional[ir.PartitionInputMetadataType] = None,
+        output_nodes: Optional[ir.PartitionOutputMetadataType] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

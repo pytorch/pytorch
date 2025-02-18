@@ -12562,9 +12562,9 @@ class CommonTemplate:
         for step in (-1, -1.0):
             expect = fn(step, "cpu")
             actual = compiled_fn(step, "cpu")
-            assert torch.allclose(expect, actual)
+            self.assertEqual(expect, actual)
 
-        assert torch.allclose(expect, actual)
+        self.assertEqual(expect, actual)
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange2(self):
@@ -12578,10 +12578,10 @@ class CommonTemplate:
         compiled_fn = torch.compile(fn)
 
         x = make_arg(1, dtype=torch.float32)
-        assert torch.allclose(fn(x), compiled_fn(x))
+        self.assertEqual(fn(x), compiled_fn(x))
 
         x = make_arg(1, dtype=torch.int64)
-        assert torch.allclose(fn(x), compiled_fn(x))
+        self.assertEqual(fn(x), compiled_fn(x))
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_argmax(self):
@@ -12591,7 +12591,7 @@ class CommonTemplate:
             return b.float().mean()
 
         compiled_fn = torch.compile(fn)
-        assert torch.allclose(fn(), compiled_fn())
+        self.assertEqual(fn(), compiled_fn())
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_both_scalars(self):
@@ -12607,10 +12607,7 @@ class CommonTemplate:
 
         compiled_fn = torch.compile(fn)
 
-        assert all(
-            math.isclose(out1, out2)
-            for out1, out2 in zip(fn(4, 3.3), compiled_fn(4, 3.3))
-        )
+        self.assertEqual(fn(4, 3.3), compiled_fn(4, 3.3))
 
     @torch._inductor.config.patch("graph_partition", True)
     @config.patch(assume_aligned_inputs=False)

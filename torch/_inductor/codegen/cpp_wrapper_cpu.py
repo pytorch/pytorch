@@ -5,7 +5,7 @@ import os
 import sys
 from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import sympy
 
@@ -78,8 +78,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[ir.IRNode]] = None,
+        input_nodes: Optional[ir.PartitionInputMetadataType] = None,
+        output_nodes: Optional[ir.PartitionOutputMetadataType] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

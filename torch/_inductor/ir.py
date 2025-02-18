@@ -17,6 +17,8 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
+    Dict,
+    List,
     Literal,
     Optional,
     overload,
@@ -173,6 +175,10 @@ _NodeOrNodes: TypeAlias = Union[
         Optional[Union[int, dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
     ],
 ]
+
+
+PartitionInputMetadataType = Dict[str, Union["IRNode", sympy.Expr]]
+PartitionOutputMetadataType = List["IRNode"]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:

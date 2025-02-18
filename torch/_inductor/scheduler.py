@@ -3965,8 +3965,8 @@ class Scheduler:
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
         return [self.only_gpu_inputs_and_outputs]
 
-    def get_name_to_nodes(self) -> Dict[str, Union[ir.IRNode, sympy.Expr]]:
-        name_to_node: Dict[str, Union[ir.IRNode, sympy.Expr]] = {}
+    def get_name_to_nodes(self) -> ir.PartitionInputMetadataType:
+        name_to_node: ir.PartitionInputMetadataType = {}
         name_to_node.update(V.graph.graph_inputs)
 
         for node in self.nodes:

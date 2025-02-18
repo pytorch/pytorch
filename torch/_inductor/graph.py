@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, Callable, Dict, List, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -70,6 +70,8 @@ from .ir import (
     FixedLayout,
     get_device_type,
     InputBuffer,
+    PartitionInputMetadataType,
+    PartitionOutputMetadataType,
     Pointwise,
     Reduction,
     StorageBox,
@@ -1762,8 +1764,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[ir.IRNode]] = None,
+        input_nodes: Optional[PartitionInputMetadataType] = None,
+        output_nodes: Optional[PartitionOutputMetadataType] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -2113,8 +2115,8 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[ir.IRNode]] = None,
+        input_nodes: Optional[PartitionInputMetadataType] = None,
+        output_nodes: Optional[PartitionOutputMetadataType] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,
