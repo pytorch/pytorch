@@ -1287,10 +1287,11 @@ class PythonWrapperCodegen(CodeGen):
                 runner = Runner()
                 """
             )
-            all_partition_name_list = ", ".join(self.all_partition_names) + (
-                "," if len(self.all_partition_names) == 1 else ""
-            )
-            result.splice(f"runner.partitions=[{all_partition_name_list}]")
+            if hasattr(self, "all_partition_names"):
+                all_partition_name_list = ", ".join(self.all_partition_names) + (
+                    "," if len(self.all_partition_names) == 1 else ""
+                )
+                result.splice(f"runner.partitions=[{all_partition_name_list}]")
             result.splice(
                 """
                 call = runner.call
