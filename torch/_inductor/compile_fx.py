@@ -1084,6 +1084,10 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
+                        # We are going to start code generating runtime asserts, so make sure
+                        # you don't start adding new ones in the lowering process
+                        graph.freeze_runtime_asserts()
+
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
@@ -1119,9 +1123,6 @@ class _InProcessFxCompile(FxCompile):
                                     additional_files=additional_files,
                                 )
                         else:
-                            # We are going to start code generating runtime asserts, so make sure
-                            # you don't start adding new ones in the lowering process
-                            graph.freeze_runtime_asserts()
                             compiled_fn = graph.compile_to_module().call
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
