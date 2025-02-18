@@ -888,6 +888,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_asserts(self) -> None:
         graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         for name, buf in graph_inputs.items():
+            # a graph partition may take an IRNode output from a previous partition
             if not isinstance(buf, ir.TensorBox):
                 continue
 
@@ -967,10 +968,11 @@ class PythonWrapperCodegen(CodeGen):
                     f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
 
-            if hasattr(self, "subgraph_input_nodes"):
-                graph_input_names = list(self.subgraph_input_nodes.keys())
-            else:
-                graph_input_names = V.graph.graph_input_names
+            graph_input_names = (
+                list(self.subgraph_input_nodes.keys())
+                if hasattr(self, "subgraph_input_nodes")
+                else V.graph.graph_input_names
+            )
 
             if graph_input_names:
                 self.write_args(graph_input_names)
@@ -1416,10 +1418,14 @@ class PythonWrapperCodegen(CodeGen):
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
         else:
-            log.warning(
-                "Skip size and stride assertion for an unknown value type %s",
-                type(value),
-            )
+            if torch._inductor.config.graph_partition:
+                # a graph partition may take an IRNode output from a previous partition
+                log.warning(
+                    "Skip size and stride assertion for an unknown value type %s",
+                    type(value),
+                )
+            else:
+                raise AssertionError(f"Unknown value type: {type(value)}")
 
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
