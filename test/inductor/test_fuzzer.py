@@ -6,8 +6,9 @@ from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import torch
+from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
-from torch._inductor.fuzzer import ConfigFuzzer, SamplingMethod, Status
+from torch._inductor.fuzzer import ConfigFuzzer, MODULE_DEFAULTS, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -146,7 +147,7 @@ class TestConfigFuzzer(TestCase):
 
             return myfn
 
-        fuzzer = ConfigFuzzer(inductor_config, create_key_1, seed=100, default={})
+        fuzzer = ConfigFuzzer(inductor_config, create_key_1, seed=100)
         num_attempts = 2
         results = fuzzer.bisect(num_attempts=num_attempts, p=1.0)
         self.assertEqual(len(results), num_attempts)
@@ -155,7 +156,42 @@ class TestConfigFuzzer(TestCase):
 
         new_results = fuzzer.reproduce(results)
         self.assertEqual(len(new_results), 1)
-        self.assertEqual(set(key_1.keys()), {j for i in new_results.keys() for j in i})
+        self.assertEqual(
+            set(key_1.keys()),
+            {j for i in new_results.keys() for j in i}
+            - set(MODULE_DEFAULTS["torch._inductor.config"].keys()),
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    def test_config_fuzzer_dynamo_bisect(self):
+        # these values just chosen randomly, change to different ones if necessary
+        key_1 = {"dead_code_elimination": False, "specialize_int": True}
+
+        def create_key_1():
+            def myfn():
+                if (
+                    not dynamo_config.dead_code_elimination
+                    and dynamo_config.specialize_int
+                ):
+                    return False
+                return True
+
+            return myfn
+
+        fuzzer = ConfigFuzzer(dynamo_config, create_key_1, seed=10)
+        num_attempts = 2
+        results = fuzzer.bisect(num_attempts=num_attempts, p=1.0)
+        self.assertEqual(len(results), num_attempts)
+        for res in results:
+            self.assertEqual(res, key_1)
+
+        new_results = fuzzer.reproduce(results)
+        self.assertEqual(len(new_results), 1)
+        self.assertEqual(
+            set(key_1.keys()),
+            {j for i in new_results.keys() for j in i}
+            - set(MODULE_DEFAULTS["torch._dynamo.config"].keys()),
+        )
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     @patch("torch.compile")
