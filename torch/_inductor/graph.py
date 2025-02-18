@@ -341,9 +341,6 @@ class GraphLowering(torch.fx.Interpreter):
             self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
-        # We are going to start code generating runtime asserts, so make sure
-        # you don't start adding new ones in the lowering process
-        shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: dict[
             Optional[sympy.Symbol], list[RuntimeAssert]
@@ -473,6 +470,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.placeholder_idx = -1
 
         self.bw_donated_idxs = get_donated_idxs()
+
+    def freeze_runtime_asserts(self) -> None:
+        self._shape_env.freeze_runtime_asserts()
 
     def get_allocation_size(
         self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
