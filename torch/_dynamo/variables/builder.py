@@ -2809,8 +2809,6 @@ def _automatic_dynamic(
 
         if marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
-        elif marked_strict_unbacked:
-            dynamic_size = DimDynamic.STRICT_SIZE_LIKE_UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic

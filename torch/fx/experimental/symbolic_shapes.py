@@ -1505,8 +1505,6 @@ class DimDynamic(Enum):
     INFER_STRIDE = 4
     # Like SIZE_LIKE_UNBACKED, but there's a hint
     OBLIVIOUS_SIZE = 5
-    # Like SIZE_LIKE_UNBACKED, but we will error if specialoized
-    STRICT_SIZE_LIKE_UNBACKED = 6
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -4417,8 +4415,7 @@ class ShapeEnv:
 
         if dynamic_dim in (
             DimDynamic.SIZE_LIKE_UNBACKED,
-            DimDynamic.OBLIVIOUS_SIZE,
-            DimDynamic.STRICT_SIZE_LIKE_UNBACKED,
+            DimDynamic.OBLIVIOUS_SIZE
         ):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
