@@ -331,6 +331,31 @@ class TestDynamicShapes(common_utils.TestCase):
         }
         self.assertEqual(unflatten_dynamic_shapes, expected_dynamic_shapes)
 
+    def test__flatten_dynamic_shapes_to_axes_with_leaves_that_are_supported_byexported_program(
+        self,
+    ):
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = (
+            {
+                "input_a": {0: dim, 1: None},
+                "input_b": {1: torch.export.Dim.AUTO, 3: 512},
+            },
+            (
+                [torch.export.Dim.STATIC, torch.export.Dim.DYNAMIC, None],
+                [dim, 512],
+            ),
+        )
+        flatten_dynamic_shapes, _ = _dynamic_shapes._flatten_dynamic_shapes_to_axes(
+            dynamic_shapes
+        )
+        expected_flattened = [
+            {0: dim, 1: None},
+            {1: torch.export.Dim.AUTO, 3: 512},
+            [torch.export.Dim.STATIC, torch.export.Dim.DYNAMIC, None],
+            [dim, 512],
+        ]
+        self.assertEqual(flatten_dynamic_shapes, expected_flattened)
+
     @common_utils.parametrize(
         "model, args, kwargs, input_names, output_names, dynamic_axes, expected_dynamic_shapes",
         [
