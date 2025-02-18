@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/SymBool.h>
 
 #include <utility>
 
@@ -78,14 +79,13 @@ inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
-template <typename T>
 inline void checkInBoundsForStorage(
-    ArrayRef<T> size,
-    ArrayRef<T> stride,
-    T storage_offset,
+    IntArrayRef size,
+    IntArrayRef stride,
+    int64_t storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  T storage_size_bytes, storage_size_plus_offset_bytes;
+  int64_t storage_size_bytes, storage_size_plus_offset_bytes;
   if (stride.data()) {
     storage_size_bytes =
         at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
@@ -101,7 +101,7 @@ inline void checkInBoundsForStorage(
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
+  int64_t new_storage_size_bytes = maybe_convert_symint<int64_t>(new_storage.sym_nbytes());
   TORCH_CHECK(
       storage_size_plus_offset_bytes <= new_storage_size_bytes,
       "setStorage: sizes ",
@@ -117,6 +117,41 @@ inline void checkInBoundsForStorage(
       storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
+}
+
+inline void checkInBoundsForStorage(
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
+    c10::SymInt storage_offset,
+    const caffe2::TypeMeta& data_type,
+    const Storage& new_storage) {
+  c10::SymInt storage_size_bytes, storage_size_plus_offset_bytes;
+  if (stride.data()) {
+    storage_size_bytes =
+        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+        size, stride, data_type.itemsize(), storage_offset);
+  } else {
+    storage_size_bytes =
+        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
+        size, data_type.itemsize(), storage_offset);
+  }
+  TORCH_SYM_CHECK(
+      sym_eq(storage_size_bytes, 0) | sym_le(storage_size_plus_offset_bytes, new_storage.sym_nbytes()),
+      "setStorage: sizes ",
+      size,
+      ", strides ",
+      stride,
+      ","
+      " storage offset ",
+      storage_offset,
+      ", and itemsize ",
+      data_type.itemsize(),
+      " requiring a storage size of ",
+      storage_size_plus_offset_bytes,
+      " are out of bounds for storage of size ",
+      new_storage.sym_nbytes());
 }
 
 template <typename T>
