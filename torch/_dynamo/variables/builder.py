@@ -2729,9 +2729,6 @@ def _automatic_dynamic(
     constraint_strides = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
-        marked_strict_unbacked = i in getattr(
-            e, "_dynamo_strict_unbacked_indices", set()
-        )
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
@@ -2789,8 +2786,6 @@ def _automatic_dynamic(
                         )
                 else:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
-            elif marked_strict_unbacked:
-                constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
@@ -2809,8 +2804,6 @@ def _automatic_dynamic(
 
         if marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
-        elif marked_strict_unbacked:
-            dynamic_size = DimDynamic.STRICT_SIZE_LIKE_UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
