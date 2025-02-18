@@ -46,6 +46,7 @@ import numpy as np
 import ops_test_common
 
 import torch
+from torch.onnx._internal.exporter._torchlib.ops import core as core_ops
 from torch.testing._internal import common_methods_invocations
 from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
@@ -441,7 +442,12 @@ def _where_input_wrangler(
 
 # Ops to be tested for numerical consistency between onnx and pytorch
 # Find the names of the OpInfos in torch/testing/_internal/common_methods_invocations.py
-TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = ()
+TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
+    TorchLibOpInfo("abs", core_ops.aten_abs),
+    TorchLibOpInfo("abs", core_ops.aten_abs_complex, complex=True),
+    TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
+    TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
+)
 
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))
@@ -680,6 +686,6 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
 assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
-assert NONDETERMINISTIC_OPS.issubset(
-    TESTED_OPS
-), f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
+assert NONDETERMINISTIC_OPS.issubset(TESTED_OPS), (
+    f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
+)
