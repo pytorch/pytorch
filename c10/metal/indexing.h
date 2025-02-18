@@ -7,7 +7,10 @@ constant constexpr unsigned max_ndim = 16;
 
 // Given coordinates and strides, calculates offset from the start of the
 // tensors
-inline long offset_from_coord(thread long idx[max_ndim], constant long* strides, uint ndim) {
+inline long offset_from_coord(
+    thread long idx[max_ndim],
+    constant long* strides,
+    uint ndim) {
   long rc = 0;
   for (uint i = 0; i < ndim; ++i) {
     rc += idx[i] * strides[i];
@@ -27,40 +30,56 @@ inline void pos_from_thread_index(
   }
 }
 
-inline long offset_from_thread_index(long idx, constant long *sizes, constant long *strides, uint ndim) {
+inline long offset_from_thread_index(
+    long idx,
+    constant long* sizes,
+    constant long* strides,
+    uint ndim) {
   long pos[max_ndim];
   pos_from_thread_index(idx, pos, sizes, ndim);
   return offset_from_coord(pos, strides, ndim);
 }
 
-template<typename T>
+template <typename T>
 struct StridedTensor {
-  StridedTensor(device T* ptr_, constant long *sizes_, constant long *strides_, uint ndim_): ptr(ptr_), sizes(sizes_), strides(strides_), ndim(ndim_) {}
+  StridedTensor(
+      device T* ptr_,
+      constant long* sizes_,
+      constant long* strides_,
+      uint ndim_)
+      : ptr(ptr_), sizes(sizes_), strides(strides_), ndim(ndim_) {}
   T operator[](long idx) const {
-      auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
-      return ptr[offs];
+    auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
+    return ptr[offs];
   }
   device T& operator[](long idx) {
-      auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
-      return ptr[offs];
+    auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
+    return ptr[offs];
   }
-protected:
-  device T*ptr;
-  constant long *sizes;
-  constant long *strides;
+
+ protected:
+  device T* ptr;
+  constant long* sizes;
+  constant long* strides;
   uint ndim;
 };
-template<typename T>
+template <typename T>
 struct ConstStridedTensor {
-  ConstStridedTensor(constant T* ptr_, constant long *sizes_, constant long *strides_, uint ndim_): ptr(ptr_), sizes(sizes_), strides(strides_), ndim(ndim_) {}
+  ConstStridedTensor(
+      constant T* ptr_,
+      constant long* sizes_,
+      constant long* strides_,
+      uint ndim_)
+      : ptr(ptr_), sizes(sizes_), strides(strides_), ndim(ndim_) {}
   T operator[](long idx) const {
-      auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
-      return ptr[offs];
+    auto offs = offset_from_thread_index(idx, sizes, strides, ndim);
+    return ptr[offs];
   }
-protected:
-  constant T*ptr;
-  constant long *sizes;
-  constant long *strides;
+
+ protected:
+  constant T* ptr;
+  constant long* sizes;
+  constant long* strides;
   uint ndim;
 };
 
