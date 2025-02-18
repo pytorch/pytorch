@@ -228,7 +228,7 @@ Tensor mkldnn_linear_pointwise(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_tensor(bias.reshape({1, weight_t.size(1)}));
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
@@ -331,7 +331,7 @@ Tensor mkldnn_linear_pointwise_binary(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_tensor(bias.reshape({1, weight_t.size(1)}));
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
