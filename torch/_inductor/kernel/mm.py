@@ -50,7 +50,6 @@ from .mm_common import (
     persistent_mm_grid,
     persistent_mm_options,
     should_fallback_to_aten,
-    triton_config,
 )
 
 
