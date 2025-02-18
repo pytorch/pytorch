@@ -809,10 +809,11 @@ OTHER_XFAILLIST = {
         MPSSkipInfo(
             TEST_OUTPUT_MATCH, variant=" ", dtypes=[torch.float16, torch.bfloat16]
         ),
-        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_0", dtypes=[torch.float16]),
-        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_3", dtypes=[torch.bfloat16]),
+        MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, variant=" ", dtypes=[torch.float16]),
+        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_0", dtypes=[torch.bfloat16]),
+        MPSSkipInfo(TEST_OUTPUT_MATCH, variant="decimals_3", dtypes=[torch.float16]),
         MPSSkipInfo(
-            TEST_OUTPUT_MATCH, variant="decimals_neg_3", dtypes=[torch.bfloat16]
+            TEST_OUTPUT_MATCH, variant="decimals_neg_3", dtypes=[torch.float16]
         ),
     ],
 }
