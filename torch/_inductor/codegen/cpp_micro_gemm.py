@@ -192,7 +192,6 @@ class CppMicroGemmConfig:
     vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
-    trans_b: bool = False
 
 
 micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
@@ -218,7 +217,6 @@ def generate_gemm_config(
     output_dtype=None,
     compute_dtype=None,
     extra_check=None,
-    trans_b=False,
 ):
     if output_dtype is None:
         output_dtype = input_dtype
@@ -235,7 +233,6 @@ def generate_gemm_config(
             vec_isa_cls,
             GemmBlocking(*blocking),
             extra_check,
-            trans_b,
         )
         for blocking in register_blockings
     ]
