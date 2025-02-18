@@ -2061,13 +2061,6 @@ class SIMDScheduling(BaseScheduling):
         other_dims: list[sympy.Symbol] = []
 
         if len(node_schedule) == 1:
-            indices = OrderedSet(
-                [
-                    var
-                    for read in node_schedule[0].read_writes.reads
-                    for var in read.var_names
-                ]
-            )
             for read in node_schedule[0].read_writes.reads:
                 if hasattr(read, "indirect_broadcast") and read.indirect_broadcast:
                     indirect_broadcast = True
@@ -2075,6 +2068,13 @@ class SIMDScheduling(BaseScheduling):
                         if not INDIRECT_PATTERN.search(asymbol.name):
                             iter_vars_symbols.add(asymbol)
             if indirect_broadcast:
+                indices = OrderedSet(
+                    [
+                        var
+                        for read in node_schedule[0].read_writes.reads
+                        for var in read.var_names
+                    ]
+                )
                 indices_list = list(indices)
                 indices_list.sort(key=lambda d: d.name)
                 assert len(indices_list) == len(node_schedule[0]._body.iter_vars), (
