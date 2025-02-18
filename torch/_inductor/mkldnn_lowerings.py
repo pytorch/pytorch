@@ -258,7 +258,7 @@ def register_onednn_fusion_ops():
 
                     kwargs = dict(
                         has_bias=b is not None,
-                        trans_w=True,
+                        trans_w=False,
                         epilogue_creator=None if attr == "none" else epilogue_creator,
                     )
                     if b is not None:
@@ -321,7 +321,7 @@ def register_onednn_fusion_ops():
 
                     kwargs = dict(
                         has_bias=b is not None,
-                        trans_w=True,
+                        trans_w=False,
                         epilogue_creator=epilogue_creator,
                     )
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
