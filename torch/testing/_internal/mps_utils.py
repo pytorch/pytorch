@@ -689,7 +689,7 @@ MACOS_13_XFAILLIST = {
     # isin non-float support added in MacOS 14.0
     "isin": MPSSkipInfo(
         TEST_OUTPUT_MATCH,
-        dtypes=[torch.int64, torch.int8, torch.uint8, torch.int16],
+        dtypes=[torch.int64, torch.int8, torch.uint8, torch.int16, torch.int32],
         upper=14.0,
     ),
 }
