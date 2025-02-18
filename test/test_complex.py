@@ -47,16 +47,11 @@ class TestComplexTensor(TestCase):
 
     @onlyCUDA
     @dtypes(*complex_types())
-    def test_conj_copy_gpu_to_cpu(self, device, dtype):
+    def test_conj_copy_async_h2d(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/146286
         x1 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype).conj()
         x2 = torch.zeros_like(x1, device="cpu").pin_memory()
         x2.copy_(x1, non_blocking=True)
-        self.assertEqual(x1, x2)
-
-        x3 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype).conj()
-        x4 = torch.zeros_like(x1, device="cpu").pin_memory()
-        x4.copy_(x3, non_blocking=False)
         self.assertEqual(x1, x2)
 
     @dtypes(*complex_types())

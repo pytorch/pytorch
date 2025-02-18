@@ -289,7 +289,7 @@ inline std::tuple<size_t, size_t, size_t, size_t> getCopyParameters(const Tensor
   }
 }
 
-static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
+static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
@@ -300,8 +300,9 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
-  if (same_dtype && iter.is_contiguous()) {
-    // Contiguous same-dtype copies can always use cudaMemcpyAsync
+  bool same_conj_neg = iter.tensor(0).is_conj() == iter.tensor(1).is_conj() && iter.tensor(0).is_neg() == iter.tensor(0).is_neg();
+  if (same_dtype && iter.is_contiguous() && same_conj_neg) {
+    // Contiguous same-dtype copies can always use cudaMemcpyAsync if we don't have a conjugate flag to handle first
     return false;
   } else if (dst_device.is_cuda() && src_device.is_cuda()) {
     // Copies between GPUs can use the copy kernel if P2P is supported
@@ -310,12 +311,15 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
 
   //for cross-device copies we can use memcpy2d if conditions are satisfied
   if (dst_device.is_cuda() != src_device.is_cuda() && same_dtype && iter.ndim() <= 2) {
-    // TensorIterator reorders strides so that the first one is the smallest
+    //We can do an async copy if there is not a conjugate bit to resolve
+    if(same_conj_neg || !non_blocking){
+      // TensorIterator reorders strides so that the first one is the smallest
 
-    if (iter.ndim() == 1 || iter.has_contiguous_first_dim()) {
-      auto [width_in_bytes, src_pitch, dst_pitch, height] = getCopyParameters(iter);
-      if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
-          return false; // No need for temporaries
+      if (iter.ndim() == 1 || iter.has_contiguous_first_dim()) {
+        auto [width_in_bytes, src_pitch, dst_pitch, height] = getCopyParameters(iter);
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+            return false; // No need for temporaries
+        }
       }
     }
   }
@@ -340,8 +344,8 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
-
-  if (copy_requires_temporaries(iter, p2p_enabled)) {
+  bool temp_needed = copy_requires_temporaries(iter, p2p_enabled, non_blocking);
+  if (copy_requires_temporaries(iter, p2p_enabled, non_blocking)) {
     // NB: this involves recursive calls to copy. Be careful that those copies
     // don't require temporaries or you will cause an infinite recursion!
     auto& dst = iter.tensor(0);
@@ -355,19 +359,17 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     auto conversion_device = non_blocking ? kCUDA : kCPU;
     if (iter.device_type(1) == conversion_device) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
+      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous().resolve_conj();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
       dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).expand_as(dst).contiguous();
+      src_contig = iter.tensor(1).expand_as(dst).contiguous().resolve_conj();
     }
 
-    // propagate the correct conjugate bit
+    // propagate the correct conjugate bit to dst, src is resolved above
     dst_contig._set_conj(dst.is_conj());
-    src_contig._set_conj(iter.tensor(1).is_conj());
 
     dst_contig._set_neg(dst.is_neg());
-    src_contig._set_neg(iter.tensor(1).is_neg());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
@@ -449,10 +451,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-     iter.tensor(0)._set_conj(iter.tensor(1).is_conj());
+     iter.tensor(0).conj_physical_();
   }
   if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-     iter.tensor(0)._set_neg(iter.tensor(1).is_neg());
+     iter.tensor(0).neg_();
   }
 }
 
