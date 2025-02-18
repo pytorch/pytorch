@@ -597,7 +597,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             # see a recompilation (along with a cache miss).
             res1 = compiled_fn(a, b)
             # A first call should miss in the cache.
-            expected_misses += 1
+            expected_misses += 1  # noqa: SIM113
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
@@ -611,7 +611,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             )
             # Because dynamic shapes are enabled, we expect backwards to be compiled ahead of time
             # So we should see a cache save here
-            expected_saves += 1
+            expected_saves += 1  # noqa: SIM113
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_saved"], expected_saves
             )
@@ -632,7 +632,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             # shape will still trigger a second call to autograd_cache.
             self._clear_dynamo_and_codecache()
             res2 = compiled_fn(a2, b2)
-            expected_hits += 1
+            expected_hits += 1  # noqa: SIM113
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
@@ -641,7 +641,7 @@ class AOTAutogradCacheTests(InductorTestCase):
                 expected_guard_misses,
             )
             # First compile is a regular cache miss, subsequent are guard misses
-            expected_guard_misses += 1
+            expected_guard_misses += 1  # noqa: SIM113
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
