@@ -656,11 +656,11 @@ MACOS_13_XFAILLIST = {
     "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
-    "__rmatmul__": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "__rmatmul__": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64], upper=14.0),
     # Precision issues
     "atan2": MPSSkipInfo(
         TEST_OUTPUT_MATCH,
-        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32],
+        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.bool],
         upper=14.0,
     ),
     "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
@@ -685,9 +685,12 @@ MACOS_13_XFAILLIST = {
     ),
     # Cumprod int64 support added in MacOS 13.3
     "cumprod": MPSSkipInfo(UNIMPLEMENTED, upper=13.3, dtypes=[torch.int64]),
+    "masked.cumprod": MPSSkipInfo(UNIMPLEMENTED, upper=13.3, dtypes=[torch.int64]),
     # isin non-float support added in MacOS 14.0
     "isin": MPSSkipInfo(
-        TEST_OUTPUT_MATCH, dtypes=[torch.int64, torch.int8, torch.uint8], upper=14.0
+        TEST_OUTPUT_MATCH,
+        dtypes=[torch.int64, torch.int8, torch.uint8, torch.int16],
+        upper=14.0,
     ),
 }
 
