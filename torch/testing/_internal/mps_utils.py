@@ -656,16 +656,17 @@ MACOS_13_XFAILLIST = {
     "fft.rfft2": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "fft.rfftn": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     "stft": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
+    "__rmatmul__": MPSSkipInfo(UNIMPLEMENTED, upper=14.0),
     # Precision issues
     "atan2": MPSSkipInfo(
-        TEST_OUTPUT_MATCH, dtypes=[torch.uint8, torch.int8, torch.int16], upper=14.0
+        TEST_OUTPUT_MATCH,
+        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32],
+        upper=14.0,
     ),
     "cdist": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
     "cumsum": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
-    "matmul": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
-    "isin": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
+    "matmul": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0, dtypes=[torch.int64]),
     "linalg.vander": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
-    "log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "masked.cumsum": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.int64], upper=14.0),
     "masked.log_softmax": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
     "masked.softmin": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, upper=14.0),
@@ -679,7 +680,15 @@ MACOS_13_XFAILLIST = {
         upper=14.0,
         dtypes=[torch.uint8],
     ),
-    "tan": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=14.0),
+    "tan": MPSSkipInfo(
+        TEST_OUTPUT_MATCH, TEST_OUTPUT_GRAD_MATCH, upper=14.0, dtypes=[torch.float32]
+    ),
+    # Cumprod int64 support added in MacOS 13.3
+    "cumprod": MPSSkipInfo(UNIMPLEMENTED, upper=13.3, dtypes=[torch.int64]),
+    # isin non-float support added in MacOS 14.0
+    "isin": MPSSkipInfo(
+        TEST_OUTPUT_MATCH, dtypes=[torch.int64, torch.int8, torch.uint8], upper=14.0
+    ),
 }
 
 """Other uncategorized xfails"""
