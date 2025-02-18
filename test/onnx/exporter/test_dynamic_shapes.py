@@ -331,7 +331,7 @@ class TestDynamicShapes(common_utils.TestCase):
         }
         self.assertEqual(unflatten_dynamic_shapes, expected_dynamic_shapes)
 
-    def test__flatten_dynamic_shapes_to_axes_with_leaves_that_are_supported_byexported_program(
+    def test__flatten_dynamic_shapes_to_axes_with_leaves_that_are_supported_by_exported_program(
         self,
     ):
         dim = torch.export.Dim("dim")

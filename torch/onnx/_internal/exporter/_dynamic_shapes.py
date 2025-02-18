@@ -246,7 +246,7 @@ def create_rename_mapping(
                 old_name = input.shape[dim].value
                 if old_name is None:
                     continue
-                # _DimHint and int and None exists in dynamic shapes, we skip renaming
+                # _DimHint, int and None exists in dynamic shapes, we skip renaming
                 if isinstance(axis, (_DimHint, int)) or axis is None:
                     continue
                 # NOTE: ExportedProgram could give the axes the same name if they share
@@ -266,7 +266,7 @@ def create_rename_mapping(
                 old_name = input.shape[dim].value
                 if old_name is None:
                     continue
-                # _DimHint and int and None exists in dynamic shapes, we skip renaming
+                # _DimHint, int and None exists in dynamic shapes, we skip renaming
                 if isinstance(axis, (_DimHint, int)) or axis is None:
                     continue
                 # NOTE: ExportedProgram could give the axes the same name if they share
