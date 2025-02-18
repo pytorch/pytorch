@@ -498,7 +498,15 @@ XFAILLIST_GRAD = {
     "nn.functional.pairwise_distance": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
     ),
-    "nn.functional.conv1d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "nn.functional.conv1d": [
+        MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], lower=14.0),
+        MPSSkipInfo(
+            TEST_OUTPUT_GRAD_MATCH,
+            skip=unittest.skip("Crashes on MacOS13"),
+            dtypes=[torch.float16],
+            upper=14.0,
+        ),
+    ],
     "nn.functional.conv2d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
     "nn.functional.conv3d": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
