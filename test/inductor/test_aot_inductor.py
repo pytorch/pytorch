@@ -1240,7 +1240,12 @@ class AOTInductorTestsTemplate:
             torch.randn((10, 20), device=self.device),
             torch.randn((10, 20), device=self.device),
         )
-        dim0_ab = Dim("s0", min=3, max=1024)
+        # TODO: the min value need to be 5 because in the body_fn, we're slicing over z1[2:],
+        # since the output size is [dim0_ab-3], when we extract tensor metadata out of the output
+        # we call guard_size_oblivious, which assumes the dim0_ab-3 != 0 or 1. So we have to set
+        # the minimum to 5 for now. We need to relax this restriction either by writing a less
+        # constrained shape checking in fake impl of cond.
+        dim0_ab = Dim("s0", min=5, max=1024)
         dynamic_shapes = {
             "p": {},
             "a": {0: dim0_ab, 1: None},
@@ -1507,6 +1512,26 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -2213,7 +2238,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 10, device=self.device),)
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), example_inputs)
+                torch.export.export(Model(), example_inputs, strict=True)
             )
         )
         try:
@@ -4323,6 +4348,24 @@ class AOTInductorTestsTemplate:
             model, example_inputs, "aoti_torch_clone_preserve_strides", 0
         )
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_stft(self):
+        N_FFT = 400
+        HOP_LENGTH = 160
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                window = torch.hann_window(N_FFT).to(x.device)
+                stft = torch.stft(
+                    x, N_FFT, HOP_LENGTH, window=window, return_complex=True
+                )
+                magnitudes = stft[..., :-1].abs() ** 2
+                return magnitudes
+
+        model = Model()
+        example_inputs = (torch.randn(500, device=self.device),)
+        self.check_model(model, example_inputs)
+
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():
             raise unittest.SkipTest("requires modern GPU to run max-autotune")
@@ -4482,6 +4525,9 @@ GPU_TEST_FAILURES = {
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
+    # No fft implementation for XPU yet.
+    "test_fft_c2c": fail_gpu(("xpu",)),
+    "test_stft": fail_gpu(("xpu",)),
 }
 
 
