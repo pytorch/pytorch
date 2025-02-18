@@ -1120,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy==1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
