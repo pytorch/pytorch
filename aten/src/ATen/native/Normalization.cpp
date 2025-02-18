@@ -532,16 +532,16 @@ BatchNormBackend _select_batch_norm_backend(
     return BatchNormBackend::Cudnn;
   }
 
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
   // See #64427
   // non static variable is used to be able to change environment variable in runtime for testing
-  bool PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
+  bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(false);
 
   if (
       input.is_cuda()
       && (input.dim() <= MIOPEN_DIM_MAX)
       && (input.scalar_type() != at::kDouble)
-      && (weight.scalar_type() == at::kFloat)
+      && (weight.scalar_type() == at::kFloat) // allow only fp32 and mixed fp16/bf16
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
@@ -549,7 +549,7 @@ BatchNormBackend _select_batch_norm_backend(
       && detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
       && (input.suggest_memory_format() == MemoryFormat::Contiguous
-        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC))
+        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM))
   ) {
     return BatchNormBackend::Miopen;
   }
