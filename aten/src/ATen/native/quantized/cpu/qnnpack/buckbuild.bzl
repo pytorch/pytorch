@@ -295,6 +295,7 @@ def define_qnnpack(third_party, labels = []):
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
+            "-fvisibility=default",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
