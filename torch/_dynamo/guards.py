@@ -1808,6 +1808,16 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
+    def MAPPING_KEYS_CHECK(self, guard):
+        """Guard on the key order of types.MappingProxyType object"""
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+
+        code = []
+        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
+
     def DICT_KEYS_MATCH(self, guard):
         """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)

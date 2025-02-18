@@ -871,6 +871,82 @@ class BytecodeDistpatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
+@dataclasses.dataclass
+class ExceptionStack:
+    """
+    Exception stack that it is shared among all InstructionTranslator instances
+    """
+
+    stack: list[VariableTracker] = dataclasses.field(default_factory=list)
+
+    def _set_context_recursive(self, val, prev_idx):
+        if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
+            return val
+        if len(self.stack) + prev_idx > 0:
+            prev = self.stack[prev_idx]
+            self._set_context_recursive(prev, prev_idx - 1)
+            val.set_context(prev)
+        return val
+
+    def set_context(self, val):
+        # set Exception.__context__
+        return self._set_context_recursive(val, len(self.stack) - 1)
+
+    def break_context_reference_cycle(self, val):
+        # See test_exceptions::test_raise_does_not_create_context_chain_cycle
+        # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
+        # As noted on CPython, this is O(chain length) but the context chains
+        # are usually very small
+        o = slow_o = val
+        slow_update_toggle = False  # floyd's algorithm for detecting cycle
+        while True:
+            context = o.__context__
+            if type(context) is ConstantVariable:  # context not set
+                break
+
+            if context is val:
+                o.set_context(ConstantVariable(None))
+                break
+
+            o = context
+            if o is slow_o:
+                # pre-existing cycle - all exceptions on the path were
+                # visited and checked
+                break
+
+            if slow_update_toggle:
+                slow_o = slow_o.__context__  # visited all exceptions
+            slow_update_toggle = not slow_update_toggle
+
+    def clear(self):
+        self.stack.clear()
+
+    def pop(self):
+        # print('-pop', self.stack)
+        return self.stack.pop()
+
+    def append(self, val):
+        # print('+append', self.stack, val)
+        self.set_context(val)
+        self.break_context_reference_cycle(val)
+        # if len(self.stack):
+        #     self.stack[-1] = val
+        # else:
+        #     self.stack.append(val)
+        self.stack.append(val)
+
+    def __len__(self):
+        return len(self.stack)
+
+    def __getitem__(self, index):
+        return self.stack[index]
+
+    def __str__(self):
+        return str(self.stack)
+
+    __repr__ = __str__
+
+
 class InstructionTranslatorBase(
     metaclass=BytecodeDistpatchTableMeta,
 ):
@@ -890,7 +966,7 @@ class InstructionTranslatorBase(
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: list[Any]
-    exn_vt_stack: list[VariableTracker]
+    exn_vt_stack: ExceptionStack
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
@@ -1161,7 +1237,9 @@ class InstructionTranslatorBase(
                 if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
-                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                        + torch.fx.GraphModule(
+                            self.output.nn_modules, self.output.graph
+                        ).print_readable(
                             print_output=False, include_stride=True, include_device=True
                         ),
                         file=sys.stderr,
@@ -1533,41 +1611,6 @@ class InstructionTranslatorBase(
             self.jump(inst)
 
     def _raise_exception_variable(self, inst):
-        def set_context_recursive(val, prev_idx):
-            if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
-                return val
-            if len(self.exn_vt_stack) + prev_idx > 0:
-                prev = self.exn_vt_stack[prev_idx]
-                set_context_recursive(prev, prev_idx - 1)
-                val.set_context(prev)
-            return val
-
-        def break_context_reference_cycle(val):
-            # See test_exceptions::test_raise_does_not_create_context_chain_cycle
-            # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
-            # As noted on CPython, this is O(chain length) but the context chains
-            # are usually very small
-            o = slow_o = val
-            slow_update_toggle = False  # floyd's algorithm for detecting cycle
-            while True:
-                context = o.__context__
-                if type(context) is ConstantVariable:  # context not set
-                    break
-
-                if context is val:
-                    o.set_context(ConstantVariable(None))
-                    break
-
-                o = context
-                if o is slow_o:
-                    # pre-existing cycle - all exceptions on the path were
-                    # visited and checked
-                    break
-
-                if slow_update_toggle:
-                    slow_o = slow_o.__context__  # visited all exceptions
-                slow_update_toggle = not slow_update_toggle
-
         val = self.pop()
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
@@ -1587,10 +1630,6 @@ class InstructionTranslatorBase(
         ):
             val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
-        # set Exception.__context__
-        set_context_recursive(val, len(self.exn_vt_stack) - 1)
-        break_context_reference_cycle(val)
-
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
 
@@ -1600,7 +1639,45 @@ class InstructionTranslatorBase(
             raise observed_exception_type(f"raised exception {val}")
         unimplemented(f"raise {exc}")
 
+    # def do_raise(self, val):
+    #     if self._isinstance_exception(val):
+    #         observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined]
+    #         raise observed_exception_type(f"raised exception {val}")
+    #     unimplemented(f"raise {val}")
+
+    # def _get_exception(self, val):
+    #     if isinstance(val, variables.BuiltinVariable):
+    #         val = val.call_function(self, [], {})
+    #     if (
+    #         is_generator(self.f_code)
+    #         and isinstance(val, variables.ExceptionVariable)
+    #         and val.exc_type is StopIteration
+    #     ):
+    #         val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+    #     return val
+
     def RAISE_VARARGS(self, inst):
+        # if inst.arg == 0:
+        #     # re-raise the last exception
+        #     val = self.stack[-1]
+        #     assert self._isinstance_exception(val)
+        #     # self.stack.append(val)
+        #     self.exn_vt_stack.append(val)
+        #     self.do_raise(val)
+        # elif inst.arg == 1:
+        #     val = self.stack[-1]
+        #     val = self._get_exception(val)
+        #     self.exn_vt_stack.append(val)
+        #     self.do_raise(val)
+        # else:
+        #     # raise .. from None
+        #     from_vt = self.pop()
+        #     if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
+        #         val = self.pop()
+        #         self.exn_vt_stack.append(val)
+        #         self.do_raise(val)
+        #     unimplemented("raise ... from ...")
+
         if inst.arg == 0:
             # duplicate the top of the stack and re-raise it
             if sys.version_info < (3, 11):
@@ -2849,6 +2926,7 @@ class InstructionTranslatorBase(
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
+        exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
@@ -2872,7 +2950,7 @@ class InstructionTranslatorBase(
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
-        self.exn_vt_stack = []
+        self.exn_vt_stack = exn_vt_stack
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -2956,6 +3034,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         frame_state,
         speculation_log: SpeculationLog,
+        exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
     ) -> None:
         _step_logger()(
@@ -2989,6 +3068,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 
@@ -3373,30 +3453,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             return result
 
-    def update_parent_exn_vt_stack(self, parent):
-        # TODO(anijain2305) - This works but we should probably have a
-        # global/central data structure for the exception stack.
-        # Prior to this, the parent stack would be extended with all exceptions from
-        # the child frame. We don't need to append everything as the parent interpreter
-        # can only match the topmost exception from the child. i.e.
-        #
-        #     def foo():
-        #         try:
-        #             raise ValueError
-        #         except ValueError as e:
-        #             raise TypeError from e
-        #
-        #     def bar():
-        #         try:
-        #             foo()
-        #         except TypeError:
-        #             # it is impossible for `bar` to match on the first `ValueError`
-        #             # raised by `foo`
-        #             pass
-        #
-        # For a test case, check test_exceptions::test_raise_match
-        parent.exn_vt_stack = self.exn_vt_stack
-
     @staticmethod
     def build_inline_tracer(
         parent,
@@ -3503,7 +3559,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
-            self.update_parent_exn_vt_stack(self.parent)
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
@@ -3578,12 +3633,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            exn_vt_stack=parent.exn_vt_stack,
             distributed_state=parent.distributed_state,
         )
         self.funcvar = funcvar
         self.parent = parent
         # Propagate any exception on the parent stack
-        self.exn_vt_stack = list(parent.exn_vt_stack)
         self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
