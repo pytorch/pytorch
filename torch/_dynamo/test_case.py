@@ -1,3 +1,13 @@
+"""Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
+
+This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
+It includes:
+- A custom TestCase class that handles Dynamo-specific setup/teardown
+- Test running utilities with dependency checking
+- Automatic reset of Dynamo state between tests
+- Proper handling of gradient mode state
+"""
+
 import contextlib
 import importlib
 import logging

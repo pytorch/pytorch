@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     TEST_MKL,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -604,12 +603,6 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        if (
-            TEST_WITH_ROCM
-            and not unbatched
-            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-        ):
-            self.skipTest("Flaky on MI300 with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
@@ -1004,6 +997,19 @@ class CPUReproTests(TestCase):
         self.common(
             fn,
             (torch.randn(8),),
+        )
+
+    def test_low_fp_index_expr_issue_147279(self):
+        # https://github.com/pytorch/pytorch/issues/147279
+        def fn(start, end, dtype, dim):
+            return torch.sum(
+                torch.arange(start=start, end=end, dtype=dtype),
+                dim=dim,
+            )
+
+        self.common(
+            fn,
+            (300, 400, torch.float16, (0,)),
         )
 
     def test_index_put(self):

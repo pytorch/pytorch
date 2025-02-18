@@ -46,6 +46,7 @@ def fully_shard(
     shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -131,6 +132,8 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
+            don't want to shard with FSDP.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -159,8 +162,9 @@ def fully_shard(
     state = fully_shard.state(modules[0])
     state.init(modules, device, mp_policy)
 
-    managed_modules = _get_managed_modules(modules)
-    params, buffers = _get_managed_states(managed_modules)
+    managed_modules = _get_managed_modules(modules, ignored_params)
+    params, buffers = _get_managed_states(managed_modules, ignored_params)
+
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
@@ -360,6 +364,31 @@ class FSDPModule:
         self._get_fsdp_state()._states_to_backward_prefetch = [
             module._get_fsdp_state() for module in modules
         ]
+
+    def set_all_reduce_hook(
+        self,
+        hook: Callable[[torch.Tensor], None],
+        *,
+        stream: Optional[torch.cuda.Stream] = None,
+    ):
+        """
+        Args:
+            hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
+                with expected signature ``hook(reduce_output: torch.Tensor) -> None``
+                where ``reduce_output`` is the reduce-scatter output if only
+                using FSDP or the all-reduce output if using native HSDP.
+            stream (Optional[torch.cuda.Stream]): Stream to run the all-reduce
+                hook in. This should only be set if not using native HSDP. If
+                using native HSDP, the hook will run in the internally defined
+                all-reduce stream used by the native HSDP all-reduce.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_reduce_hook = hook
+            if stream is not None:
+                if fsdp_param_group._is_hsdp:
+                    raise ValueError("stream cannot be set when using native HSDP")
+                fsdp_param_group._all_reduce_hook_stream = stream
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """

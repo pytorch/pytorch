@@ -31,7 +31,7 @@ std::vector<std::string> splitName(const std::string& name) {
 
 template <typename Iter>
 std::string concatName(const Iter& begin, const Iter& end) {
-  std::string combined_name = "";
+  std::string combined_name;
   for (Iter it = begin; it != end; ++it) {
     const std::string& sub_name = *it;
     if (!combined_name.empty()) {
