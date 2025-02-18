@@ -2,10 +2,49 @@
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
+#include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+
+// Remember to update the type signature for DynamoCallbackFn.__call__ in
+// torch/_dynamo/types.py if this function's signature changes.
+static py::object dynamo_call_callback(
+    py::handle callback,
+    THP_EVAL_API_FRAME_OBJECT* _frame,
+    FrameLocalsMapping* locals,
+    CacheEntry* cache_entry,
+    FrameState* frame_state) {
+  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
+  if (frame == nullptr) {
+    throw std::runtime_error(
+        "Dynamo failed to initialize CPython interpreter frame wrapper");
+  }
+  frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
+
+  py::object cache_entry_obj = py::none();
+  if (cache_entry) {
+    cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
+  }
+
+  py::object result = callback(
+      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+  Py_DECREF(frame);
+  return result;
+}
+
+static py::handle _callback_from_action(
+    py::handle callback,
+    FrameAction action) {
+  if (action == SKIP) {
+    return Py_None;
+  } else if (action == RUN_ONLY) {
+    return Py_False;
+  }
+  return callback;
+}
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -13,7 +52,7 @@ PyObject* dynamo__custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
-    PyObject* callback) {
+    PyObject* callback_py) {
 #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
@@ -56,23 +95,25 @@ PyObject* dynamo__custom_eval_frame(
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
+  py::handle callback(callback_py);
+
   // callback to run on recursively invoked frames
-  PyObject* recursive_callback = callback; // borrowed
+  py::handle recursive_callback = callback; // borrowed
   PyCodeObject* cached_code = nullptr; // borrowed
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
   auto eval_default = [&]() {
-    eval_frame_callback_set(recursive_callback);
+    eval_frame_callback_set(recursive_callback.ptr());
     eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    if (callback != recursive_callback) {
+    if (!callback.is(recursive_callback)) {
       // NB: Only set the callback if it's different than the recursive
       // callback! Setting the callback is dangerous in the case that `frame`
       // also sets the eval frame callback. This happens in some functions in
       // eval_frame.py. These functions should be skipped with DEFAULT recursive
       // action, so we won't accidentally overwrite the callback.
-      eval_frame_callback_set(callback);
+      eval_frame_callback_set(callback.ptr());
     }
   };
 
@@ -81,12 +122,12 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    eval_frame_callback_set(recursive_callback);
+    eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
-    if (callback != recursive_callback) {
-      eval_frame_callback_set(callback);
+    if (!callback.is(recursive_callback)) {
+      eval_frame_callback_set(callback.ptr());
     }
     clear_old_frame_if_python_312_plus(tstate, frame);
   };
@@ -95,7 +136,7 @@ PyObject* dynamo__custom_eval_frame(
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
-  if (callback == Py_False && extra == nullptr) {
+  if (callback.is(py::bool_(false)) && extra == nullptr) {
     DEBUG_TRACE("skip (run only with empty cache) %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -108,13 +149,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // Get recursive action
   FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
-  if (strategy.cur_action != DEFAULT) {
-    if (strategy.recursive_action == SKIP) {
-      recursive_callback = Py_None;
-    } else if (strategy.recursive_action == RUN_ONLY) {
-      recursive_callback = Py_False;
-    }
-  }
+  recursive_callback =
+      _callback_from_action(recursive_callback, strategy.recursive_action);
 
   // Skip this frame
   if (strategy.cur_action == SKIP) {
@@ -126,7 +162,7 @@ PyObject* dynamo__custom_eval_frame(
   // default and run-only mode require guard eval
   std::unique_ptr<FrameLocalsMapping> locals =
       std::make_unique<FrameLocalsMapping>(frame);
-  PyObject* backend = get_backend(callback); // borrowed
+  PyObject* backend = get_backend(callback.ptr()); // borrowed
 
   // We don't run the current custom_eval_frame behavior for guards.
   // So we temporarily set the callback to Py_None to drive the correct behavior
@@ -150,7 +186,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only = strategy.cur_action == RUN_ONLY || callback == Py_False;
+  bool run_only =
+      strategy.cur_action == RUN_ONLY || callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
@@ -187,10 +224,18 @@ PyObject* dynamo__custom_eval_frame(
   // call callback
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
-  // strong reference
-  PyObject* callback_result = dynamo_call_callback(
-      callback, frame, locals.get(), cache_entry, frame_state);
-  if (callback_result == nullptr) {
+  py::object callback_result;
+  FrameExecStrategy new_strategy;
+  bool apply_to_code = false;
+  PyObject* guarded_code = nullptr;
+  try {
+    callback_result = dynamo_call_callback(
+        callback, frame, locals.get(), cache_entry, frame_state);
+    new_strategy =
+        callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
+    apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
+    guarded_code = callback_result.attr("guarded_code").ptr();
+  } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
     // code this is useful for debugging -- but we dont want it to happen
     // outside of testing NB: we intentionally DO NOT re-enable custom
@@ -199,27 +244,30 @@ PyObject* dynamo__custom_eval_frame(
     // exception inside the torch.compile block we won't try to Dynamo
     // anything else.
     fail();
-  } else if (callback_result == skip_code_recursive_flag) {
-    // Dynamo returned skip_code_recursive_flag, so we should recursively skip
-    // code.
-    DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
-    extra_state_set_exec_strategy(extra, FrameExecStrategy{SKIP, SKIP});
-    // Also apply recursive action to current frame, only if a recursive
-    // action is not DEFAULT.
-    if (strategy.recursive_action == DEFAULT) {
-      recursive_callback = Py_None;
+    e.restore();
+    return eval_result;
+  }
+
+  // recursive frame action
+  if (strategy.recursive_action == DEFAULT) {
+    // old recursive action overrides new recursive action
+    recursive_callback = _callback_from_action(
+        recursive_callback, new_strategy.recursive_action);
+  }
+
+  // possibly apply frame strategy to future frames with same code object
+  if (apply_to_code) {
+    if (new_strategy.cur_action != DEFAULT) {
+      DEBUG_TRACE("create action: %d\n", new_strategy.cur_action);
     }
-    eval_default();
-  } else if (callback_result == cache_limit_hit_flag) {
-    // Dynamo returned cache_limit_hit_flag, so we should recursively skip
-    // code.
-    DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
-    extra_state_set_exec_strategy(extra, FrameExecStrategy{RUN_ONLY, RUN_ONLY});
-    if (strategy.recursive_action == DEFAULT) {
-      recursive_callback = Py_False;
+    if (new_strategy.recursive_action != DEFAULT) {
+      DEBUG_TRACE(
+          "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    eval_default();
-  } else if (callback_result != Py_None) {
+    extra_state_set_exec_strategy(extra, new_strategy);
+  }
+
+  if (guarded_code != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
     // NB: We could use extract_cache_entry to get the cache_entry, but
@@ -227,7 +275,7 @@ PyObject* dynamo__custom_eval_frame(
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
     CacheEntry* new_cache_entry =
-        create_cache_entry(extra, callback_result, backend);
+        create_cache_entry(extra, guarded_code, backend);
 
     // Update the existing cache_entry on the extra object. This extra object
     // is sitting on the extra scratch space, we are just changing the
@@ -238,10 +286,7 @@ PyObject* dynamo__custom_eval_frame(
     trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
     eval_custom();
   } else {
-    DEBUG_TRACE("create skip %s", get_frame_name(frame));
-    extra_state_set_exec_strategy(extra, FrameExecStrategy{SKIP, DEFAULT});
     eval_default();
   }
-  Py_XDECREF(callback_result);
   return eval_result;
 }
