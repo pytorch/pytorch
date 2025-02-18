@@ -12,6 +12,9 @@ exit /b 1
 :wheel
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
+goto smoke_test
+
+:smoke_test
 Echo Checking that torch is installed...
 python -c "import torch"
 if ERRORLEVEL 1 exit /b 1
