@@ -1163,7 +1163,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         X_size, W_size = X.get_size(), W.get_size()
         if len(X_size) != len(W_size):
-            log.info("X and W have different ranks")
+            log.info("X and W have different ranks: %d, %d", len(X_size), len(W_size))
             return False
         if len(X_size) == 2:
             return X_size[1] == W_size[0]
