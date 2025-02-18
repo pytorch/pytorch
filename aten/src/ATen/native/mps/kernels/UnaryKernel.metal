@@ -108,3 +108,70 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 
 INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
 INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
+
+template <typename T0, typename T1>
+kernel void sinc_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(sinc(static_cast<float>(input[index])));
+}
+
+template <typename T>
+kernel void sinc_complex(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T(sinc(float2(input[index])));
+}
+
+#define INSTANTIATE_SINC_KERNEL(DTYPE0, DTYPE1)                                \
+  template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]])
+
+#define INSTANTIATE_SINC_COMPLEX_KERNEL(DTYPE)                          \
+  template [[host_name("sinc_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sinc_complex(                                                         \
+      device DTYPE##2 * output [[buffer(0)]],                           \
+      constant DTYPE##2 * input [[buffer(1)]],                          \
+      uint id [[thread_position_in_grid]])
+
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_SINC_KERNEL(bfloat, bfloat);
+#endif
+INSTANTIATE_SINC_KERNEL(half, half);
+INSTANTIATE_SINC_KERNEL(float, float);
+INSTANTIATE_SINC_KERNEL(float, long);
+INSTANTIATE_SINC_KERNEL(float, int);
+INSTANTIATE_SINC_KERNEL(float, short);
+INSTANTIATE_SINC_KERNEL(float, char);
+INSTANTIATE_SINC_KERNEL(float, uchar);
+INSTANTIATE_SINC_KERNEL(float, bool);
+INSTANTIATE_SINC_COMPLEX_KERNEL(half);
+INSTANTIATE_SINC_COMPLEX_KERNEL(float);
+
+template <typename T>
+kernel void round_decimals_kernel(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant long& ndigits [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = static_cast<T>(
+      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
+}
+
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                 \
+  template [[host_name("round_decimals_" #DTYPE "_" #DTYPE)]] kernel void \
+  round_decimals_kernel(                                                  \
+      device DTYPE* output [[buffer(0)]],                                 \
+      constant DTYPE* input [[buffer(1)]],                                \
+      constant long& ndigits [[buffer(2)]],                               \
+      uint id [[thread_position_in_grid]])
+
+INSTANTIATE_ROUND_DECIMALS(float);
+INSTANTIATE_ROUND_DECIMALS(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_ROUND_DECIMALS(bfloat);
+#endif

@@ -689,9 +689,7 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
             f")"
         )
     if torch._C._functorch.is_gradtrackingtensor(tensor):
-        return (
-            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
-        )
+        return f"GradTrackingTensor(lvl={level}, value=\n{indented_value_repr}\n)"
     if torch._C._functorch.is_functionaltensor(tensor):
         return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
 

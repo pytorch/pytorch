@@ -255,6 +255,103 @@ def register_pytree_node(
         _cxx_pytree_pending_imports.append((args, kwargs))
 
 
+def register_dataclass(cls: type[Any]) -> None:
+    """Registers a ``dataclasses.dataclass`` type as a pytree node.
+
+    This is a simpler API than :func:`register_pytree_node` for registering
+    a dataclass.
+
+    Args:
+        cls: the dataclass type to register
+
+    Example:
+
+        >>> from torch import Tensor
+        >>> from dataclasses import dataclass
+        >>> import torch.utils._pytree as pytree
+        >>>
+        >>> @dataclass
+        >>> class Point:
+        >>>     x: Tensor
+        >>>     y: Tensor
+        >>>
+        >>> pytree.register_dataclass(Point)
+        >>>
+        >>> point = Point(torch.tensor(0), torch.tensor(1))
+        >>> point = pytree.tree_map(lambda x: x + 1, point)
+        >>> assert torch.allclose(point.x, torch.tensor(1))
+        >>> assert torch.allclose(point.y, torch.tensor(2))
+
+    """
+    import torch.export
+
+    # Eventually we should move the export code here. It is not specific to export,
+    # aside from the serialization pieces.
+    torch.export.register_dataclass(cls)
+
+
+def register_constant(cls: type[Any]) -> None:
+    """Registers a type as a pytree node with no leaves.
+
+    Instances of these types are treated as a constant (sometimes referred to as
+    "static") by :func:`torch.compile`. When used in a function compiled by
+    :func:`torch.compile`, :func:`torch.compile` guards on the instance
+    object's hash: if :func:`torch.compile` sees a new hash then
+    :func:`torch.compile` will recompile the function using the new instance.
+
+    In general, if your class holds Tensors or dynamic int/float/bool (values that
+    may change from run-to-run of a function being compiled), then you probably
+    do not want to register it as a constant.
+
+    Args:
+        cls: the type to register as a constant. This type must be hashable.
+
+    Example:
+
+        >>> from dataclasses import dataclass
+        >>> import torch.utils._pytree as pytree
+        >>>
+        >>> @dataclass
+        >>> class Config:
+        >>>     norm: str
+        >>>
+        >>> pytree.register_constant(Config)
+        >>>
+        >>> config = Config("l2")
+        >>> values, spec = pytree.tree_flatten(config)
+        >>> assert len(values) == 0
+
+    """
+
+    def _flatten(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
+    def _unflatten(_, context):  # type: ignore[no-untyped-def]
+        return context.value
+
+    _private_register_pytree_node(
+        cls,
+        _flatten,
+        _unflatten,
+    )
+
+
+@dataclasses.dataclass
+class ConstantNode:
+    value: Any
+
+
+def _is_constant_holder(spec: "TreeSpec") -> bool:
+    """Checks if the spec is from a pytree registered with register_constant"""
+    return isinstance(spec.context, ConstantNode)
+
+
+def _retrieve_constant(spec: "TreeSpec") -> Any:
+    """Given a spec from a pytree registered with register_constant, retrieves the constant"""
+    assert _is_constant_holder(spec)
+    return tree_unflatten([], spec)
+
+
 def _register_namedtuple(
     cls: type[Any],
     *,
@@ -741,6 +838,19 @@ class TreeSpec:
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
+
+    def __eq__(self, other: PyTree) -> bool:
+        if self is other:
+            return True
+        elif other.__class__ is self.__class__:
+            if str(self.type) != str(other.type):
+                return False
+            if self.context != other.context:
+                return False
+            elif self.children_specs != other.children_specs:
+                return False
+            return True
+        return NotImplemented
 
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
@@ -1485,6 +1595,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return str_spec
 
 
+@functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
     protocol, json_schema = json.loads(serialized)
 

@@ -1,3 +1,4 @@
+#include <ATen/native/quantized/cpu/qlinear.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
@@ -120,6 +121,7 @@ const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
 AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
+AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
@@ -1153,7 +1155,19 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << '\n';
-  std::cout << "Dtype: " << t->dtype() << '\n';
+
+  // Print dtypes and for float types, print exact precision
+  auto scalarType = t->scalar_type();
+  if (scalarType == at::ScalarType::Float) {
+    std::cout << "Dtype: float32" << std::endl;
+  } else if (scalarType == at::ScalarType::Half) {
+    std::cout << "Dtype: float16" << std::endl;
+  } else if (scalarType == at::ScalarType::BFloat16) {
+    std::cout << "Dtype: bfloat16" << std::endl;
+  } else {
+    std::cout << "Dtype: " << t->dtype() << '\n';
+  }
+
   if (numel > 0) {
     // torch/aten `mean()` function only supports float and complex dtypes
     // See:
@@ -1259,5 +1273,21 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     t->zero_();
+  });
+}
+
+AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = at::native::_weight_int4pack_mm_cpu_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(w),
+        *tensor_handle_to_tensor_pointer(qGroupSize),
+        *tensor_handle_to_tensor_pointer(qScaleAndZeros));
+    *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
