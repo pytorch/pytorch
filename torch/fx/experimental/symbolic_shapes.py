@@ -71,6 +71,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
+    Max,
     Mod,
     PythonMod,
 )
@@ -102,7 +103,7 @@ DimList = list
 log = logging.getLogger(__name__)
 
 import sympy
-from sympy import S
+from sympy import Add, S
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -5770,6 +5771,25 @@ class ShapeEnv:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
+
+        if expr.has(Max):
+            max_replacements = {}
+            for atom in expr.atoms(Max):
+                a, b = atom.args
+                if b == 1 or b == 0:
+                    a, b = b, a
+                if a == 1 or a == 0:
+                    if (
+                        isinstance(b, Add)
+                        and len(b.free_symbols) == 2  # TODO: expand to N?
+                        and b.free_symbols == set(b.atoms())
+                        and all(x in self.size_like for x in b.free_symbols)
+                    ):
+                        max_replacements[atom] = b
+            if max_replacements:
+                expr = expr.xreplace(max_replacements)
+                expr = safe_expand(expr)
+
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
         # the non-recursive replacement doesn't work, and
