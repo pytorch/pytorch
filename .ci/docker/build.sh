@@ -1,4 +1,8 @@
 #!/bin/bash
+# The purpose of this script is to:
+# 1. Extract the set of parameters to be used for a docker build based on the provided image name.
+# 2. Run docker build with the parameters found in step 1.
+# 3. Run the built image and print out the expected and actual versions of packages installed.
 
 set -ex
 
