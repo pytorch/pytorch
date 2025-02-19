@@ -1667,7 +1667,7 @@ def aten_replication_pad2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.replication_pad3d.default)
+@onnx_impl(aten.replication_pad3d.default, trace_only=True)
 def aten_replication_pad3d(self: TTensor, padding: Sequence[INT64]) -> TTensor:
     """replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor"""
 
