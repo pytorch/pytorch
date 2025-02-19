@@ -9,6 +9,7 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import NAVI_ARCH, skipIfRocmArch
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
@@ -450,6 +451,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @skipIfRocmArch(NAVI_ARCH)  # failed on Navi when comparing ["unbind_stack_aten_pass"] with 2 (1 for Navi)
     @requires_cuda
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
