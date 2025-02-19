@@ -3760,8 +3760,8 @@ Tensor linalg_eig_backward(
       ret.diagonal(0, -2, -1).fill_(1.);
       return ret;
     }();
-
-    auto ret = VhgV.div_(Econj);
+    const float eps = 1e-8;
+    auto ret = VhgV.div_(Econj + eps);
 
     if (gL.defined()) {
       // For CompositeCompliance, if `gL` is subclass but `ret`
