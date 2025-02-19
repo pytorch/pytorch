@@ -9833,7 +9833,6 @@ class TestNNDeviceType(NNTestCase):
         else:
             _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bilinear2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
         # NOTE: We expand the batch dim such that `b*c` is above the maximum
@@ -13011,10 +13010,68 @@ if __name__ == '__main__':
     @largeTensorTest("20GB", "cuda")
     def test_softmax_backward_64bit_indexing(self, device):
         for numel in (2147483650, 2147483650 + 1):
-            x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
+            x = torch.ones([1, 1, numel], device=device, dtype=torch.float16)
             x.fill_(1.0 / numel)
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
+
+    @onlyCUDA
+    def test_softmax_backward_smem(self, device):
+        torch.manual_seed(0)
+        # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype)
+            result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_without_fully_vectorized(self, device):
+        torch.manual_seed(0)
+        # We don't use smem here because the size of the elements does not divide
+        # ILP cleanly. ILP is defined as sizeof(float4) / sizeof(dtype). Since ILP
+        # is 4 and numel is not divisible by 4, we don't use shared memory here.
+        numel = 2048 + 1
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    def make_unaligned_1d_tensor_of_rand(self, numel, device, dtype):
+        # It's hard to get pytorch to return us a tensor that is not aligned to 16
+        # bytes. To work around that, we create an aligned tensor and create a
+        # slice of it that is not aligned.
+        output = torch.ones([numel + 1], device=device, dtype=dtype)
+        unaligned_output = output[1:]
+        self.assertNotEqual(unaligned_output.data_ptr() % 16, 0)
+        return unaligned_output
+
+    @onlyCUDA
+    def test_softmax_backward_unaligned_output(self, device):
+        torch.manual_seed(0)
+        # We don't use smem here because the output is not aligned to 16 bytes.
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            unaligned_output = self.make_unaligned_1d_tensor_of_rand(numel, device, dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(grad_output, unaligned_output, 0, unaligned_output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), unaligned_output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_unaligned_grad_output(self, device):
+        torch.manual_seed(0)
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            unaligned_grad_output = self.make_unaligned_1d_tensor_of_rand(numel, device, dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(unaligned_grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(unaligned_grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
 
     # reference issue: https://github.com/pytorch/pytorch/issues/68248
     @onlyCUDA

@@ -114,8 +114,19 @@ def try_import_cutlass() -> bool:
     return False
 
 
+@functools.lru_cache(8)
 def _normalize_cuda_arch(arch: str) -> str:
-    if int(arch) >= 90:
+    if int(arch) >= 100:
+        log.warning(
+            "Detected CUDA architecture >= 100: %s. We will generate operations with "
+            "GenerateSM100 (if available) and GenerateSM90. Please file an "
+            "issue for any problems and feedback. ",
+            arch,
+        )
+
+    if int(arch) >= 100:
+        return "100"
+    elif int(arch) >= 90:
         return "90"
     elif int(arch) >= 80:
         return "80"
@@ -135,6 +146,7 @@ class CUTLASSArgs:
 
     architectures: Optional[str] = None
     cuda_version: Optional[str] = None
+    instantiation_level: Optional[str] = None
 
     operations = "all"
     build_dir = ""
@@ -143,7 +155,6 @@ class CUTLASSArgs:
     kernels = "all"
     ignore_kernels = ""
     exclude_kernels = ""
-    instantiation_level = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
@@ -178,10 +189,23 @@ def _gen_ops_cached(arch, version) -> list[Any]:
         )
         return []
     arch = _normalize_cuda_arch(arch)
-    args = CUTLASSArgs(architectures=arch, cuda_version=version)
+    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    args = CUTLASSArgs(
+        architectures=arch,
+        cuda_version=version,
+        instantiation_level=instantiation_level,
+    )
     manifest = cutlass_manifest.Manifest(args)
 
-    if arch == "90":
+    if arch == "100":
+        try:
+            from cutlass_generator import GenerateSM100  # type: ignore[import]
+
+            GenerateSM100(manifest, args.cuda_version)
+        except ImportError:
+            log.warning("Cannot find GenerateSM100. Only GenerateSM90 will be used. ")
+        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+    elif arch == "90":
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
         cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     else:
@@ -274,11 +298,6 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype == torch.half:
-        if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
-            return torch_dtype
-        else:
-            return torch.float
     if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
@@ -364,10 +383,11 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self
 
     def __exit__(self, *args, **kwargs):
-        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
