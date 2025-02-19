@@ -2416,7 +2416,7 @@ def as_storage_and_layout(
                 )
             else:
                 x.decide_layout()
-        return x, x.get_layout()
+        return StorageBox(x), x.get_layout()
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
