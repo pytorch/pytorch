@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, trace_rules
+from . import config, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -538,7 +538,7 @@ class ConvertFrameAssert:
                 gb_type="Attempt to trace generator",
                 context="",
                 explanation="Dynamo cannot trace generators as a top-level function.",
-                hints=[],
+                hints=[*graph_break_hints.FUNDAMENTAL],
             )
 
         if not has_tensor_in_frame(frame):
