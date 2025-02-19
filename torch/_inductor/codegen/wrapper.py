@@ -2294,11 +2294,7 @@ class PythonWrapperCodegen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return (
-            f"{self.declare_maybe_reference}{new_name} = "
-            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
-            f"  {self.comment} reuse"
-        )
+        return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
