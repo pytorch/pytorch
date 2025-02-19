@@ -1197,6 +1197,23 @@ std::vector<Shape> compute_shape_as_strided(
     const int64_t& storage_offset) {
   return {Shape(input.shape().scalar_type(), size)};
 }
+
+std::vector<Shape> compute_shape_as_strided(
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    ::std::optional<int64_t> storage_offset) {
+  auto self_meta = at::native::empty_strided_meta_symint(
+      self.sym_sizes(),
+      self.sym_strides(),
+      /*dtype=*/self.scalar_type(),
+      /*layout=*/self.layout(),
+      /*device=*/c10::Device(c10::kMeta),
+      /*pin_memory=*/::std::nullopt);
+  auto out_meta = at::as_strided(self_meta, size, stride, storage_offset);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_diagonal_view_update(
     const Output& target,
     const Output& input,
