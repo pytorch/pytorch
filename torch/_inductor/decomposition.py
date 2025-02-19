@@ -962,14 +962,14 @@ def index_reduce(
     )
 
 
-@register_decomposition(aten.max_pool2d_with_indices)
-def max_pool2d_with_indices(
+def max_pool2d_forward(
     x: torch.Tensor,
     kernel_size: list[int],
     stride: Optional[Union[int, list[int]]] = None,
     padding: Union[int, list[int]] = 0,
     dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
+    return_indices: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if dilation == 1:
         dilation = [1, 1]
@@ -1003,14 +1003,45 @@ def max_pool2d_with_indices(
         dilation,
         ceil_mode,
     )
-    indices = prims._low_memory_max_pool2d_offsets_to_indices(
-        offsets,
-        kernel_size[1],
-        x.size(-1),
-        stride,
-        padding,
+    if return_indices:
+        indices = prims._low_memory_max_pool2d_offsets_to_indices(
+            offsets,
+            kernel_size[1],
+            x.size(-1),
+            stride,
+            padding,
+        )
+        return vals, indices
+    else:
+        return vals
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+def max_pool2d_with_indices(
+    x: torch.Tensor,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]] = None,
+    padding: Union[int, list[int]] = 0,
+    dilation: Union[int, list[int]] = 1,
+    ceil_mode: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return max_pool2d_forward(
+        x, kernel_size, stride, padding, dilation, ceil_mode, return_indices=True
     )
-    return vals, indices
+
+
+@register_decomposition(aten.mkldnn_max_pool2d)
+def mkldnn_max_pool2d(
+    x: torch.Tensor,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]] = None,
+    padding: Union[int, list[int]] = 0,
+    dilation: Union[int, list[int]] = 1,
+    ceil_mode: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return max_pool2d_forward(
+        x, kernel_size, stride, padding, dilation, ceil_mode, return_indices=False
+    )
 
 
 @register_decomposition(aten.adaptive_max_pool2d)

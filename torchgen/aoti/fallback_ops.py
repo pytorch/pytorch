@@ -84,6 +84,7 @@ inductor_fallback_ops = {
     "aten.max_pool2d_with_indices.default",
     "aten.max_pool3d_with_indices.default",
     "aten.max_pool3d_with_indices_backward.default",
+    "aten.mkldnn_max_pool2d.default",
     "aten.max_unpool2d.default",
     "aten.max_unpool3d.default",
     "aten.median.default",
