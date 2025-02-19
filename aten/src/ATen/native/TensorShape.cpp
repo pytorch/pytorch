@@ -3053,7 +3053,7 @@ Tensor slice(
   }
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
-  sizes[dim] = (len + step - 1) / step; // round-up
+  sizes[dim] = (len == 0) ? 0 : (1 + (len - 1) / step ); // round-up, avoiding overflow
   strides[dim] *= step;
 
   Tensor result;
