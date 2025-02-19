@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import re
+import sysconfig
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -164,7 +165,6 @@ class TestCutlassBackend(TestCase):
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("shape_combo", (0, 1, 2, 3))
     def test_cutlass_backend_subproc_addmm(self, shape_combo):
         """
         Test autotune_in_subproc works for addmm.
@@ -182,9 +182,6 @@ class TestCutlassBackend(TestCase):
             (N,),
         ]
 
-        x_shape = x_shapes[shape_combo]
-        x = torch.randn(x_shape).cuda().half()
-
         alpha = 2.0
         beta = 0.4
 
@@ -198,9 +195,11 @@ class TestCutlassBackend(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ):
-            Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
-            Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
-            torch.testing.assert_close(Y_compiled, Y)
+            for x_shape in x_shapes:
+                x = torch.randn(x_shape).cuda().half()
+                Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
+                Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+                torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1032,7 +1031,6 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         def mm(a, b):
             return torch.mm(a, b.to(torch.half))
@@ -1090,6 +1088,16 @@ class TestCutlassBackend(TestCase):
             command = cuda_standalone_runner_compile_command(
                 Path(cu_file.name), Path(exe_file.name)
             )
+
+            if config.is_fbcode():
+                # hack to bypass the following error:
+                # error while loading shared libraries: IX}: invalid mode for dlopen(): Invalid argument
+                platform_path = sysconfig.get_config_var("LIBDIR")
+                link_str = " ".join(
+                    [f"-L{platform_path}", "-Xlinker", f"-rpath={platform_path}"]
+                )
+                command = command.replace(link_str, " ")
+
             retcode = os.system(command)
             assert retcode == 0
 
