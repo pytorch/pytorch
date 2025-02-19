@@ -84,6 +84,23 @@ class TestCUDADeviceGuard(torch._dynamo.test_case.TestCase):
         self.assertEqual(device_guard.prev_idx, -1)
         self.assertEqual(device_guard.idx, None)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_constant_tensor_device_guards(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            y = torch.tensor([5], device="cuda")
+            return (y,)
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:0"))
+
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:1"))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
