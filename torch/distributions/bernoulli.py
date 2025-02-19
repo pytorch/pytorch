@@ -1,7 +1,10 @@
-# mypy: allow-untyped-defs
+from typing import Any, Optional, Union
+from typing_extensions import Self
+
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
     broadcast_all,
@@ -10,7 +13,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Bernoulli"]
@@ -35,12 +38,20 @@ class Bernoulli(ExponentialFamily):
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.unit_interval,
+        "logits": constraints.real,
+    }
     support = constraints.boolean
-    has_enumerate_support = True
-    _mean_carrier_measure = 0
+    has_enumerate_support: bool = True
+    _mean_carrier_measure: float = 0
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -49,6 +60,7 @@ class Bernoulli(ExponentialFamily):
             is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
+            assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
@@ -58,7 +70,7 @@ class Bernoulli(ExponentialFamily):
             batch_shape = self._param.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Bernoulli, _instance)
         batch_shape = torch.Size(batch_shape)
         if "probs" in self.__dict__:
@@ -71,7 +83,7 @@ class Bernoulli(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
     @property
@@ -100,23 +112,23 @@ class Bernoulli(ExponentialFamily):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.bernoulli(self.probs.expand(shape))
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
         return -binary_cross_entropy_with_logits(logits, value, reduction="none")
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return binary_cross_entropy_with_logits(
             self.logits, self.probs, reduction="none"
         )
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         values = torch.arange(2, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
@@ -127,5 +139,5 @@ class Bernoulli(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (torch.logit(self.probs),)
 
-    def _log_normalizer(self, x):
+    def _log_normalizer(self, x: Tensor) -> Tensor:
         return torch.log1p(torch.exp(x))

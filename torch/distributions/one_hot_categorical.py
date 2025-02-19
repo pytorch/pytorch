@@ -1,8 +1,11 @@
-# mypy: allow-untyped-defs
+from typing import Any, Optional
+from typing_extensions import Self
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.types import _size
 
@@ -39,17 +42,25 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.simplex,
+        "logits": constraints.real_vector,
+    }
     support = constraints.one_hot
-    has_enumerate_support = True
+    has_enumerate_support: bool = True
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(OneHotCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new._categorical = self._categorical.expand(batch_shape)
@@ -59,7 +70,7 @@ class OneHotCategorical(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._categorical._new(*args, **kwargs)
 
     @property
@@ -92,23 +103,23 @@ class OneHotCategorical(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         sample_shape = torch.Size(sample_shape)
         probs = self._categorical.probs
         num_events = self._categorical._num_events
         indices = self._categorical.sample(sample_shape)
         return torch.nn.functional.one_hot(indices, num_events).to(probs)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         indices = value.max(-1)[1]
         return self._categorical.log_prob(indices)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return self._categorical.entropy()
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         n = self.event_shape[0]
         values = torch.eye(n, dtype=self._param.dtype, device=self._param.device)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
@@ -125,7 +136,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
     (Bengio et al., 2013)
     """
-    has_rsample = True
+    has_rsample: bool = True
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         samples = self.sample(sample_shape)

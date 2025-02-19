@@ -1,9 +1,11 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Optional
+from typing_extensions import Self
 
 import torch
-from torch import Tensor
+from torch import Size, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
 from torch.types import _size
@@ -12,7 +14,7 @@ from torch.types import _size
 __all__ = ["MultivariateNormal"]
 
 
-def _batch_mv(bmat, bvec):
+def _batch_mv(bmat: Tensor, bvec: Tensor) -> Tensor:
     r"""
     Performs a batched matrix-vector product, with compatible but different batch shapes.
 
@@ -26,7 +28,7 @@ def _batch_mv(bmat, bvec):
     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
 
 
-def _batch_mahalanobis(bL, bx):
+def _batch_mahalanobis(bL: Tensor, bx: Tensor) -> Tensor:
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
     for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
@@ -45,7 +47,7 @@ def _batch_mahalanobis(bL, bx):
     old_batch_dims = outer_batch_dims + bL_batch_dims
     new_batch_dims = outer_batch_dims + 2 * bL_batch_dims
     # Reshape bx with the shape (..., 1, i, j, 1, n)
-    bx_new_shape = bx.shape[:outer_batch_dims]
+    bx_new_shape: Size = bx.shape[:outer_batch_dims]
     for sL, sx in zip(bL.shape[:-2], bx.shape[outer_batch_dims:-1]):
         bx_new_shape += (sx // sL, sL)
     bx_new_shape += (n,)
@@ -76,7 +78,7 @@ def _batch_mahalanobis(bL, bx):
     return reshaped_M.reshape(bx_batch_shape)
 
 
-def _precision_to_scale_tril(P):
+def _precision_to_scale_tril(P: Tensor) -> Tensor:
     # Ref: https://nbviewer.jupyter.org/gist/fehiepsi/5ef8e09e61604f10607380467eb82006#Precision-to-scale_tril
     Lf = torch.linalg.cholesky(torch.flip(P, (-2, -1)))
     L_inv = torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1)
@@ -121,23 +123,23 @@ class MultivariateNormal(Distribution):
         :attr:`precision_matrix` is passed instead, it is only used to compute
         the corresponding lower triangular matrices using a Cholesky decomposition.
     """
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,
         "scale_tril": constraints.lower_cholesky,
     }
     support = constraints.real_vector
-    has_rsample = True
+    has_rsample: bool = True
 
     def __init__(
         self,
-        loc,
-        covariance_matrix=None,
-        precision_matrix=None,
-        scale_tril=None,
-        validate_args=None,
-    ):
+        loc: Tensor,
+        covariance_matrix: Optional[Tensor] = None,
+        precision_matrix: Optional[Tensor] = None,
+        scale_tril: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         if (covariance_matrix is not None) + (scale_tril is not None) + (
@@ -166,6 +168,7 @@ class MultivariateNormal(Distribution):
             )
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
+            assert precision_matrix is not None  # helps mypy
             if precision_matrix.dim() < 2:
                 raise ValueError(
                     "precision_matrix must be at least two-dimensional, "
@@ -184,10 +187,10 @@ class MultivariateNormal(Distribution):
             self._unbroadcasted_scale_tril = scale_tril
         elif covariance_matrix is not None:
             self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
-        else:  # precision_matrix is not None
+        elif precision_matrix is not None:
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(MultivariateNormal, _instance)
         batch_shape = torch.Size(batch_shape)
         loc_shape = batch_shape + self.event_shape
@@ -245,7 +248,7 @@ class MultivariateNormal(Distribution):
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
@@ -255,7 +258,7 @@ class MultivariateNormal(Distribution):
         )
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         half_log_det = (
             self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
         )

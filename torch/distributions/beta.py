@@ -1,7 +1,10 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -28,14 +31,19 @@ class Beta(ExponentialFamily):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
     support = constraints.unit_interval
-    has_rsample = True
+    has_rsample: bool = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: Union[Tensor, float],
+        concentration0: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
@@ -52,7 +60,7 @@ class Beta(ExponentialFamily):
         )
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Beta, _instance)
         batch_shape = torch.Size(batch_shape)
         new._dirichlet = self._dirichlet.expand(batch_shape)
@@ -76,13 +84,13 @@ class Beta(ExponentialFamily):
     def rsample(self, sample_shape: _size = ()) -> Tensor:
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         heads_tails = torch.stack([value, 1.0 - value], -1)
         return self._dirichlet.log_prob(heads_tails)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return self._dirichlet.entropy()
 
     @property
@@ -105,5 +113,5 @@ class Beta(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration1, self.concentration0)
 
-    def _log_normalizer(self, x, y):
+    def _log_normalizer(self, x: Tensor, y: Tensor) -> Tensor:
         return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)

@@ -1,12 +1,16 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exponential import Exponential
 from torch.distributions.gumbel import euler_constant
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
 
 
 __all__ = ["Weibull"]
@@ -27,13 +31,18 @@ class Weibull(TransformedDistribution):
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
     """
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
-    support = constraints.positive
+    support = constraints.positive  # type: ignore[assignment]
 
-    def __init__(self, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        scale: Union[Tensor, float],
+        concentration: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(
@@ -45,7 +54,7 @@ class Weibull(TransformedDistribution):
         ]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Weibull, _instance)
         new.scale = self.scale.expand(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
@@ -78,7 +87,7 @@ class Weibull(TransformedDistribution):
             - torch.exp(2 * torch.lgamma(1 + self.concentration_reciprocal))
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return (
             euler_constant * (1 - self.concentration_reciprocal)
             + torch.log(self.scale * self.concentration_reciprocal)

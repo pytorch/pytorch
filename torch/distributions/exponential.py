@@ -1,7 +1,10 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
@@ -24,10 +27,10 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
-    arg_constraints = {"rate": constraints.positive}
+    arg_constraints: dict[str, Constraint] = {"rate": constraints.positive}
     support = constraints.nonnegative
-    has_rsample = True
-    _mean_carrier_measure = 0
+    has_rsample: bool = True
+    _mean_carrier_measure: float = 0
 
     @property
     def mean(self) -> Tensor:
@@ -45,12 +48,16 @@ class Exponential(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.rate.pow(-2)
 
-    def __init__(self, rate, validate_args=None):
+    def __init__(
+        self,
+        rate: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         (self.rate,) = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, _Number) else self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Exponential, _instance)
         batch_shape = torch.Size(batch_shape)
         new.rate = self.rate.expand(batch_shape)
@@ -62,25 +69,25 @@ class Exponential(ExponentialFamily):
         shape = self._extended_shape(sample_shape)
         return self.rate.new(shape).exponential_() / self.rate
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return self.rate.log() - self.rate * value
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return 1 - torch.exp(-self.rate * value)
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         return -torch.log1p(-value) / self.rate
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return 1.0 - torch.log(self.rate)
 
     @property
     def _natural_params(self) -> tuple[Tensor]:
         return (-self.rate,)
 
-    def _log_normalizer(self, x):
+    def _log_normalizer(self, x: Tensor) -> Tensor:
         return -torch.log(-x)

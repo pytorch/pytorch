@@ -1,9 +1,11 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import inf, nan, Tensor
 from torch.distributions import Chi2, constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 from torch.types import _size
@@ -29,13 +31,13 @@ class StudentT(Distribution):
         loc (float or Tensor): mean of the distribution
         scale (float or Tensor): scale of the distribution
     """
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "df": constraints.positive,
         "loc": constraints.real,
         "scale": constraints.positive,
     }
     support = constraints.real
-    has_rsample = True
+    has_rsample: bool = True
 
     @property
     def mean(self) -> Tensor:
@@ -59,13 +61,19 @@ class StudentT(Distribution):
         m[self.df <= 1] = nan
         return m
 
-    def __init__(self, df, loc=0.0, scale=1.0, validate_args=None):
+    def __init__(
+        self,
+        df: Union[Tensor, float],
+        loc: Union[Tensor, float] = 0.0,
+        scale: Union[Tensor, float] = 1.0,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(StudentT, _instance)
         batch_shape = torch.Size(batch_shape)
         new.df = self.df.expand(batch_shape)
@@ -90,7 +98,7 @@ class StudentT(Distribution):
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         y = (value - self.loc) / self.scale
@@ -103,7 +111,7 @@ class StudentT(Distribution):
         )
         return -0.5 * (self.df + 1.0) * torch.log1p(y**2.0 / self.df) - Z
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         lbeta = (
             torch.lgamma(0.5 * self.df)
             + math.lgamma(0.5)
