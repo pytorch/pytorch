@@ -5,10 +5,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from filelock import FileLock
-
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
+from torch.utils._filelock import FileLock
 
 from .runtime.runtime_utils import triton_cache_dir
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
