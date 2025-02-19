@@ -64,7 +64,6 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
     sorted_rename_mapping = dict(
         sorted(rename_mapping.items(), key=lambda item: len(item[0]), reverse=True)
     )
-
     for value in _all_values(model):
         if value.shape is None:
             continue
