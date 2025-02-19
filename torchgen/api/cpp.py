@@ -149,35 +149,28 @@ def argumenttype_type(
         return r
 
     if isinstance(t, BaseType):
+        base_c_type = BaseCType(BaseTypeToCppMapping[t.name])
         if t.name == BaseTy.Tensor:
             if mutable and not local.use_const_ref_for_mutable_tensors():
-                return NamedCType(binds, MutRefCType(BaseCType(tensorT)))
-            else:
-                return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
-        elif t.name == BaseTy.Scalar:
-            return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
-        else:
-            raise AssertionError(f"base type should have been value type {t}")
+                return NamedCType(binds, MutRefCType(base_c_type))
+        if t.name in (BaseTy.Tensor, BaseTy.Scalar):
+            return NamedCType(binds, ConstRefCType(base_c_type))
+        raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
-        if str(t.elem) == "Tensor":
-            if mutable and not local.use_const_ref_for_mutable_tensors():
-                return NamedCType(
-                    binds, MutRefCType(BaseCType(tensorT))
-                )  # TODO: fix this discrepancy
-            else:
-                return NamedCType(
-                    binds, ConstRefCType(OptionalCType(BaseCType(tensorT)))
-                )
-        elif str(t.elem) == "Scalar":
-            return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
-        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
-            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
-        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "SymInt":
-            if symint:
-                return NamedCType(binds, BaseCType(optionalSymIntArrayRefT))
-            else:
-                return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, symint=symint)
+        if str(t.elem) in ("Tensor", "Scalar"):
+            c_type = elem.type
+            if isinstance(c_type, ConstRefCType):
+                c_type = OptionalCType(c_type.elem)
+                return NamedCType(binds, ConstRefCType(c_type))
+            assert isinstance(c_type, MutRefCType)
+            c_type = OptionalCType(c_type.elem)
+            return NamedCType(binds, MutRefCType(c_type))
+        elif isinstance(t.elem, ListType):
+            if str(t.elem.elem) in ("int", "SymInt"):
+                if symint and str(t.elem.elem) == "SymInt":
+                    return NamedCType(binds, BaseCType(optionalSymIntArrayRefT))
+                return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
