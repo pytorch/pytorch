@@ -2436,6 +2436,11 @@ def compile(
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
     to compile the module inplace without changing its structure.
 
+    .. note::
+
+        When compiling an :class:`torch.nn.Module`, `torch.compile` directly compiles the `forward` method
+        and those functions called within the `forward` method. Other methods will not be compiled.
+
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
@@ -2468,8 +2473,9 @@ def compile(
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend:
-          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+        - To register an out-of-tree custom backend, following the
+          `tutorial <https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends>`_.
+
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
