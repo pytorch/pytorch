@@ -8196,6 +8196,12 @@ def aten_swapdims(self: TensorType, dim0: int, dim1: int) -> TensorType:
     raise NotImplementedError
 
 
+@onnx_impl(torch.sym_not, trace_only=True)
+def sym_not(self) -> BOOL:
+    """sym_not(SymBool self) -> SymBool"""
+    return op.Not(self)
+
+
 @onnx_impl(aten.sym_size.int, trace_only=True)
 def aten_sym_size(self: TensorType, dim: int = 0) -> INT64:
     """sym_size.int(Tensor self, int dim) -> SymInt"""
