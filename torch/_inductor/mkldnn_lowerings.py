@@ -145,11 +145,11 @@ def grouped_gemm_lowering(
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: list[ChoiceCaller] = []
-    *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
+    *_, layout, x, _ = mm_args(x, w[0], layout=layout)
 
     kwargs = {
         "has_bias": [bias is not None for bias in b],
-        "trans_w": True,
+        "trans_w": False,
         "epilogue_creator": None,
         "act_mapping": dict.fromkeys(range(num_gemm), x),
     }
@@ -388,10 +388,8 @@ def register_onednn_fusion_ops():
                 b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment]
             choices: list[ChoiceCaller] = []
             if config.max_autotune or config.max_autotune_gemm:
-                transposed_w = permute(w, [1, 0])
-                *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                if use_cpp_gemm_template(layout, x, transposed_w):
-
+                *_, layout, x, w = mm_args(x, w, layout=layout)
+                if use_cpp_gemm_template(layout, x, w):
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(
                             buf, attr, scalars=scalars, algorithm=algorithm
@@ -453,11 +451,8 @@ def register_onednn_fusion_ops():
                 b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment]
             choices: list[ChoiceCaller] = []
             if config.max_autotune or config.max_autotune_gemm:
-                transposed_w = permute(w, [1, 0])
-                *_, layout, x, transposed_w, y = mm_args(
-                    x, transposed_w, y, layout=layout
-                )
-                if use_cpp_gemm_template(layout, x, transposed_w):
+                *_, layout, x, w, y = mm_args(x, w, y, layout=layout)
+                if use_cpp_gemm_template(layout, x, w):
 
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(buf, attr, other=y)
