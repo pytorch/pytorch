@@ -21,10 +21,12 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _to_json_bytes,
     canonicalize,
     deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleSerializer,
     serialize,
     SerializeError,
 )
@@ -419,6 +421,17 @@ def forward(self, x):
         for v in serialized.exported_program.range_constraints.values():
             self.assertEqual(v.max_val, None)
 
+    def test_symint_list(self):
+        # This reflects the behavior from inductor's ExternFallbackNode
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        res = serializer.serialize_inputs(
+            torch.ops.aten.ones.default, ([1, symint, 3],), {}
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].arg._type, "as_sym_ints")
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -455,6 +468,26 @@ def forward(self, x):
             name = output.name
             self.assertNotIn(name, seen)
             seen.add(name)
+
+    def test_infinity_inputs(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Scalar(x, math.inf)
+
+        fn = Module()
+        ep = torch.export.export(
+            fn,
+            (torch.randn(3, 2),),
+        )
+        json_bytes = _to_json_bytes(
+            ExportedProgramSerializer().serialize(ep).exported_program
+        )
+        import json
+
+        def parse_constant(x):
+            raise RuntimeError(f"Invalid JSON float: {x}")
+
+        json.loads(json_bytes, parse_constant=parse_constant)
 
     def test_multi_return_some_unused(self) -> None:
         """

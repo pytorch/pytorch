@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+Utility functions and classes used throughout the TorchDynamo system.
+
+This module contains a collection of helper utilities used by various parts of Dynamo for:
+- Performance metrics collection and reporting
+- Compilation timing and debugging
+- Graph manipulation and tensor operations
+- Runtime guards and checks
+- Common data structure operations
+- Testing and development tools
+
+This is an internal module that provides shared functionality used across the Dynamo codebase.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -380,7 +395,7 @@ class CompileEventLogger:
             chromium_log.add_event_data(event_name, **metadata)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
 
             if event_name != top_event:
                 raise RuntimeError(
@@ -402,7 +417,7 @@ class CompileEventLogger:
         """
         Syntactic sugar for logging to the toplevel event
         """
-        top_event = get_chromium_event_logger().get_top()
+        top_event = get_chromium_event_logger().get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
@@ -424,7 +439,7 @@ class CompileEventLogger:
             chromium_log.increment(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -450,7 +465,7 @@ class CompileEventLogger:
         Increments a value on the toplevel metric. By default, logs to metric.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -472,7 +487,7 @@ class CompileEventLogger:
             chromium_log.add_to_set(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -499,7 +514,7 @@ class CompileEventLogger:
         Defaults to COMPILATION_METRIC log level.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -1294,7 +1309,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
     """
     event_logger = get_chromium_event_logger()
-    event_name = event_logger.get_top()
+    event_name = event_logger.get_outermost_event()
     if not event_name:
         return
     event_logger.add_event_data(
@@ -1525,12 +1540,13 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> Optional[str]:
+    def get_outermost_event(self) -> Optional[str]:
         """
-        Get the top event name or None if the stack is empty.
+        Get the outermost event name (i.e. the longest running event)
+        or None if the stack is empty.
         """
         stack = self.get_stack()
-        return stack[-1] if stack else None
+        return stack[0] if stack else None
 
     def get_pt2_compile_substack(self):
         """
@@ -2355,6 +2371,10 @@ dict_methods = {
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
+list_methods = {method for method in list.__dict__.values() if callable(method)}
+list_getitem = list.__getitem__
+
+str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 
 def builtin_dict_keys(d):
@@ -2406,8 +2426,15 @@ def to_subclass(t, cls):
     return t.as_subclass(cls)
 
 
+dict_getitem = dict.__getitem__
+
+
 def dict_keys_getitem(d, n):
-    return next(itertools.islice(iter(d), n, n + 1))
+    # Call dict(d) to prevent calling overridden __iter__/keys
+    dict_class = dict
+    if isinstance(d, OrderedDict):
+        dict_class = OrderedDict
+    return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -2948,6 +2975,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # fake tensor validity is checked inside get_fake_value using
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
+
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
 
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
@@ -4285,3 +4318,27 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    return mode
