@@ -11721,7 +11721,9 @@ def forward(self, x):
             for node in ep.graph.nodes
         ].count(True)
         # second assert from TORCH_SYM_CHECK in checkInBoundsForStorage
-        expected_num_asserts = 2 if 'TrainingIRToRunDecompExport' in str(self.__class__) else 1
+        expected_num_asserts = (
+            2 if "TrainingIRToRunDecompExport" in str(self.__class__) else 1
+        )
         self.assertEqual(num_asserts, expected_num_asserts)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
