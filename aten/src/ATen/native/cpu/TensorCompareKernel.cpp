@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <utility>
 #include <vector>
-#include <iostream>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>

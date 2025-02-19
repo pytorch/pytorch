@@ -51,7 +51,6 @@ void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double a
     if (rtol == 0 && atol == 0) {
       return cast_a == cast_b;
   }
-    printf("rtol%f atol%.8f \n", rtol, atol);
     if (equal_nan &&
       (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) &&
       (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
