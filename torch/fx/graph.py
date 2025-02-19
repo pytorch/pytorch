@@ -2,7 +2,6 @@
 import builtins
 import contextlib
 import copy
-import dataclasses
 import enum
 import functools
 import inspect
@@ -362,14 +361,12 @@ class CodeGen:
             f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
         )
 
-    def generate_output(
-        self, output_args: Argument, arg_repr: Callable[[Any], str]
-    ) -> str:
+    def generate_output(self, output_args: Argument) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
         Note: The returned statement should not be indented.
         """
-        return f"return {arg_repr(output_args)}"
+        return f"return {repr(output_args)}"
 
     def process_inputs(self, *args: Any) -> Any:
         """
@@ -519,25 +516,7 @@ class CodeGen:
             if isinstance(arg, tuple) and hasattr(arg, "_fields"):
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
-                return f"{global_name}{_get_repr(tuple(arg))}"
-            elif dataclasses.is_dataclass(arg):
-                qualified_name = _get_qualified_name(type(arg))
-                global_name = add_global(qualified_name, type(arg))
-                args = []
-                kwargs = {}
-                for field in dataclasses.fields(arg):
-                    if field.init:
-                        field_arg = getattr(arg, field.name)
-                        if getattr(field, "kw_only", False):
-                            kwargs[field.name] = field_arg
-                        else:
-                            args.append(field_arg)
-                args_str = ", ".join(f"{_get_repr(a)}" for a in args)
-                kwargs_str = ", ".join(
-                    f"{name}={_get_repr(a)}" for name, a in kwargs.items()
-                )
-                all_args_str = ", ".join([args_str, kwargs_str])
-                return f"{global_name}({all_args_str})"
+                return f"{global_name}{repr(tuple(arg))}"
             elif isinstance(
                 arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
             ):
@@ -759,7 +738,7 @@ class CodeGen:
             elif node.op == "output":
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                body.append(self.generate_output(node.args[0], _get_repr))
+                body.append(self.generate_output(node.args[0]))
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
@@ -905,13 +884,11 @@ class _PyTreeCodeGen(CodeGen):
     {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
-    def generate_output(self, output_args, arg_repr: Callable[[Any], str]):
+    def generate_output(self, output_args):
         if self.pytree_info and self.pytree_info.out_spec:
-            return (
-                f"return pytree.tree_unflatten({arg_repr(output_args)}, self._out_spec)"
-            )
+            return f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
         else:
-            return super().generate_output(output_args, arg_repr)
+            return super().generate_output(output_args)
 
 
 class _FindNodesLookupTable:
