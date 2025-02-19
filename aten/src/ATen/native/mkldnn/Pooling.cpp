@@ -402,7 +402,12 @@ Tensor mkldnn_max_pool2d(
       "mkldnn_max_pool2d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool2d: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  }
+
+  if (input.scalar_type() == ScalarType::Half) {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+        "mkldnn_max_pool2d: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   return _mkldnn_pooling(
@@ -426,7 +431,11 @@ Tensor mkldnn_max_pool3d(
       "mkldnn_max_pool3d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool3d: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  }
+  if (input.scalar_type() == ScalarType::Half) {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+        "mkldnn_max_pool3d: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   return _mkldnn_pooling(

@@ -755,8 +755,10 @@ class TestMkldnn(TestCase):
             torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
         }
         msg = {
-            torch.bfloat16: f"mkldnn_max_pool{dim:d}d: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq",
-            torch.half: f"mkldnn_max_pool{dim:d}d: fp16 path needs the cpu support avx_ne_convert or avx512_fp16",
+            torch.bfloat16: f"mkldnn_max_pool{dim:d}d: bf16 path needs the cpu support "
+            "avx_ne_convert or avx512bw, avx512vl and avx512dq",
+            torch.half: f"mkldnn_max_pool{dim:d}d: fp16 path needs the cpu support "
+            "avx_ne_convert or avx512_fp16",
         }
         for stride in [1, 2, 3]:
             for ceil_mode in [False, True]:
