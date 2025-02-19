@@ -105,7 +105,8 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
-
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
+NAVI4_ARCH = ("gfx1200", "gfx1201")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1752,6 +1753,19 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return wrapper
     if func:
         return dec_fn(func)
+    return dec_fn
+
+def skipIfRocmArch(arch: Tuple[str, ...]):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:  # noqa: F821
+                prop = torch.cuda.get_device_properties(0)
+                if prop.gcnArchName.split(":")[0] in arch:
+                    reason = f"skipIfRocm: test skipped on {arch}"
+                    raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
     return dec_fn
 
 def runOnRocm(fn):

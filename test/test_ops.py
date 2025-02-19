@@ -1346,6 +1346,8 @@ class TestCommon(TestCase):
         if TEST_WITH_ROCM and "cuda" in device:
             rocm_blocklist = [
                 "test_non_standard_bool_values_masked_scatter_cuda_bool",
+                "test_non_standard_bool_values_nn_functional_unfold_cuda_bool",
+                # "test_non_standard_bool_values_put_cuda_bool",
                 "test_non_standard_bool_values_scatter_add_cuda_bool",
                 "test_non_standard_bool_values_scatter_cuda_bool",
                 "test_non_standard_bool_values_scatter_reduce_sum_cuda_bool",

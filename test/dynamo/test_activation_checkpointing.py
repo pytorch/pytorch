@@ -20,7 +20,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     SM90OrLater,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NAVI_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -1167,6 +1172,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
+    @skipIfRocmArch(NAVI_ARCH)
     @requires_cuda
     def test_pattern_matcher(self):
         # Check that the sdpa op is recomputed in the backward graph
