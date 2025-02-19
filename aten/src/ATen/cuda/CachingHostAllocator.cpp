@@ -112,7 +112,9 @@ struct CUDACachingHostAllocatorImpl
       std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
-    event->record(stream, cudaEventRecordExternal);
+    cudaStreamCaptureStatus capture_status{cudaStreamCaptureStatusNone};
+    AT_CUDA_CHECK(cudaStreamIsCapturing(stream, &capture_status));
+    event->record(stream, capture_status == cudaStreamCaptureStatusNone ? cudaEventRecordDefault : cudaEventRecordExternal);
     events->push_back(std::move(event));
   }
 
