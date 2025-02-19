@@ -32,7 +32,7 @@ class RegistryItem:
 
 
 _TState = TypeVar("_TState", bound="_State", covariant=True)
-M = TypeVar("M", nn.Module, list[nn.Module])
+_M = TypeVar("_M", nn.Module, list[nn.Module])
 
 
 class _ContractFn(Protocol, Generic[_P, _T, _TState]):
@@ -46,8 +46,8 @@ class _ContractFn(Protocol, Generic[_P, _T, _TState]):
 def contract(
     state_cls: type[_TState] = _State,  # type: ignore[assignment]
 ) -> Callable[
-    [Callable[Concatenate[M, _P], M]],
-    _ContractFn[Concatenate[M, _P], M, _TState],
+    [Callable[Concatenate[_M, _P], _M]],
+    _ContractFn[Concatenate[_M, _P], _M, _TState],
 ]:
     r"""
     Decorate a function as a composable distributed API, where the first
@@ -92,14 +92,14 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[Concatenate[M, _P], M]
-    ) -> _ContractFn[Concatenate[M, _P], M, _TState]:
+        func: Callable[Concatenate[_M, _P], _M]
+    ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(
-            module: M,
+            module: _M,
             *args: _P.args,
             **kwargs: _P.kwargs,
-        ) -> M:
+        ) -> _M:
             inp_module = module
             modules: list[nn.Module]
             if isinstance(module, nn.Module):
