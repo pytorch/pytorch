@@ -517,14 +517,14 @@ class Conv2d(_ConvNd):
         kernel_size_ = _pair(kernel_size)
         stride_ = _pair(stride)
         padding_ = padding if isinstance(padding, str) else _pair(padding)
-        dilation_ = _pair(dilation)
+        self._dilation = _pair(dilation)
         super().__init__(
             in_channels,
             out_channels,
             kernel_size_,
             stride_,
             padding_,
-            dilation_,
+            self._dilation,
             False,
             _pair(0),
             groups,
@@ -533,6 +533,16 @@ class Conv2d(_ConvNd):
             **factory_kwargs,
         )
 
+    @property
+    def dilation(self):
+        # fallback for older serialised models
+        return getattr(self, "_dilation", self.__dict__.get("dilation", (1, 1)))
+
+    @dilation.setter
+    def dilation(self, value):
+        # ensures dilation is always a tuple
+        self._dilation = _pair(value)
+    
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
         if self.padding_mode != "zeros":
             return F.conv2d(
