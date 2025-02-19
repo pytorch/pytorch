@@ -13,10 +13,7 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import logging
-import math
-import operator
 import types
 from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
@@ -88,48 +85,6 @@ class OnnxDecompMeta:
                 self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
 
 
-def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
-    """Obtain the torch op from <namespace>::<op_name>[.<overload>]"""
-    # TODO(justinchuby): Handle arbitrary custom ops
-    namespace, opname_overload = qualified_name.split("::")
-    op_name, *maybe_overload = opname_overload.split(".", 1)
-    if namespace == "_operator":
-        # Builtin functions
-        return getattr(operator, op_name)
-    if namespace == "math":
-        return getattr(math, op_name)
-    if namespace == "torchvision":
-        if importlib.util.find_spec("torchvision") is None:
-            logger.warning("torchvision is not installed. Skipping %s", qualified_name)
-            return None
-    try:
-        op_packet = getattr(getattr(torch.ops, namespace), op_name)
-        if maybe_overload:
-            overload = maybe_overload[0]
-        elif "default" in op_packet._overload_names or "" in op_packet._overload_names:
-            # Has a default overload
-            overload = "default"
-        else:
-            logger.warning(
-                "'%s' does not have a 'default' overload. This could be an error in specifying the op name. Ignoring.",
-                qualified_name,
-                stacklevel=1,
-            )
-            return None
-
-        return getattr(op_packet, overload)  # type: ignore[call-overload]
-    except AttributeError:
-        if qualified_name.endswith("getitem"):
-            # This is a special case where we registered the function incorrectly,
-            # but for BC reasons (pt<=2.4) we need to keep it.
-            return None
-        logger.info("'%s' is not found in this version of PyTorch.", qualified_name)
-        return None
-    except Exception:
-        logger.exception("Failed to find torch op '%s'", qualified_name)
-        return None
-
-
 class ONNXRegistry:
     """Registry for ONNX functions.
 
@@ -159,31 +114,6 @@ class ONNXRegistry:
         registry = cls()
         for meta in _torchlib_registry.get_torchlib_ops():
             registry._register(meta.fx_target, meta)
-
-        # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
-        torchlib_ops = onnxscript_apis.get_torchlib_ops()
-
-        for torchlib_meta in torchlib_ops:
-            qualified_name = torchlib_meta.qualified_name
-            overload_func = torchlib_meta.function
-            try:
-                # NOTE: This is heavily guarded with try-except because we don't want
-                # to fail the entire registry population if one function fails.
-                target = _get_overload(qualified_name)
-                if target is None:
-                    continue
-
-                meta = OnnxDecompMeta(
-                    onnx_function=overload_func,
-                    fx_target=target,
-                    signature=None,
-                    is_custom=False,
-                    is_complex=torchlib_meta.is_complex,
-                )
-                registry._register(target, meta)
-            except Exception:
-                logger.exception("Failed to register '%s'. Skipped", qualified_name)
-                continue
 
         return registry
 

@@ -65,6 +65,7 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
     sorted_rename_mapping = dict(
         sorted(rename_mapping.items(), key=lambda item: len(item[0]), reverse=True)
     )
+
     for value in _all_values(model):
         if value.shape is None:
             continue
@@ -92,20 +93,10 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
 
 def add_torchlib_common_imports(model: ir.Model) -> None:
     """Hack to add torchlib common imports to the model."""
+    from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
 
-    try:
-        # TODO(justinchuby): Remove this hack and improved onnxscript
-        from onnxscript.function_libs.torch_lib.ops import common as common_ops
-
-        model.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
-        rank_func = ir.serde.deserialize_function(common_ops.Rank.to_function_proto())
-        is_scalar_func = ir.serde.deserialize_function(
-            common_ops.IsScalar.to_function_proto()
-        )
-        model.functions[rank_func.identifier()] = rank_func
-        model.functions[is_scalar_func.identifier()] = is_scalar_func
-    except Exception:
-        logger.exception("Failed to add torchlib common imports to the model.")
+    rank_func = ir.serde.deserialize_function(common_ops.Rank.to_function_proto())
+    model.functions[rank_func.identifier()] = rank_func
 
 
 def _maybe_set_opset_version(
