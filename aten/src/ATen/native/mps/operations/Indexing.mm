@@ -583,15 +583,16 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   dim = maybe_wrap_dim(dim, self.dim());
 
   // Checks
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector but dim = ", index.dim());
   TORCH_CHECK(!(self.dim() == 0 && num_indices != 1),
               "index_select(): Index to scalar can have only 1 value, got ",
               num_indices,
               " value(s)");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_select(): Expected dtype int32 or int64 for index");
+              "index_select(): Expected dtype int32 or int64 for index, got ", index.scalar_type());
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
-              "index_select(): self and output must have the same scalar type");
+              "index_select(): self and output must have the same scalar type: ",
+              self.scalar_type(), "!=", output.scalar_type());
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(output.dim() == 0 || index.size(-1) == output.size(dim),
               "index_select(): index and output must have the same size at `dim`th dimension, but got ",
