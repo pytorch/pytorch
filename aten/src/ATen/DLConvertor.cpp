@@ -67,6 +67,7 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Float8_e5m2fnuz:
     case ScalarType::Float8_e4m3fn:
     case ScalarType::Float8_e4m3fnuz:
+    case ScalarType::Float8_e8m0fnu:
       TORCH_CHECK(false, "float8 types are not supported by dlpack");
       break;
     case ScalarType::QInt8:
