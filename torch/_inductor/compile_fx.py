@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
+import dataclasses
 import enum
 import functools
 import io
@@ -8,10 +10,12 @@ import itertools
 import json
 import logging
 import os
+import queue
 import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
@@ -21,11 +25,21 @@ from typing import (
     ContextManager,
     Mapping,
     Optional,
+    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
+from typing_extensions import (
+    Never,
+    override,
+    ParamSpec,
+    Protocol,
+    Self,
+    TypedDict,
+    TypeGuard,
+    Unpack,
+)
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -66,8 +80,14 @@ from torch._inductor.codecache import (
     FxGraphCache,
     output_code_log,
 )
+from torch._inductor.compile_worker.subproc_pool import (
+    AnyPool,
+    SubprocKind,
+    SubprocPool,
+)
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
 from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
@@ -80,6 +100,7 @@ from torch._inductor.output_code import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
+    clear_inductor_caches,
     count_tangents,
     fresh_inductor_cache,
     InputType,
@@ -127,6 +148,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Generator, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
@@ -157,21 +179,20 @@ if TYPE_CHECKING:
     )
 
 
-# For testing - use the serde FxCompile scheme to debug serialization and
-# deserialization of GraphMoule and CompiledFxGraph.
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
     # deserialization of GraphMoule and CompiledFxGraph.
     SERIALIZE = 1
+    # Compile using a subprocess instead of in-process.
+    SUBPROCESS = 2
 
 
 def _fx_compile_mode_default() -> FxCompileMode:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
-    NORMAL = FxCompileMode.NORMAL
     if value is None:
-        return NORMAL
+        return FxCompileMode.NORMAL
     try:
         value = value.upper()
         return FxCompileMode[value]
@@ -191,7 +212,6 @@ def _fx_compile_mode_default() -> FxCompileMode:
 
 
 fx_compile_mode = _fx_compile_mode_default()
-
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1215,6 +1235,72 @@ def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
 
 
 @dataclass
+class _VirtualizedSerializer:
+    """
+    This handles the data for serializing Virtualized.
+    """
+
+    # The values here get serialized. We don't grab everything because some of
+    # the fields can't be serialized.
+    aot_compilation: Any = None
+    choices: Any = None
+    local_buffer_context: Any = None
+    ops: Any = None
+    kernel: Any = None
+    current_node: Any = None
+
+    @classmethod
+    def serialize(cls) -> _VirtualizedSerializer:
+        """
+        Turn the current state of torch._inductor.virtualized.V into a
+        serializable structure.
+        """
+        kwargs = {}
+        for f in dataclasses.fields(cls):
+            kwargs[f.name] = getattr(V, f.name)
+        return _VirtualizedSerializer(**kwargs)
+
+    def patch(self) -> _VirtualizedSerializerContextManager:
+        """
+        Returns a context manager which patches the saved values into the
+        current environment. While patched, any value not listed above will be
+        poisoned so that reads will raise an error.
+        """
+        return _VirtualizedSerializerContextManager(self)
+
+
+class _VirtualizedSerializerContextManager(contextlib.ExitStack):
+    """
+    Helper for _VirtualizedSerializer.patch()
+    """
+
+    def __init__(self, virtualized: _VirtualizedSerializer) -> None:
+        super().__init__()
+        self.virtualized = virtualized
+
+    @override
+    def __enter__(self) -> Self:
+        super().__enter__()
+
+        for set_name in dir(V):
+            if not set_name.startswith("set_"):
+                continue
+            name = set_name[4:]
+            if name.endswith("_handler"):
+                name = name[:-8]
+            set_handler = getattr(V, set_name)
+            if hasattr(self.virtualized, name):
+                value = getattr(self.virtualized, name)
+            else:
+                # poison any values that we don't serialize so that any
+                # unset accesses are caught.
+                value = torch._inductor.virtualized._PoisonedVirtual
+            self.enter_context(set_handler(value))
+
+        return self
+
+
+@dataclass
 class _WireProtocolInput:
     """
     For _SerializedFxCompile - encapsulates all the data being transferred
@@ -1225,7 +1311,13 @@ class _WireProtocolInput:
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
     graph_kwargs: _CompileFxKwargs
-    # TODO: Add additional state to transfer to the child.
+    tracing_context: Optional[torch._guards.TracingContext]
+    config: dict[str, object]
+    virtualized: _VirtualizedSerializer
+    deterministic_guard_for_testing: Optional[
+        torch.testing._internal.common_utils.DeterministicGuard
+    ]
+    logger_state: _LoggerState
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -1261,6 +1353,9 @@ class _WireProtocolOutput:
     """
 
     graph: OutputCode
+    metrics: CachedMetricsDeltas
+    logs: list[logging.LogRecord]
+    warning_replay: Optional[list[warnings.WarningMessage]]
 
     def serialize(self) -> _WireProtocolPickledOutput:
         """
@@ -1292,6 +1387,119 @@ class _WireProtocolPickledOutput:
         return result
 
 
+class _LoggerState:
+    """
+    This class is for tracking logging that happens during an out-of-process
+    compile so we can "replay" those messages when the compile is done. Used as
+    a context manager which returns the captured logs (object).
+    """
+
+    loggers: dict[str, int]
+    # The actual log capturing mechanism - this should be None when we're not
+    # actively capturing logs.
+    captured_logs: Optional[_CapturedLogs] = None
+
+    def __init__(self) -> None:
+        # Mapping from logger name to level.
+        self.loggers = {}
+
+        def filter(
+            logger: Union[logging.Logger, logging.PlaceHolder]
+        ) -> TypeGuard[logging.Logger]:
+            if not isinstance(logger, logging.Logger):
+                # Assume that Placeholders propagate
+                return False
+            # We only want to track torch._inductor logging
+            if not logger.name.startswith("torch._inductor"):
+                return False
+            # If this logger propagates then assume we'll track its parent
+            if logger.propagate:
+                return False
+            return True
+
+        root = logging.getLogger("torch._inductor")
+        if sys.version_info < (3, 12):
+            # logging.getChildren() doesn't exist until 3.12
+            logging._acquireLock()  # type: ignore[attr-defined]
+            try:
+                for logger in root.manager.loggerDict.values():
+                    if filter(logger):
+                        self.loggers[logger.name] = logger.level
+            finally:
+                logging._releaseLock()  # type: ignore[attr-defined]
+        else:
+            q = [root]
+            while q:
+                logger = q.pop()
+                if filter(logger):
+                    self.loggers[logger.name] = logger.level
+                q.extend(logger.getChildren())
+
+    def __enter__(self) -> _CapturedLogs:
+        assert self.captured_logs is None
+        self.captured_logs = _CapturedLogs(self)
+        self.captured_logs.apply()
+        return self.captured_logs
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[types.TracebackType],
+    ) -> None:
+        assert self.captured_logs is not None
+        self.captured_logs.remove()
+
+
+class _CapturedLogs:
+    """
+    Helper for _LoggerState - this class actually attaches to the logger in
+    the child process and grabs the log messages themselves.
+    """
+
+    state: _LoggerState
+    queue: queue.Queue[logging.LogRecord]
+    handlers: Optional[dict[str, logging.Handler]]
+
+    def __init__(self, state: _LoggerState) -> None:
+        self.state = state
+        # A queue of the log entries
+        # TODO: For memory purposes should we log to a file and then respond with that?
+        self.queue = queue.Queue(-1)
+        # Mapping from name to handler (only valid when applied)
+        self.handlers = None
+
+    def finish(self) -> list[logging.LogRecord]:
+        assert self.handlers is None
+        logs = []
+        try:
+            while True:
+                logs.append(self.queue.get_nowait())
+        except queue.Empty:
+            pass
+        return logs
+
+    def remove(self) -> None:
+        assert self.handlers is not None
+        handlers, self.handlers = self.handlers, None
+        for name, handler in handlers.items():
+            logger = logging.getLogger(name)
+            logger.removeHandler(handler)
+
+    def apply(self) -> None:
+        from logging.handlers import QueueHandler
+
+        assert self.handlers is None
+        self.handlers = {}
+        for name, level in self.state.loggers.items():
+            logger = logging.getLogger(name)
+            handler = QueueHandler(self.queue)
+            self.handlers[name] = handler
+            logger.addHandler(handler)
+            if level != logging.NOTSET:
+                logger.setLevel(level)
+
+
 class _SerializedFxCompile(FxCompile):
     """
     This is used to represent an FxCompile which occurs across a serialized
@@ -1306,8 +1514,34 @@ class _SerializedFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        # _context = torch._guards.TracingContext.try_get()
+        def fallback() -> OutputCode:
+            return _InProcessFxCompile().codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+
+        try:
+            # _check_for_hop raises BypassFxGraphCache when it detects something
+            # we can't cache (or serialize)
+            FxGraphCache._check_for_hop(gm)
+        except BypassFxGraphCache as e:
+            log.debug("Skipping %s compile: %s", type(self), e)
+            return fallback()
+
+        context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
+        logger_state = _LoggerState()
+
+        # If we're running tests then grab the DeterministicGuard (don't want to
+        # import this if it isn't already imported because it has side-effects)
+        deterministic_guard_for_testing: Optional[
+            torch.testing._internal.common_utils.DeterministicGuard
+        ] = None
+        if testing := getattr(torch, "testing", None):
+            if internal := getattr(testing, "_internal", None):
+                if common_utils := internal.common_utils:
+                    deterministic_guard_for_testing = (
+                        common_utils.DeterministicGuard._current_state()
+                    )
 
         try:
             input = _WireProtocolInput(
@@ -1315,6 +1549,11 @@ class _SerializedFxCompile(FxCompile):
                 example_inputs,
                 inputs_to_check,
                 graph_kwargs,
+                context,
+                config.save_config_portable(),
+                _VirtualizedSerializer.serialize(),
+                deterministic_guard_for_testing,
+                logger_state,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
@@ -1323,10 +1562,7 @@ class _SerializedFxCompile(FxCompile):
             # TODO: scuba record about not being able to do this?
             log.debug("Unable to pickle input graph or example inputs", exc_info=True)
 
-            # Fallback to in-process
-            return _InProcessFxCompile().codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
-            )
+            return fallback()
 
         output = self._send_to_child(input).deserialize(constants)
 
@@ -1354,11 +1590,16 @@ class _SerializedFxCompile(FxCompile):
         pickled_input: _WireProtocolPickledInput,
         extra_env: Optional[Mapping[str, str]] = None,
     ) -> _WireProtocolPickledOutput:
+        metrics = CachedMetricsHelper()
+
         with contextlib.ExitStack() as stack:
             if extra_env is not None:
                 import unittest
 
                 stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
+
+            # Save warnings to "replay" in the parent
+            warning_replay = stack.enter_context(warnings.catch_warnings(record=True))
 
             # TODO: Should we split the input into multiple sections where each
             # section sets up state for the previous section? (i.e. a Config section
@@ -1366,6 +1607,12 @@ class _SerializedFxCompile(FxCompile):
             # we decode and apply, etc)
             input = pickled_input.deserialize()
 
+            stack.enter_context(input.virtualized.patch())
+            stack.enter_context(config.patch(input.config))
+            captured_logs = stack.enter_context(input.logger_state)
+            if input.deterministic_guard_for_testing:
+                stack.enter_context(input.deterministic_guard_for_testing)
+            stack.enter_context(torch._guards.tracing(input.tracing_context))
             stack.enter_context(DebugContext())
 
             output_graph = _InProcessFxCompile().codegen_and_compile(
@@ -1375,8 +1622,10 @@ class _SerializedFxCompile(FxCompile):
                 input.graph_kwargs,
             )
 
+        logs = captured_logs.finish()
+
         return _WireProtocolOutput(
-            output_graph,
+            output_graph, metrics.get_deltas(), logs, warning_replay
         ).serialize()
 
 
@@ -1392,6 +1641,174 @@ class _DebugSerdeFxCompile(_SerializedFxCompile):
         return self._run_in_child(pickled_input)
 
 
+class _OutOfProcessFxCompile(_SerializedFxCompile):
+    """
+    Represents an FxCompile which is run outside the current process (in
+    either a subprocess or possibly even a separate machine).
+    """
+
+    def _postprocess(self, output: _WireProtocolOutput) -> None:
+        # Since our metrics were gathered in a subprocess make sure to add them
+        # here.
+        CachedMetricsHelper.apply_deltas(output.metrics)
+
+        # This is used by tests to check the output for specific details.  For
+        # remote things (subproc and RE) we need to do the `save_output_code`
+        # here since it didn't happen earlier in-process. In the future if this
+        # doesn't have "source_code" (it's a CompiledAOTI, for example) and we
+        # need it we'll have to grab it and serialize it separately from the
+        # child.
+        if GraphLowering.save_output_code is not None:
+            GraphLowering.save_output_code(output.graph.source_code)  # type: ignore[attr-defined]
+
+        # And forward our collected logs. The cache is cleared when the outer
+        # function exits.
+        @functools.lru_cache(None)
+        def getLogger(name: str) -> logging.Logger:
+            return logging.getLogger(name)
+
+        if output.warning_replay:
+            for w in output.warning_replay:
+                warnings.warn_explicit(
+                    message=w.message,
+                    category=w.category,
+                    filename=w.filename,
+                    lineno=w.lineno,
+                    source=w.source,
+                )
+
+        for record in output.logs:
+            logger = getLogger(record.name)
+            logger.handle(record)
+
+
+_PostCompileData = namedtuple(
+    "_PostCompileData", ("example_inputs", "cudagraphs", "constants")
+)
+
+
+class _SubprocessFxCompile(_OutOfProcessFxCompile):
+    @override
+    def _send_to_child(
+        self, input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        # TODO: Do we need to copy across some kind of logging IDs? (ChromiumEventLogger)
+
+        pool = self.process_pool()
+
+        # TODO: This is probably the wrong thing to do long-term - but for now
+        # let's share the cache so we can identify tests broken by this later.
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+        f = pool.submit(_SubprocessFxCompile._run_in_child_subprocess, input, extra_env)
+
+        # For debugging: If we want to print status updates...
+        # last = time.time()
+        # while not f.done():
+        #     print("tick...")
+        #     time.sleep(0.125)
+        #     now = time.time()
+        #     if now - last > 1:
+        #         last = now
+
+        output = f.result()
+
+        return output
+
+    @staticmethod
+    @functools.cache
+    def process_pool() -> AnyPool:
+        pool = SubprocPool(
+            # TODO: Consider raising this limit if we start using async w/
+            # subprocess and want to compile multiple graphs in parallel.
+            1,
+            kind=SubprocKind.SPAWN,
+        )
+
+        atexit.register(pool.shutdown)
+
+        return pool
+
+    @classmethod
+    def _run_in_child_subprocess(
+        cls,
+        pickled_input: _WireProtocolPickledInput,
+        extra_env: Optional[Mapping[str, str]],
+    ) -> _WireProtocolPickledOutput:
+        # TODO: In subprocess mode we need to clear the inductor caches.
+        # The problem:
+        #   1. We compile in worker A which fills stuff in tmpdir
+        #   2. parent clears inductor caches which deletes tmpdirs and tells
+        #      cpp_prefix_path() to clear its LRU cache
+        #   3. We compile a second time in subproc A - but since we never told
+        #      cpp_prefix_path() in worker A to clear its LRU it thinks the
+        #      tmpdir still exists and fails to compile.
+        #
+        # TODO: We probably should be using a separate tmpdir in the worker
+        # anyway... but we should probably still respect clear_inductor_caches()
+        # in the parent... maybe?
+        #
+        # TODO: We could be less aggressive by keeping a clock which gets
+        # incremented when we clear the cache, send the clock to the worker and
+        # only clear caches if the clock changed since last time.
+        #
+        clear_inductor_caches()
+        torch._inductor.metrics.reset()
+
+        # TODO: turn off config.fx_graph_async_compile
+
+        result = cls._run_in_child(pickled_input, extra_env)
+        return result
+
+
+# For debugging - create a _FxCompile which writes the serialized data to a file
+# and then exits.
+#
+# TODO: make this a FxCompileMode value?
+#
+# The "child runner" should look something like this:
+#
+#     import torch
+#     from torch._inductor import compile_fx
+#     idx = 0
+#     with open(f"/tmp/pytorch_compile_fx_tmp_input_{idx}.bin", "rb") as f:
+#         input = compile_fx._WireProtocolPickledInput(f.read())
+#     result = compile_fx._SubprocessFxCompile._run_in_child(input)
+#     with open(f"/tmp/pytorch_compile_fx_tmp_output_{idx}.bin", "wb") as f:
+#         f.write(result.value)
+#
+class _DebugFileFxCompile(_OutOfProcessFxCompile):
+    file_index = 0
+
+    @override
+    def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        idx = _DebugFileFxCompile.file_index
+        _DebugFileFxCompile.file_index += 1
+
+        name = f"/tmp/aorenste/pytorch_compile_fx_tmp_input_{idx}.bin"
+        with open(name, "wb") as f:
+            f.write(pickled_input.value)
+        print(f"Wrote to {name}")
+
+        if False:
+            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_actual_{idx}.bin"
+            actual = self._run_in_child(pickled_input)
+            with open(name, "wb") as f:
+                f.write(actual.value)
+            return actual
+        elif False:
+            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
+            with open(name, "rb") as f:
+                result = _WireProtocolPickledOutput(f.read())
+                print(f"Read from {name}")
+            return result
+        else:
+            os._exit(-1)
+
+
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -1401,12 +1818,13 @@ def fx_codegen_and_compile(
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     scheme: FxCompile
+
     if fx_compile_mode == FxCompileMode.NORMAL:
         scheme = _InProcessFxCompile()
     elif fx_compile_mode == FxCompileMode.SERIALIZE:
         scheme = _DebugSerdeFxCompile()
-    else:
-        raise NotImplementedError
+    elif fx_compile_mode == FxCompileMode.SUBPROCESS:
+        scheme = _SubprocessFxCompile()
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
