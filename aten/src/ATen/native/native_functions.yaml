@@ -3896,6 +3896,7 @@
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
+    CPU: mkldnn_max_pool2d
     MkldnnCPU: mkldnn_max_pool2d
   autogen: mkldnn_max_pool2d.out
 
@@ -3906,6 +3907,7 @@
 
 - func: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
+    CPU: mkldnn_max_pool3d
     MkldnnCPU: mkldnn_max_pool3d
   autogen: mkldnn_max_pool3d.out
 
