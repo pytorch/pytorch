@@ -1417,13 +1417,14 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     @contextmanager
-    def no_sync(self):
+    def no_sync(self, enabled: bool = True):
         r"""
         Context manager to disable gradient synchronizations across DDP processes.
 
         Within this context, gradients will be accumulated on module
         variables, which will later be synchronized in the first
         forward-backward pass exiting the context.
+        When calling with enabled=False, gradients will be synchronized.
 
         Example::
 
@@ -1433,13 +1434,16 @@ class DistributedDataParallel(Module, Joinable):
             >>>     for input in inputs:
             >>>         ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
+            >>> with ddp.no_sync(enabled=False):
+            >>>     ddp(another_input).backward() # synchronize grads
 
         .. warning::
             The forward pass should be included inside the context manager, or
             else gradients will still be synchronized.
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
-        self.require_backward_grad_sync = False
+        if enabled:
+            self.require_backward_grad_sync = False
         try:
             yield
         finally:
