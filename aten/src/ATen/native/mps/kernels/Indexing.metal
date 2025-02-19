@@ -320,18 +320,18 @@ index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
 
 template <typename T>
 kernel void masked_fill_scalar(
-    device T* input_data,
-    constant bool* mask_data,
+    device T* input,
+    constant bool* mask,
     constant T& val,
     constant long* sizes,
     constant long* input_strides,
     constant long* mask_strides,
     device uint& ndim,
     uint thread_index [[thread_position_in_grid]]) {
-  ConstStridedTensor<bool> mask(mask_data, sizes, mask_strides, ndim);
-  if (mask[thread_index]) {
-    StridedTensor<T> input(input_data, sizes, input_strides, ndim);
-    input[thread_index] = val;
+  long pos[max_ndim];
+  pos_from_thread_index(thread_index, pos, sizes, ndim);
+  if (mask[offset_from_coord(pos, mask_strides, ndim)]) {
+    input[offset_from_coord(pos, input_strides, ndim)] = val;
   }
 }
 
