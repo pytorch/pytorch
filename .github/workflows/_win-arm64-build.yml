@@ -88,7 +88,7 @@ jobs:
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_sscache
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Get workflow job id
