@@ -11,10 +11,8 @@
 
 #include <functional>
 #include <iosfwd>
-#include <map>
 #include <memory>
 #include <string>
-#include <type_traits>
 
 namespace torch::nn {
 
@@ -538,6 +536,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   }
 
   virtual std::vector<AnyValue> _forward_populate_default_args(
+      // NOLINTNEXTLINE(*rvalue-reference*)
       std::vector<AnyValue>&& arguments) {
     TORCH_CHECK(
         false,
@@ -682,6 +681,7 @@ std::shared_ptr<ModuleType> Module::replace_module(
 }
 
 template <typename... Ts>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 void Module::to_impl(Ts&&... ts) {
   // First call `to()` on every child module.
   for (auto& child : children_) {
@@ -689,11 +689,11 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : named_parameters(/*recurse=*/false)) {
-    parameter->set_data(autograd::Variable(*parameter).to(ts...));
+    parameter->set_data(parameter->to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : named_buffers(/*recurse=*/false)) {
-    buffer->set_data(autograd::Variable(*buffer).to(ts...));
+    buffer->set_data(buffer->to(ts...));
   }
 }
 
