@@ -48,7 +48,7 @@ class TestCustomOperators(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"unsupported operator: .* you may need to `import nonexistent`",
+            r"(?s)unsupported operator: .* you may need to `import nonexistent`",
         ):
             f(x)
 

@@ -537,7 +537,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             unimplemented_v2(
                 gb_type="Should not compile partial graph (data-dependent jump)",
                 context="",
-                explanation="Dynamo has determined when encountering a data-dependent jump that it should not compile the partial graph.",
+                explanation="Dynamo has determined when encountering a data-dependent "
+                "jump that it should not compile the partial graph.",
                 hints=[],
             )
         # compile a partial subgraph prefix then jump into user code
@@ -1183,7 +1184,9 @@ class InstructionTranslatorBase(
                 if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
-                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                        + torch.fx.GraphModule(
+                            self.output.nn_modules, self.output.graph
+                        ).print_readable(
                             print_output=False, include_stride=True, include_device=True
                         ),
                         file=sys.stderr,
@@ -2109,7 +2112,8 @@ class InstructionTranslatorBase(
             unimplemented_v2(
                 gb_type="Should not compile partial graph (STORE_ATTR)",
                 context="",
-                explanation="Dynamo has determined when encountering an unsupported STORE_ATTR instruction that it should not compile the partial graph.",
+                explanation="Dynamo has determined when encountering an unsupported "
+                "STORE_ATTR instruction that it should not compile the partial graph.",
                 hints=[],
             )
         self.output.compile_subgraph(
@@ -3445,7 +3449,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented_v2(
                 gb_type="Inline attempt with __self__",
                 context=str(func),
-                explanation="Attempted to inline a function with the `__self__` attribute. Dynamo is expected to decompose method calls into function calls with a `self` argument.",
+                explanation="Attempted to inline a function with the `__self__` attribute. "
+                "Dynamo is expected to decompose method calls into function calls with a `self` argument.",
                 hints=[],
             )
 
@@ -3719,7 +3724,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             gb_type="Graph break in inlined function",
             context="",
             explanation="Graph breaks in an inlined call are not supported.",
-            hints="",
+            hints=[],
         )
 
     def RETURN_VALUE(self, inst):

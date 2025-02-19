@@ -297,7 +297,14 @@ class PyCodegen:
                     gb_type="Reconstruction failure",
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for variable {value}.",
-                    hints=[],
+                    hints=[
+                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                        "If this reconstruction graph break occurs while handling another graph break, then resolve the "
+                        "initial graph break.",
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that many objects that don't have"
+                        "reconstruction rules are fundamentally unreconstructable (e.g. built-in iterator objects like `map`, `zip`, etc.).",
+                    ],
                 )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
