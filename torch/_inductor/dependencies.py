@@ -2,7 +2,6 @@ import abc
 import dataclasses
 import itertools
 import logging
-from os import replace
 import re
 from collections.abc import Iterable, Sequence
 from typing import Any, Callable, Optional, TypeVar, Union
@@ -698,11 +697,15 @@ def extract_loop_body_with_args(
             for free_symbol in read.index.free_symbols:
                 if free_symbol in repl_reverse:
                     for node in fn.root_block.graph.nodes:
-                        if node.name == f"set_{repl_reverse[free_symbol].name}" and len(node.args) == 1 and node.args[0].name.startswith("load"):
+                        if (
+                            node.name == f"set_{repl_reverse[free_symbol].name}"
+                            and len(node.args) == 1
+                            and node.args[0].name.startswith("load")
+                        ):
                             # not sure if this is the correct way to update deps
                             read_new = read.set_indirect_broadcast_to_True()
                             replacement_mem_dep[read] = read_new
-    for read,read_new in replacement_mem_dep.items():
+    for read, read_new in replacement_mem_dep.items():
         inner._reads.remove(read)
         inner._reads.add(read_new)
     return inner
