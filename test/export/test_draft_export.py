@@ -278,7 +278,7 @@ class TestDraftExport(TestCase):
 
                 return z[:a]
 
-        _, report = draft_export(
+        ep, report = draft_export(
             M(),
             (torch.tensor(6), torch.randn(5)),
             dynamic_shapes={"x": None, "y": {0: Dim.DYNAMIC}},
@@ -287,6 +287,19 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
+        # check data-dependent asserts
+        assert_scalar_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.target == torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_scalar_nodes), 5)
+        # unbacked bindings
+        unbacked_binding_symbols = set()
+        for node in ep.graph.nodes:
+            if bindings := node.meta.get("unbacked_bindings"):
+                unbacked_binding_symbols.update(bindings.keys())
+        self.assertEqual(len(unbacked_binding_symbols), 1)
 
     def test_offsets(self):
         class M(torch.nn.Module):
