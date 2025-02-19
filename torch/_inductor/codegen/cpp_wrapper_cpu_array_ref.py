@@ -833,117 +833,38 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         writeline: Callable[..., None],
         dtype=None,
     ) -> str:
-        dim = str(len(size))
-        original_offset = offset
-        offset = self.codegen_sizevar(offset)
-        call_strs = []
-        final_tmp_name = None
+        """Returns a newly-created, temporary RAII tensor handle containing the
+        reinterpreted tensor data.  Callers of this function are responsible for saving
+        the handle if persistent access is needed."""
 
-        def create_reinterpret_call() -> tuple[str, str]:
-            tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
-            args = [
-                f"{data.get_name()}",
-                dim,
-                self.codegen_int_array_var(
-                    self.codegen_shape_tuple(size),
-                    writeline,
-                    known_statically=self.is_statically_known_list_of_ints(size),
-                    graph=self.get_codegened_graph(),
-                ),
-                self.codegen_int_array_var(
-                    self.codegen_shape_tuple(stride),
-                    writeline,
-                    known_statically=self.is_statically_known_list_of_ints(stride),
-                    graph=self.get_codegened_graph(),
-                ),
-                offset,
+        def create_new_tensor_handle() -> tuple[str, list[str]]:
+            # Calling reset() on ArrayRefTensor does nothing, since the array is
+            # const-allocated on the stack.  Thus, it's safe to return a reference to
+            # the original array.
+            if (name := data.get_name()) in self.stack_allocated_buffers:
+                return name, []
+
+            tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
             ]
-            call_str = (
-                f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
-            )
-            return tmp_name, call_str
-
-        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
-            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
-            dtype_name = str(dtype).split(".")[-1]
-            device_name = data.layout.device.type
-            get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
-            dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
-            call_strs.append(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
-                f"({reinterpret_call}, {get_dtype_function}(), &{tmp_AtenTensorHandle}));"
-            )
-            tmp_RAIIAtenTensorHandle = (
-                f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}_handle"
-            )
-            call_strs.append(
-                f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
-            )
-            return tmp_RAIIAtenTensorHandle, call_strs
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
             and stride == data.layout.stride
-            and original_offset == data.layout.offset
+            and offset == data.layout.offset
+            and (dtype is None or dtype == data.dtype)
         ):
-            # pure dtypeview
-            if dtype is not None and dtype != data.dtype:
-                tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
-                call_strs.extend(tmp_call_strs)
-                final_tmp_name = tmp_output_name
-            else:
-                return data.get_name()
-        else:
-            # firstly create reinterpretview
-            final_tmp_name, reinterpret_call = create_reinterpret_call()
-            call_strs.append(reinterpret_call)
+            final_tensor_str, call_strs = create_new_tensor_handle()
+            for line in call_strs:
+                writeline(line)
+            return final_tensor_str
 
-            if dtype is not None and dtype != data.dtype:
-                # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
-                call_strs.extend(tmp_call_strs)
-            else:
-                # No need to wrap with RAIIAtenTensorHandle when using stack allocation.
-                call_strs.append(
-                    f"auto wrap_with_raii_handle_if_needed_{final_tmp_name}"
-                    f" = wrap_with_raii_handle_if_needed({final_tmp_name});"
-                )
-                final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
-
-        for line in call_strs:
-            writeline(line)
-
-        # NB, the return handle here represents a temporary tensor, which will be automatically
-        # released.
-        # Here's a sample usage in the cpp wrapper code:
-        # ```
-        # aoti_torch_addmm_out(
-        #     buf1,
-        #     arg1_1,
-        #     RAIIAtenTensorHandle(tmp_tensor_handle_0),
-        #     buf0,
-        #     1L,
-        #     1L));
-        # ```
-        # RAIIAtenTensorHandle(tmp_tensor_handle_0) will be released after the call to addmm_out.
-        # This could be problematic when it's used in a different pattern, for example:
-        # ````
-        # AtenTensorHandle tensor_args[] = {RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6};
-        # aoti_torch_proxy_executor_call_function(..., tensor_args);
-        # ````
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) will be invalid when it's used in the latter
-        # kernel call.
-        #
-        # This is solved by updating the proxy_executor invocation to
-        # ```
-        # aoti_torch_proxy_executor_call_function(...,
-        #     std::vector<AtenTensorHandle>{
-        #         RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6
-        #     }.data()
-        # );
-        # ```
-        return final_tmp_name
+        return super().codegen_reinterpret_view(
+            data, size, stride, offset, writeline, dtype
+        )
 
     def val_to_arg_str(self, val, type_=None) -> str:
         if (
