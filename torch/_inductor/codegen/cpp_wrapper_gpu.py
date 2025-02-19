@@ -25,6 +25,7 @@ from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
+
     from ..graph import GraphLowering
 
 

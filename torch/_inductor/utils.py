@@ -21,7 +21,7 @@ import tempfile
 import textwrap
 import time
 import unittest
-from collections.abc import Iterator, Mapping, MutableMapping
+from collections.abc import Collection, Iterator, Mapping, MutableMapping, MutableSet
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -37,7 +37,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from collections.abc import Collection, MutableSet
 from typing_extensions import (
     Concatenate,
     dataclass_transform,

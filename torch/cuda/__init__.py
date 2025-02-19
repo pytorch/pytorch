@@ -85,7 +85,7 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
-                    self.paths: List[str] = paths
+                    self.paths: list[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any
