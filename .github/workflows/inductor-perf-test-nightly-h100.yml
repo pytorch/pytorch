@@ -1,7 +1,6 @@
 name: inductor-perf-nightly-h100
 
 on:
-  pull_request:
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
