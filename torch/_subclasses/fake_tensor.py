@@ -1928,9 +1928,11 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env:
             pending_unbacked = list(self.shape_env.pending_fresh_unbacked_symbols)
 
-        def _clear_pending_unbacked():
-            self.shape_env.pending_fresh_unbacked_symbols = list(
-                set(self.shape_env.pending_fresh_unbacked_symbols).difference(pending_unbacked)
+        def _clear_pending_unbacked() -> None:
+            self.shape_env.pending_fresh_unbacked_symbols = list(  # type: ignore[union-attr]
+                set(self.shape_env.pending_fresh_unbacked_symbols).difference(  # type: ignore[union-attr]
+                    pending_unbacked  # type: ignore[arg-type]
+                )
             )
 
         fake_paths_leaves, fake_spec = pytree.tree_flatten_with_path(fake_out)
@@ -1968,13 +1970,17 @@ class FakeTensorMode(TorchDispatchMode):
 
         # if no errors raised, run cross checks on fake/real tensors,
         # optionally overriding individual fake tensors, if individual meta kernel output is incorrect.
-        fake_leaves, overrides = zip(*[
-            self._maybe_infer_fake(func, _fake_path, _fake_out, _real_out)
-            for (_fake_path, _fake_out), _real_out in zip(
-                fake_paths_leaves, real_leaves
-            )
-        ])
-        if any(overrides) and pending_unbacked:  # only keep new pending unbacked symbols
+        fake_leaves, overrides = zip(
+            *[
+                self._maybe_infer_fake(func, _fake_path, _fake_out, _real_out)
+                for (_fake_path, _fake_out), _real_out in zip(
+                    fake_paths_leaves, real_leaves
+                )
+            ]
+        )
+        if (
+            any(overrides) and pending_unbacked
+        ):  # only keep new pending unbacked symbols
             _clear_pending_unbacked()
         return pytree.tree_unflatten(fake_leaves, fake_spec)
 
