@@ -101,13 +101,13 @@ inline void checkInBoundsForStorage(
   // It's ok to always evaluate to False for this early return for SymInts because
   // (1) maybe_convert_symint below only installs guard for int64_t case
   // (2) we check for this condition in the TORCH_MAYBE_SYM_CHECK below
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(storage_size_bytes == 0)) {
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(storage_size_bytes, 0))) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
   TORCH_MAYBE_SYM_CHECK(
-      sym_eq(storage_size_bytes, 0) | sym_le(storage_size_plus_offset_bytes, new_storage_size_bytes),
+      sym_eq(storage_size_bytes, 0) || sym_le(storage_size_plus_offset_bytes, new_storage_size_bytes),
       "setStorage: sizes ",
       size,
       ", strides ",
