@@ -1,4 +1,22 @@
 # mypy: allow-untyped-defs
+
+"""
+Device abstraction layer for TorchDynamo and Inductor backends.
+
+This module provides a unified interface for different hardware backends (CUDA, XPU,
+CPU, MPS) through a common device interface. Key components include:
+
+- DeviceInterface: Base class defining the common API for all device types
+- Device-specific implementations: CudaInterface, XpuInterface, CpuInterface, MpsInterface
+- Device registration system for managing available backends
+- Worker APIs for multi-processing scenarios
+- Stream and event management across different devices
+- Device property caching for worker processes
+
+The abstraction layer enables device-agnostic code in TorchDynamo while allowing
+specialized implementations for each hardware backend's unique features.
+"""
+
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass

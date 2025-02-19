@@ -3485,6 +3485,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
 
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
+    torch._dynamo.reset()
     runner.args = args
 
     args.filter = args.filter or [r"."]
@@ -3563,15 +3564,6 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
-            "RobertaForQuestionAnswering",
-            "nvidia_deeprecommender",
-            "volo_d1_224",
-        }:
-            # These seem unhappy with numerics of larger cuBLASLt workspace
-            # sizes following #145130 (due to enabling split-k?)
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
