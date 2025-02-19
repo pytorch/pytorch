@@ -662,7 +662,7 @@ class BuiltinVariable(VariableTracker):
                         ),
                         (
                             (variables.ExceptionVariable, variables.ExceptionVariable),
-                            lambda tx, l, r: ConstantVariable(op(l, r))
+                            lambda tx, l, r: ConstantVariable(op(l, r)),
                         ),
                     ]
                 )
