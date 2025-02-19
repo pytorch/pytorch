@@ -12543,12 +12543,14 @@ class CommonTemplate:
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
-    
+    @config.patch(implicit_fallbacks=True)
     def test_slice_overflow(self):
         # https://github.com/pytorch/pytorch/issues/147071
         def f(input):
-            var_17 = torch.slice_copy(input, dim=0, start=449, end=None, step=9223372036854775807)
-            return torch.reciprocal(var_17)
+            var = torch.slice_copy(
+                input, dim=0, start=449, end=None, step=9223372036854775807
+            )
+            return torch.reciprocal(var)
 
         input = torch.randn((875,))
         self.assertEqual(torch.compile(f)(input), f(input))
@@ -12708,8 +12710,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 expected_divisible[2] = expected_divisible.pop(1)
             elif config.triton.cooperative_reductions:
                 self.assertEqual(len(kernels), 1)
+                # one kernel, with extra workspace/semaphore args
                 expected_divisible = {
-                    # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
                 }
             else:
