@@ -769,20 +769,21 @@ class TestMkldnn(TestCase):
                     ceil_mode=ceil_mode,
                 )
 
-                if lowp_support[dtype]():
+                with torch.backends.mkldnn.flags(enabled=True):
                     if test_plain:
                         y = max_pool(input)
                         y_lowp = max_pool(x_lowp).to(dtype=torch.float32)
                     else:
-                        y = max_pool(input.to_mkldnn()).to_dense()
-                        y_lowp = max_pool(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                        if lowp_support[dtype]():
+                            y = max_pool(input.to_mkldnn()).to_dense()
+                            y_lowp = max_pool(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                        else:
+                            self.assertRaisesRegex(
+                                RuntimeError, msg[dtype], lambda: max_pool(x_lowp.to_mkldnn())
+                            )
                     self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
-                elif not test_plain:
-                    self.assertRaisesRegex(
-                        RuntimeError, msg[dtype], lambda: max_pool(x_lowp.to_mkldnn())
-                    )
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.float16)
     def test_max_pool2d_lowp(self, dtype):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -791,7 +792,7 @@ class TestMkldnn(TestCase):
             self._test_max_pool_lowp_base(dim=2, input=x, dtype=dtype)
             self._test_max_pool_lowp_base(dim=2, input=x, dtype=dtype, test_plain=True)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.float16)
     def test_max_pool3d_lowp(self, dtype):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
