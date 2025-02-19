@@ -80,7 +80,10 @@ def fully_shard(
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+# [1] Python runtime decorator does not play well with static type checking
+# so suppressing some type checks to support type overloads
+# such that caller can still get correct return types based on input type
+@contract(state_cls=FSDPState)  # type: ignore[misc] # [1]
 def fully_shard(
     module,
     *,
@@ -205,7 +208,7 @@ def fully_shard(
     modules = (
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
-    state = fully_shard.state(modules[0])
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # [1]
     state.init(modules, device, mp_policy)
 
     managed_modules = _get_managed_modules(modules, ignored_params)
