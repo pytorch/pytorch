@@ -223,6 +223,7 @@ std::pair<std::string, std::string> getDtypeNames(c10::ScalarType scalarType) {
     case c10::ScalarType::Float8_e4m3fnuz:
       return std::make_pair("float8_e4m3fnuz", "");
     case c10::ScalarType::Float8_e8m0fnu:
+      // TODO(#146647): macroify all of this
       return std::make_pair("float8_e8m0fnu", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");

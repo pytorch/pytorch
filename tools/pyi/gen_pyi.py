@@ -1362,7 +1362,7 @@ def gen_pyi(
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # TODO: don't explicitly list dtypes here; get it from canonical
+    # TODO(#146647): don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
         f"{n}: dtype = ..."

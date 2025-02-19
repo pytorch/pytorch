@@ -28,7 +28,7 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
   }
 
   // if exponent is NaN, need to special case to return properly encoded NaN
-  if (x == 255) {
+  if (isnan()) {
     return c10::detail::fp32_from_bits(0x7f800001);
   }
 
@@ -103,9 +103,6 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   }
   static constexpr c10::Float8_e8m0fnu quiet_NaN() {
     return c10::Float8_e8m0fnu(0b11111111, c10::Float8_e8m0fnu::from_bits());
-  }
-  static constexpr c10::Float8_e8m0fnu denorm_min() {
-    return c10::Float8_e8m0fnu(0b00000000, c10::Float8_e8m0fnu::from_bits());
   }
 };
 

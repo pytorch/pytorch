@@ -79,6 +79,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       *(at::BFloat16*)data =
           at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
       break;
+    // TODO(#146647): simplify below with macros
     case at::kFloat8_e5m2:
       *(at::Float8_e5m2*)data =
           at::convert<at::Float8_e5m2, double>(THPUtils_unpackDouble(obj));
@@ -147,6 +148,7 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
     case at::kBFloat16:
       return PyFloat_FromDouble(
           at::convert<double, at::BFloat16>(*(at::BFloat16*)data));
+    // TODO(#146647): simplify below with macros
     case at::kFloat8_e5m2:
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e5m2>(*(at::Float8_e5m2*)data));

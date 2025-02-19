@@ -152,6 +152,8 @@ struct static_cast_with_inter_type<
   }
 };
 
+// TODO(#146647): Can we make all these template specialization happen
+// based off our apply macros?
 template <>
 struct static_cast_with_inter_type<
     c10::complex<c10::Half>,

@@ -52,6 +52,7 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
   } else if (iter.dtype() == ScalarType::Float8_e5m2fnuz) {
     fill_non_native_type<at::Float8_e5m2fnuz>(iter, value_scalar);
   } else if (iter.dtype() == ScalarType::Float8_e8m0fnu) {
+    // TODO(#146647): use macro here instead of spelling out each float8 dtype
     fill_non_native_type<at::Float8_e8m0fnu>(iter, value_scalar);
   } else {
     AT_DISPATCH_V2(

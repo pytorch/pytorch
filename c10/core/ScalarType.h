@@ -457,6 +457,10 @@ inline bool isSignedType(ScalarType t) {
     return std::numeric_limits< \
         ::c10::impl::ScalarTypeToCPPTypeT<ScalarType::name>>::is_signed;
 
+  // TODO(#146647): If we expect to have numeric_limits for everything,
+  // let's just have a big macro for the whole thing.
+  // If we're hardcoding it, let's just use the macro and a "true"/"false"
+  // below?
   switch (t) {
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
