@@ -164,7 +164,7 @@ class TestCutlassBackend(TestCase):
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("shape_combo", (0,))
+    @parametrize("shape_combo", (0, 1, 2, 3))
     def test_cutlass_backend_subproc_addmm(self, shape_combo):
         """
         Test autotune_in_subproc works for addmm.
@@ -179,7 +179,7 @@ class TestCutlassBackend(TestCase):
             (M, N),
             (M, 1),
             (1, N),
-            (K,),
+            (N,),
         ]
 
         x_shape = x_shapes[shape_combo]
