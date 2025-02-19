@@ -248,6 +248,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        '_unsafe_masked_index',
         'abs',
         'add',
         'alias_copy',
@@ -297,6 +298,7 @@ def mps_ops_modifier(ops):
         'linalg.svd',
         'mH',
         'mT',
+        'masked_fill',
         'masked_scatter',
         'masked_select',
         'meshgridlist_of_tensors',
@@ -375,7 +377,6 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
-        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -453,7 +454,6 @@ def mps_ops_modifier(ops):
         'logical_xor',
         'logsumexp',
         'long',
-        'masked_fill',
         'masked.mean',
         'masked.prod',
         'masked.std',
@@ -1060,9 +1060,6 @@ def mps_ops_error_inputs_modifier(ops):
         'gather',
         'scatter',
         'scatter_add',
-
-        # unsupported complex dtypes
-        'masked_fill',
 
         # MPS does not support tensor dimensions > 16
         'amax',

@@ -1,27 +1,7 @@
+#include <c10/metal/indexing.h>
 #include <metal_stdlib>
 using namespace metal;
-
-// Given coordinates and strides, calculates offset from the start of the
-// tensors
-long offset_from_coord(thread long* idx, constant long* strides, uint ndim) {
-  long rc = 0;
-  for (uint i = 0; i < ndim; ++i) {
-    rc += idx[i] * strides[i];
-  }
-  return rc;
-}
-
-// Given thread index calculates position in the ndim tensor
-void pos_from_thread_index(
-    long idx,
-    thread long* pos,
-    constant long* sizes,
-    uint ndim) {
-  for (uint i = 0; i < ndim; ++i) {
-    pos[i] = idx % sizes[i];
-    idx /= sizes[i];
-  }
-}
+using namespace c10::metal;
 
 // Consider out = in.unfold(dim, size, step), then
 // out.shape[dim] == (in.shape[dim] - size) / step + 1,
@@ -52,8 +32,8 @@ kernel void unfold_backward(
   auto size = dim_size_step_ndim.y;
   auto step = dim_size_step_ndim.z;
   auto ndim = dim_size_step_ndim.w;
-  long pos[16];
-  pos_from_thread_index(thread_index, pos, output_sizes, ndim);
+  long pos[max_ndim];
+  pos_from_thread_index(long(thread_index), pos, output_sizes, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
   const auto in_dim_size = max(1L, (output_sizes[dim] - size) / step + 1);
   const auto out_dim_idx = pos[dim];
