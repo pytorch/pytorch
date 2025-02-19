@@ -4821,7 +4821,8 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
   GuardAccessor* clone(
       GuardManager* cloned_parent,
       const py::function& clone_filter_fn) override {
-    return clone_common<WeakRefCallGuardAccessor>(cloned_parent, clone_filter_fn);
+    return clone_common<WeakRefCallGuardAccessor>(
+        cloned_parent, clone_filter_fn);
   }
 
   void clone_visitor(WeakRefCallGuardAccessor* to) {}
@@ -5461,6 +5462,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "get_leaf_guards",
           &GuardManager::get_leaf_guards,
+          py::return_value_policy::reference)
+      .def(
+          "get_parent",
+          &GuardManager::get_parent,
           py::return_value_policy::reference)
       .def(
           "add_lambda_guard",
