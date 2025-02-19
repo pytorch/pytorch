@@ -46,6 +46,7 @@ import numpy as np
 import ops_test_common
 
 import torch
+from torch.onnx._internal.exporter._torchlib.ops import core as core_ops
 from torch.testing._internal import common_methods_invocations
 from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
@@ -441,7 +442,12 @@ def _where_input_wrangler(
 
 # Ops to be tested for numerical consistency between onnx and pytorch
 # Find the names of the OpInfos in torch/testing/_internal/common_methods_invocations.py
-TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = ()
+TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
+    TorchLibOpInfo("abs", core_ops.aten_abs),
+    TorchLibOpInfo("abs", core_ops.aten_abs_complex, complex=True),
+    TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
+    TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
+)
 
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))
