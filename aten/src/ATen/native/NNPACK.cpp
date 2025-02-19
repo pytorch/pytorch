@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/error.h>
 
 #include <thread>

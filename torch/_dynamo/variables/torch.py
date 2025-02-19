@@ -1,10 +1,39 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+"""
+This module implements variable tracking for torch functions and operations during Dynamo tracing.
+
+It provides classes to handle different types of torch operations:
+
+TorchInGraphFunctionVariable: Handles torch.* functions that should be captured in the FX graph.
+Provides special handling for constant folding, tensor methods, and torch function overrides.
+Manages complex cases like out= variants and parameter construction.
+
+TorchCtxManagerClassVariable: Handles torch context managers like torch.no_grad(), autocast, etc.
+Provides implementations for entering/exiting these contexts during tracing.
+
+DispatchKeySetVariable: Represents torch.DispatchKeySet for managing dispatch keys and
+device-specific operations during tracing.
+
+The module includes special handling for:
+- Constant folding of pure functions
+- Tensor method calls
+- torch.nn.Parameter construction
+- __torch_function__ overrides
+- Context manager state tracking
+- Device and dtype management
+
+This is a core part of Dynamo's tracing system, translating torch operations into
+traceable graph nodes while preserving correct semantics and handling edge cases.
+"""
+
 import functools
 import inspect
 import logging
 import math
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch._C
@@ -207,7 +236,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,7 +271,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -654,6 +683,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch.full)
+        def handle_full(self, tx, size, fill_value, **kwargs):
+            if isinstance(fill_value, TensorVariable):
+                result = TorchInGraphFunctionVariable(
+                    torch.ops.aten._local_scalar_dense
+                ).call_function(tx, [fill_value], {})
+                return TorchInGraphFunctionVariable(torch.full).call_function(
+                    tx, [size, result], kwargs
+                )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
@@ -931,7 +970,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
@@ -1306,4 +1345,9 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             )
         elif name in ["level", "batch_size", "randomness"]:
             return variables.ConstantVariable.create(getattr(self.value, name)())
+        elif name == "lower":
+            assert not args and not kwargs
+            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+                tx, None
+            )
         return super().call_method(tx, name, args, kwargs)

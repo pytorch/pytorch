@@ -459,6 +459,8 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
   }
 }
 
@@ -506,8 +508,8 @@ void TuningContext::EnableNumericsCheck(bool value) {
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
-  if (env == "1") {
+  const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+  if (env != nullptr && strcmp(env, "1") == 0) {
     return true;
   }
   return numerics_check_enable_;
