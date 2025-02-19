@@ -33,7 +33,7 @@ kernel void unfold_backward(
   auto step = dim_size_step_ndim.z;
   auto ndim = dim_size_step_ndim.w;
   long pos[max_ndim];
-  pos_from_thread_index(thread_index, pos, output_sizes, ndim);
+  pos_from_thread_index(long(thread_index), pos, output_sizes, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
   const auto in_dim_size = max(1L, (output_sizes[dim] - size) / step + 1);
   const auto out_dim_idx = pos[dim];

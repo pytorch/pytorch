@@ -328,8 +328,8 @@ kernel void masked_fill_scalar(
     constant long* mask_strides,
     device uint& ndim,
     uint thread_index [[thread_position_in_grid]]) {
-  long pos[max_ndim];
-  pos_from_thread_index(thread_index, pos, sizes, ndim);
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
   if (mask[offset_from_coord(pos, mask_strides, ndim)]) {
     input[offset_from_coord(pos, input_strides, ndim)] = val;
   }
