@@ -309,8 +309,8 @@ def ir_node_to_tensor(
         shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
-    if layout := x.maybe_get_layout():
-        stride = [shape_fn(s) for s in layout.stride]
+    if is_storage_and_layout(x):
+        stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
         stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
@@ -2391,22 +2391,32 @@ def as_storage_and_layout(
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-    if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
+    if isinstance(x, StorageBox):
+        _, layout = as_storage_and_layout(
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
+            allow_padding=allow_padding,
+            exact_strides=exact_strides,
+        )
+        return x, x.data.get_layout()
+    if isinstance(x, Buffer):
         if freeze:
             if want_contiguous:
-                x.data.freeze_layout()
-                assert x.data.get_layout().is_contiguous()
+                x.freeze_layout()
+                assert x.get_layout().is_contiguous()
             elif stride_order is not None:
-                x.data.freeze_layout_with_stride_order(
+                x.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
                 )
             elif exact_strides is not None:
-                x.data.freeze_layout_with_exact_strides(
+                x.freeze_layout_with_exact_strides(
                     exact_strides, allow_padding=allow_padding
                 )
             else:
-                x.data.decide_layout()
-        return x, x.data.get_layout()
+                x.decide_layout()
+        return x, x.get_layout()
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
