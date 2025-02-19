@@ -261,11 +261,12 @@ class TritonBundler:
                         # Each kernel has bunch of files like .cubin(for cuda), spv(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
+
                 if _IS_WINDOWS:
-                    # Atomic on POSIX systems
-                    os.replace(tmp_dir, directory)
-                else:
                     with FileLock(directory + ".lock"):
                         os.replace(tmp_dir, directory)
+                else:
+                    # Atomic on POSIX systems
+                    os.replace(tmp_dir, directory)
 
             return TritonBundlerMetadata(kernel_names)
