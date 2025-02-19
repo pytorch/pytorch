@@ -133,6 +133,102 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_subproc_mm(self):
+        """
+        Test autotune_in_subproc works for mm.
+
+        NOTE: Shape like M, N, K = 100, 100, 10 would get filtered out due to
+        alignment mismatch.
+        """
+
+        M, N, K = 4096, 2048, 25728
+
+        a = torch.randn(M, K).cuda().half()
+        b = torch.randn(K, N).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "compile_threads": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            Y_compiled = torch.compile(torch.mm)(a, b)
+            Y = torch.mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(
+        True, "FIXME: Disabled temporarily since IMA or crashing in subprocess"
+    )
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+        """
+        Test autotune_in_subproc works for addmm.
+        """
+
+        M, N, K = 4096, 2048, 25728
+
+        a = torch.randn(M, K).cuda().half()
+        b = torch.randn(K, N).cuda().half()
+
+        x_shapes = [
+            (M, N),
+            (M, 1),
+            (1, N),
+            (N,),
+        ]
+
+        alpha = 2.0
+        beta = 0.4
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "compile_threads": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            for x_shape in x_shapes:
+                x = torch.randn(x_shape).cuda().half()
+                Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
+                Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+                torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_subproc_bmm(self):
+        """
+        Test autotune_in_subproc works for bmm.
+        """
+
+        B, M, N, K = 10, 4096, 2048, 25728
+
+        a = torch.randn(B, M, K).cuda().half()
+        b = torch.randn(B, K, N).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "compile_threads": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            Y_compiled = torch.compile(torch.bmm)(a, b)
+            Y = torch.bmm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_aoti_rerun_with_different_shapes(self):
         """
         Compile with one shape, then re-run with different input shapes
