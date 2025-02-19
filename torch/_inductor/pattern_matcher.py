@@ -589,7 +589,11 @@ class _TargetArgsExpr(_TargetExpr):
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
     ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
-        type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
+        type_mapping: dict[type, type] = {
+            immutable_list: tuple,
+            list: tuple,
+            immutable_dict: dict,
+        }
 
         def convert_type(x: Any) -> Any:
             cls = type(x)
