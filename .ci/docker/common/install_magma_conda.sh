@@ -4,11 +4,7 @@
 set -eou pipefail
 
 cuda_version_nodot=${1/./}
-if [[ $# -ge 2 &&  -n "$2" ]]; then
-    anaconda_dir="/opt/conda/envs/py_$2"
-else
-    anaconda_dir="$CONDA_PREFIX"
-fi
+anaconda_dir="$CONDA_PREFIX"
 
 MAGMA_VERSION="2.6.1"
 magma_archive="magma-cuda${cuda_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
