@@ -1126,6 +1126,9 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
+    if norm_type == 0:
+        raise ValueError("norm_type should not be 0")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             lp_pool2d,
