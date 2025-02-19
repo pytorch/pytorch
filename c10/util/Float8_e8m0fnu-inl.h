@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 
+// TODO(#146647): Can we remove the below warning?
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
@@ -20,7 +21,7 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::Float8_e8m0fnu(float value)
 /// Implicit conversions
 
 inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
-  // TODO(future PR): rewrite without control flow
+  // TODO(#146647): maybe rewrite without control flow
 
   // if exponent is zero, need to special case to return 2^-127 instead of zero
   if (x == 0) {

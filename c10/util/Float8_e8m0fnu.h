@@ -17,6 +17,7 @@
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
+// TODO(#146647): do we need to special case OPENCL?
 #if defined(__cplusplus)
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
@@ -36,7 +37,7 @@ namespace detail {
  * 8-bit floating-point number in fp8 e8m0fnu format, in bit representation.
  */
 inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
-  // TODO(future PR): rewrite without control flow
+  // TODO(#146647): maybe rewrite without control flow
 
   uint32_t f_bits = c10::detail::fp32_to_bits(f);
 
