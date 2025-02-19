@@ -15,7 +15,6 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import torch
-
     from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
