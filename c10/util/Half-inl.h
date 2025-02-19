@@ -344,6 +344,13 @@ class numeric_limits<c10::Half> {
     return c10::Half(0x0001, c10::Half::from_bits());
   }
 };
+ 
+#if defined(__QNX__)
+  inline bool isnan(c10::Half& val)
+  {
+    return std::isnan(static_cast<float>(val));
+  }
+#endif
 
 } // namespace std
 
