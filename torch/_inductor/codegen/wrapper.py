@@ -2296,13 +2296,11 @@ class PythonWrapperCodegen(CodeGen):
         )
         return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
-    def codegen_deferred_allocation(self, name, layout):
+    def codegen_deferred_allocation(self, name: str, view: ir.ReinterpretView) -> None:
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = "
-                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
-                f"  {self.comment} alias",
+                f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
             )
         )
 
@@ -2337,7 +2335,7 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
-            self.codegen_deferred_allocation(name, layout)
+            self.codegen_deferred_allocation(name, layout.view)
             return
 
         if isinstance(layout, ir.CommBufferLayout):

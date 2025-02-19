@@ -646,7 +646,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}  // reuse"
+            # The only way to get into this case is via an exact buffer reuse, since all
+            # other options result in a new tensor handle.
+            return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
+        return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  // reuse"
 
     def _assert_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         # Borrowing arguments to shim functions is only safe because we know
