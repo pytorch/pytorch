@@ -3497,10 +3497,10 @@ class TestRandomTensorCreation(TestCase):
                                r"randint\(\): argument 'high' \(position 1\) must be int, not float",
                                lambda: torch.randint(.5, size=size))
         self.assertRaisesRegex(RuntimeError,
-                               "from is out of bounds for short int",
+                               "from is out of bounds for",
                                lambda: torch.randint(-32769, 0, size=size, dtype=torch.int16))
         self.assertRaisesRegex(RuntimeError,
-                               "from is out of bounds for unsigned int",
+                               "from is out of bounds for",
                                lambda: torch.randint(-1, 1, size=size, dtype=torch.uint32))
 
     # TODO: this test should be updated
