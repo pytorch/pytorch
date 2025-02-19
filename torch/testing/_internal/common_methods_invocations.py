@@ -18528,8 +18528,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -21382,13 +21380,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                dtypes=[torch.bool],
-                device_type='cuda',
             ),
         ),
     ),
