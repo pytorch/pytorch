@@ -362,6 +362,29 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `mark_traceable(fn)` call
+        if self.fn is torch._dynamo.mark_traceable:
+            raise_type_error = True
+            if len(args) == 1 and len(kwargs) == 0:
+                fn_var = args[0]
+                if isinstance(fn_var, BaseUserFunctionVariable):
+                    raise_type_error = False
+            if raise_type_error:
+                msg = ConstantVariable.create(
+                    "`mark_traceable` expects a single function"
+                )
+                raise_observed_exception(TypeError, tx, [msg])
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                unimplemented(
+                    """
+`mark_traceable` currently requires the target function to be defined outside `torch.compile` region.
+"""
+                )  # NOQA: B950
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs

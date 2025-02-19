@@ -402,11 +402,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value, traceable=None, **kwargs) -> None:
         super().__init__(value, **kwargs)
         from ..trace_rules import is_mark_traceable_callable
 
-        self.traceable = is_mark_traceable_callable(value)
+        if traceable is None:
+            traceable = is_mark_traceable_callable(value)
+        self.traceable = traceable
 
     def __repr__(self) -> str:
         return f"TorchInGraphFunctionVariable({self.value}, traceable={self.traceable})"
@@ -1014,7 +1016,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if not is_graphable_type(arg_type):
                     unimplemented(
                         f"""
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type {flat_arg_vt.python_type()}, please use one of the following to register the type with pytree:
+Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <{flat_arg_vt.python_type().__qualname__}>, please use one of the following to register the type with pytree:
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
                     )

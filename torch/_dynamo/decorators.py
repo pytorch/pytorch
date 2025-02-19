@@ -160,7 +160,7 @@ def allow_in_graph(fn):
     return fn
 
 
-def mark_traceable(fn):
+def mark_traceable(traceable_fn):
     """
     Like `allow_in_graph`, but with the following enhancements/differences:
 
@@ -170,16 +170,26 @@ def mark_traceable(fn):
        will be represented as a call to `torch._higher_order_ops.flat_apply`,
        which takes in the `mark_traceable`-ed function and pytree-flattened
        inputs.
+    3. Only the returned function is traceable, and the original function will
+       not be. Moreover, `mark_traceable` can be used inside a `torch.compile`
+       region.
 
     NOTE: like `allow_in_graph`, aliasing information is neither preserved
     between inputs themselves, nor between inputs and outputs.
     """
-    assert callable(fn), "mark_traceable expects a callable"
-    if id(fn) not in trace_rules._mark_traceable_callable_ids:
-        trace_rules._disallowed_callable_ids.remove(id(fn))
-        trace_rules._allowed_callable_ids.add(id(fn))
-        trace_rules._mark_traceable_callable_ids.add(id(fn))
-    return fn
+    assert callable(traceable_fn), "mark_traceable expects a callable"
+
+    @functools.wraps(traceable_fn)
+    def wrapped(*args, **kwargs):
+        return traceable_fn(*args, **kwargs)
+
+    # This line allows us to reuse much of the `allow_in_graph` impl.
+    trace_rules._allowed_callable_ids.add(id(wrapped))
+
+    # This line allows us to diverge the impl from `allow_in_graph`.
+    trace_rules._mark_traceable_callable_ids.add(id(wrapped))
+
+    return wrapped
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed):

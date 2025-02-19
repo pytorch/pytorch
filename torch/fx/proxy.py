@@ -142,18 +142,6 @@ class TracerBase:
     # Mapping of node name to module scope
     node_name_to_scope: dict[str, tuple[str, type]]
 
-    # Decides whether we represent `NamedTuple` instances as `call_function`
-    # nodes, or inline them directly as instance arguments to the user nodes.
-    _proxy_named_tuple: bool
-
-    # Decides whether we represent `NamedTuple` instances as `call_function`
-    # nodes, or inline them directly as instance arguments to the user nodes.
-    _proxy_dataclass: bool
-
-    def __init__(self):
-        self._proxy_named_tuple = True
-        self._proxy_dataclass = True
-
     @compatibility(is_backward_compatible=True)
     def create_node(
         self,
@@ -307,16 +295,12 @@ class TracerBase:
             return a.__fx_create_arg__(self)
         # aggregates
         elif isinstance(a, tuple):
-            if hasattr(a, "_fields"):  # Handle `NamedTuple`
-                if self._proxy_named_tuple:
-                    args = tuple(self.create_arg(elem) for elem in a)
-                    return self.create_node("call_function", a.__class__, args, {})
-                else:
-                    # NamedTuple constructors don't seem to like getting a generator
-                    # expression as an argument to their constructor, so build this
-                    # intermediate tuple and unpack it into the NamedTuple constructor
-                    args = [self.create_arg(elem) for elem in a]
-                    return type(a)(*args)  # type: ignore[arg-type]
+            if hasattr(a, "_fields"):
+                # NamedTuple constructors don't seem to like getting a generator
+                # expression as an argument to their constructor, so build this
+                # intermediate tuple and unpack it into the NamedTuple constructor
+                args = [self.create_arg(elem) for elem in a]
+                return type(a)(*args)  # type: ignore[arg-type]
             return type(a)([self.create_arg(elem) for elem in a])
         elif isinstance(a, list):
             return [self.create_arg(elem) for elem in a]
@@ -357,20 +341,11 @@ class TracerBase:
             return a
 
         elif is_dataclass(a):
-            args = []
-            kwargs = {}
-            for field in fields(a):
-                if field.init:
-                    field_arg = self.create_arg(getattr(a, field.name))
-                    if getattr(field, "kw_only", False):
-                        kwargs[field.name] = field_arg
-                    else:
-                        args.append(field_arg)
-            args = tuple(args)
-            if self._proxy_dataclass:
-                return self.create_node("call_function", a.__class__, args, kwargs)
-            else:
-                return a.__class__(*args, **kwargs)
+            kwargs = {
+                field.name: self.create_arg(getattr(a, field.name))
+                for field in fields(a)
+            }
+            return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a

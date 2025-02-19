@@ -1,10 +1,8 @@
 # Owner(s): ["module: dynamo"]
-import dataclasses
 import functools
 import operator
 import os
 import unittest.mock as mock
-from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -205,69 +203,6 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
-
-    def test_allow_in_graph_named_tuple(self):
-        class Pair(NamedTuple):
-            foo: Any
-            bar: Any
-
-        @torch.compiler.allow_in_graph
-        def trace_me(dc):
-            return dc.bar + 1
-
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        @torch.compile(fullgraph=True, backend=backend)
-        def func(d):
-            inner = Pair(foo=d, bar=d + 1)
-            outer = Pair(foo=inner, bar=d + 2)
-            return trace_me(outer)
-
-        func(torch.randn(10))
-        graph = backend.graphs[0].graph
-
-        # Make sure we don't call the named tuple constructor.
-        for node in graph.nodes:
-            if node.op == "call_function":
-                self.assertNotEqual(node.target, Pair)
-
-        # Make sure named tuple instances are used directly as inputs.
-        out_arg = graph.output_node().args[0]
-        trace_me_arg = out_arg[0].args[0]
-        self.assertTrue(type(trace_me_arg), Pair)
-        self.assertTrue(type(trace_me_arg.foo), Pair)
-
-    def test_allow_in_graph_dataclass(self):
-        @dataclasses.dataclass(frozen=True)
-        class Pair:
-            foo: Any
-            bar: Any
-
-        @torch.compiler.allow_in_graph
-        def trace_me(dc):
-            return dc.bar + 1
-
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        @torch.compile(fullgraph=True, backend=backend)
-        def func(d):
-            inner = Pair(foo=d, bar=d + 1)
-            outer = Pair(foo=inner, bar=d + 2)
-            return trace_me(outer)
-
-        func(torch.randn(10))
-        graph = backend.graphs[0].graph
-
-        # Make sure we don't call the named tuple constructor.
-        for node in graph.nodes:
-            if node.op == "call_function":
-                self.assertNotEqual(node.target, Pair)
-
-        # Make sure dataclass instances are used directly as inputs.
-        out_arg = graph.output_node().args[0]
-        trace_me_arg = out_arg[0].args[0]
-        self.assertTrue(type(trace_me_arg), Pair)
-        self.assertTrue(type(trace_me_arg.foo), Pair)
 
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
@@ -523,15 +458,52 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_mark_traceable_inside_compiled_function(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        def fn(x):
+            res = torch._dynamo.mark_traceable(trace_me)(x)
+            return res + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_no_action_at_a_distance(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        # No effect on traceability of `trace_me`
+        torch._dynamo.mark_traceable(trace_me)
+
+        def fn(x):
+            res = trace_me(x)
+            return res + 1
+
+        x = torch.randn(10)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        # There should be 1 graph break
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_mark_traceable_inside_compiled_function_error(self):
         @torch.compile(fullgraph=True, backend="aot_eager")
         def fn(x, y):
-            @torch._dynamo.mark_traceable
             def trace_me(x, y):
                 torch._dynamo.graph_break()
                 return x * y
 
-            res = trace_me(x, y)
+            res = torch._dynamo.mark_traceable(trace_me)(x, y)
             return res + 1
 
         try:
@@ -539,7 +511,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Found a mark_traceable decorator to a function which is created inside the parent function that is getting compiled.  Please move the usage to outside the `torch.compile`-ed region.
+`mark_traceable` currently requires the target function to be defined outside `torch.compile` region.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
@@ -568,39 +540,8 @@ Found a mark_traceable decorator to a function which is created inside the paren
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <class '__main__.DecoratorTests.test_mark_traceable_custom_class_error.<locals>.Point'>, please use one of the following to register the type with pytree:
+Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <DecoratorTests.test_mark_traceable_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
   * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
-
-    def test_mark_traceable_pytree_register_constant_error(self):
-        class Point:
-            x: int
-            y: int
-
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-
-        torch.utils._pytree.register_constant(Point)
-
-        @torch._dynamo.mark_traceable
-        def trace_me(x, p):
-            torch._dynamo.graph_break()
-            return x * p.x + p.y
-
-        @torch.compile(fullgraph=True, backend="aot_eager")
-        def fn(x, p):
-            res = trace_me(x, p)
-            return res + 1
-
-        try:
-            p = Point(3, 4)
-            fn(torch.ones(10), p)
-            self.assertFalse(True)  # must raise error before this
-        except torch._dynamo.exc.Unsupported as e:
-            msg = """
-This error is most likely due to a call to `mark_traceable`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
@@ -649,8 +590,39 @@ This error is most likely due to a call to `mark_traceable`-ed function, where o
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <class '__main__.DecoratorTests.test_mark_traceable_nested_custom_class_error.<locals>.Point'>, please use one of the following to register the type with pytree:
+Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <DecoratorTests.test_mark_traceable_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
   * `torch.utils._pytree.register_pytree_node`
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_mark_traceable_pytree_register_constant_error(self):
+        class Point:
+            x: int
+            y: int
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_constant(Point)
+
+        @torch._dynamo.mark_traceable
+        def trace_me(x, p):
+            torch._dynamo.graph_break()
+            return x * p.x + p.y
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x, p):
+            res = trace_me(x, p)
+            return res + 1
+
+        try:
+            p = Point(3, 4)
+            fn(torch.ones(10), p)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+This error is most likely due to a call to `mark_traceable`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
