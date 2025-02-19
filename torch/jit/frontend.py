@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import inspect
 import re
@@ -580,10 +581,18 @@ def build_ignore_context_manager(ctx, stmt):
     return_stmt = ast.parse(return_stmt).body[0]
     ignore_function.body.append(return_stmt)  # type: ignore[attr-defined]
 
+    ignore_func_str = f"""\
+# Backward compat: These used to be imported into the outer global scope so some
+# code may still expect them.
+from typing import List, Dict, Tuple
+
+@torch.jit.ignore
+{astunparse.unparse(ignore_function)}
+"""
+    g = copy.copy(globals())
+    exec(ignore_func_str, g)  # noqa: P204
     # registers the custom function in the global context
-    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
-    ignore_func_str += f'\nglobals()["{ignore_function_name}"] = {ignore_function_name}'
-    exec(ignore_func_str)  # noqa: P204
+    globals()[ignore_function_name] = g[ignore_function_name]
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
