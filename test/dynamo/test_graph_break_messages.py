@@ -453,9 +453,7 @@ Attempted to call function marked as skipped
         first_graph_break = next(iter(counters["graph_break"].keys()))
 
         def post_munge(s):
-            return re.sub(
-                r"`mylib(_v\d+)?.PyCapsule.foobar`", "`mylib.PyCapsule.foobart`", s
-            )
+            return re.sub(r"mylib(_v\d+)?", "mylib", s)
 
         self.assertExpectedInline(
             first_graph_break,
@@ -467,6 +465,7 @@ Attempted to call function marked as skipped
 
   Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
 """,
+            post_munge=post_munge,
         )
 
         cpp_source = """
