@@ -341,9 +341,6 @@ class GraphLowering(torch.fx.Interpreter):
             self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
-        # We are going to start code generating runtime asserts, so make sure
-        # you don't start adding new ones in the lowering process
-        shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: dict[
             Optional[sympy.Symbol], list[RuntimeAssert]
@@ -473,6 +470,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.placeholder_idx = -1
 
         self.bw_donated_idxs = get_donated_idxs()
+
+    def freeze_runtime_asserts(self) -> None:
+        self._shape_env.freeze_runtime_asserts()
 
     def get_allocation_size(
         self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
@@ -1381,16 +1381,15 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = OrderedSet([n])
+        # origins: OrderedSet[Union[Node, ir.IRNode]] = OrderedSet([n])
+        origins: OrderedSet[Any] = OrderedSet([n])
         is_call_function = n.op == "call_function"
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
+        with ir.IRNode.current_origins(origins), self.set_current_node(
             n
-        ), V.set_current_node(
-            n
-        ):
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem

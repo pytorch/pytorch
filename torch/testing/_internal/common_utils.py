@@ -1507,12 +1507,6 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 )
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
-TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and (
-    torch.version.cuda and (
-        (int(torch.version.cuda.split(".")[0]) >= 12 and int(torch.version.cuda.split(".")[1]) >= 4) or
-        (int(torch.version.cuda.split(".")[0]) >= 13)
-    )
-)
 
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
@@ -1730,6 +1724,41 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
     return decorator
+
+
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(fn)
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+    ) -> None:
+        def dummy(fn: Callable[..., Any]) -> None:
+            fn(self)
+
+        actual = CompileCounter()
+
+        dummy(fn)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn(fn)
+        reset()
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+        )
+
+    return test_fn
 
 
 # Run PyTorch tests with translation validation on.
