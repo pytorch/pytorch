@@ -306,6 +306,7 @@ manual_torch_name_rule_map = {
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch._dynamo.mark_traceable": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
