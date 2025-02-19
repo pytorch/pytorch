@@ -14066,9 +14066,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             _, code = run_and_get_code(f_compiled, x_cloned, y_cloned)
 
-            FileCheck().check("def partition_0(args):").check(
-                "(buf0, buf1) = self.partitions[0](partition0_args)"
-            ).check("recursively_apply_fns = runner.recursively_apply_fns").run(code[0])
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").check(
+                    "(buf0, buf1) = self.partitions[0](partition0_args)"
+                ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
+                    code[0]
+                )
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_multiple_functions(self):
