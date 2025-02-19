@@ -1202,6 +1202,11 @@ endif()
 
 if(USE_XPU)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
+  if(WIN32)
+    # Need to add /permissive- flag for conformance mode for the compiler.
+    # This will fix the build errors with old C++ standard usage.
+    string(APPEND CMAKE_CXX_FLAGS " /permissive-")
+  endif()
 endif()
 
 if(EMSCRIPTEN)
