@@ -4060,7 +4060,9 @@ class Scheduler:
         with dynamo_timed("Scheduler.codegen"):
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition and not V.graph.aot_mode
+                if torch._inductor.config.graph_partition
+                and not V.graph.cpp_wrapper
+                and not V.graph.aot_mode
                 else self._codegen(self.nodes)
             )
 

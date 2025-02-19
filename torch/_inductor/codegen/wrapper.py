@@ -931,8 +931,9 @@ class PythonWrapperCodegen(CodeGen):
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
         if (
-            not config.cpp_wrapper
-            and torch._inductor.config.graph_partition
+            config.graph_partition
+            and not V.graph.cpp_wrapper
+            and not V.graph.aot_mode
             and not hasattr(self, "subgraph_name")
         ):
             self.prefix.splice(
@@ -1285,8 +1286,9 @@ class PythonWrapperCodegen(CodeGen):
         result.splice(self.suffix)
 
         if (
-            not config.cpp_wrapper
-            and torch._inductor.config.graph_partition
+            config.graph_partition
+            and not V.graph.aot_mode
+            and not V.graph.cpp_wrapper
             and not hasattr(self, "subgraph_name")
         ):
             result.splice(
