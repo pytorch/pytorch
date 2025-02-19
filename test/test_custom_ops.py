@@ -363,9 +363,19 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         x = torch.tensor(3.14159 / 3, requires_grad=True)
         with self.assertRaisesRegex(
-            optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"
+            optests.OpCheckError, "eager-mode PyTorch vs AOTDispatcher"
         ):
             torch.library.opcheck(op, (x,), {})
+
+        # Test that we can actually see the absolute difference numbers
+        try:
+            torch.library.opcheck(op, (x,), {})
+        except optests.OpCheckError as err:
+            orig = err.__context__.__context__
+            self.assertIn("Absolute difference:", str(orig))
+
+        # Test atol/rtol overrides
+        torch.library.opcheck(op, (x,), {}, atol=3, rtol=0.01)
 
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):

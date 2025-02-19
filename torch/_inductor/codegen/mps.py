@@ -2,18 +2,21 @@
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
 
+import itertools
 from typing import Any, Optional, TYPE_CHECKING
 
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
+    DTYPE_TO_COMPUTATION_DTYPE,
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import StoreMode
+    from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -228,6 +231,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::sin({x})"
 
     @staticmethod
+    def sinc(x: CSEVariable) -> str:
+        return f"c10::metal::sinc({x})"
+
+    @staticmethod
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
@@ -252,12 +259,8 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::log_gamma({x})"
 
     @staticmethod
-    def polygamma(n: CSEVariable, x: CSEVariable) -> str:
-        # polygamma's API takes order as first argument
-        # and the input tensor as second, while the
-        # metal shader has these inverted.
-        # TODO (dcci): make this more uniform.
-        return f"c10::metal::polygamma({x}, {n})"
+    def polygamma(x: CSEVariable, y: CSEVariable) -> str:
+        return f"c10::metal::polygamma({x}, {y})"
 
     @staticmethod
     def digamma(x: CSEVariable) -> str:
@@ -356,6 +359,13 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
+    @staticmethod
+    def zeta(a: CSEVariable, b: CSEVariable) -> str:
+        return f"c10::metal::zeta({a}, {b})"
+
+
+MetalOverrides._initialize_pointwise_overrides("mps")
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -372,8 +382,7 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.compute = self.body
-        self.loads = self.body
-        self.stores = self.body
+        self.acc_var_ids = itertools.count()
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -383,7 +392,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         line = f"{var}[{self.index_to_str(index)}]"
-        return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
+        return self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -392,12 +401,78 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
-        self.body.writeline(DeferredLine(name, line))
+        self.stores.writeline(DeferredLine(name, line))
+
+    def _new_accvar(
+        self,
+        dtype: torch.dtype,
+        elem_count: Optional[int] = None,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+    ) -> CSEVariable:
+        var_name = f"tmp_acc_{next(self.acc_var_ids)}"
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        if elem_count:
+            self.loads.writeline(
+                f"threadgroup {self.dtype_to_str(dtype)} {var_name}[{elem_count}];"
+            )
+        else:
+            self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
+        return var
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        """Codegen a reduction operation"""
+        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+        if reduction_type == "any":
+            acc = self._new_accvar(dtype)
+            self.loads.writeline(f"{acc} = false;")
+            self.body.splice(
+                f"""
+                if ({value}) {{
+                    {acc} = true;
+                }}
+            """
+            )
+            return acc
+        if reduction_type in ["prod", "sum"]:
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            return self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+                dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
+            )
+        if reduction_type in ["max", "min", "argmax", "argmin"]:
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(
+                f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
+            )
+            return self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+                dtype=dtype,
+            )
+        if reduction_type == "welford_reduce":
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            wf_res = self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+            )
+            return OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
+            )
+        raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
+        self.loads.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
@@ -413,6 +488,8 @@ class MetalKernel(SIMDKernel):
             """,
                 strip=True,
             )
+            if self.inside_reduction:
+                code.writeline("#include <c10/metal/reduction_utils.h>")
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
@@ -425,24 +502,37 @@ class MetalKernel(SIMDKernel):
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
-                if len(idx_var_names) == 1:
+                assert len(idx_var_names) < 4, "Up to 3 index variables are supported"
+                thread_pos_dtype = (
+                    f"uint{len(idx_var_names)}" if len(idx_var_names) > 1 else "uint"
+                )
+                thread_pos_var_name = (
+                    idx_var_names[0] if len(idx_var_names) == 1 else "thread_pos"
+                )
+                thread_pos_suffix = "," if self.inside_reduction else ""
+                code.writeline(
+                    f"{thread_pos_dtype} {thread_pos_var_name} [[thread_position_in_grid]]{thread_pos_suffix}"
+                )
+                if self.inside_reduction:
                     code.writeline(
-                        f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
+                        f"{thread_pos_dtype} group_pos [[thread_position_in_threadgroup]]"
                     )
-                else:
-                    assert (
-                        len(idx_var_names) < 4
-                    ), "Up to 3 index variables are supported"
-                    code.writeline(
-                        f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
-                    )
-
             code.writeline(") {")
             with code.indent():
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
                         code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
+                code.splice(self.loads)
+                if self.inside_reduction:
+                    code.writeline(
+                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                    )
                 code.splice(self.body)
+                if self.inside_reduction:
+                    code.writeline(
+                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                    )
+                code.splice(self.stores)
             code.writeline("}")
         code.writeline('""")')
 
@@ -457,6 +547,9 @@ class MetalKernel(SIMDKernel):
         if len(self.active_range_trees()) > 0:
             threads = [self.pexpr(v.numel) for v in self.active_range_trees()]  # type: ignore[misc]
             args += [f"threads=[{', '.join(threads)}]"]
+        if self.inside_reduction:
+            threads = [self.pexpr(v.numel) if v.is_reduction else "1" for v in self.active_range_trees()]  # type: ignore[misc]
+            args += [f"group_size=[{', '.join(threads)}]"]
 
         wrapper.generate_kernel_call(
             name,

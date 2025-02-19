@@ -41,7 +41,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCH = ["cuda-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -86,13 +86,14 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.8": (
         "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.7.0.66; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -101,7 +102,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2025.0.2 | "
@@ -174,7 +176,7 @@ def arch_type(arch_version: str) -> str:
         return "cpu-aarch64"
     elif arch_version in CPU_S390X_ARCH:
         return "cpu-s390x"
-    elif arch_version in CUDA_AARCH64_ARCH:
+    elif arch_version in CUDA_AARCH64_ARCHES:
         return "cuda-aarch64"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
@@ -189,6 +191,10 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_ARCHES
     },
     **{
+        gpu_arch: f"pytorch/manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}-{DEFAULT_TAG}"
+        for gpu_arch in CUDA_AARCH64_ARCHES
+    },
+    **{
         gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
@@ -197,7 +203,6 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.6-{DEFAULT_TAG}",
 }
 
 CXX11_ABI = "cxx11-abi"
@@ -232,7 +237,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
-        "cuda-aarch64": "cu126",
+        "cuda-aarch64": f"cu{gpu_arch_version.replace('-aarch64', '').replace('.', '')}",
         "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
@@ -329,9 +334,9 @@ def generate_wheels_matrix(
             if "12.8" in arches:
                 arches.remove("12.8")
         elif os == "linux-aarch64":
-            # Only want the one arch as the CPU type is different and
+            # Separate new if as the CPU type is different and
             # uses different build/test scripts
-            arches = ["cpu-aarch64", "cuda-aarch64"]
+            arches = CPU_AARCH64_ARCH + CUDA_AARCH64_ARCHES
         elif os == "linux-s390x":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
@@ -347,13 +352,12 @@ def generate_wheels_matrix(
                 or arch_version == "cpu-cxx11-abi"
                 or arch_version == "cpu-aarch64"
                 or arch_version == "cpu-s390x"
-                or arch_version == "cuda-aarch64"
                 or arch_version == "xpu"
                 else arch_version
             )
 
-            # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS or Windows
-            if (gpu_arch_type in ["xpu", "cpu-s390x"]) and python_version == "3.13t":
+            # TODO: Enable python 3.13t cpu-s390x or MacOS or Windows
+            if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
                 continue
 
             if use_split_build and (
@@ -370,7 +374,7 @@ def generate_wheels_matrix(
             if (
                 arch_version in ["12.8", "12.6", "12.4", "11.8"]
                 and os == "linux"
-                or arch_version == "cuda-aarch64"
+                or arch_version in CUDA_AARCH64_ARCHES
             ):
                 ret.append(
                     {
@@ -389,9 +393,12 @@ def generate_wheels_matrix(
                             if os != "linux-aarch64"
                             else ""
                         ),
-                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
-                            ".", "_"
-                        ),
+                        "build_name": (
+                            f"{package_type}-py{python_version}-{gpu_arch_type}"
+                            f"{'-' if 'aarch64' in gpu_arch_type else ''}{gpu_arch_version.replace('-aarch64', '')}".replace(
+                                ".", "_"
+                            )
+                        ),  # include special case for aarch64 build, remove the -aarch64 postfix
                     }
                 )
                 # Special build building to use on Colab. Python 3.11 for 12.4 CUDA
