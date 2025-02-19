@@ -1824,8 +1824,15 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     buffer.writeline(line)
 
                     # cpp backend cannot determin is_vec at this point
-                    backend = get_current_backend()
-                    if assignment and dtype is not None and backend != "cpp":
+                    if (
+                        assignment
+                        and (
+                            config.test_configs.runtime_triton_dtype_assert
+                            or config.test_configs.static_cpp_dtype_assert
+                        )
+                        and dtype is not None
+                        and get_current_backend() != "cpp"
+                    ):
                         check_dtype(buffer, var, dtype)
 
         else:
@@ -2352,7 +2359,11 @@ class CSEProxy(DefaultHandler):
 
             csevar.update_on_args(name, args, kwargs)
 
-            check_dtype(V.kernel.compute, csevar, var_dtype)
+            if (
+                config.test_configs.runtime_triton_dtype_assert
+                or config.test_configs.static_cpp_dtype_assert
+            ):
+                check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
         return pytree.tree_map(do_cse, value)
