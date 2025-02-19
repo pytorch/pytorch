@@ -163,9 +163,9 @@ class ONNXRegistry:
         # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
         torchlib_ops = onnxscript_apis.get_torchlib_ops()
 
-        for meta in torchlib_ops:
-            qualified_name = meta.qualified_name
-            overload_func = meta.function
+        for torchlib_meta in torchlib_ops:
+            qualified_name = torchlib_meta.qualified_name
+            overload_func = torchlib_meta.function
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
@@ -178,7 +178,7 @@ class ONNXRegistry:
                     fx_target=target,
                     signature=None,
                     is_custom=False,
-                    is_complex=meta.is_complex,
+                    is_complex=torchlib_meta.is_complex,
                 )
                 registry._register(target, meta)
             except Exception:
