@@ -104,7 +104,8 @@ class TestFunctionValidity(common_utils.TestCase):
             (info.op.name, info)
             for info in ops_test_data.TESTED_TORCHLIB_OPS
             if isinstance(info.op, onnxscript.OnnxFunction)
-        ]
+        ],
+        skip_on_empty=True,
     )
     def test_script_function_passes_checker(
         self, _, torchlib_op_info: ops_test_data.TorchLibOpInfo
