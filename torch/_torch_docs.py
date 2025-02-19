@@ -6504,15 +6504,15 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
-    >>> a = torch.randn(3,1,3,)
-    >>> a.max(dim=0, keepdim=True)
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
     torch.return_types.max(
-    values=tensor([[[1.2928, 1.4774, 0.8201]]]),
-    indices=tensor([[[2, 2, 1]]]))
-    >>> a.max(dim=0, keepdim=False)
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
     torch.return_types.max(
-    values=tensor([[1.2928, 1.4774, 0.8201]]),
-    indices=tensor([[2, 2, 1]]))
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
