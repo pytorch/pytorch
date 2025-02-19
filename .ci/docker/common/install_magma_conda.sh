@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Script that replaces the magma install from a conda package
+# Script that installs magma from tarball inside conda environment
+# it replaces anaconda magma-cuda package which is no longer published
+# please see: https://github.com/pytorch/pytorch/issues/138506
 
 set -eou pipefail
 
