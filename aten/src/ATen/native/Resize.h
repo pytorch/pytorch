@@ -79,13 +79,14 @@ inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
+template <typename T>
 inline void checkInBoundsForStorage(
-    IntArrayRef size,
-    IntArrayRef stride,
-    int64_t storage_offset,
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  int64_t storage_size_bytes, storage_size_plus_offset_bytes;
+  T storage_size_bytes, storage_size_plus_offset_bytes;
   if (stride.data()) {
     storage_size_bytes =
         at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
@@ -97,13 +98,16 @@ inline void checkInBoundsForStorage(
     storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
         size, data_type.itemsize(), storage_offset);
   }
-  if (storage_size_bytes == 0) {
+  // It's ok to always evaluate to False for this early return for SymInts because
+  // (1) maybe_convert_symint below only installs guard for int64_t case
+  // (2) we check for this condition in the TORCH_MAYBE_SYM_CHECK below
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(storage_size_bytes == 0)) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  int64_t new_storage_size_bytes = maybe_convert_symint<int64_t>(new_storage.sym_nbytes());
-  TORCH_CHECK(
-      storage_size_plus_offset_bytes <= new_storage_size_bytes,
+  T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
+  TORCH_MAYBE_SYM_CHECK(
+      sym_eq(storage_size_bytes, 0) | sym_le(storage_size_plus_offset_bytes, new_storage_size_bytes),
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -117,41 +121,6 @@ inline void checkInBoundsForStorage(
       storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
-}
-
-inline void checkInBoundsForStorage(
-    c10::SymIntArrayRef size,
-    c10::SymIntArrayRef stride,
-    c10::SymInt storage_offset,
-    const caffe2::TypeMeta& data_type,
-    const Storage& new_storage) {
-  c10::SymInt storage_size_bytes, storage_size_plus_offset_bytes;
-  if (stride.data()) {
-    storage_size_bytes =
-        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
-        size, stride, data_type.itemsize(), storage_offset);
-  } else {
-    storage_size_bytes =
-        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
-    storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
-        size, data_type.itemsize(), storage_offset);
-  }
-  TORCH_SYM_CHECK(
-      sym_eq(storage_size_bytes, 0) | sym_le(storage_size_plus_offset_bytes, new_storage.sym_nbytes()),
-      "setStorage: sizes ",
-      size,
-      ", strides ",
-      stride,
-      ","
-      " storage offset ",
-      storage_offset,
-      ", and itemsize ",
-      data_type.itemsize(),
-      " requiring a storage size of ",
-      storage_size_plus_offset_bytes,
-      " are out of bounds for storage of size ",
-      new_storage.sym_nbytes());
 }
 
 template <typename T>
