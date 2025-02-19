@@ -220,7 +220,7 @@ class TestMkldnnFusion(JitTestCase):
                     scalars = pointwise_info.scalars
                     algorithm = pointwise_info.algorithm
                     fused = torch.ops.mkldnn._linear_pointwise(
-                        v, mod.linear.weight, mod.linear.bias, attr, scalars, algorithm
+                        v, mod.linear.weight.t(), mod.linear.bias, attr, scalars, algorithm
                     )
                     self.assertEqual(ref, fused)
 
@@ -338,7 +338,7 @@ class TestMkldnnFusion(JitTestCase):
                     ref = mod(v, other)
                     attr = pointwise_name
                     fused = torch.ops.mkldnn._linear_pointwise(
-                        v, other, mod.linear.weight, mod.linear.bias, attr
+                        v, other, mod.linear.weight.t(), mod.linear.bias, attr
                     )
                     self.assertEqual(ref, fused)
 
