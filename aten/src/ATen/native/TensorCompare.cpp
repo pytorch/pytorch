@@ -664,6 +664,10 @@ std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
 }
 
+Tensor& where_(const Tensor& condition, Tensor& self, const Tensor& other) {
+  return at::native::where_self_out(condition, self, other, self);
+}
+
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
