@@ -572,6 +572,22 @@ def _multi_tensor_adam(
         if lr.device.type != "cpu" and lr.dim() != 0:
             lr = lr.squeeze()
 
+    if isinstance(beta1, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta1 as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if beta1.numel() != 1:
+            raise ValueError("Tensor beta1 must be 1-element")
+
+    if isinstance(beta2, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta2 as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if beta2.numel() != 1:
+            raise ValueError("Tensor beta2 must be 1-element")
+
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
