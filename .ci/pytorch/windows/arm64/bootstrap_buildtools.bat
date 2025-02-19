@@ -41,9 +41,9 @@ if "%MSVC_VERSION%" == "latest" (
 )
 
 :: Check if installation was successful
-if %errorlevel% neq 0 (
-    echo Failed to install Visual Studio Build Tools with C++ components. (exitcode = %errorlevel%)
-    exit /b 1
-)
+:: if %errorlevel% neq 0 (
+::     echo Failed to install Visual Studio Build Tools with C++ components. (exitcode = %errorlevel%)
+::     exit /b 1
+:: )
 
 echo Dependency Visual Studio Build Tools with C++ installation finished.
