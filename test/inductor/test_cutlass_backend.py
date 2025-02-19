@@ -823,12 +823,15 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @unittest.skipIf(not SM80OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
+
+        NOTE: For SM90, special alignemnt is needed, since in gemm_template.py,
+        set_alignment has arch specific logic.
         """
 
         def mm(a, b):
@@ -838,7 +841,7 @@ class TestCutlassBackend(TestCase):
         # layouts for this operation, thus the transpose of tensor b.
         # Also, for CUTLASS alignment requirements, number of columns
         # of the first tensor has to be divisible by 16.
-        m, n, k = 100, 16, 100
+        m, n, k = 128, 16, 128
         a = torch.randn(m, k).cuda().half()
         b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
 
