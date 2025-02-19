@@ -1183,7 +1183,7 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
-def run_tests(argv=UNITTEST_ARGS):
+def run_tests(argv=UNITTEST_ARGS, use_pytest=USE_PYTEST):
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
@@ -1215,7 +1215,7 @@ def run_tests(argv=UNITTEST_ARGS):
     if SHOWLOCALS:
         argv = [
             argv[0],
-            *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
+            *(["--showlocals", "--tb=long", "--color=yes"] if use_pytest else ["--locals"]),
             *argv[1:],
         ]
 
@@ -1225,7 +1225,7 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
             other_args.append("--import-slow-tests")
-        if USE_PYTEST:
+        if use_pytest:
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
@@ -1233,7 +1233,7 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args += ['--save-xml', args.save_xml]
 
         test_cases = (
-            get_pytest_test_cases(argv) if USE_PYTEST else
+            get_pytest_test_cases(argv) if use_pytest else
             [case.id().split('.', 1)[1] for case in discover_test_cases_recursively(suite)]
         )
 
@@ -1243,7 +1243,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
             cmd = (
                 [sys.executable] + [argv[0]] + other_args + argv[1:] +
-                (["--pytest-single-test"] if USE_PYTEST else []) +
+                (["--pytest-single-test"] if use_pytest else []) +
                 [test_case_full_name]
             )
             string_cmd = " ".join(cmd)
@@ -1277,7 +1277,7 @@ def run_tests(argv=UNITTEST_ARGS):
         for p in processes:
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
-    elif USE_PYTEST:
+    elif use_pytest:
         pytest_args = argv + ["--use-main-module"]
         test_report_path = ""
         if TEST_SAVE_XML:
