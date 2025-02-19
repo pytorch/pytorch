@@ -11,7 +11,7 @@ from typing import Optional, Sequence, Tuple, TypeVar, Union
 
 import onnx
 
-from onnxscript import BFLOAT16, BOOL, DOUBLE, FLOAT, FLOAT16, INT64
+from onnxscript import BFLOAT16, BOOL, DOUBLE, FLOAT, FLOAT16, INT64, ir
 from onnxscript.onnx_opset import opset18 as op
 from onnxscript.onnx_types import TensorType
 
@@ -1505,6 +1505,32 @@ def aten_one_hot(self: TensorType, num_classes: int = -1) -> TensorType:
     raise NotImplementedError
 
 
+def _process_padding(padding: Sequence[INT64 | int], rank: int) -> INT64:
+    """Convert PyTorch padding for ONNX Pad."""
+    assert isinstance(padding, (list, tuple))
+    if all(isinstance(pad, int) for pad in padding):
+        paddings = padding
+        zeros = [0] * (rank * 2 - len(paddings))
+        paddings = [*paddings, *zeros]
+        paddings = paddings[-2::-2] + paddings[-1::-2]
+        return op.Constant(value=ir.tensor(paddings, dtype=ir.DataType.INT64))
+    else:
+        paddings = []
+        for pad in padding:
+            if isinstance(pad, int):
+                paddings.append(op.Constant(value_ints=[pad]))
+            else:
+                # Dynamic value
+                paddings.append(op.Reshape(pad, [-1]))
+        # Create a series of 1d zero tensors
+        zero = op.Constant(value_ints=[0])
+        zeros = [zero] * (rank * 2 - len(paddings))
+        paddings = [*paddings, *zeros]
+        # Interleave the padding values
+        paddings = paddings[-2::-2] + paddings[-1::-2]
+        return op.Concat(paddings, axis=0)
+
+
 @onnx_impl(aten.pad.default, trace_only=True)
 def aten_pad(
     self: TensorType,
@@ -1576,7 +1602,7 @@ def aten_reflection_pad2d_backward(
     raise NotImplementedError
 
 
-@torch_op(aten.reflection_pad3d.default, trace_only=True)
+@onnx_impl(aten.reflection_pad3d.default, trace_only=True)
 def aten_reflection_pad3d(self: TensorType, padding: Sequence[INT64]) -> TensorType:
     """reflection_pad3d(Tensor self, SymInt[6] padding) -> Tensor"""
     rank = len(self.shape)
