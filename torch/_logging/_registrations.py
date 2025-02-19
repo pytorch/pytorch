@@ -197,6 +197,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "autotuning",
+    "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+)
+
+register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
     off_by_default=True,
