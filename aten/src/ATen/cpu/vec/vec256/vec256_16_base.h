@@ -641,10 +641,10 @@ public:
   Vectorized<T> inline operator<=(const Vectorized<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LE_OQ); });
   }
-  Vectorized<T> inline operator==(const Vectorized<T>& other) const {
+  Vectorized<T> inline operator==(const Vectorized16<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_EQ_OQ); });
   }
-  Vectorized<T> inline operator!=(const Vectorized<T>& other) const {
+  Vectorized<T> inline operator!=(const Vectorized16<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ); });
   }
 };
