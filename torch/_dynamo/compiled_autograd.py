@@ -1,4 +1,21 @@
 # mypy: allow-untyped-defs
+
+"""
+Provides functionality for compiling PyTorch's autograd (automatic differentiation) system.
+
+This module implements compiled autograd, which traces and optimizes backward pass
+computations at runtime. The key components are:
+
+- AutogradCompilerInstance: Traces and compiles autograd graphs using FX
+- Context managers (_enable/_disable): Control when compiled autograd is active
+- Utility functions: Support graph manipulation, tensor operations, and hooks
+
+Compiled autograd can significantly improve backward pass performance by removing
+Python overhead and enabling additional optimizations. It works by capturing
+backward computations into an FX graph that can be compiled and optimized,
+while maintaining the same semantics as eager mode autograd.
+"""
+
 import contextlib
 import functools
 import itertools
@@ -90,10 +107,10 @@ class OpNamespace:
             # C++ autograd function was not marked as traceable
             # Dynamo can't dry run it at compile time, so must fallback to eager
             @torch._dynamo.disable
-            def fn(*args, **kwargs):
+            def run_non_traceable_cpp_in_eager(*args, **kwargs):
                 return result(*args, **kwargs)
 
-            setattr(self, name, fn)
+            setattr(self, name, run_non_traceable_cpp_in_eager)
         return name
 
     def get(self, name):
@@ -171,6 +188,7 @@ class AutogradCompilerInstance:
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
+        sv_hook_ids: list[int],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -201,7 +219,7 @@ class AutogradCompilerInstance:
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        self.bind_tensors_to_proxies(inputs, args_proxy, inputs_origins)
+        self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints
         sizes = [
@@ -212,9 +230,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+        proxies = self.bind_objects_to_proxies(sizes, self.sizes_proxy, sizes_origins)
         for i, symint in enumerate(sizes):
-            self.symnode_proxy_lookup[symint.node] = self.sizes_proxy[i]
+            self.symnode_proxy_lookup[symint.node] = proxies[i]
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -236,9 +254,14 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, self.scalars_proxy, scalars_origins)
+        self.bind_objects_to_proxies(scalars, self.scalars_proxy, scalars_origins)
         for i, symval in enumerate(scalars):
             self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
+
+        unpacked_tensors = []
+        for hook_id in sv_hook_ids:
+            data_id = hook_id + 1
+            unpacked_tensors.append(self.unpack_hook(hook_id, data_id))
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -251,7 +274,13 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
-        return str(CompileContext.current_compile_id()), inputs, sizes, scalars
+        return (
+            str(CompileContext.current_compile_id()),
+            inputs,
+            sizes,
+            scalars,
+            unpacked_tensors,
+        )
 
     def log_compile_reasons(
         self,
@@ -391,7 +420,7 @@ class AutogradCompilerInstance:
             outputs = [
                 dummy() if isinstance(o, torch.fx.Proxy) else o for o in poutputs
             ]
-            self.bind_tensors_to_proxies(outputs, poutputs)
+            self.bind_objects_to_proxies(outputs, poutputs)
             return outputs
 
         outputs = copy_paste_aot_backward_graph()
@@ -411,7 +440,7 @@ class AutogradCompilerInstance:
             )
 
             output = self.allocate_dummy()
-            self.bind_tensors_to_proxies([output], [poutput])
+            self.bind_objects_to_proxies([output], [poutput])
             return output
 
         results = torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
@@ -471,7 +500,7 @@ class AutogradCompilerInstance:
                 grad_ins.append(
                     torch.empty(size=size, dtype=dtype, layout=layout, device=device)
                 )
-            self.bind_tensors_to_proxies(grad_ins, proxies)
+            self.bind_objects_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
     def call_copy_slices_prologue(self, inputs, base, view):
@@ -515,7 +544,7 @@ class AutogradCompilerInstance:
             "call_function", fn, args=proxy_args, kwargs={}
         )
         result = [self.allocate_dummy() for _ in output_metadata]
-        self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(len(result))])
+        self.bind_objects_to_proxies(result, [proxy_out[i] for i in range(len(result))])
         return result
 
     def validate_outputs(self, _, outputs, args, output_metadata):
@@ -526,7 +555,7 @@ class AutogradCompilerInstance:
             "call_function", op, args=proxy_args, kwargs={}
         )
         assert len(output_metadata) == len(outputs)
-        self.bind_tensors_to_proxies(outputs, new_proxy_outputs)
+        self.bind_objects_to_proxies(outputs, new_proxy_outputs)
         return outputs
 
     def accumulate(self, old_var, new_var):
@@ -536,7 +565,7 @@ class AutogradCompilerInstance:
             "call_function", torch.add, args=(old_var_proxy, new_var_proxy), kwargs={}
         )
         result = self.allocate_dummy()
-        self.bind_tensors_to_proxies([result], [proxy_out])
+        self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
     def proxy_call_hook(self, hook, *args, **kwargs):
@@ -550,6 +579,20 @@ class AutogradCompilerInstance:
             kwargs,
         )
 
+    def unpack_hook(self, hook_id, data_id):
+        assert self.hooks_proxy is not None
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        # move this out of hooks
+        data = self.hooks_proxy[data_id]  # type: ignore[index]
+        proxy = self.proxy_call_hook(
+            hook,
+            data,
+            hook_type="unpack_hook",
+        )
+        unpacked_tensor = self.allocate_dummy()
+        self.bind_tensors_to_proxies([unpacked_tensor], [proxy])
+        return unpacked_tensor
+
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
@@ -560,7 +603,7 @@ class AutogradCompilerInstance:
         )
         with disable_proxy_modes_tracing():
             inputs[i] = maybe_clone(inputs[i])
-            self.bind_tensors_to_proxies([inputs[i]], [proxy])
+            self.bind_objects_to_proxies([inputs[i]], [proxy])
         return inputs
 
     def pre_hook(self, inputs, hook_id):
@@ -573,7 +616,7 @@ class AutogradCompilerInstance:
         )
         with disable_proxy_modes_tracing():
             inputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(inputs, proxies)
+            self.bind_objects_to_proxies(inputs, proxies)
         return inputs
 
     def post_hook(self, outputs, inputs, hook_id):
@@ -587,7 +630,7 @@ class AutogradCompilerInstance:
         )
         with disable_proxy_modes_tracing():
             outputs = [maybe_clone(x) for x in outputs]
-            self.bind_tensors_to_proxies(outputs, proxies)
+            self.bind_objects_to_proxies(outputs, proxies)
         return outputs
 
     def post_acc_grad_hook(self, input, hook_id):
@@ -601,7 +644,7 @@ class AutogradCompilerInstance:
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, [proxy])
+            self.bind_objects_to_proxies(input, [proxy])
         return input
 
     # Note: [Compiled autograd and cudagraphs]
@@ -689,6 +732,9 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
+    def create_graph_module(self, id):
+        return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
+
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
@@ -715,7 +761,20 @@ class AutogradCompilerInstance:
                 if field in node.meta:
                     del node.meta[field]
 
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "compiled_autograd_graph_pre_reordering",
+                "encoding": "string",
+            },
+            payload_fn=lambda: GraphModule(
+                self.fx_tracer.root,
+                self.fx_tracer.graph,
+                f"CompiledAutograd{self.id}PreReordering",
+            ).print_readable(print_output=False),
+        )
         self.rename_aot_dispatcher_nodes()
+        self.delay_unpack_hook_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
         self.reorder_accumulate_grad_nodes()
@@ -734,9 +793,7 @@ class AutogradCompilerInstance:
         # should prevent these ops from going into the CA graph.
         self.dce()
 
-        graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
-        )
+        graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
             "Compiled autograd graph",
@@ -908,6 +965,19 @@ class AutogradCompilerInstance:
                 arg.append(node)
                 if getitem_node is not None:
                     arg.append(getitem_node)
+
+    def delay_unpack_hook_nodes(self):
+        """
+        We can delay unpack hooks until they are needed, even later than in the eager autograd engine.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "unpack_hook":
+                continue
+
+            first_user = min(node.users)
+            first_user.prepend(node)
 
     def reorder_tensor_pre_hook_nodes(self):
         """
@@ -1115,23 +1185,24 @@ class AutogradCompilerInstance:
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
 
-    def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[list[tuple[int, str]]] = None
+    def bind_objects_to_proxies(
+        self, objects, proxies, origins: Optional[list[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:
-                assert len(origins) == len(tensors)
+                assert len(origins) == len(objects)
                 bound_proxies = []
-                for i in range(len(tensors)):
+                for i in range(len(objects)):
                     nodecall_index, node_name = origins[i]
                     self.set_node_origin(node_name, nodecall_index, None)
                     bound_proxies.append(proxies[i])  # type: ignore[index]
                 proxies = bound_proxies
             else:
-                proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+                proxies = [proxies[i] for i in range(len(objects))]  # type: ignore[index]
 
-        assert len(tensors) == len(proxies)
-        track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
+        assert len(objects) == len(proxies)
+        track_tensor_tree(objects, proxies, constant=None, tracer=self.fx_tracer)
+        return proxies
 
     def bind_backward_state(self, index: int):
         assert self.hooks_proxy is not None

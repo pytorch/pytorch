@@ -1,9 +1,9 @@
 #pragma once
 
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
-#include <c10/core/SafePyObject.h>
 
 #include <ATen/core/Tensor.h>
 
@@ -54,7 +54,11 @@ class TORCH_API SavedVariable {
     return (bool)hooks_;
   }
 
-  std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>> get_hook_for_compiled_autograd() const {
+  std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
+  get_hook_for_compiled_autograd() const {
+    if (!hooks_) {
+      return std::nullopt;
+    }
     return hooks_->get_hook_for_compiled_autograd();
   }
 

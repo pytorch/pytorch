@@ -175,6 +175,14 @@ struct TensorArgs {
     return arg;
   }
 
+  TensorArg& add_unpacked_sv(
+      const SavedVariable& sv,
+      const at::Tensor& container) {
+    TensorArg& arg = add(container);
+    _saved_variables.emplace(&sv, &arg);
+    return arg;
+  }
+
   // the concrete tensors that will get passed into the graph as inputs
   std::vector<at::Tensor> inputs;
   // NodeCall id of each input, only when verbose logging is enabled
@@ -261,6 +269,7 @@ struct AutogradCompilerCall {
   SizeInput::DynType default_dyn_type;
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
+  std::unordered_map<const SavedVariable*, size_t> sv_to_hooks;
 };
 
 class CompiledNodeArgs {
@@ -288,12 +297,18 @@ class CompiledNodeArgs {
   }
   void collect(const SavedVariable& sv, bool is_output) {
     auto hook = sv.get_hook_for_compiled_autograd();
-    TORCH_INTERNAL_ASSERT(hook.has_value());
-    auto& [unpack_hook, data] = hook.value();
-    _compiler.emplace_hook(std::move(unpack_hook));
-    _compiler.emplace_hook(std::move(data));
-    collect(
-        _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
+    if (hook.has_value()) {
+      auto& [unpack_hook, data] = hook.value();
+      size_t unpack_id = _compiler.emplace_hook(std::move(unpack_hook));
+      size_t data_id = _compiler.emplace_hook(std::move(data));
+      TORCH_INTERNAL_ASSERT(data_id == unpack_id + 1);
+      // tensors need to be deduped
+      _compiler.sv_to_hooks.emplace(&sv, unpack_id);
+    } else {
+      // happy path, no hooks
+      collect(
+          _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
+    }
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
@@ -503,7 +518,7 @@ class CompiledNodeArgs {
         fn->retains_grad_hooks().empty(),
         "retains_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
-        i->compiled_args(*this);
+      i->compiled_args(*this);
     }
     for (auto& i : fn->pre_hooks()) {
       i->compiled_args(*this);

@@ -301,14 +301,6 @@ bool PyNode::is_aot_backward() const {
   return py::hasattr(py::getattr(handle, "_forward_cls"), "_aot_id");
 }
 
-auto PyNode::compiled_autograd_should_lift() const -> bool {
-  pybind11::gil_scoped_acquire gil;
-  static PyObject* attr_name =
-      PyUnicode_InternFromString("_compiled_autograd_should_lift");
-  THPObjectPtr should_lift(PyObject_GetAttr(obj, attr_name));
-  return PyObject_IsTrue(should_lift.get()) == 1;
-}
-
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");

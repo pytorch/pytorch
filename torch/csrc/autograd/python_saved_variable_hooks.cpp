@@ -46,13 +46,13 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
   // unpack_hook_ will be manually decrefed when the saved variable is released
 }
 
-std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>  PySavedVariableHooks::get_hook_for_compiled_autograd() const {
+std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
+PySavedVariableHooks::get_hook_for_compiled_autograd() const {
   Py_INCREF(unpack_hook_);
   Py_INCREF(data_);
   return std::make_pair(
-    c10::SafePyObject(unpack_hook_, getPyInterpreter()),
-    c10::SafePyObject(data_, getPyInterpreter())
-  );
+      c10::SafePyObject(unpack_hook_, getPyInterpreter()),
+      c10::SafePyObject(data_, getPyInterpreter()));
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -60,7 +60,6 @@ PySavedVariableHooks::~PySavedVariableHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     py::gil_scoped_acquire gil;
-    std::cout << "decref pack/unpack/data" << std::endl;
     Py_XDECREF(pack_hook_);
     Py_XDECREF(unpack_hook_);
     Py_XDECREF(data_);

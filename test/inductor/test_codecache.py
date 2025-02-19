@@ -1494,6 +1494,9 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Worker processes do not register PatchCaches() properly
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
@@ -1531,6 +1534,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_local_cache": True})
     @config.patch({"autotune_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"compile_threads": 1})
     @config.patch({"max_autotune": True})
     def test_bundled_autotune_remote_cache(self):
         class Model(torch.nn.Module):

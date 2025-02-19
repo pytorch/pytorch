@@ -59,6 +59,7 @@ SavedVariable::SavedVariable(
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
+      TORCH_INTERNAL_ASSERT(!data_.defined());
       return;
     }
 
