@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -8,7 +10,6 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs
 from torch.types import _size
-
 
 __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
@@ -74,10 +75,10 @@ class ExpRelaxedCategorical(Distribution):
     def probs(self) -> Tensor:
         return self._categorical.probs
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
-            torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
+            torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device, generator=generator)
         )
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature

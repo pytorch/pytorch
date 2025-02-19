@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import nan, Tensor
+from torch import nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
-
 
 __all__ = ["Categorical"]
 
@@ -127,11 +128,12 @@ class Categorical(Distribution):
             device=self.probs.device,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
         probs_2d = self.probs.reshape(-1, self._num_events)
-        samples_2d = torch.multinomial(probs_2d, sample_shape.numel(), True).T
+        samples_2d = torch.multinomial(
+            probs_2d, sample_shape.numel(), True, generator=generator).T
         return samples_2d.reshape(self._extended_shape(sample_shape))
 
     def log_prob(self, value):

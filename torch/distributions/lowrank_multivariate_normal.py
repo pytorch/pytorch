@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
 from torch.types import _size
-
 
 __all__ = ["LowRankMultivariateNormal"]
 
@@ -200,11 +200,11 @@ class LowRankMultivariateNormal(Distribution):
             self._batch_shape + self._event_shape + self._event_shape
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         W_shape = shape[:-1] + self.cov_factor.shape[-1:]
-        eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)
-        eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device, generator=generator)
+        eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device, generator=generator)
         return (
             self.loc
             + _batch_mv(self._unbroadcasted_cov_factor, eps_W)
