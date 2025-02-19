@@ -1,10 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import copy
 import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -17,6 +19,7 @@ from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor import comms
 from torch._inductor.virtualized import ops
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._subclasses import fake_tensor
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
@@ -51,6 +54,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .numeric_utils import enable_runtime_numeric_check
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -71,7 +75,12 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
+def post_grad_passes(
+    gm: torch.fx.GraphModule,
+    is_inference: bool,
+    example_inputs: Sequence[object] = (),
+    fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
+):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -114,6 +123,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+        gm_before_fx_passes = None
+        if hasattr(
+            config, "fx_passes_numeric_check"
+        ) and config.fx_passes_numeric_check.get("post_grad", False):
+            gm_before_fx_passes = copy.deepcopy(gm)
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
@@ -141,6 +155,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
+        optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
+        fx_passes_numeric_check = config.fx_passes_numeric_check.get("post_grad", False)
+        enable_runtime_numeric_check(
+            example_inputs, fake_mode, gm_before_fx_passes, gm, fx_passes_numeric_check
+        )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -185,7 +204,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 

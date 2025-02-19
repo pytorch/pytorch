@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import gc
 import logging
 import os
@@ -12,6 +13,7 @@ import torch.optim as optim
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..pattern_matcher import stable_topological_sort
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -130,6 +132,14 @@ def compare_gradients(model_base, model_control, precision):
     )
 
 
+def compare_buffers(model_base, model_control, precision):
+    return compare_dict_tensors(
+        dict(model_base.named_buffers()),
+        dict(model_control.named_buffers()),
+        precision,
+    )
+
+
 def run_model(
     model_base, model_control, model_input, num_iterations=10, precision=1e-4
 ):
@@ -146,6 +156,9 @@ def run_model(
 
         res = compare_forward_output(pred_base, pred_control, precision)
         logger.info("compare loss/predict. Numerical result : %s", res)
+
+        res = compare_buffers(model_base, model_control, precision)
+        logger.info("compare buffers. Numerical result : %s", res)
         # tensor may not have a grad_fn
         try:
             _ = pred_base[0].sum().backward(retain_graph=True)
@@ -211,3 +224,36 @@ def numeric_check_if_enabled(
             "Runtime numeric check failed in pre grad fx passes with error: %s", e
         )
         traceback.print_exc()
+
+
+def enable_runtime_numeric_check(
+    example_inputs, fake_mode, gm_before_fx_passes, gm, fx_passes_numeric_check
+):
+    """
+    Enable runtime numeric check for fx passes.
+    """
+    if (
+        config.pattern_matcher
+        and hasattr(config, "fx_passes_numeric_check")
+        and fx_passes_numeric_check
+        and example_inputs is not None
+    ):
+        stable_topological_sort(gm.graph)
+        gm_after_fx_passes = copy.deepcopy(gm)
+        if fake_mode is not None:
+            with fake_mode:
+                numeric_check_if_enabled(
+                    gm_before_fx_passes,  # type: ignore[possibly-undefined]
+                    gm_after_fx_passes,
+                    example_inputs,
+                    config.fx_passes_numeric_check.get("num_iterations", 1),
+                    config.fx_passes_numeric_check.get("precision", 1e-4),
+                )
+        else:
+            numeric_check_if_enabled(
+                gm_before_fx_passes,  # type: ignore[possibly-undefined]
+                gm_after_fx_passes,
+                example_inputs,
+                config.fx_passes_numeric_check.get("num_iterations", 1),
+                config.fx_passes_numeric_check.get("precision", 1e-4),
+            )

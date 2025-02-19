@@ -28,6 +28,7 @@ from ..pattern_matcher import (
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
+from .numeric_utils import enable_runtime_numeric_check
 from .split_cat import PRE_GRAD_PATTERNS
 
 
@@ -133,10 +134,11 @@ def pre_grad_passes(
     """
     if config.pattern_matcher:
         lazy_init()
+        gm_before_fx_passes = None
         if hasattr(
             config, "fx_passes_numeric_check"
         ) and config.fx_passes_numeric_check.get("pre_grad", False):
-            gm_before_fx_passes = gm.__copy__()
+            gm_before_fx_passes = copy.deepcopy(gm)
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
 
@@ -277,6 +279,13 @@ def pre_grad_passes(
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
+            optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
+            fx_passes_numeric_check = config.fx_passes_numeric_check.get(
+                "pre_grad", False
+            )
+            enable_runtime_numeric_check(
+                example_inputs, None, gm_before_fx_passes, gm, fx_passes_numeric_check
+            )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -291,24 +300,6 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
-
-    if (
-        config.pattern_matcher
-        and hasattr(config, "fx_passes_numeric_check")
-        and config.fx_passes_numeric_check.get("pre_grad", False)
-        and example_inputs is not None
-    ):
-        from .numeric_utils import numeric_check_if_enabled
-
-        gm_after_fx_passes = gm.__copy__()
-        numeric_check_if_enabled(
-            gm_before_fx_passes,  # type: ignore[possibly-undefined]
-            gm_after_fx_passes,
-            example_inputs,
-            config.fx_passes_numeric_check.get("num_iterations", 1),
-            config.fx_passes_numeric_check.get("precision", 1e-4),
-        )
 
     return gm
 
