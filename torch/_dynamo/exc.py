@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+
+"""Exception handling and error reporting for TorchDynamo.
+
+This module provides a comprehensive set of exception classes and utilities for error
+handling in TorchDynamo. It includes:
+
+Base Exceptions:
+    - TorchDynamoException: Base class for all TorchDynamo-specific exceptions
+    - Various specialized subclasses for different error scenarios
+
+User Error Handling:
+    - UserError: Exceptions for user-facing errors in TorchDynamo usage
+    - UserErrorType: Enumeration of different categories of user errors
+    - Formatted error messages with debugging information
+
+Observed Exceptions:
+    - Classes for handling exceptions observed during tracing
+    - Special handling for StopIteration, LookupError, etc.
+    - Exception state management during compilation
+
+Error Formatting:
+    - Stack trace filtering and formatting
+    - Error message augmentation
+    - Debugging utilities for error reporting
+"""
+
 import logging
 import os
 import textwrap
@@ -19,6 +45,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
 
@@ -147,6 +174,10 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class UnknownPropertiesDuringBackwardTrace(Unsupported):
+    pass
+
+
 class RecompileError(TorchDynamoException):
     pass
 
@@ -157,6 +188,17 @@ class ArgsMismatchError(Unsupported):
 
 
 class AttributeMutationError(Unsupported):
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
+class InfiniteGeneratorError(Unsupported):
+    # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
+class SideEffectsError(Unsupported):
     def __init__(self, msg: str) -> None:
         super().__init__(msg)
 
@@ -251,8 +293,22 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-class ObservedKeyError(ObservedException):
+class ObservedLookupError(ObservedException):
+    # A LookupError exception to be raised from inside Dynamo tracing. This can happen on __getitem__
+    pass
+
+
+class ObservedIndexError(ObservedLookupError):
+    # An IndexError exception to be raised from inside Dynamo tracing. This can happen on list __getitem__
+    pass
+
+
+class ObservedKeyError(ObservedLookupError):
     # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
+    pass
+
+
+class ObservedGeneratorExit(ObservedException):
     pass
 
 
@@ -262,6 +318,7 @@ class ObservedAttributeError(ObservedException):
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
     pass
 
 
@@ -269,23 +326,46 @@ class ObservedNotImplementedError(ObservedException):
     pass
 
 
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
+    LookupError: ObservedLookupError,
+    IndexError: ObservedIndexError,
+    GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
     NotImplementedError: ObservedNotImplementedError,
+    TypeError: ObservedTypeError,
 }
 
 
-def raise_observed_exception(e: type[Exception], tx: Any) -> None:
+def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
+    if exc_type not in observed_exception_map:
+        observed_exception_map[exc_type] = type(
+            f"Observed{exc_type.__name__}Error", (ObservedException,), {}
+        )
+    return observed_exception_map[exc_type]
+
+
+def raise_observed_exception(
+    exc_type: type[Exception],
+    tx: InstructionTranslatorBase,
+    *,
+    args: Optional[list[Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
+) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
+    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
-    raise observed_exception_map[e]
+    raise observed_exception_map[exc_type]
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -410,14 +490,6 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
                 f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
-
-    if not config.suppress_errors and not export:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    import torch._dynamo\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
 
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 

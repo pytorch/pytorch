@@ -4,6 +4,7 @@ import functools
 import logging
 import os
 import re
+import unittest
 import unittest.mock
 
 import torch
@@ -17,6 +18,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
@@ -756,6 +758,20 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
 
+    @make_logging_test(autotuning=True)
+    @requires_cuda
+    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    def test_autotuning(self, records):
+        with torch._inductor.utils.fresh_inductor_cache():
+
+            def f(a, b):
+                return torch.mm(a, b)
+
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            self.assertGreater(len(records), 0)
+            self.assertLess(len(records), 40)
+
     @make_logging_test(graph_region_expansion=True)
     def test_graph_region_expansion(self, records):
         with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
@@ -843,6 +859,8 @@ fn(torch.randn(5))
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
         # Test program
         @torch.compile()
         def foo():
@@ -876,7 +894,7 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
-# single record tests
+# non single record tests
 exclusions = {
     "bytecode",
     "cudagraphs",
@@ -913,6 +931,7 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "autotuning",
     "graph_region_expansion",
 }
 for name in torch._logging._internal.log_registry.artifact_names:

@@ -49,8 +49,7 @@ Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
 
 BCELossImpl::BCELossImpl(BCELossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  BCELossImpl::reset();
 }
 
 void BCELossImpl::reset() {
@@ -89,8 +88,7 @@ Tensor HingeEmbeddingLossImpl::forward(
 
 MultiMarginLossImpl::MultiMarginLossImpl(MultiMarginLossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  MultiMarginLossImpl::reset();
 }
 
 void MultiMarginLossImpl::reset() {
@@ -143,8 +141,7 @@ Tensor CosineEmbeddingLossImpl::forward(
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
     torch::nn::MultiLabelSoftMarginLossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  MultiLabelSoftMarginLossImpl::reset();
 }
 
 void MultiLabelSoftMarginLossImpl::pretty_print(std::ostream& stream) const {
@@ -356,8 +353,7 @@ Tensor MarginRankingLossImpl::forward(
 
 NLLLossImpl::NLLLossImpl(NLLLossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  NLLLossImpl::reset();
 }
 
 void NLLLossImpl::reset() {
@@ -377,8 +373,7 @@ Tensor NLLLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 CrossEntropyLossImpl::CrossEntropyLossImpl(CrossEntropyLossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  CrossEntropyLossImpl::reset();
 }
 
 void CrossEntropyLossImpl::reset() {
@@ -405,8 +400,7 @@ Tensor CrossEntropyLossImpl::forward(
 
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(BCEWithLogitsLossOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  BCEWithLogitsLossImpl::reset();
 }
 
 void BCEWithLogitsLossImpl::reset() {
