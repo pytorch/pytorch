@@ -586,6 +586,34 @@ class TestFxGraphCache(TestCase):
             result = f()
             self.assertEqual(result[0].device, torch.device("cuda:1"))
 
+    @config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @config.patch("fx_graph_remote_cache", False)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    def test_tensor_device_guards_cpu_tensor(self):
+        """
+        CPU tensor arguments should still cache hit
+        """
+
+        @torch.compile
+        def f(x):
+            return x.sin()
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f(torch.randn(3, device="cpu"))
+            self.assertEqual(result.device, torch.device("cpu"))
+
+        self.reset()
+        # Should not cache hit with device guard
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f(torch.randn(3, device="cpu"))
+            self.assertEqual(result.device, torch.device("cpu"))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
