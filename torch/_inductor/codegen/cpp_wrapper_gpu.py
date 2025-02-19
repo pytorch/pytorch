@@ -87,13 +87,15 @@ class DeferredTritonCallWrapper:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
         # tensors can be RAIIAtenTensorHandle or ConstantHandle, so make them template types
-        tensor_types = [
+        template_types = [
             f"typename {name}_type_"
             for name, arg_type in zip(def_args, arg_types)
             if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
         ]
-        if tensor_types:
-            prefix.writeline(f"template <{', '.join(tensor_types)}>")
+        if V.graph.aot_mode:
+            template_types.append("typename kernels_type_")
+        if template_types:
+            prefix.writeline(f"template <{', '.join(template_types)}>")
         prefix.writeline(f"static inline void {self.wrapper_name}(")
         with prefix.indent():
             assert len(def_args) == len(arg_types), (def_args, arg_types)
@@ -110,7 +112,7 @@ class DeferredTritonCallWrapper:
                     raise ValueError(f"Unexpected arg type {arg_type}")
             prefix.writeline("cudaStream_t stream_,")
             if V.graph.aot_mode:
-                prefix.writeline("AOTInductorModelKernels& kernels_,")
+                prefix.writeline("kernels_type_& kernels_,")
             prefix.writeline(
                 "const std::optional<std::string>& cubin_dir_ = std::nullopt"
             )
@@ -292,20 +294,15 @@ class CppWrapperGpu(CppWrapperCpu):
         with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             return super().generate(is_inference)
 
-    def generate_aot_mode_prefix(self):
-        pass  # will be handled in finalize_prefix
-
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
         self.prefix = IndentedBuffer()
-        self.prefix.writeline("namespace torch::aot_inductor {")
-        super().generate_aot_mode_prefix()
         super().finalize_prefix()
         for kernel in self._triton_call_wrappers.values():
             self.prefix.writeline("\n")
             kernel.generate(self)
-        self.prefix.writeline("\n} // namespace torch::aot_inductor")
+        self.prefix.writeline("\n")
         self.prefix.splice(old_prefix)
 
     def generate_tma_descriptor(self, desc):

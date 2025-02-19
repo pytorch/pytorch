@@ -842,32 +842,32 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.prefix.writeline("}")
 
-    def generate_aot_mode_prefix(self):
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-
     def generate(self, is_inference):
         with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
-            self.generate_aot_mode_prefix()
             self.write_wrapper_decl()
             return super().generate(is_inference)
 
     def finalize_prefix(self):
-        cached_dtypes_buffer = IndentedBuffer()
+        prior = self.prefix
+        self.prefix = aot_mode_decls = IndentedBuffer()
+        if V.graph.aot_mode and not V.graph.is_const_graph:
+            aot_mode_decls.writeline("using namespace torch::aot_inductor;")
+            self.codegen_model_kernels()
+            self.codegen_model_constructor()
+            self.codegen_const_run_driver()
+
+        self.prefix = cache_decls = IndentedBuffer()
         for dtype in self.used_cached_dtypes:
-            cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            cache_decls.writeline(f"CACHE_TORCH_DTYPE({dtype});")
         for device in self.used_cached_devices:
-            cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
+            cache_decls.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
-            cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+            cache_decls.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         for memory_format in self.used_cached_memory_formats:
-            cached_dtypes_buffer.writeline(
-                f"CACHE_TORCH_MEMORY_FORMAT({memory_format});"
-            )
-        cached_dtypes_buffer.splice(self.prefix)
-        self.prefix = cached_dtypes_buffer
+            cache_decls.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
+
+        self.prefix.splice(aot_mode_decls)
+        self.prefix.splice(prior)
 
     def define_kernel(
         self,
