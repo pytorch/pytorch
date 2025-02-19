@@ -1784,7 +1784,16 @@ class AlgorithmSelectorCache(PersistentCache):
             start_times: dict[concurrent.futures.Future[Any], float] = {}
             elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
 
+            # Some choices only differ in runtime arguments, so we
+            # skip a choice if it has the same hash as a previously seen choice
+            seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
             for c in choices:
+                # Skip choices which we have already issued a precompile
+                if c.hash_key() in seen_choices:
+                    continue
+                else:
+                    seen_choices.add(c.hash_key())
+
                 if hasattr(c, "precompile"):
                     triton_cuda_choice = isinstance(
                         c, TritonTemplateCaller
