@@ -808,6 +808,10 @@ class FxGraphHashDetails:
         # Alignment checks
         self.inputs_to_check = inputs_to_check
 
+        # This device index is usually already encoded by the device of the inputs
+        # but fx graphs don't necessarily have tensor inputs
+        self.default_cuda_device_index = torch.cuda.current_device()
+
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
             torch.are_deterministic_algorithms_enabled(),

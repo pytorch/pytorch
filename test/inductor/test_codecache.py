@@ -30,7 +30,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch._library import capture_triton
 from torch.compiler._cache import CacheArtifactManager
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -555,6 +555,36 @@ class TestFxGraphCache(TestCase):
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             self.assertEqual(res1, res2)
+
+    @config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @config.patch("fx_graph_remote_cache", False)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    def test_no_arguments_tensor_device_guards(self):
+        """
+        Usually, when there are example inputs, the device index of the inputs
+        is sufficient to make sure we don't cache hit with the results from different
+        cuda devices.
+        When the input has no arguments, we still need to have the cuda
+        device index in the cache key.
+        """
+
+        @torch.compile
+        def f():
+            y = torch.randn(3, device="cuda")
+            return (y,)
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:0"))
+        self.reset()
+        # Should not cache hit with device guard
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:1"))
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
