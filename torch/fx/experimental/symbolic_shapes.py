@@ -5678,7 +5678,7 @@ class ShapeEnv:
 
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
-        expr = self.simplify(expr)
+        expr = self.simplify(expr, size_oblivious)
 
         if compute_hint:
             expr = expr.xreplace(self.var_to_val).xreplace(self.unbacked_var_to_val)
@@ -5768,12 +5768,12 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: _SympyT) -> _SympyT:
+    def simplify(self, expr: _SympyT, size_oblivious: bool = False) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if expr.has(Max):
+        if size_oblivious and expr.has(Max):
             max_replacements = {}
             for atom in expr.atoms(Max):
                 a, b = atom.args
