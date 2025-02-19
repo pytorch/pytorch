@@ -1,6 +1,5 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
-import dataclasses
 import inspect
 import operator
 import types
@@ -923,16 +922,5 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
-    elif dataclasses.is_dataclass(a):
-        args = []
-        kwargs = {}
-        for field in dataclasses.fields(a):
-            if field.init:
-                field_arg = map_aggregate(getattr(a, field.name), fn)
-                if getattr(field, "kw_only", False):
-                    kwargs[field.name] = field_arg
-                else:
-                    args.append(field_arg)
-        return type(a)(*args, **kwargs)
     else:
         return fn(a)
