@@ -794,7 +794,7 @@ class TestMaxAutotune(TestCase):
         count = 2 if using_triton_mm else 1
         FileCheck().check(_get_func_call()).check_count(
             _get_kernel_launch(), count, exactly=True
-        ).run(code[0])
+        ).run("\n".join(code))
 
         def f(x, y):
             y = torch.cos(y)
