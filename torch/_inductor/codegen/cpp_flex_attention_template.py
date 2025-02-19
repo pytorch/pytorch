@@ -400,7 +400,7 @@ extern "C"
           /* ld_dst */ cur_kvSplitSize);
 
         // Pack [headSize, cur_kvSplitSize]
-        pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
           /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
                   j * eheadSize * kvSize + n * eheadSize),
@@ -409,7 +409,7 @@ extern "C"
           /* N */ cur_kvSplitSize);
 
         // Pack [cur_kvSplitSize, headSize_v]
-        pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(v_addr),
           /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
                   i * num_head * kv_padding_size * headSize_v +

@@ -113,7 +113,8 @@ inline void {{kernel_name}}(
             "int8_gemm": self.input_dtype in [torch.uint8, torch.int8],
             "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
-            "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            "pack_vnni_B_locally": self.pack_vnni_B_locally,
+            "template": self,
         }
 
     def get_kernel_declaration(self):
@@ -186,33 +187,30 @@ inline void {{kernel_name}}(
     def get_b_layout(self) -> LayoutType:
         return LayoutType.NORMAL
 
-
-class CppMicroGemmF16Abstract(CppMicroGemm):
-    ALLOCATE_BUFFER = r"""
-  int64_t {{buffer_name}}_dtype_itemsize = (
-    std::is_same_v<{{buffer_dtype}}, at::BFloat16>
-    || std::is_same_v<{{buffer_dtype}}, at::Half>
-    ) ? 2 : 4;
-  auto& {{buffer_name}}_allocator = *at::getCPUAllocator();
-  auto {{buffer_name}}_work_data = {{buffer_name}}_allocator.allocate({{buffer_size}}*{{buffer_name}}_dtype_itemsize);
-  void* {{buffer_name}}_data_ptr = {{buffer_name}}_work_data.get();
-  {{buffer_dtype}}* {{buffer_name}} = ({{buffer_dtype}}*){{buffer_name}}_data_ptr;
+    ALLOCATE_WEIGHT_BUFFER = r"""
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{buffer_dtype}}[]> heap_deq_b_buf_ptr(new {{buffer_dtype}}[{{buffer_size}}]);
+    {{buffer_dtype}}* {{buffer_name}} = heap_deq_b_buf_ptr.get();
+    {%- else %}
+    // It's safe to use a stack-allocated array since the blocking strategy would
+    // require us to allocate an array that's smaller than the size of L1D cache,
+    // and the default per thread max stack size on Linux is quite higher,
+    // so we need not worry about stack overflow.
+    alignas(4096) {{buffer_dtype}} {{buffer_name}}[{{buffer_size}}];
+    {%- endif %}
 """
 
-    def get_common_options(self):
-        options = {
-            "pack_vnni_B_locally": self.pack_vnni_B_locally,
-            "template": self,
-            **super().get_common_options(),
-        }
-        return options
-
-    def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
-        return KernelTemplate._template_from_string(self.ALLOCATE_BUFFER).render(
+    def codegen_allocate_weight_buffer(
+        self, buffer_name: str, buffer_dtype: str, *size_args
+    ) -> str:
+        buffer_size = " * ".join(map(str, size_args))
+        return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
             dict(
                 buffer_name=buffer_name,
                 buffer_dtype=buffer_dtype,
                 buffer_size=buffer_size,
+                is_msvc_compiler=cpp_builder.is_msvc_cl(),
             )
         )
 
@@ -567,7 +565,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         extra_check=check_amx_extra,
     ),
 )
-class CppMicroGemmAMX(CppMicroGemmF16Abstract):
+class CppMicroGemmAMX(CppMicroGemm):
     """
     This class generates the code for micro gemm using Advanced Matrix eXtention (AMX)
     instructions available in 4th generation Intel Xeon for compute.
@@ -575,30 +573,17 @@ class CppMicroGemmAMX(CppMicroGemmF16Abstract):
     """
 
     TEMPLATE_ENTRY = r"""
-#include <ATen/Context.h>
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
 {%- if pack_vnni_B_locally %}
-    int64_t block_n = {{block_n}};
-    {{template.codegen_allocate_buffer("packed_B_buf", input2_t, "K * block_n")}}
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K", block_n)}}
 {%- endif %}
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
-    const auto buf_size = K * {{block_n}};
-    {%- if is_msvc_compiler %}
-    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
-    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
-    {%- else %}
-    // It's safe to use a stack-allocated array since the blocking strategy would
-    // require us to allocate an array that's smaller than the size of L1D cache,
-    // and the default per thread max stack size on Linux is quite higher,
-    // so we need not worry about stack overflow.
-    alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
-    {%- endif %}
+    {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
@@ -636,7 +621,7 @@ class CppMicroGemmAMX(CppMicroGemmF16Abstract):
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if pack_vnni_B_locally %}
         // Pack non-constant weights into VNNI interleaved format in packed_B_buf
-        pack_vnni2(B + n, packed_B_buf, ldb, K, {{block_n}});
+        at::vec::pack_vnni2(B + n, packed_B_buf, ldb, K, {{block_n}});
 {%- elif use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
@@ -876,7 +861,7 @@ def check_brgemm_extra(config, m, n, k, alpha, num_threads):
         extra_check=check_brgemm_extra,
     ),
 )
-class CppMicroBrgemm(CppMicroGemmF16Abstract):
+class CppMicroBrgemm(CppMicroGemm):
     """
     This class generates the code for micro gemm using oneDNN brgemm.
     It supports input types of torch.half.
@@ -884,11 +869,10 @@ class CppMicroBrgemm(CppMicroGemmF16Abstract):
 
     TEMPLATE_ENTRY = r"""
 #include <ATen/native/CPUBlas.h>
-#include <ATen/Context.h>
 {{declare_kernel}} {
 {%- if pack_vnni_B_locally %}
-    {{template.codegen_allocate_buffer("packed_B_buf", input2_t, "K * N")}}
-    pack_vnni2(B, packed_B_buf, ldb, K, N);
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K * N")}}
+    at::vec::pack_vnni2(B, packed_B_buf, ldb, K, N);
 {%- endif %}
     at::native::cpublas::brgemm(
       M, N, K,
