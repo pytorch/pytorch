@@ -81,6 +81,7 @@ def export_compat(
                 "and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' "
                 "Supply the 'dynamic_shapes' argument instead if export is unsuccessful.",
                 UserWarning,
+                stacklevel=3,
             )
             try:
                 dynamic_shapes, args, kwargs = (

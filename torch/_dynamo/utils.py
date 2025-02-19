@@ -2976,6 +2976,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)
@@ -4312,3 +4318,27 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    return mode

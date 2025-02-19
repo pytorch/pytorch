@@ -44,7 +44,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -54,7 +54,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -155,7 +155,7 @@ jobs:
       - wheel-py3_9-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -279,7 +279,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -290,7 +290,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -391,7 +391,7 @@ jobs:
       - wheel-py3_9-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -517,7 +517,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -528,7 +528,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -629,7 +629,7 @@ jobs:
       - wheel-py3_9-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -755,7 +755,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -766,7 +766,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -867,7 +867,7 @@ jobs:
       - wheel-py3_9-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -993,7 +993,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1104,7 +1104,7 @@ jobs:
       - wheel-py3_9-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1228,7 +1228,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1238,7 +1238,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1339,7 +1339,7 @@ jobs:
       - wheel-py3_10-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1463,7 +1463,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1474,7 +1474,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1575,7 +1575,7 @@ jobs:
       - wheel-py3_10-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1701,7 +1701,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1712,7 +1712,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1813,7 +1813,7 @@ jobs:
       - wheel-py3_10-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1939,7 +1939,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1950,7 +1950,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2051,7 +2051,7 @@ jobs:
       - wheel-py3_10-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2177,7 +2177,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2288,7 +2288,7 @@ jobs:
       - wheel-py3_10-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2412,7 +2412,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2422,7 +2422,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2523,7 +2523,7 @@ jobs:
       - wheel-py3_11-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2647,7 +2647,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2658,7 +2658,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2759,7 +2759,7 @@ jobs:
       - wheel-py3_11-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2885,7 +2885,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2896,7 +2896,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2997,7 +2997,7 @@ jobs:
       - wheel-py3_11-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3123,7 +3123,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3134,7 +3134,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3235,7 +3235,7 @@ jobs:
       - wheel-py3_11-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3361,7 +3361,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3472,7 +3472,7 @@ jobs:
       - wheel-py3_11-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3596,7 +3596,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3606,7 +3606,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3707,7 +3707,7 @@ jobs:
       - wheel-py3_12-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3831,7 +3831,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3842,7 +3842,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3943,7 +3943,7 @@ jobs:
       - wheel-py3_12-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4069,7 +4069,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4080,7 +4080,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4181,7 +4181,7 @@ jobs:
       - wheel-py3_12-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4307,7 +4307,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4318,7 +4318,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4419,7 +4419,7 @@ jobs:
       - wheel-py3_12-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4545,7 +4545,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4656,7 +4656,7 @@ jobs:
       - wheel-py3_12-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4780,7 +4780,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4790,7 +4790,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4891,7 +4891,7 @@ jobs:
       - wheel-py3_13-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5015,7 +5015,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5026,7 +5026,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5127,7 +5127,7 @@ jobs:
       - wheel-py3_13-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5253,7 +5253,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5264,7 +5264,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5365,7 +5365,7 @@ jobs:
       - wheel-py3_13-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5491,7 +5491,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5502,7 +5502,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5603,7 +5603,7 @@ jobs:
       - wheel-py3_13-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5729,7 +5729,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5840,7 +5840,7 @@ jobs:
       - wheel-py3_13-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5964,7 +5964,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5974,7 +5974,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -6075,7 +6075,7 @@ jobs:
       - wheel-py3_13t-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6199,7 +6199,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6210,7 +6210,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -6311,7 +6311,7 @@ jobs:
       - wheel-py3_13t-cuda11_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6437,7 +6437,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6448,7 +6448,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -6549,7 +6549,7 @@ jobs:
       - wheel-py3_13t-cuda12_4-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6675,7 +6675,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6686,7 +6686,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Display EC2 information
         shell: bash
@@ -6787,7 +6787,7 @@ jobs:
       - wheel-py3_13t-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6913,7 +6913,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7024,7 +7024,7 @@ jobs:
       - wheel-py3_13t-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
