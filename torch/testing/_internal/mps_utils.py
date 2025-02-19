@@ -518,7 +518,6 @@ XFAILLIST_GRAD = {
     ),
 }
 
-
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
 """Ops which do not have support for complex dtypes and are expected to fail"""
 """Only applies to MacOS14+, all complex ops are unsupported on earlier MacOS versions"""
@@ -716,7 +715,7 @@ MACOS_13_XFAILLIST = {
     "nn.functional.conv3d": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH,
         skip=unittest.skip("Hard crash on MacOS13"),
-        dtypes=[torch.float16],
+        dtypes=[torch.float16, torch.float32],
         upper=14.0,
     ),
     "nn.functional.conv_transpose1d": MPSSkipInfo(
@@ -909,7 +908,6 @@ ERRORINPUT_XFAILLIST = {
 
 MPS_OPINFO: Dict[str, List[MPSSkipInfo]] = {}
 
-
 def append_skips(skip_list: Dict) -> None:
     for op_name, skip in skip_list.items():
         if not isinstance(skip, Iterable):
@@ -918,7 +916,6 @@ def append_skips(skip_list: Dict) -> None:
             MPS_OPINFO[op_name] += skip
         else:
             MPS_OPINFO[op_name] = skip
-
 
 append_skips(UNIMPLEMENTED_XFAILIST)
 append_skips(XFAILLIST_GRAD)
