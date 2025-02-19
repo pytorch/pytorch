@@ -1363,7 +1363,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
