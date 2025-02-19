@@ -1,3 +1,14 @@
+"""
+Profile Guided Optimization (PGO) implementation for Dynamo.
+
+This module provides functionality for caching and managing code state profiles
+that guide optimization decisions in Dynamo. It implements both local and remote
+caching mechanisms for storing profile information across runs, handles profile
+merging across distributed ranks, and manages the lifecycle of profile data
+during compilation. The profiles track dynamic vs static properties of tensors
+and help Dynamo make better specialization decisions.
+"""
+
 from __future__ import annotations
 
 import base64

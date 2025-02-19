@@ -30,10 +30,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import (
-    can_codegen_without_upcasts,
-    prologue_preserves_zero_mask,
-)
+from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -1358,7 +1355,10 @@ class SIMDScheduling(BaseScheduling):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule,  # type: ignore[arg-type]
+                    kernel_name,
+                )
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1498,7 +1498,7 @@ class SIMDScheduling(BaseScheduling):
                     buffer.get_name(), []
                 ):
                     can_codegen_without_upcast = all(
-                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
+                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
                     )
 
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
@@ -2002,8 +2002,8 @@ class SIMDScheduling(BaseScheduling):
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
             ) -> Optional[dict[str, sympy.Expr]]:
-                a0, a1 = tiling0["x"], tiling0["y"]
-                b0, b1 = tiling1["x"], tiling1["y"]
+                a0, a1 = tiling0["x"], tiling0.get("y", 1)
+                b0, b1 = tiling1["x"], tiling1.get("y", 1)
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:

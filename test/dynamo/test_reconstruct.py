@@ -18,7 +18,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     def register_bytecode_hook(self, fn):
         def hook(code, out_code):
             fn(list(dis.get_instructions(out_code)))
-            return code
+            return None
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
