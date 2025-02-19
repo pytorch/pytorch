@@ -4206,14 +4206,14 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
-    def assertWarnsOnceRegex(self, category, regex='', flags=0):
+    def assertWarnsOnceRegex(self, category, regex=''):
         """Context manager for code that *must always* warn
 
         This filters expected warnings from the test and fails if
         the expected warning is not caught. It uses set_warn_always() to force
         TORCH_WARN_ONCE to behave like TORCH_WARN
         """
-        pattern = re.compile(regex, flags=flags)
+        pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             with set_warn_always_context(True):

@@ -446,8 +446,7 @@ Attempted to call function marked as skipped
 
         with self.assertWarnsOnceRegex(
             UserWarning,
-            ".*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
-            flags=re.DOTALL,
+            "(?s).*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
         ):
             f(x)
         self.assertEqual(len(counters["graph_break"]), 1)
