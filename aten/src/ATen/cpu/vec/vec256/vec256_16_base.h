@@ -617,8 +617,8 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
 private:
-  template<typename Op>
-  Vectorized<T> inline binary_compare(const Vectorized<T>& b, Op op) const {
+  template<typename Op, typename VectorizedType>
+  Vectorized<T> inline binary_compare(const VectorizedType& b, Op op) const {
     __m256 a_lo, a_hi;
     __m256 b_lo, b_hi;
     cvt_to_fp32<T>(values, a_lo, a_hi);
