@@ -273,9 +273,6 @@ class TestDraftExport(TestCase):
 
                 z = torch.cat([y, y])
 
-                torch._check_is_size(a)
-                torch._check(a < z.shape[0])
-
                 return z[:a]
 
         ep, report = draft_export(
@@ -287,6 +284,7 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
+        self.assertTrue(len(report.expressions_created) >= 4)
         # check data-dependent asserts
         assert_scalar_nodes = [
             node
