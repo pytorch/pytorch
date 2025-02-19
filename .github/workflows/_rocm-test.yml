@@ -288,6 +288,13 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+      
+      - name: Revert owner and group change
+        if: always()
+        run: |
+          # revert the perms to ensure stability on the mi200s
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R root:root /var/lib/jenkins/workspace/test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "ls -la /var/lib/jenkins/workspace/test"
 
       - name: Collect backtraces from coredumps (if any)
         if: always()
