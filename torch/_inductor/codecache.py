@@ -812,8 +812,8 @@ class FxGraphHashDetails:
         # This device index is usually already encoded by the device of the inputs
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,
         # we need to guard on the device index in case we allocate cuda tensors
-        if no_tensor_inputs and torch.cuda.is_available():
-            self.default_cuda_device_index = torch.cuda.current_device()
+        if no_tensor_inputs and torch.accelerator.is_available():
+            self.default_cuda_device_index = torch.accelerator.current_device_index()
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
