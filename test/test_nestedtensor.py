@@ -1,4 +1,3 @@
-warning: Selection `RUF030` has no effect because preview is not enabled.
 # Owner(s): ["module: nestedtensor"]
 # ruff: noqa: F841
 import ast
