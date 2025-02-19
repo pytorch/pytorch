@@ -2118,6 +2118,52 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(((res < 2) & (res >= 0)).all().item())
 
     @requires_gpu
+    def test_bool_input(self):
+        # The clamp_one input needs to be marked as "i1".
+        @triton.jit
+        def triton_add_noise_(x_ptr, y_ptr, numel, clamp, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+
+            x = tl.load(x_ptr + offsets, mask=(offsets < numel))
+            rnd = tl.rand(2**33, offsets)
+            res = x + rnd
+            if clamp:
+                tl.where(res > 1, 1, res)
+            tl.store(y_ptr + offsets, res, mask=(offsets < numel))
+
+        def add_noise(x, clamp_one):
+            y = torch.empty_like(x)
+            numel = x.numel()
+            BLOCK_SIZE = 256
+
+            def grid(meta):
+                return (triton.cdiv(numel, meta["BLOCK_SIZE"]),)
+
+            triton_add_noise_[grid](x, y, numel, clamp_one, BLOCK_SIZE)
+            return y
+
+        def fn_no_clamp(x):
+            x = x * x
+            return add_noise(x, False)
+            
+        def fn_clamp(x):
+            x = x * x
+            return add_noise(x, True)
+
+        inp = torch.rand(400, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(inp, 0)
+
+        fn_no_comiled = torch.compile(fn_no_clamp, fullgraph=True)
+        fn_clamp_compiled = torch.compile(fn_clamp, fullgraph=True)
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            res = fn_no_comiled(inp)
+            res_clamped = fn_clamp_compiled(inp)
+
+        self.assertTrue(((res < 2) & (res >= 0)).all().item())
+        self.assertTrue((res_clamped <= 1) & (res_clamped >= 0).all().item())
+
+    @requires_gpu
     @parametrize("wrapped", [False, True])
     @parametrize("autotune", [False, True])
     def test_constexpr_dynamic_shapes(self, wrapped, autotune):
