@@ -628,7 +628,6 @@ private:
     auto o2 = op(a_hi, b_hi);
     return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
   }
-
 public:
   Vectorized<T> inline operator>(const Vectorized<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GT_OQ); });
