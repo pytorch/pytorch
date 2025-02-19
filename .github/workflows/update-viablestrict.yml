@@ -23,7 +23,7 @@ jobs:
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
+          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\", \"rocm\", \"inductor\", \"inductor-unittest\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
