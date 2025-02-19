@@ -131,7 +131,7 @@ class TestPatternMatcher(TestCase):
         counters.clear()
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
-        self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
+        self.assertEqual("triton_tem_fused__int" in code, fused_int_mm_mul_expected)
         if fused_int_mm_mul_expected:
             indices = ~ref.isinf()
             torch.testing.assert_close(
@@ -140,7 +140,13 @@ class TestPatternMatcher(TestCase):
 
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
     def test_fused_int_mm_mul(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -234,7 +240,13 @@ class TestPatternMatcher(TestCase):
 
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
     def test_fused_int_mm_mul_epilogue(self):
         def fn1(a, b, c):
             return (
@@ -274,7 +286,13 @@ class TestPatternMatcher(TestCase):
     @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -290,10 +308,8 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
             torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
         )
-        self._test_fused_int_mm_mul_impl(fn1, args1, False)
+        self._test_fused_int_mm_mul_impl(fn1, args1, True)
         self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
-        inductor_config.force_fuse_int_mm_with_mul = False
-        self._test_fused_int_mm_mul_impl(fn1, args2, False)
 
     def _test_mixed_impl(
         self,
