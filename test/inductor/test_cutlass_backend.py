@@ -2,6 +2,7 @@
 import logging
 import math
 import os
+import re
 import sysconfig
 import unittest
 import unittest.mock as mock
@@ -10,6 +11,7 @@ from typing import Callable, Optional
 
 from torch._inductor.utils import clear_inductor_caches
 from torch.export import Dim
+from torch.testing._internal.logging_utils import log_settings
 
 
 try:
@@ -127,32 +129,6 @@ class TestCutlassBackend(TestCase):
                     not isinstance(cc, CUDATemplateCaller)
                     for cc in passed_choice_callers
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
-            torch.testing.assert_close(Y_compiled, Y)
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_precompile(self):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
-                "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-            Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -296,11 +272,13 @@ class TestCutlassBackend(TestCase):
     # NOTE: right now tuned_mm doesn't support cutlass 2x, which is used by A100
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @parametrize("use_aoti", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str, use_aoti: bool
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        use_aoti: bool = False,
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -501,7 +479,6 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
@@ -532,10 +509,9 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,CUTLASS"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic, max_autotune_gemm_backends
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -611,10 +587,9 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,ATen"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_int_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -1088,6 +1063,44 @@ class TestCutlassBackend(TestCase):
             # Remove temporary files.
             os.remove(cu_file.name)
             os.remove(exe_file.name)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_integration(self):
+        """
+        Test if cutlass backend can be autotune with other backends
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 2,
+                # needed for log searching
+                "force_disable_caches": True,
+            }
+        ):
+            with log_settings("+inductor"), self.assertLogs(
+                logger="torch._inductor.codegen.cuda", level=logging.DEBUG
+            ) as test_log:
+                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+                Y = mm(a, b)
+                torch.testing.assert_close(Y_compiled, Y)
+
+            output = "\n".join(record.getMessage() for record in test_log.records)
+
+            match = re.search(
+                r"Got cutlass configs: total number of ops: (\d+)", output
+            )
+            assert match, "Expect to find the cutlass configs log"
+            num_ops = int(match.group(1))
+            self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
 
 if __name__ == "__main__":
