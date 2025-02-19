@@ -112,6 +112,7 @@ and move it to the desired devices on the callee if necessary.
 .. autofunction:: rpc_async
 .. autofunction:: remote
 .. autofunction:: get_worker_info
+.. autofunction:: gather_remote_modules
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
