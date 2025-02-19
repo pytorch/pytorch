@@ -96,7 +96,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     const std::vector<ViewMeta> view_metas;
   };
 
-  explicit FunctionalStorageImpl(const Tensor& value);
+  explicit FunctionalStorageImpl(const Tensor& base);
 
   void add_update(
       const Tensor& updated_val,

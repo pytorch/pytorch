@@ -153,7 +153,7 @@ class DynamicType : public SharedType {
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
   std::string str() const override;
   static const TypeKind Kind = TypeKind::DynamicType;
-  static TORCH_API DynamicTypePtr create(Type& ty);
+  static TORCH_API DynamicTypePtr create(Type& other);
 
   explicit DynamicType(Tag, Arguments);
   explicit DynamicType(Tag, std::string_view, Arguments);
