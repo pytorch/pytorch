@@ -22,6 +22,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
+#include <c10/cuda/CUDAFunctions.h>
 #endif
 
 #ifdef USE_XPU
@@ -577,23 +578,33 @@ struct GlobalStateGuard {
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
+#ifdef USE_CUDA
+    _default_cuda_device_index =
+        static_cast<int32_t>(c10::cuda::current_device());
+#endif
   }
 
   inline bool check() const {
     auto& ctx = at::globalContext();
-    return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
-            _torch_function == torch::torch_function_enabled() &&
-            _torch_function_all_disabled ==
-                at::impl::torch_function_all_disabled() &&
-            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-            _deterministic_algorithms_warn_only ==
-                ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == ctx.allowTF32CuBLAS() &&
-            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
-            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-            _num_threads == at::get_num_threads()) &&
-        _default_dtype == at::get_default_dtype();
+    bool cuda_device_index_match = true;
+#ifdef USE_CUDA
+    cuda_device_index_match = _default_cuda_device_index ==
+        static_cast<int32_t>(c10::cuda::current_device());
+#endif
+    return (
+        _grad_mode == at::GradMode::is_enabled() &&
+        _autocast_state == AutocastState() &&
+        _torch_function == torch::torch_function_enabled() &&
+        _torch_function_all_disabled ==
+            at::impl::torch_function_all_disabled() &&
+        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+        _deterministic_algorithms_warn_only ==
+            ctx.deterministicAlgorithmsWarnOnly() &&
+        _allow_tf32 == ctx.allowTF32CuBLAS() &&
+        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+        _num_threads == at::get_num_threads() &&
+        _default_dtype == at::get_default_dtype() && cuda_device_index_match);
   }
 
   inline std::string reason() const {
@@ -634,6 +645,7 @@ struct GlobalStateGuard {
   bool _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
+  int32_t _default_cuda_device_index;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
