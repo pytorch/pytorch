@@ -1360,6 +1360,8 @@ IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
 
+NAVI32_ARCH = "gfx1101"
+
 def is_navi_arch():
     if torch.cuda.is_available():
         prop = torch.cuda.get_device_properties(0)

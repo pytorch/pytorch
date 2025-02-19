@@ -44,8 +44,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_ROCM,
+    NAVI32_ARCH,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -925,6 +927,8 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    # Eager mode produces incorrect tensor values for navi32 during this test
+    @skipIfRocmArch(NAVI32_ARCH)
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa_2(self):
