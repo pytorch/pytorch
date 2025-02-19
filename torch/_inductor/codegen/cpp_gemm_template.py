@@ -862,8 +862,6 @@ class CppGemmTemplate(CppTemplate):
                     view_size, view_stride, view_offset
                 )
 
-            if not trans_w:
-                return new_inputs, layout_or_out
             X = new_inputs[0]
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
