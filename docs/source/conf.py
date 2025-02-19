@@ -67,6 +67,26 @@ extensions = [
     "sphinx.ext.linkcode",
 ]
 
+# Configure cache
+
+doctree_path = os.environ.get('SPHINX_DOCTREE_DIR', 'docs/build/.doctrees')
+cache_path = os.path.join('docs/build', '.sphinx-cache')
+
+os.makedirs(doctree_path, exist_ok=True)
+os.makedirs(cache_path, exist_ok=True)
+
+# Enable caching
+html_use_opensearch = False
+html_cache_dir = '_cache'
+html_cache_timestamp = True
+
+# Additional cache settings
+nitpicky = True  # More strict reference checking
+keep_warnings = True
+parallel_write_safe = True
+parallel_read_safe = True
+
+
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
@@ -79,9 +99,11 @@ panels_add_bootstrap_css = False
 # duplicated section names that are in different documents.
 autosectionlabel_prefix_document = True
 
+
 # katex options
 #
-#
+
+
 
 katex_prerender = True
 
