@@ -908,6 +908,7 @@ ERRORINPUT_XFAILLIST = {
 
 MPS_OPINFO: Dict[str, List[MPSSkipInfo]] = {}
 
+
 def append_skips(skip_list: Dict) -> None:
     for op_name, skip in skip_list.items():
         if not isinstance(skip, Iterable):
@@ -916,6 +917,7 @@ def append_skips(skip_list: Dict) -> None:
             MPS_OPINFO[op_name] += skip
         else:
             MPS_OPINFO[op_name] = skip
+
 
 append_skips(UNIMPLEMENTED_XFAILIST)
 append_skips(XFAILLIST_GRAD)
