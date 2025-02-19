@@ -4,11 +4,7 @@
 import pathlib
 import sys
 
-from test_cuda import (  # noqa: F401
-    TestBlockStateAbsorption,
-    TestCuda,
-    TestCudaMallocAsync,
-)
+from test_cuda import TestBlockStateAbsorption, TestCuda
 
 import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
