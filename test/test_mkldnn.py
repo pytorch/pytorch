@@ -773,15 +773,16 @@ class TestMkldnn(TestCase):
                     if test_plain:
                         y = max_pool(input)
                         y_lowp = max_pool(x_lowp).to(dtype=torch.float32)
+                        self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
                     else:
                         if lowp_support[dtype]():
                             y = max_pool(input.to_mkldnn()).to_dense()
                             y_lowp = max_pool(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                            self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
                         else:
                             self.assertRaisesRegex(
                                 RuntimeError, msg[dtype], lambda: max_pool(x_lowp.to_mkldnn())
                             )
-                    self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
 
     @dtypes(torch.bfloat16, torch.float16)
     def test_max_pool2d_lowp(self, dtype):
