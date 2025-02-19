@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <ATen/OpMathType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
@@ -9,7 +10,7 @@
 #include <algorithm>
 #include <utility>
 #include <vector>
-
+#include <iostream>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
@@ -433,28 +434,32 @@ void isclose_kernel_impl_complex(
     double rtol,
     double atol,
     bool equal_nan) {
+    using opmath_t = at::opmath_type<scalar_t>;
+
   cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> bool {
+    opmath_t cast_a = static_cast<opmath_t>(a);
+    opmath_t cast_b = static_cast<opmath_t>(b);
     if (a == b) {
       return true;
     }
 
     if (equal_nan &&
-        (std::isnan(std::real(a)) || std::isnan(std::imag(a))) &&
-        (std::isnan(std::real(b)) || std::isnan(std::imag(b)))) {
+      (std::isnan(cast_a.real()) || std::isnan(cast_a.imag())) &&
+      (std::isnan(cast_b.real()) || std::isnan(cast_b.imag()))) {
       return true;
     }
 
     if (rtol == 0 && atol == 0) {
       return false;
     }
-
-    bool is_a_finite = std::isfinite(std::real(a)) && std::isfinite(std::imag(a));
-    bool is_b_finite = std::isfinite(std::real(b)) && std::isfinite(std::imag(b));
+;
+    bool is_a_finite = std::isfinite(cast_a.real()) && std::isfinite(cast_a.imag());
+    bool is_b_finite = std::isfinite(cast_b.real()) && std::isfinite(cast_b.imag());
 
     if (is_a_finite && is_b_finite) {
-      auto abs_b = std::abs(b);
+      auto abs_b = std::abs(cast_b);
       auto allowed_error = static_cast<double>(atol + rtol * abs_b);
-      return std::abs(a - b) <= allowed_error;
+      return std::abs(cast_a - cast_b) <= allowed_error;
     }
 
     return false;

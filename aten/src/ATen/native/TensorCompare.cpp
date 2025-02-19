@@ -343,7 +343,7 @@ bool allclose(
 // TODO: use bitwise operator overloads once we add them
 // TODO: revisit complex inputs and equal_nan=true after
 //  https://github.com/numpy/numpy/issues/15959 is resolved
-Tensor isclose(
+Tensor is_close(
     const Tensor& self,
     const Tensor& other,
     double rtol,
@@ -363,15 +363,71 @@ Tensor isclose(
   TORCH_CHECK(
       atol >= 0, "atol must be greater than or equal to zero, but got ", atol);
 
-  Tensor output = at::empty({0}, self.options().dtype(kBool));
-  auto iter = TensorIteratorConfig()
-                  .add_output(output)
-                  .add_const_input(self)
-                  .add_const_input(other)
-                  .promote_inputs_to_common_dtype(true)
-                  .build();
+  Tensor cast_self = self;
+  Tensor cast_other = other;
 
-  isclose_stub(iter.device_type(), iter, rtol, atol, equal_nan);
+  if (self.scalar_type() == at::kBool) {
+    cast_self = self.to(at::get_default_dtype());
+    cast_other = other.to(at::get_default_dtype());
+  } else if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    cast_other = other.to(at::get_default_dtype());
+  }
+
+  Tensor output = at::empty({0}, self.options());
+
+  if (self.scalar_type() != at::kComplexHalf &&
+      (self.device().type() == at::kCPU || self.device().type() == at::kCUDA)) {
+    // kComplexHalf can't go through this codepath because TensorIterator lacks
+    // the ability to handle dynamic casting needed.
+    auto iter = TensorIteratorConfig()
+                    .add_output(output)
+                    .add_const_input(cast_self)
+                    .add_const_input(cast_other)
+                    .build();
+
+    isclose_stub(iter.device_type(), iter, rtol, atol, equal_nan);
+  } else {
+    Tensor close = cast_self == cast_other;
+    if (equal_nan &&
+        (cast_self.is_floating_point() || cast_self.is_complex())) {
+      // For CompositeCompliance, if `other` is a CCT and `self` is a regular
+      // Tensor, then we can't perform inplace op into `self` with `other`.
+      // NOTE: Inplacing into `close` is fine because it is generated from
+      // out-of-place with args `self` and `other`. So if either of them is a
+      // CCT then `close` will also be a `CCT`.
+      if (isTensorSubclassLike(cast_other)) {
+        close.__ior__(cast_self.isnan().bitwise_and(cast_other.isnan()));
+      } else {
+        close.__ior__(cast_self.isnan().__iand__(cast_other.isnan()));
+      }
+    }
+
+    // In case of zero tolerances the closeness inequality degenerates to an
+    // equality check. In this case, the short-circuit prevents false positives
+    // as detailed in the paragraph below.
+    if (rtol == 0 && atol == 0) {
+      return close;
+    }
+    // Note [closeness error computation]
+    // atol and rtol are provided as doubles, so the computation
+    // rtol * other will produce a float or complex tensor.
+    // When the difference (self - other) is compared to it then the
+    // tensor representing the difference will also be cast to float or complex.
+    // However, since (self - other) in uint8 is very likely to produce a
+    // negative value, this moves the cast forward so the difference is
+    // always computed in a float or complex type.
+    // If the values of the integer tensors cannot be exactly represented
+    // by the default scalar type then this may cause an incorrect result.
+
+    // Computes allowed and actual error
+    Tensor allowed_error = atol + (rtol * cast_other).abs();
+    Tensor actual_error = (cast_self - cast_other).abs();
+
+    close.__ior__(
+        at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
+    output = close;
+  }
+
   return output;
 }
 

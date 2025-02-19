@@ -6,6 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
+#include <iostream>
 
 namespace at::native {
 
@@ -44,17 +45,20 @@ template <typename scalar_t>
 void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
   using opmath_t = at::opmath_type<scalar_t>;
   gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-    if (a == b) {
-
-      return true;
-    }
 
     opmath_t cast_a = static_cast<opmath_t>(a);
     opmath_t cast_b = static_cast<opmath_t>(b);
-
+    if (rtol == 0 && atol == 0) {
+      return cast_a == cast_b;
+  }
+    printf("rtol%f atol%.8f \n", rtol, atol);
     if (equal_nan &&
-        (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) &&
-        (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
+      (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) &&
+      (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
+      return true;
+    }
+
+    if (cast_a == cast_b) {
       return true;
     }
 
@@ -67,7 +71,7 @@ void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double a
 
     if (is_a_finite && is_b_finite) {
       auto abs_b = std::abs(cast_b);
-      auto allowed_error = static_cast<typename opmath_t::value_type>(atol + rtol * abs_b);
+      auto allowed_error = atol + (rtol * abs_b);
       return std::abs(cast_a - cast_b) <= allowed_error;
     }
 
@@ -103,15 +107,14 @@ void isclose_kernel_impl_real(TensorIteratorBase& iter, double rtol, double atol
         auto allowed_error = static_cast<opmath_t>(atol + rtol * ::abs(cast_b));
         return ::abs(cast_a - cast_b) <= allowed_error;
       }
-
       return false;
     });
   }
 }
 
 void isclose_kernel_impl(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
-  if (iter.common_dtype() == kComplexHalf || iter.common_dtype() == kComplexFloat || iter.common_dtype() == kComplexDouble) {
-    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "isclose_cuda", [&]() {
+  if (iter.common_dtype() == kComplexFloat || iter.common_dtype() == kComplexDouble) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "isclose_cuda", [&]() {
       isclose_kernel_impl_complex<scalar_t>(iter, rtol, atol, equal_nan);
     });
   } else {
