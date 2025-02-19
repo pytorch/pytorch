@@ -71,7 +71,7 @@ void sort_cuda_kernel(
   // data in the tensor and not the metadata.
   // That's why, tensor's dtype stays as bool. It just becomes a standard bool.
   if (self_dtype == ScalarType::Bool) {
-      self.copy_(self.to(at::kByte)); 
+      self.copy_(self.to(at::kByte));
   }
 #endif
 
