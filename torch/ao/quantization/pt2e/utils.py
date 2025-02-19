@@ -151,6 +151,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     supported_ops = [
         torch.ops.aten.batch_norm.default,
         torch.ops.aten._native_batch_norm_legit.default,
+        torch.ops.aten._native_batch_norm_legit_functional.default
         # Note: we won't need this op anymore after batch norm consolidation
         # For now, we need to continue to support it because it gives better
         # training numerics than `_native_batch_norm_legit`
@@ -307,6 +308,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
         if n.op != "call_function" or n.target not in (
             torch.ops.aten._native_batch_norm_legit_no_training.default,
             torch.ops.aten.batch_norm.default,
+            torch.ops.aten._native_batch_norm_legit_functional.default
         ):
             continue
         bn_node = n
