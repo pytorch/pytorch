@@ -15,8 +15,6 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <exception>
 #include <functional>
 #include <memory>

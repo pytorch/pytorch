@@ -782,6 +782,13 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
+
+  // We may add the size/stride assert at compile time due to unbacked symint,
+  // but at runtime, the tensor can be empty.
+  if (tensor.numel() == 0) {
+    Py_RETURN_TRUE;
+  }
+
   std::stringstream msg;
   int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
@@ -1631,6 +1638,27 @@ class NOT_NONE : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value != Py_None;
   }
+};
+
+class MAPPING_KEYS_MATCH : public LeafGuard {
+ public:
+  MAPPING_KEYS_MATCH(py::object value, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {
+    // This is ok to stash in the state because we only support
+    // MappingProxyType objects with constant keys. So, the mem overhead is
+    // negligible.
+    _keys = py::list(value.attr("keys")());
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    PyObject* keys = PyMapping_Keys(value); // new ref
+    int result = PyObject_RichCompareBool(keys, _keys.ptr(), Py_EQ);
+    Py_DECREF(keys);
+    return result;
+  }
+
+ private:
+  py::object _keys;
 };
 
 class DEFAULT_DEVICE : public LeafGuard {
@@ -5220,6 +5248,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<py::list>())
       .def("__call__", &NOT_NONE::check);
   py::class_<
+      MAPPING_KEYS_MATCH,
+      LeafGuard,
+      std::shared_ptr<MAPPING_KEYS_MATCH>>(py_m, "MAPPING_KEYS_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &MAPPING_KEYS_MATCH::check);
+  py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
@@ -5506,6 +5540,15 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("NOT_NONE");
             self.add_leaf_guard(
                 std::make_shared<NOT_NONE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_mapping_keys_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("MAPPING_KEYS_MATCH");
+            self.add_leaf_guard(std::make_shared<MAPPING_KEYS_MATCH>(
+                std::move(value), std::move(verbose_code_parts)));
           })
       .def(
           "add_dispatch_key_set_guard",
