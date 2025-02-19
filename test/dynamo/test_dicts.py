@@ -945,6 +945,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    def test_builtin_ior_(self):
+        def f():
+            a = {"one": torch.ones(1)}
+            b = {"two": torch.ones(2)}
+            a |= b
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
