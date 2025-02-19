@@ -239,6 +239,8 @@ class TritonBundler:
                     )
                     continue
 
+                Path(basedir).mkdir(parents=True, exist_ok=True)
+
                 # Random ID to avoid any collisions
                 rnd_id = str(uuid.uuid4())
                 tmp_dir = os.path.join(basedir, f"tmp.{rnd_id}")
