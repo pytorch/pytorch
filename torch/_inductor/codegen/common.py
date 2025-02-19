@@ -37,11 +37,11 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
-from ..ops_handler import BasicMathOps
+from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -538,8 +538,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",
@@ -764,7 +763,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
-class OpOverrides(BasicMathOps, OpDecompositions):
+class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -946,6 +945,16 @@ class OpOverrides(BasicMathOps, OpDecompositions):
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
+        )
+
+    def output(self, *args: OpVarT) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear at codegen time"
+        )
+
+    def placeholder(self, index: int) -> OpVarT:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear at codegen time"
         )
 
     @staticmethod
@@ -1225,12 +1234,6 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_OpOverrides(OpOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1368,8 +1371,19 @@ class KernelArgs:
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
+            alive_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if not isinstance(val, RemovedArg)
+            ]
+            removed_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if isinstance(val, RemovedArg)
+            ]
+            inplace_buffer_idx = len(unique(alive_buffers)) + len(removed_buffers)
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                f"in_out_ptr{inplace_buffer_idx}",
                 [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
@@ -2243,6 +2257,12 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
@@ -2253,84 +2273,84 @@ class KernelTemplate:
         raise NotImplementedError
 
 
-class CSEProxy:
+class CSEProxy(DefaultHandler):
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
         super().__init__()
+        from ..bounds import ValueRangeAnalysis
+
         self.vr_analysis = ValueRangeAnalysis()
         self.kernel = kernel
         self.parent_handler = parent_handler
 
-    def __getattr__(self, name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
-        def inner(*args: Any, **kwargs: Any) -> CSEVariable:
-            bounds = self._bound_variable(name, *args, **kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        bounds = self._bound_variable(name, *args, **kwargs)
 
-            value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-            dtype_handler = DtypePropagationOpsHandler()
+        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        dtype_handler = DtypePropagationOpsHandler()
 
-            output_idx = 0
+        output_idx = 0
 
-            def do_cse(v: str) -> CSEVariable:
-                # cpp backend doesnt set current device - TODO: fix
-                if V.graph.current_device is not None:
-                    device_str = V.graph.get_current_device_or_throw().type
-                    triton_backend = (
-                        config.cpu_backend == "triton"
-                        if device_str == "cpu"
-                        else config.cuda_backend == "triton"
-                        if device_str != "mps"
-                        else False
-                    )
-                else:
-                    triton_backend = False
-
-                # only triton backend tracks dtype currently
-                if triton_backend:
-                    if name == "masked":
-                        output_dtype = value.dtype
-                    else:
-                        output_dtype = getattr(
-                            dtype_handler,
-                            name,
-                        )(*args, **kwargs)
-                else:
-                    # cpp backend doesnt track dtype yet
-                    output_dtype = None
-
-                csevar = V.kernel.cse.generate(
-                    V.kernel.compute,
-                    v,
-                    bounds=bounds,
-                    dtype=output_dtype,
+        def do_cse(v: str) -> CSEVariable:
+            # cpp backend doesnt set current device - TODO: fix
+            if V.graph.current_device is not None:
+                device_str = V.graph.get_current_device_or_throw().type
+                triton_backend = (
+                    config.cpu_backend == "triton"
+                    if device_str == "cpu"
+                    else config.cuda_backend == "triton"
+                    if device_str != "mps"
+                    else False
                 )
+            else:
+                triton_backend = False
 
-                nonlocal output_idx
-                if config.test_configs.runtime_triton_dtype_assert and triton_backend:
-                    from torch._inductor.codegen.triton import triton_type
+            # only triton backend tracks dtype currently
+            if triton_backend:
+                if name == "masked":
+                    output_dtype = value.dtype
+                else:
+                    output_dtype = getattr(
+                        dtype_handler,
+                        name,
+                    )(*args, **kwargs)
+            else:
+                # cpp backend doesnt track dtype yet
+                output_dtype = None
 
-                    # we tree_map over the output, so we need to fetch corresponding dtype
-                    if isinstance(output_dtype, (list, tuple)):
-                        output_dtype = output_dtype[output_idx]
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute,
+                v,
+                bounds=bounds,
+                dtype=output_dtype,
+            )
 
-                    V.kernel.compute.writeline(
-                        f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
-                    )
-                output_idx += 1
+            nonlocal output_idx
+            if config.test_configs.runtime_triton_dtype_assert and triton_backend:
+                from torch._inductor.codegen.triton import triton_type
 
-                csevar.update_on_args(name, args, kwargs)
+                # we tree_map over the output, so we need to fetch corresponding dtype
+                if isinstance(output_dtype, (list, tuple)):
+                    output_dtype = output_dtype[output_idx]
 
-                return csevar
+                V.kernel.compute.writeline(
+                    f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                )
+            output_idx += 1
 
-            return pytree.tree_map(do_cse, value)
+            csevar.update_on_args(name, args, kwargs)
 
-        return inner
+            return csevar
+
+        return pytree.tree_map(do_cse, value)
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
         If the variable comes from an FX node, we forward the bound we have already computed
         Else, if the variable when codegen'ing another op, we try to compute its bounds
         """
+        from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
@@ -2568,8 +2588,3 @@ class CSEProxy:
             sorter,
             sorter_indices,
         )
-
-
-# Use mypy to check protocol implemented correctly
-def _typecheck_CSEProxy(h: CSEProxy) -> OpsHandler[CSEVariable]:
-    return h

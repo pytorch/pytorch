@@ -94,6 +94,7 @@ class TestDraftExport(TestCase):
             class M(torch.nn.Module):
                 def forward(self, a, b):
                     res = torch.ops.mylib.foo(a, b)
+                    res = torch.ops.mylib.foo(res, b)
                     return res
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
@@ -243,23 +244,47 @@ class TestDraftExport(TestCase):
             def forward(self, x, y, z):
                 res = 0
                 for v in [x, y]:
-                    if v.item() > 10:
-                        res += v * v
+                    b = v.item()
+                    if b > 10:
+                        res += v * b
                     else:
-                        res += v + v
+                        res += v + b
 
                 return z * res
 
         inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
 
         ep, report = draft_export(M(), inp)
-        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(len(report.failures), 1)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
 
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_complex_data_dependent_expr(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                a = -a
+                a = a // 3
+                a = a + 5
+
+                z = torch.cat([y, y])
+
+                return z[:a]
+
+        _, report = draft_export(
+            M(),
+            (torch.tensor(6), torch.randn(5)),
+            dynamic_shapes={"x": None, "y": {0: Dim.DYNAMIC}},
+        )
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertTrue(len(report.expressions_created) >= 4)
 
     def test_offsets(self):
         class M(torch.nn.Module):
