@@ -11953,6 +11953,20 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    @contextmanager
+    def distributed_env(self, world_size):
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=0,
+                store=FakeStore(),
+            )
+            yield
+
+        finally:
+            torch.distributed.destroy_process_group()
+
     @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
@@ -11965,21 +11979,75 @@ class GraphModule(torch.nn.Module):
                 torch.distributed.all_reduce(y)
                 return y
 
-        try:
-            torch.distributed.init_process_group(
-                backend="fake",
-                world_size=2,
-                rank=0,
-                store=FakeStore(),
-            )
-
+        with self.distributed_env(world_size=2):
             m = Foo()
             ep = export(m, (torch.randn(4, 4),))
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-        finally:
-            torch.distributed.destroy_process_group()
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_gather(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                ys = [torch.empty_like(x) for _ in range(2)]
+                torch.distributed.all_gather(ys, x)
+                return ys
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2),))
+            inp = (torch.randn(2),)
+            self.assertTrue(
+                torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
+            )
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_gather_into_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(2 * 2)
+                torch.distributed.all_gather_into_tensor(y, x)
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2),))
+            inp = (torch.randn(2),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_to_all_single(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(4)
+                torch.distributed.all_to_all_single(y, x)
+                return y
+
+        with self.distributed_env(world_size=4):
+            m = Foo()
+            ep = export(m, (torch.randn(4),))
+            nodes = ep.graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.all_to_all_single.default,
+            )
+            self.assertEqual(len(nodes), 1)
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_reduce_scatter_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(2)
+                torch.distributed.reduce_scatter_tensor(y, x)
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2 * 2),))
+            nodes = ep.graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            )
+            self.assertEqual(len(nodes), 1)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
