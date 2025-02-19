@@ -194,7 +194,7 @@ class TimerServer(abc.ABC):
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
             logger.info(
-                "Reaping worker_id=[%s]." " Expired timers: %s",
+                "Reaping worker_id=[%s]. Expired timers: %s",
                 worker_id,
                 self._get_scopes(expired_timers),
             )
@@ -212,7 +212,7 @@ class TimerServer(abc.ABC):
 
     def start(self) -> None:
         logger.info(
-            "Starting %s..." " max_interval=%s," " daemon=%s",
+            "Starting %s... max_interval=%s, daemon=%s",
             type(self).__name__,
             self._max_interval,
             self._daemon,

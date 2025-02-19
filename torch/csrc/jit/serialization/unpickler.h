@@ -73,7 +73,7 @@ class TORCH_API Unpickler {
       TypeParserT type_parser = defaultTypeParser,
       std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
-        tensor_table_(),
+
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),

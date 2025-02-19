@@ -379,7 +379,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   op_kernel.stack_.resize(schema_args.size());
   for (const auto& named_argument : serialized_node["inputs"]) {
     const auto& arg = named_argument["arg"];
-    const auto& name = named_argument["name"];
+    const auto& name = named_argument["name"].get<std::string>();
 
     // Doing a linear lookup in the schema to find the index
     // of a static argument. Should be fine performance wise

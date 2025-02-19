@@ -1,4 +1,5 @@
 // Implementation of specal math functions for Metal
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
@@ -7,7 +8,7 @@ namespace metal {
 // Translated to metal from https://www.johndcook.com/cpp_erf.html
 
 template <typename T>
-T erf(T x) {
+inline T erf(T x) {
   T a1 = 0.254829592;
   T a2 = -0.284496736;
   T a3 = 1.421413741;
@@ -85,7 +86,7 @@ inline T chbevl(T x, const float array[], const int len) {
 // https://github.com/pytorch/pytorch/blob/58b661cda2c002a8e1ac3bee494bfe1f7420437c/aten/src/ATen/native/cuda/Math.cuh#L502
 
 template <typename T>
-T i0(T _x) {
+inline T i0(T _x) {
   auto x = ::metal::fabs(_x);
 
   if (x <= 8.0) {
@@ -144,7 +145,7 @@ T i0(T _x) {
 // https://github.com/pytorch/pytorch/blob/58b661cda2c002a8e1ac3bee494bfe1f7420437c/aten/src/ATen/native/cuda/Math.cuh#L576
 
 template <typename T>
-T i1(T _x) {
+inline T i1(T _x) {
   const auto x = ::metal::fabs(_x);
 
   if (x <= 8.0) {
@@ -198,7 +199,7 @@ template <typename T>
 inline float log_gamma(const T);
 
 template <typename T>
-float gamma(const T x) {
+inline float gamma(const T x) {
   if (x < 0.001) {
     constexpr float EULER_MASCHERONI = 0.577215664901532860606512090;
     // For small x, 1/gamma(x) has power series x + gamma x^2  - ...
@@ -383,7 +384,7 @@ inline float zeta(float x, float q) {
 }
 
 template <typename T0>
-inline float polygamma(const T0 input, const int64_t order) {
+inline float polygamma(const int64_t order, const T0 input) {
   float x = input;
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
@@ -444,10 +445,62 @@ inline float digamma(T0 x) {
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
-    return ::metal::copysign(INFINITY, -x);
+    return ::metal::copysign(INFINITY, static_cast<float>(-x));
   } else {
     return calc_digamma_positive_domain(x);
   }
+}
+
+template <typename T>
+inline T sinc(T a) {
+  if (a == static_cast<T>(0)) {
+    return static_cast<T>(1);
+  }
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
+}
+
+// Complex sinc2 implementation
+inline float2 sinc(float2 inp) {
+  float2 a = inp * M_PI_F;
+  const float a2 = a.x * a.x + a.y * a.y;
+  if (a2 == 0) {
+    return 0;
+  }
+  float cosx;
+  float sinx = ::metal::sincos(a.x, cosx);
+  float sinhy = ::metal::sinh(a.y);
+  float coshy = ::metal::cosh(a.y);
+  auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
+  auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
+  return float2(re, im) / a2;
+}
+
+template <typename T>
+inline T spherical_bessel_j0(T x) {
+  if (::metal::isinf(x))
+    return T(0.0);
+  T x2 = x * x;
+  T k1 = static_cast<T>(-1.0);
+  T k2 = static_cast<T>(1.0);
+
+  if (::metal::fabs(static_cast<T>(x)) < T(0.5)) {
+    return T(1.0) +
+        x2 *
+        (k1 / T(6.0) +
+         x2 *
+             (k2 / T(120.0) +
+              x2 *
+                  (k1 / T(5040.0) +
+                   x2 *
+                       (k2 / T(362880.0) +
+                        x2 *
+                            (k1 / T(39916800.0) +
+                             x2 * (k2 / T(6227020800.0)))))));
+  }
+
+  return static_cast<T>(::metal::sin(x) / x);
 }
 
 } // namespace metal
