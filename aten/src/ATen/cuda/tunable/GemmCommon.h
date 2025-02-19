@@ -100,6 +100,65 @@ inline const char* TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
+// Similar to Compute Type in GemmRocblas.h
+template <typename T>
+inline std::string ComputeTypeFor() {
+  return "Unknown ComputeType";
+}
+
+#ifdef USE_ROCM
+// This is a union of the compute types for
+// ROCBLAS and hipBLASLt.
+template <>
+inline std::string ComputeTypeFor<float>() {
+  if (!at::globalContext().allowTF32CuBLAS()) {
+    return "float";
+  } else {
+    return "xfloat";
+  }
+}
+
+template <>
+inline std::string ComputeTypeFor<double>() {
+  return "double";
+}
+
+template <>
+inline std::string ComputeTypeFor<Half>() {
+  return "float";
+}
+
+template <>
+inline std::string ComputeTypeFor<BFloat16>() {
+  return "float";
+}
+
+template <>
+inline std::string ComputeTypeFor<c10::complex<float>>() {
+  return "float complex";
+}
+
+template <>
+inline std::string ComputeTypeFor<c10::complex<double>>() {
+  return "double complex";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e4m3fn>() {
+  return "float";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e5m2>() {
+  return "float";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
+  return "float";
+}
+#endif
+
 // Convert opmath_type<T> to string
 template <typename T>
 inline std::string to_string_opmath(const at::opmath_type<T>& value) {
