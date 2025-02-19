@@ -36,11 +36,11 @@ if TYPE_CHECKING:
 # Mapping of builtins to their `typing` equivalent.
 # (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: list,
-    dict: dict,
-    set: set,
-    frozenset: frozenset,
-    tuple: tuple,
+    list: typing.List,  # noqa: UP006
+    dict: typing.Dict,  # noqa: UP006
+    set: typing.Set,  # noqa: UP006
+    frozenset: typing.FrozenSet,  # noqa: UP006
+    tuple: typing.Tuple,  # noqa: UP006
 }
 
 _legal_ops = dict.fromkeys(

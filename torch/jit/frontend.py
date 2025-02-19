@@ -550,7 +550,7 @@ def build_ignore_context_manager(ctx, stmt):
             return_type_ann = " -> " + outputs[0].ann
             return_statement_str += outputs[0].name
         if len(outputs) > 1:
-            return_type_ann = " -> Tuple"
+            return_type_ann = " -> tuple"
             return_type_ann += "[" + ", ".join([var.ann for var in outputs]) + "]"
             return_statement_str += ", ".join([var.name for var in outputs])
         return return_type_ann, return_statement_str

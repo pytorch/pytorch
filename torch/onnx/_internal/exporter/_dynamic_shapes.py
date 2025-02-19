@@ -155,19 +155,22 @@ def from_dynamic_shapes_to_dynamic_axes(
     return dynamic_axes
 
 
-def _any_str_in_dynamic_shapes(
+def _any_str_or_dim_in_dynamic_shapes(
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
 ) -> bool:
-    """Check if there is any string in the dynamic_shapes."""
+    """Check if there is any string or _Dim in the dynamic_shapes."""
     flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
+    if any(not isinstance(axes, (dict, list, tuple)) for axes in flat_dynamic_shapes):
+        return False
+    # both str and _Dim can provide custom names
     for axes in flat_dynamic_shapes:
         if isinstance(axes, dict):
             for dim in axes.values():
-                if isinstance(dim, str):
+                if isinstance(dim, (str, _Dim)):
                     return True
         elif isinstance(axes, (list, tuple)):
             for dim in axes:
-                if isinstance(dim, str):
+                if isinstance(dim, (str, _Dim)):
                     return True
     return False
 
@@ -176,9 +179,8 @@ def convert_str_to_export_dim(
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
 ) -> tuple[dict[str, Any] | tuple[Any, ...] | list[Any] | None, bool]:
     # 1. If there is no string in dynamic_shapes, we do not touch dynamic_shapes
-    if dynamic_shapes is None or not _any_str_in_dynamic_shapes(dynamic_shapes):
+    if dynamic_shapes is None or not _any_str_or_dim_in_dynamic_shapes(dynamic_shapes):
         return dynamic_shapes, False
-
     # 2. Convert "name" to Dim.AUTO with flattening and identify if there is any string
     #    to be replaced with Dim.AUTO, and then unflatten it back to the original structure.
     #    for example: {"y": {0: "dim_0"}, "x": {1: "dim_1"}}
@@ -248,7 +250,8 @@ def create_rename_mapping(
                 old_name = input.shape[dim].value
                 if old_name is None:
                     continue
-                if isinstance(axis, _DimHint):
+                # _DimHint, int and None exists in dynamic shapes, we skip renaming
+                if isinstance(axis, (_DimHint, int)) or axis is None:
                     continue
                 # NOTE: ExportedProgram could give the axes the same name if they share
                 # the same shape constraints.
@@ -267,7 +270,8 @@ def create_rename_mapping(
                 old_name = input.shape[dim].value
                 if old_name is None:
                     continue
-                if isinstance(axis, _DimHint):
+                # _DimHint, int and None exists in dynamic shapes, we skip renaming
+                if isinstance(axis, (_DimHint, int)) or axis is None:
                     continue
                 # NOTE: ExportedProgram could give the axes the same name if they share
                 # the same shape constraints.
@@ -308,12 +312,12 @@ def _flatten_dynamic_shapes_to_axes(
             isinstance(x, dict)
             and all(
                 isinstance(k, int)
-                and (v is None or isinstance(v, (_Dim, _DimHint, str)))
+                and (v is None or isinstance(v, (_Dim, _DimHint, str, int)))
                 for k, v in x.items()
             )
         ) or (
             isinstance(x, (list, tuple))
-            and all(isinstance(v, (_Dim, _DimHint, str)) for v in x)
+            and all(v is None or isinstance(v, (_Dim, _DimHint, str, int)) for v in x)
         )
 
     return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
