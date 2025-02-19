@@ -124,13 +124,24 @@ def _maybe_reenter_make_fx(fn):
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
+    # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
+    # the top-level frame produces no graph, the default behavior is to fallback to eager.
+    # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
+    # For while_loop, during inspecting the inner call, we trace into the python dispathcer
+    # logic, which is not tracable as of today. So the proper fix can be either 1. allow dispatch
+    # logic to be dynamo tracable or 2. fixing https://github.com/pytorch/pytorch/issues/144360.
+    # but it exposes some bugs in existing tests so we have to have a temporary flag to control
+    # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch._dynamo.config.allow_empty_graphs = True
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
 
 
 def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
@@ -328,6 +339,17 @@ def unmask_none_gradients(grads, operands):
     return unmasked_grads
 
 
+def _maybe_fake_prop_ignore_unbacked(fn, args):
+    with ExitStack() as ctx_stack:
+        if (fake_mode := detect_fake_mode(args)) is not None:
+            ctx_stack.enter_context(fake_mode)
+            if fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
+        return fn(*args)
+
+
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
 def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
@@ -457,7 +479,7 @@ def save_tensors_and_symints_for_backward(ctx, args):
     ), args
     partitioned_args: list[Any] = [[], []]
     pos = []
-    for i, arg in enumerate(args):
+    for arg in args:
         idx = 0 if isinstance(arg, torch.Tensor) else 1
         partitioned_args[idx].append(arg)
         pos.append(idx)
@@ -567,18 +589,12 @@ def check_input_alias_and_mutation(
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
-            if (fake_mode := detect_fake_mode(fake_args)) is not None:
-                ctx_stack.enter_context(fake_mode)
-                if fake_mode.shape_env is not None:
-                    ctx_stack.enter_context(
-                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                    )
             cloned = [
                 clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
+            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [

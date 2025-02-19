@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import os
 from itertools import count
 from typing import Callable, Optional
 
@@ -64,7 +63,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -82,18 +83,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
-    def write_header(self):
-        if V.graph.is_const_graph:
-            # We do not write header for constant graph, it will be written by main module.
-            return
-
-        super().write_header()
-        with open(
-            os.path.join(
-                os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
-            )
-        ) as f:
-            self.header.splice(f.read())
+    @staticmethod
+    def get_device_include_path(device: str) -> str:
+        assert device == "cpu", "ArrayRef only supported on CPU!"
+        if V.graph.aot_mode:
+            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
+        return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
 
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
@@ -182,6 +177,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
+                assert V.graph.const_code is not None
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:
@@ -667,15 +663,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
+    def generate_c_shim_extern_kernel_call(
+        self, kernel: str, args: list[str], device: str, **_
+    ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
         wrapped_args = []
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
@@ -692,12 +688,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     piece = f"borrow_arrayref_tensor_as_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
-        with debug_printer_manager:
-            shim_fn = self.get_c_shim_func_name(kernel)
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
-            )
+        super().generate_c_shim_extern_kernel_call(
+            kernel, wrapped_args, device, debug_args=args
+        )
 
     def generate_scatter_fallback(
         self,
@@ -713,7 +706,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
