@@ -287,6 +287,7 @@ def uninteresting_files() -> set[str]:
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
+    import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
 
@@ -303,6 +304,8 @@ def uninteresting_files() -> set[str]:
         torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
+        torch._logging._internal,
+        torch._logging.structured,
     ]
     import torch._dynamo.guards
 
@@ -4244,10 +4247,8 @@ class ShapeEnv:
                 "symbol": str(symbol),
                 "node_id": id(sym_node),
                 "vr": f"[{vr.lower}, {vr.upper}]",
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(),
             },
         )
 
@@ -5902,6 +5903,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
+        expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5940,6 +5942,18 @@ class ShapeEnv:
             + maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
+        )
+
+        dtrace_structured(
+            "guard_on_data_dependent_error",
+            metadata_fn=lambda: {
+                "expr": repr(expr),
+                "unhinted_expr": repr(unhinted_expr),
+                "expr_id": expr_sym_node_id,
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
@@ -6478,11 +6492,8 @@ class ShapeEnv:
                 for s in x.node.expr.free_symbols:
                     if str(s) in frame_symbols:  # type: ignore[operator]
                         continue
-                    frame_symbols[str(s)] = (  # type: ignore[index]
-                        self.var_to_sources[s][0].name()  # type: ignore[assignment]
-                        if s in self.var_to_sources
-                        else None  # unbacked
-                    )
+                    if s in self.var_to_sources:
+                        frame_symbols[str(s)] = self.var_to_sources[s][0].name()  # type: ignore[assignment]
                 return str(x)
             return None
 
@@ -6561,9 +6572,9 @@ class ShapeEnv:
         hint: Optional[Union[int, bool, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
@@ -6571,8 +6582,8 @@ class ShapeEnv:
                 hint,
                 fx_node,
                 size_oblivious,
+                expr_sym_node_id,
                 forcing_spec=forcing_spec,
-                expr_sym_node=expr_sym_node,
             )
         except Exception:
             self.log.warning(
@@ -6590,9 +6601,9 @@ class ShapeEnv:
         hint: Optional[Union[bool, int, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -6672,7 +6683,10 @@ class ShapeEnv:
             if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
                 if hint is not None:
-                    assert orig_expr == hint, f"{orig_expr} != {hint}"
+                    if isinstance(hint, bool):
+                        assert orig_expr == hint, f"{orig_expr} != {hint}"
+                    else:
+                        assert sympy.Eq(orig_expr, hint), f"{orig_expr} != {hint}"
                 return orig_expr
 
             expr = orig_expr
@@ -6743,7 +6757,7 @@ class ShapeEnv:
                         and not (
                             unsound_result := orig_expr.xreplace(
                                 self.unbacked_var_to_val
-                            )
+                            ).xreplace(self.var_to_val)
                         ).free_symbols
                     ):
                         log.warning(
@@ -6756,7 +6770,6 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
@@ -6767,13 +6780,13 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
+                                "expr_node_id": expr_sym_node_id,
+                                "user_stack": structured.get_user_stack(3),
+                                "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },
@@ -6787,6 +6800,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
+                            expr_sym_node_id=expr_sym_node_id,
                         )
                 else:
                     expr = new_expr

@@ -37,7 +37,7 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
+  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -46,7 +46,7 @@ PT_EXPORT {{kernel_call_signature}} {
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw, swizzle,
+  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
@@ -120,7 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
-  arguments.scheduler.max_swizzle_size = {{swizzle}};
+  arguments.scheduler.max_swizzle_size = swizzle;
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -154,10 +154,7 @@ GEMM_TEMPLATE_CUTLASS_2X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(W, -2)}};
-  int64_t N = {{kernel.size(W, -1)}};
+  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -176,13 +173,6 @@ PT_EXPORT {{kernel_call_signature}} {
 
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Meta)}}
-  {{kernel.check_not_null(Y)}}
-
-
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -276,9 +266,9 @@ GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
   // Initialize GemmSparse arguments.
   arguments = {
     {
-      static_cast<coord_t>({{M}}),
-      static_cast<coord_t>({{N}}),
-      static_cast<coord_t>(K),
+      static_cast<coord_t>(M),
+      static_cast<coord_t>(N),
+      static_cast<coord_t>(2 * K),
     },  // GemmCoord problem_size
     X_ref,  // TensorRef<ElementA const, LayoutA> ref_A
     W_ref,  // TensorRef<ElementB const, LayoutB> ref_B
@@ -314,20 +304,43 @@ bool initialize_block(
   if (block.size()<=0) return false;
   Element scope_max(static_cast<Element>(max)), scope_min(static_cast<Element>(min));
   cutlass::reference::device::BlockFillRandomUniform(
-    block.get(), block.size(), seed, scope_max, scope_min, 0);
+    (Element*)block.get(), block.size(), seed, scope_max, scope_min, 0);
 
   return true;
 }
+
+{% if Meta is defined and Meta is not none %}
+template <class Element>
+bool initialize_block_meta(
+  cutlass::DeviceAllocation<Element>& block,
+  uint64_t seed) {
+  if (block.size()<=0) return false;
+  cutlass::reference::device::BlockFillRandomSparseMeta(
+    (Element*)block.get(), block.size(), seed, {{instance_type}}::kMetaSizeInBits);
+  return true;
+}
+{% endif %}
 
 extern "C" int run_standalone(uint64_t seed, int repetitions) {
     std::cout << "Starting GEMM Standalone test run with seed " << seed << std::endl;
     size_t workspace_size = 0;
     size_t* workspace_size_ptr = &workspace_size;
 
+    int M = {{kernel.get_layout_args()[0]}};
+    int N = {{kernel.get_layout_args()[1]}};
+    int K = {{kernel.get_layout_args()[2]}};
+    int lda = {{kernel.get_layout_args()[3]}};
+    int ldb = {{kernel.get_layout_args()[4]}};
+    int ldc = {{kernel.get_layout_args()[5]}};
+    int ldd = {{kernel.get_layout_args()[6]}};
+
     using ElementA = {{kernel.cutlass_dtype(X)}};
     using ElementB = {{kernel.cutlass_dtype(W)}};
     using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
     using ElementD = {{kernel.cutlass_dtype(Y)}};
+    {% if Meta is defined and Meta is not none %}
+    using ElementE = {{kernel.cutlass_dtype(Meta)}};
+    {% endif %}
 
     cutlass::DeviceAllocation<ElementA> X_data({{kernel.max_valid_index(X)+1}});
     initialize_block(X_data, seed++);
@@ -336,6 +349,10 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
     initialize_block(Bias_data, seed++);
     cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
+    {% if Meta is defined and Meta is not none %}
+    cutlass::DeviceAllocation<ElementE> Meta_data({{kernel.max_valid_index(Meta)+1}});
+    initialize_block_meta(Meta_data, seed++);
+    {% endif %}
 
     cutlass::DeviceAllocation<uint8_t> workspace_data;
     // Call once with workspace_size_ptr set to get workspace size
@@ -474,6 +491,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
         raise NotImplementedError
 
     def _add_cutlass_gemm_choices(
@@ -955,7 +980,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
-            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -990,13 +1014,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
         _, __, arg_types = kernel.args.cpp_argdefs()
         arg_names = [name.strip() for name in names_str.strip().split(",")]
-        if input_nodes[2] is None:
-            del arg_names[2]
+        arg_names = self._update_arg_names_for_test_call_statement(
+            arg_names, input_nodes
+        )
         arguments = [
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1216,12 +1241,20 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         names: list[str] = []
         return (Bias, inputs, names)
 
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
+        if input_nodes[2] is None:
+            del arg_names[2]
+        return arg_names
+
     def render_gemm_arguments(
         self,
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
-        swizzle: int,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
@@ -1267,7 +1300,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             M="M",
             N="N",
             epilogue_args=epilogue_args,
-            swizzle=swizzle,
         )
         assert epilogue_template is not None
 
@@ -1382,7 +1414,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
         K = max(A_size[1], B_size[0])
-        return (K == A_size[1] or K == 2 * A_size[0]) and K == B_size[0]
+        return (K == A_size[1] or K == 2 * A_size[1]) and K == B_size[0]
 
     def _shape_match(
         self,
@@ -1491,6 +1523,17 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         inputs = [Meta]
         names = ["Meta"]
         return (Bias, inputs, names)
+
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
+        if input_nodes[3] is None:
+            del arg_names[3]
+        if input_nodes[2] is None:
+            del arg_names[2]
+        return arg_names
 
     def render_gemm_arguments(
         self,

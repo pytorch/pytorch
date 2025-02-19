@@ -874,6 +874,13 @@ def distribute_module(
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
+    already_distributed = getattr(module, "_distribute_module_applied", False)
+    if already_distributed:
+        raise RuntimeError(
+            "distribute_module should only be called once on a module, "
+            "but it has already been called on this module!"
+        )
+
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
@@ -967,6 +974,7 @@ def distribute_module(
                 f"output_fn should take in 3 arguments, but got {num_args} arguments!"
             )
 
+    module._distribute_module_applied = True  # type: ignore[assignment]
     return module
 
 

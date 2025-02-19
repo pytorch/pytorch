@@ -1,5 +1,24 @@
 # mypy: ignore-errors
 
+"""
+This module contains classes and utilities for handling higher-order operators in Dynamo.
+It provides functionality for tracing and transforming control flow constructs like
+conditions (torch.cond), loops (torch.while_loop), maps (torch.ops.higher_order.map),
+and other higher-order operations.
+
+The module includes specialized VariableTracker classes for different types of
+higher-order operations, along with utilities for:
+- Speculating and capturing subgraphs
+- Managing control flow
+- Handling autograd function applications
+- Supporting function transformations
+- Processing activation checkpoints
+
+These classes work together to enable Dynamo to correctly trace and compile code
+containing complex control flow patterns and higher-order functions while preserving
+their semantic behavior.
+"""
+
 import contextlib
 import copy
 import functools
@@ -959,18 +978,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_shared + unique_true + unique_false,
         )
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            true_r.as_proxy(),
-        )
-
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.cond,
             p_args,
             {},
-            flat_example_value,
+            None,
             true_treespec,
         )
 
@@ -1269,20 +1282,25 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
 
+        from . import TensorVariable
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, xs):
-            return combine_fn, xs
+        def arg_extractor(combine_fn, xs, additional_inputs):
+            return combine_fn, xs, additional_inputs
 
-        combine_fn, xs = arg_extractor(*args, **kwargs)
+        combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
 
         if xs.python_type() != list:
             unimplemented(
                 f"Expected xs to be a list of tensors but got {xs.python_type()}",
             )
         assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
+
+        # Ensure that all additional_inputs are TensorVariables and no
+        # ints or SymInts as this is not yet supported
+        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
 
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
@@ -1292,6 +1310,12 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 _make_inlined(tx, first_slice_copy)(leaf)
                 for leaf in itertools.chain(xs.items, xs.items)
             ]
+            sub_args_additional_inputs = [
+                t.call_method(tx, "clone", args=(), kwargs={})
+                for t in additional_inputs.items
+            ]
+
+        sub_args = sub_args + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
             combine_graph,
@@ -1305,11 +1329,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
-
-        if combine_lifted_freevars:
-            unimplemented(
-                f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
-            )
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
             unimplemented(
@@ -1317,6 +1337,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         xs_proxy = xs.as_proxy()
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
         check_meta_consistency_vt(
             [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
@@ -1332,6 +1353,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             xs_proxy,
+            additional_inputs_proxy,
         )
 
         with tx.fake_mode:
