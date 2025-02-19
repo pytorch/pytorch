@@ -59,8 +59,7 @@ aten = torch.ops.aten
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
-    source=(
-        r"""
+    source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -128,11 +127,11 @@ mm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
-        if torch.version.hip is None
-        # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
-        # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
-        # See more details in https://github.com/pytorch/pytorch/pull/146293
-        else r"""
+    if torch.version.hip is None
+    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+    # See more details in https://github.com/pytorch/pytorch/pull/146293
+    else r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -199,8 +198,7 @@ mm_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
-"""
-    ),
+""",
 )
 
 persistent_tma_mm_template = TritonTemplate(
