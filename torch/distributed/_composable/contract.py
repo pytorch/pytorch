@@ -44,35 +44,22 @@ class _ContractFn(Protocol, Generic[_P, _T, _TState]):
 
 
 @overload
-def contract() -> (
-    Callable[
-        [Callable[Concatenate[nn.Module, _P], _T]],
-        _ContractFn[Concatenate[nn.Module, _P], _T, _State],
-    ]
-):
+def contract(
+    state_cls: _State,
+) -> _ContractFn[Concatenate[nn.Module, _P], _T, _State]:
     ...
 
 
 @overload
 def contract(
     state_cls: type[_TState],
-) -> Callable[
-    [Callable[Concatenate[nn.Module, _P], _T]],
-    _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
-]:
+) -> _ContractFn[Concatenate[nn.Module, _P], _T, _TState]:
     ...
 
 
 def contract(
-    state_cls: type = _State,
-) -> Callable[
-    [
-        Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
-    ],
-    _ContractFn,
-]:
+    state_cls: ... = _State,
+):
     r"""
     Decorate a function as a composable distributed API, where the first
     argument of the function must be an :class:`nn.Module` instance or sequence
@@ -116,9 +103,7 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
+        func: Callable[Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T]
     ) -> _ContractFn[
         Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T, _TState
     ]:
