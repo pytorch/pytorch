@@ -31,6 +31,12 @@ else()
   set(LINUX FALSE)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "AIX")
+  set(AIX TRUE)
+else()
+  set(AIX FALSE)
+endif()
+
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 # check and set CMAKE_CXX_STANDARD
