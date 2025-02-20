@@ -30,7 +30,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
@@ -393,7 +393,26 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
+def check_tensor_meta_match(
+    t1: torch.Tensor, t2: torch.Tensor, attr_names: tuple[str, ...], msg_prefix: str
+) -> None:
+    def _get_attr_maybe_call(t: torch.Tensor, attr_name: str) -> Any:
+        attr = getattr(t, attr_name)
+        if callable(attr):
+            return attr()
+        return attr
+
+    for attr_name in attr_names:
+        lattr = _get_attr_maybe_call(t1, attr_name)
+        rattr = _get_attr_maybe_call(t2, attr_name)
+        torch._check(
+            lattr == rattr,
+            lambda: f"{msg_prefix} expected same {attr_name} but got {lattr} and {rattr}.",
+        )
+
+
 def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
+    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, b)
     from torch.fx.experimental.symbolic_shapes import (
         _nested_int_aware_sort,
         SymIntEqByExpr,
@@ -403,21 +422,28 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
     if a is None or b is None:
         assert a is None and b is None, (a, b)
         return None
-    torch._check(
-        a.dtype == b.dtype,
-        lambda: "When merging two branches' output in torch.cond, "
-        f"expected same dtype but got {a.dtype} and {b.dtype}",
+
+    # Note: we don't check size,stride and storage_offset because
+    # they'll be merged with unbacked symints if they differ.
+    _meta_to_check = {
+        "dtype",
+        "device",
+        "layout",
+        "dim",
+        "is_quantized",
+        "is_conj",
+        "is_sparse",
+    }
+    check_tensor_meta_match(
+        a,
+        b,
+        tuple(_meta_to_check),
+        msg_prefix="When merging two branches' output in torch.cond, ",
     )
-    torch._check(
-        a.device == b.device,
-        lambda: "When merging two branches' output in torch.cond, "
-        f"expected same device but got {a.device} and {b.device}",
-    )
-    torch._check(
-        a.dim() == b.dim(),
-        lambda: "When merging two branches' output in torch.cond, "
-        f"expected same dim but got {a.dim()} and {b.dim()}",
-    )
+    # NYI
+    assert not a.is_quantized and not b.is_quantized
+    assert not a.is_sparse and not b.is_sparse
+    assert not a.is_conj() and not b.is_conj()
 
     """
     Step 1: create unbacked symints for sizes that are different
@@ -455,22 +481,52 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
             merged_size.append(new_size)
 
     """
-    Step 2: Since tensor stride is a accumulative muliplication of the sizes (a permutated
-        ascending sequence), given a tensor size, stride and merged_size, we can re-map the
-        stride of the tensor using merged_size.
+    This follows the logic in symbolic_shapes._compute_symbolic_stride
+    Step 2: Since tensor stride is an accumulative muliplication of the sizes, which is a permutated
+        (due to view ops) non-decending sequence.
 
-        Without loss of generality, suppose we have a tenosr with:
+        Case 1: No size is 1. In this case, strides have unique values.
+            For example, suppose we have a tenosr with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
-            merged_size [3, 4, 3, u0, 4, u0], where we bound 5 to u0.
-        The following code visit the strides in the ascending order: 1, 3, 12, 60, 300, 1200.
-        In each step, it checks whether the current stride is bounded or not and bound old stride
-        to new value. It also generates the next candidate by bounding stride[i] * size[i]
-        to bounded_stride * merged_size[i]. Concretely:
-        1. In 1st iteration, we bound 1 to 1, and set candidates[3] = 3
-        2. In 2nd iteration, we bound 3 to 3, and set candiates[12] = 12
-        3. In 3rd iteration, we bound 12 to 12, and set candidates[60] = 12 * u0
-        4. In 4th iteration, we bound 60 to 12 * u0, and set candidates[300] = 12 * u0 * u0
+            merged_size [u0, u1, u2, u3, u4, u5].
+
+            We visit the strides in ascending order: 1, 3, 12, 60, 300, 1200. In each step, we check whether
+            the current stride is bounded or not and bound next stride by setting.
+                stride_expr[next_stride] = current_stride_expr * current_size_expr
+            1st round:
+                current_stride is 1, current_size is 3, so next_stride is 1 * 3 = 3,
+                current_stride_expr is set to 1, current_size_expr is u2, so stride_expr[3] is therefore 1 * u2 = u2
+            2nd round:
+                current_stride is 3, current_size is 4, so next_stride is 3 * 4 = 12,
+                current_stride_expr is stride_expr[3] i.e. u2, current_size_expr is u4, so stride_expr[12] = u2 * u4
+                ...
+
+        Case 2: At least one dimension has size 1, which can produce duplicates in strides.
+            In this case, theorectically, we cannot uniquely determine the expr of strides because
+            the accessing stride_expr with same key in different order causes the final stride expression
+            to be different.
+
+            Suppose we have:
+                size: (3, 1)
+                stride: (1, 1)
+                merged_size: (u0, u1)
+
+            The stride expr could either be (u1, 1) or (1, u0) depending on whether we start with u1 or u0.
+            For this reason, we try to break tie by sorting via decending index so we always get (u1, 1).
+
+            Note that backend might optimize the strides anyway so this is usually not a problem as long
+            as two branches matches. See relevant discussions in https://github.com/pytorch/pytorch/issues/142024.
+
+        Case 3: Dim has 0 stride. 0 stride doesn't participate in the accumulative multiplication of
+            sizes. So they're always treated as constant even if their corresponding size is turned into unbacked symint.
+
+            Suppose we have:
+                size: (3, 3)
+                stride: (0, 1)
+                merged_size: (u0, u1)
+
+            The merged stride would be (0, 1)
     """
 
     def _bound_stride(
@@ -482,7 +538,7 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
             (val, -i) for i, val in enumerate(ex_stride)
         ]
         stride_li.sort(key=_nested_int_aware_sort)
-        candidates: dict[Any, Union[int, torch.SymInt]] = {}
+        stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
 
         def _maybe_expr(s: Union[int, torch.SymInt]):
             if isinstance(s, int):
@@ -492,16 +548,20 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         bounded_strides: list[Union[int, torch.SymInt]] = [None] * len(ex_stride)  # type: ignore[list-item]
         for val, neg_i in stride_li:
             i = -neg_i
-            if _maybe_expr(val) in candidates:
-                bounded_strides[i] = candidates[_maybe_expr(val)]
-            else:
+            if val == 0:
                 bounded_strides[i] = val
-            candidates[_maybe_expr(val * ex_size[i])] = (
+                continue
+
+            if _maybe_expr(val) in stride_expr:
+                bounded_strides[i] = stride_expr[_maybe_expr(val)]
+            else:
+                assert (
+                    val == 1
+                ), "strides that are neither 0 or 1 should be bound already"
+                bounded_strides[i] = val
+            stride_expr[_maybe_expr(val * ex_size[i])] = (
                 bounded_strides[i] * merged_size[i]
             )
-        assert all(
-            a is not None for a in bounded_strides
-        ), f"not all strides are bounded {bounded_strides}"
         return bounded_strides
 
     a_stride: list[Union[int, torch.SymInt]] = _bound_stride(
@@ -515,13 +575,11 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
     """
     torch._check(
         a_stride == b_stride,
-        lambda: f"Error when merging two branches output's strides. True branch size {a.size()} vs False branch size {b.size()},"
-        f" merged output size: {merged_size}. Merged True stride {a_stride} vs Mmrged False stride {b_stride}. ",
+        lambda: f"Fail to merge two branches output's strides. Consider call contiguous() for outputs before return"
+        f" Specifically, true branch return has size {a.size()} vs False branch return size {b.size()}, torch.cond try to"
+        f" merge into an output of size: {merged_size}. However, calculated merged stride of true branch to be {a_stride}"
+        f" vs False branch stride {b_stride} don't match.",
     )
-
-    # NYI
-    assert not a.is_quantized
-    assert not b.is_quantized
 
     with mode:
         return torch.empty_strided(
