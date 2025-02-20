@@ -926,15 +926,8 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline(f"{lhs} = args")
         self.prefix.writeline("args.clear()")
 
-    def write_prefix(self) -> None:
-        assert self.launcher_fn_name is not None
-        self.write_async_compile_wait()
-        if (
-            config.graph_partition
-            and not V.graph.cpp_wrapper
-            and not V.graph.aot_mode
-            and not hasattr(self, "subgraph_name")
-        ):
+    def write_launcher_fn_call_get_indent(self) -> int:
+        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
             self.prefix.splice(
                 """
                 class Runner:
@@ -958,6 +951,12 @@ class PythonWrapperCodegen(CodeGen):
                 """
             )
             prefix_indent = 1
+        return prefix_indent
+
+    def write_prefix(self) -> None:
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        prefix_indent = self.write_launcher_fn_call_get_indent()
 
         with self.prefix.indent(prefix_indent):
             if config.triton.debug_sync_graph:
@@ -1053,6 +1052,9 @@ class PythonWrapperCodegen(CodeGen):
             self.wrapper_call.writeline("return ()")
 
     def generate_before_suffix(self, result: IndentedBuffer) -> None:
+        return
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
         return
 
     def generate_end(self, result: IndentedBuffer) -> None:
@@ -1210,6 +1212,12 @@ class PythonWrapperCodegen(CodeGen):
         with dynamo_timed("PythonWrapperCodegen.generate"):
             return self._generate(is_inference)
 
+    def get_wrapper_call_indent(self) -> int:
+        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+            return 2
+        else:
+            return 1
+
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
@@ -1271,41 +1279,14 @@ class PythonWrapperCodegen(CodeGen):
         self.finalize_prefix()
         result.splice(self.prefix)
 
-        wrapper_call_indent = (
-            2
-            if torch._inductor.config.graph_partition
-            and not hasattr(self, "subgraph_name")
-            else 1
-        )
+        wrapper_call_indent = self.get_wrapper_call_indent()
 
         with result.indent(wrapper_call_indent):
             result.splice(self.wrapper_call)
 
         self.generate_before_suffix(result)
         result.splice(self.suffix)
-
-        if (
-            config.graph_partition
-            and not V.graph.aot_mode
-            and not V.graph.cpp_wrapper
-            and not hasattr(self, "subgraph_name")
-        ):
-            result.splice(
-                """
-                runner = Runner()
-                """
-            )
-            if hasattr(self, "all_partition_names"):
-                all_partition_name_list = ", ".join(self.all_partition_names) + (
-                    "," if len(self.all_partition_names) == 1 else ""
-                )
-                result.splice(f"runner.partitions=[{all_partition_name_list}]")
-            result.splice(
-                """
-                call = runner.call
-                recursively_apply_fns = runner.recursively_apply_fns
-                """
-            )
+        self.generate_after_suffix(result)
 
         self.generate_end(result)
 
@@ -2768,6 +2749,37 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def next_kernel_suffix(self) -> str:
         # Ensures that subgraphs kernels do not clash with each other
         return self.parent_wrapper.next_kernel_suffix()
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
+        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+            result.splice(
+                """
+                runner = Runner()
+                """
+            )
+            if hasattr(self, "all_partition_names"):
+                all_partition_name_list = ", ".join(self.all_partition_names) + (
+                    "," if len(self.all_partition_names) == 1 else ""
+                )
+                result.splice(f"runner.partitions=[{all_partition_name_list}]")
+            result.splice(
+                """
+                call = runner.call
+                recursively_apply_fns = runner.recursively_apply_fns
+                """
+            )
+
+    def write_launcher_fn_call_get_indent(self) -> int:
+        self.prefix.splice(
+            f"""
+            def {self.launcher_fn_name}(args):
+            """
+        )
+        prefix_indent = 1
+        return prefix_indent
+
+    def get_wrapper_call_indent(self) -> int:
+        return 1
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
