@@ -54,7 +54,7 @@ struct LoadBoolOp {
 auto wrap_input_iterator(const bool *data) {
   // See NOTE [Loading boolean values]
   LoadBoolOp op;
-  return NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<bool, LoadBoolOp, const uint8_t*, int>(
+  return thrust::transform_iterator<LoadBoolOp, const uint8_t*, int>(
       reinterpret_cast<const uint8_t*>(data), op);
 }
 
@@ -259,7 +259,7 @@ struct UniqueCub<bool> {
 
     const bool* self_data = self.const_data_ptr<bool>();
     MapNumberOfTrueValues op;
-    NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<int, MapNumberOfTrueValues, const uint8_t*, int>
+    thrust::transform_iterator<MapNumberOfTrueValues, const uint8_t*, int>
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
                           NO_ROCM(at_cuda_detail)::cub::Sum{}, 0);

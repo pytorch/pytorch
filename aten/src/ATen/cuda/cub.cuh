@@ -270,7 +270,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+    auto input_ = thrust::transform_iterator<decltype(input_iter_transform), ArgIndexInputIterator>(
       ArgIndexInputIterator(input + i), input_iter_transform);
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
@@ -425,7 +425,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
     TransformFunctor<T, aggT, nonzero> transform_functor;
-    auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
+    auto iter_in = thrust::transform_iterator<TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
       if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
         BlockLoadT(temp_storage.load).Load(iter_in, data);
