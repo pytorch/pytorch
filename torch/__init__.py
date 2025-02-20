@@ -2596,12 +2596,17 @@ def compile(
                 return model(*args, **kwargs)
             else:
                 if compiled_fn is None:
+                    from torch.fx.experimental.dynamism import (
+                        track_dynamism_across_examples,
+                    )
+
+                    dynamism = track_dynamism_across_examples(example_inputs)
                     compiled_fn = torch._dynamo.optimize(
                         backend=backend,
                         nopython=fullgraph,
                         dynamic=dynamic,
                         disable=disable,
-                        example_inputs=example_inputs,
+                        dynamism=dynamism,
                     )(model)
                 return compiled_fn(*args, **kwargs)
 

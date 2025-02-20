@@ -87,6 +87,7 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
+    ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
@@ -1957,7 +1958,7 @@ class VariableBuilder:
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
                 self.source.dynamism is not None
-                and self.source.dynamism[0]
+                and dict(self.source.dynamism).get(self.source.name(), {0: False})[0]
                 or not config.assume_static_by_default
             ):
                 dynamic_dim = DimDynamic.DYNAMIC
@@ -2811,8 +2812,18 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic or (
-            isinstance(source, LocalSource) and source.dynamism and source.dynamism[i]
+        if (
+            marked_dynamic
+            or (
+                isinstance(source, LocalSource)
+                and source.dynamism
+                and dict(source.dynamism).get(source.name(), {i: False})[i]
+            )
+            or (
+                isinstance(source, ChainedSource)
+                and source.base.dynamism
+                and dict(source.base.dynamism).get(source.name(), {i: False})[i]
+            )
         ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
