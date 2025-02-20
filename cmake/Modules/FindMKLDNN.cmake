@@ -20,17 +20,20 @@ IF(NOT MKLDNN_FOUND)
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
 
   if(USE_XPU) # Build oneDNN GPU library
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(WIN32)
+      # Windows
+      set(DNNL_HOST_COMPILER "DEFAULT")
+      set(SYCL_CXX_DRIVER "icx")
+      set(DNNL_LIB_NAME "dnnl.lib")
+    elseif(LINUX)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
       set(DNNL_HOST_COMPILER "g++")
       set(SYCL_CXX_DRIVER "icpx")
       set(DNNL_LIB_NAME "libdnnl.a")
     else()
-      # Windows
-      set(DNNL_HOST_COMPILER "DEFAULT")
-      set(SYCL_CXX_DRIVER "icx")
-      set(DNNL_LIB_NAME "dnnl.lib")
+      MESSAGE(FATAL_ERROR "OneDNN for Intel GPU in PyTorch currently supports only Windows and Linux.
+                           Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
     endif()
 
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
