@@ -527,9 +527,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -1026,11 +1025,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def has_closure(self):
         return self.closure is not None
-
-    def const_getattr(self, tx, name):
-        if name == "__name__":
-            return self.fn_name.as_python_constant()
-        return super().const_getattr(tx, name)
 
     def has_self(self):
         return False
