@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
@@ -892,9 +893,10 @@ static bool _scaled_mm_is_fnuz() {
 
 namespace{
 
-enum class ScalingType {
+enum class ScalingType : std::uint8_t {
   TensorWise,
   RowWise,
+  BlockWise,
   Error
 };
 /*
@@ -919,6 +921,9 @@ ScalingType get_scaling_type(
     const at::Tensor& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
+  if (scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
+    return ScalingType::BlockWise;
+  }
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
@@ -1018,6 +1023,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Check what type of scaling we are doing based on inputs
   ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat2.size(1));
   TORCH_INTERNAL_ASSERT(scaling_choice != ScalingType::Error, "Scaling type not supported");
+
+  // TODO(future PR): enumerate what boundary conditions (scale shapes, etc)
+  // are supported / not supported for blockwise scaling
 
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
@@ -1202,10 +1210,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         scale_a.data_ptr(),
         args.lda,
         args.mata->scalar_type(),
+        scale_a.scalar_type(),
         args.matb->data_ptr(),
         scale_b.data_ptr(),
         args.ldb,
         args.matb->scalar_type(),
+        scale_b.scalar_type(),
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
