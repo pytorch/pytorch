@@ -418,11 +418,11 @@ enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
-use_graph_deduplication = False
+use_graph_deduplication = True
 
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True
-track_nodes_for_deduplication = False
+track_nodes_for_deduplication = True
 
 # Issues a warning in Python 3.13.0 for possibly slower guard evaluation and
 # instructs user to attempt using 3.13.1+, where the CPython bug is fixed.
