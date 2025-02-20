@@ -70,6 +70,7 @@ from .ctx_manager import (
     ProfilerContextVariable,
     TorchFunctionDisableVariable,
 )
+from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
@@ -401,8 +402,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
+    def __init__(self, value, traceable=None, **kwargs) -> None:
+        super().__init__(value, **kwargs)
+        from ..trace_rules import is_mark_traceable_callable
+
+        if traceable is None:
+            traceable = is_mark_traceable_callable(value)
+        self.traceable = traceable
+
     def __repr__(self) -> str:
-        return f"TorchInGraphFunctionVariable({self.value})"
+        return f"TorchInGraphFunctionVariable({self.value}, traceable={self.traceable})"
 
     def get_function(self):
         return self.value
@@ -976,6 +985,93 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
+        if self.traceable:
+            import torch._higher_order_ops.flat_apply as flat_apply
+            from torch._higher_order_ops.flat_apply import (
+                func_to_graphable,
+                is_graphable_type,
+            )
+            from torch.utils._pytree import tree_flatten
+
+            fn = self.value
+            # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
+            #
+            # Rather than reconstructing `args, kwargs` into python objects and
+            # then tree_flatten them, we just let Dynamo symbolically interpret
+            # `tree_flatten((args, kwargs))`. This saves us from having to
+            # worry about the reconstruction logic, side effects, and guards.
+            packed_input_vt = TupleVariable.build(
+                tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
+            )
+            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(
+                tx, [packed_input_vt], {}
+            )
+            assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
+            flat_args_vts, input_spec_vt = out_vt.items
+            assert isinstance(flat_args_vts, ListVariable)
+
+            # Handle the case when the input contains a non-graphable type.
+            for flat_arg_vt in flat_args_vts.items:
+                arg_type = flat_arg_vt.python_type()
+                if not is_graphable_type(arg_type):
+                    unimplemented(
+                        f"""
+Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <{flat_arg_vt.python_type().__qualname__}>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_pytree_node`
+"""  # NOQA: B950
+                    )
+
+            # Since we checked with `is_graphable` above, `as_proxy` on the
+            # flat_arg VT should always work.
+            proxified_flat_args = [
+                flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vts.items
+            ]
+
+            # The downstream `flat_apply` call requires the input spec; however,
+            # it's not a graphable type. So we still have to reconstruct it into
+            # a python object, and store it as a constant attribute on the fx
+            # graph.
+            #
+            # Luckily, the structure of input spec is predictable and fixed
+            # (it's a part of the torch codebase), and existing
+            # `VariableTracker.as_python_constant` implementations already
+            # covers all the cases, so we just use that.
+            #
+            # TODO handle `pytree._register_constant`-ed values.
+            try:
+                input_spec = input_spec_vt.as_python_constant()
+            except NotImplementedError:
+                unimplemented(
+                    """
+This error is most likely due to a call to `mark_traceable`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+"""  # NOQA: B950
+                )
+
+            # `flat_appy` wants a TreeSpec for the function input.
+            _, f_spec = func_to_graphable(fn)
+
+            # TreeSpec isn't graphable, so we register the function and input
+            # specs as attributes on the graph module.
+            f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                fn.__name__, f_spec
+            )
+            input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                fn.__name__ + "_input_spec", input_spec
+            )
+            all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+
+            # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
+            # the call and wrap output into a VariableTracker.
+            proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+            out_vt = wrap_fx_proxy(tx, proxy)
+            # TODO support more output types
+            # Q: flat_apply will likely pytree_flatten the output for this, then
+            # how do we intercept the output before flatten, and wrap those?
+            # - Maybe we can have `flat_apply` return the output spec, so that
+            #   Dynamo can unflatten and wrap the result.
+
+            return out_vt
+
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
 
@@ -1034,6 +1130,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             ):
                 fn_ = getattr(torch, torch_sym_op)
 
+        # TODO for each of the following check on `out=` or `requires_grad=`
+        # variant torch ops, the original function could come from a user
+        # defined `@allow_in_graph` function as well, which doesn't have the
+        # same semantics as the torch ops.
         fake_out_shape = None
         if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
             # Calling fake tensor propagation can mutate the out= tensor in
@@ -1053,6 +1153,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             ),
         )
 
+        # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
             isinstance(tensor_variable, TensorVariable)
             and "requires_grad" in kwargs
@@ -1063,6 +1164,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
             )
 
+        # Handle e.g., `torch.add(a, b, out=result)`
         if "out" in kwargs and not (
             isinstance(kwargs["out"], variables.ConstantVariable)
             and kwargs["out"].as_python_constant() is None
