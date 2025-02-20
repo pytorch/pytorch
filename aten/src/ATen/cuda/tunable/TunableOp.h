@@ -23,25 +23,6 @@
 #include <vector>
 #include <deque>
 
-class FixedSizeStack {
-  private:
-      std::deque<std::string> stack;
-      const size_t max_size;
-
-  public:
-      FixedSizeStack(size_t size) : max_size(size) {}
-
-      void push(const std::string& value) {
-          if (stack.size() >= max_size) {
-              stack.pop_front(); // Remove the oldest entry
-          }
-          stack.push_back(value); // Add new entry
-      }
-
-      auto rbegin() { return stack.rbegin(); }
-      auto rend() { return stack.rend(); }
-};
-
 namespace at::cuda::tunable {
 
 template <typename ParamsT>
@@ -102,6 +83,25 @@ class Stats {
     double _sum;
     double _min;
     double _max;
+};
+
+class FixedSizeStack {
+  private:
+      std::deque<std::string> stack;
+      const size_t max_size;
+
+  public:
+      FixedSizeStack(size_t size) : max_size(size) {}
+
+      void push(const std::string& value) {
+          if (stack.size() >= max_size) {
+              stack.pop_front(); // Remove the oldest entry
+          }
+          stack.push_back(value); // Add new entry
+      }
+
+      auto rbegin() { return stack.rbegin(); }
+      auto rend() { return stack.rend(); }
 };
 
 } // anonymous namespace
