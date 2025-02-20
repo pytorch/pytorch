@@ -41,11 +41,11 @@ def is_available() -> bool:
     Returns:
         bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
 
+    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
+
     Example::
 
         >>> assert torch.accelerator.is_available() "No available accelerators detected."
-
-    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     return device_count() > 0
 
