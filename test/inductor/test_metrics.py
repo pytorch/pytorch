@@ -95,7 +95,7 @@ class TestMetrics(TestCase):
         kernel_code = kernel_list[0]
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
-    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE)
+    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE, inductor=True)
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):
