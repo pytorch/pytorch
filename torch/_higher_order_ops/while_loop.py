@@ -23,7 +23,6 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.cuda.graphs import _graph_no_gc
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     ProxyTorchDispatchMode,
@@ -235,6 +234,10 @@ def while_loop_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inpu
 # WAR for https://github.com/pytorch/pytorch/issues/140322
 @while_loop_op.py_impl(ControlFlowOpWarmupDispatchMode)
 def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    # Import inside this method to prevent a module load time
+    # dependency on torch.cuda.graphs, which is believed to cause this error:
+    # https://github.com/pytorch/pytorch/pull/140979#issuecomment-2657590366
+    from torch.cuda.graphs import _graph_no_gc
     if torch.cuda.is_current_stream_capturing():
         # This is a call to torch.while_loop() nested within either
         # torch.while_loop() or another torch.cond() function.

@@ -38,7 +38,6 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.cuda.graphs import _graph_no_gc
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
@@ -373,6 +372,10 @@ def cond_op_cudagraph(mode, pred, true_fn, false_fn, operands):
 # WAR for https://github.com/pytorch/pytorch/issues/140322
 @cond_op.py_impl(ControlFlowOpWarmupDispatchMode)
 def cond_op_warmup(mode, pred, true_fn, false_fn, operands):
+    # Import inside this method to prevent a module load time
+    # dependency on torch.cuda.graphs, which is believed to cause this error:
+    # https://github.com/pytorch/pytorch/pull/140979#issuecomment-2657590366
+    from torch.cuda.graphs import _graph_no_gc
     if torch.cuda.is_current_stream_capturing():
         # This is a call to torch.cond() nested within either
         # torch.while_loop() or another torch.cond() function.

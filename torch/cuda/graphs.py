@@ -133,11 +133,6 @@ class graph:
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
             actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
             unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
-        collect_garbage (bool, optional): If True, call torch.cuda.synchronize() followed by gc.collect() to free
-            memory before starting graph capture. Users almost always this to be True, but since the introduction of
-            conditional nodes in cuda graphs, it is possible that more than one stream may be capturing at once.
-            Since cudaDeviceSynchronize() synchronizes all streams, including capturing streams, previously started
-            stream captures will be invalidated. This is not desirable.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
