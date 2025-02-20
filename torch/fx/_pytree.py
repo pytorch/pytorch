@@ -52,7 +52,13 @@ def tree_flatten_spec(
             flat = tree_flatten_spec(child, child_spec)
             result += flat
         return result
-    return list(tree_flatten(pytree)[0])
+    flat_result, real_spec = tree_flatten(pytree)
+    if spec != real_spec:
+        raise RuntimeError(
+            "Real spec {real_spec} of object {pytree} is different from expected spec {spec}. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml"
+        )
+    return list(flat_result) if not isinstance(flat_result, list) else flat_result
 
 
 def _dict_flatten_spec(d: dict[_K, _V], spec: TreeSpec) -> list[_V]:
