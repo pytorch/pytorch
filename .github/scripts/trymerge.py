@@ -1526,13 +1526,14 @@ def post_starting_merge_comment(
         dry_run=dry_run,
     )
     for additional_prs, _ in get_ghstack_prs(repo, pr):
-        gh_post_pr_comment(
-            additional_prs.org,
-            additional_prs.project,
-            additional_prs.pr_num,
-            f"Starting merge as part of PR stack under #{pr.pr_num}",
-            dry_run=dry_run,
-        )
+        if additional_prs.pr_num != pr.pr_num:
+            gh_post_pr_comment(
+                additional_prs.org,
+                additional_prs.project,
+                additional_prs.pr_num,
+                f"Starting merge as part of PR stack under #{pr.pr_num}",
+                dry_run=dry_run,
+            )
 
 
 def manually_close_merged_pr(
