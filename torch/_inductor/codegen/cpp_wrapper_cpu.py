@@ -19,7 +19,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, cache_on_self, normalize_name
+from ..utils import _align, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -910,13 +910,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
-    @cache_on_self
-    def get_output_refs(self):
-        return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
-
     def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
+
+        # If any output ref represents a temporary tensor, save it off first.  This
+        # prevents situations where the temporary tensor would reinterpret another
+        # output_ref which has already been released.
+        for idx, output in enumerate(output_refs):
+            var_name, call_str = self.create_tmp_raii_handle_var(output)
+            if var_name:
+                self.wrapper_call.writeline(call_str)
+                output_refs[idx] = var_name
+
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -1003,6 +1009,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # Release the inputs for memory reuse.
         wrapper_body += """
                     args.clear()
+                    del input_tensors
         """
 
         # unwrap output tensor back to python scalar
@@ -1494,14 +1501,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         writeline: Callable[..., None],
         dtype=None,
     ) -> str:
+        """Returns a newly-created, temporary RAII tensor handle containing the
+        reinterpreted tensor data.  Callers of this function are responsible for saving
+        the handle if persistent access is needed."""
         dim = str(len(size))
         original_offset = offset
         offset = self.codegen_sizevar(offset)
         call_strs = []
-        final_tmp_name = None
+        final_tensor_str = None
 
-        def create_reinterpret_call() -> tuple[str, str]:
-            tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+        def create_reinterpret_call() -> str:
             args = [
                 f"{data.get_name()}",
                 dim,
@@ -1519,29 +1528,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 ),
                 offset,
             ]
-            call_str = (
-                f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
-            )
-            return tmp_name, call_str
+            return f"wrap_with_raii_handle_if_needed(reinterpret_tensor_wrapper({', '.join(args)}))"
 
         def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
-            dtype_name = str(dtype).split(".")[-1]
+            tmp_call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             device_name = data.layout.device.type
-            get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
             dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
-            call_strs.append(
+            tmp_call_strs.append(
                 f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
-                f"({reinterpret_call}, {get_dtype_function}(), &{tmp_AtenTensorHandle}));"
+                f"({reinterpret_call}, {self.codegen_dtype(dtype)}, &{tmp_AtenTensorHandle}));"
             )
-            tmp_RAIIAtenTensorHandle = (
-                f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}_handle"
-            )
-            call_strs.append(
-                f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
-            )
-            return tmp_RAIIAtenTensorHandle, call_strs
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+
+        def create_new_tensor_handle() -> tuple[str, list[str]]:
+            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
@@ -1550,25 +1556,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ):
             # pure dtypeview
             if dtype is not None and dtype != data.dtype:
-                tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
-                call_strs.extend(tmp_call_strs)
-                final_tmp_name = tmp_output_name
+                final_tensor_str, tmp_call_strs = create_dtypeview_call(data.get_name())
             else:
-                return data.get_name()
+                final_tensor_str, tmp_call_strs = create_new_tensor_handle()
+            call_strs.extend(tmp_call_strs)
         else:
             # firstly create reinterpretview
-            final_tmp_name, reinterpret_call = create_reinterpret_call()
-            call_strs.append(reinterpret_call)
+            final_tensor_str = create_reinterpret_call()
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
-                call_strs.extend(tmp_call_strs)
-            else:
-                call_strs.append(
-                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
+                final_tensor_str, tmp_call_strs = create_dtypeview_call(
+                    final_tensor_str
                 )
-                final_tmp_name = f"{final_tmp_name}_raii"
+                call_strs.extend(tmp_call_strs)
 
         for line in call_strs:
             writeline(line)
@@ -1602,7 +1603,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         #     }.data()
         # );
         # ```
-        return final_tmp_name
+        return final_tensor_str
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
@@ -2389,7 +2390,17 @@ if (custom_op_wrapper.get() == NULL) {
                     f"const {self.c_type_for_prim_type(None, element_type)}* {var_name} = nullptr;"
                 )
             else:
-                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+                result = [self.val_to_arg_str(x, element_type) for x in val]
+                if isinstance(element_type, torch.TensorType):
+                    # If any tensor in the list represents a temporary tensor, save it
+                    # off first.  This increases memory usage in these cases (since the
+                    # saved handle is currently permanent), but prevents segfaults.
+                    for i, tensor in enumerate(result):
+                        tmp_var_name, call_str = self.create_tmp_raii_handle_var(tensor)
+                        if tmp_var_name:
+                            self.writeline(call_str)
+                            result[i] = tmp_var_name
+                result = f"{{{', '.join(result)}}}"
                 self.writeline(
                     f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
                 )
@@ -2403,14 +2414,21 @@ if (custom_op_wrapper.get() == NULL) {
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
-    def create_tmp_raii_handle_var(self, base_handle):
-        if base_handle.startswith(("wrap_with_raii_handle_if_needed",)):
-            # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
-            # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+    def create_tmp_raii_handle_var(self, base_handle: str) -> tuple[str, str]:
+        if base_handle.startswith(
+            (
+                "borrow_arrayref_tensor_as_tensor(",
+                "copy_arrayref_tensor_to_tensor(",
+                "wrap_with_raii_handle_if_needed(",
+                "RAIIAtenTensorHandle(",
+            )
+        ):
+            # these operations create a temp RAIIAtenTensorHandle, so we need to
+            # explicitly store them to avoid destroying them early
             tmp_var_name = f"var_{next(self.arg_var_id)}"
             return (
                 tmp_var_name,
-                f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};\n",
+                f"auto {tmp_var_name} = {base_handle};\n",
             )
         else:
             return "", ""
