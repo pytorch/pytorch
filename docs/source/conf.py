@@ -19,7 +19,7 @@ import inspect
 #
 import os
 
-# import sys
+import sys
 import pkgutil
 import re
 from os import path
@@ -47,6 +47,9 @@ import pytorch_sphinx_theme
 #
 needs_sphinx = "3.1.2"
 
+# Any python files under this directory can be used as an extension
+sys.path.insert(0, os.path.abspath('../extensions'))
+
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
@@ -63,8 +66,9 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx_copybutton",
     "sphinx_panels",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
+    "nb_execution_timeout",
 ]
 
 # build the templated autosummary files
@@ -78,6 +82,35 @@ panels_add_bootstrap_css = False
 # The following tells autosectionlabel to not throw a warning for
 # duplicated section names that are in different documents.
 autosectionlabel_prefix_document = True
+
+# [NOTE] Code execution in documentation
+# With the myst-nb plugin, we allow code execution in markdown docs if the code
+# regions are annotated with the {code-cell} directive. The output of code cells
+# will be recorded in the output of the docs.
+#
+# This comes with a number of caveats in the interest of not slowing down builds:
+# - code must execute quickly (see nb_execution_timeout.py for the per-page timeout)
+# - code must execute using cpu-only runners (use PyTorch tutorials if you want GPU runners.)
+#
+# myst-nb comes with a number of niceties that makes our lives easier.
+# The "cache" execution mode caches the output of code cells.
+
+IN_CI = os.environ.get("IN_CI", "0") != "0"
+
+if os.name == 'nt':
+    # Don't execute any notebooks on Windows.
+    nb_execution_mode = "off"
+elif IN_CI:
+    # Always execute notebooks in CI.
+    nb_execution_mode = "cache"
+elif os.environ.get("PYTORCH_NB_EXECUTE", "0") != "0":
+    # Locally, set PYTORCH_NB_EXECUTE=1 to execute notebooks.
+    nb_execution_mode = "cache"
+else:
+    # Locally, don't execute notebooks by default.
+    nb_execution_mode = "off"
+
+nb_execution_timeout = 30  # timeout per cell in seconds
 
 # katex options
 #
