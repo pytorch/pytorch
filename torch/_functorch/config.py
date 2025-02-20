@@ -11,6 +11,8 @@ import os
 import sys
 from typing import Optional, TYPE_CHECKING
 
+from torch.utils._config_module import Config, install_config_module
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -38,8 +40,10 @@ cse = True
 from torch._inductor.config import is_fbcode
 
 
-enable_autograd_cache = (
-    os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0" if is_fbcode() else "1") == "1"
+enable_autograd_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_autograd_cache",
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
+    default=True,
 )
 
 
@@ -217,8 +221,6 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
-
-from torch.utils._config_module import install_config_module
 
 
 # adds patch, save_config, invalid config checks, etc

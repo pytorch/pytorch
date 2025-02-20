@@ -4915,8 +4915,9 @@ class ExternKernel(InputsKernel):
             )
 
     def get_kernel_name(self):  # type: ignore[no-untyped-def]
+        device = d.type if (d := self.get_device()) else V.graph.device_type
         return (
-            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name, device)  # type: ignore[attr-defined]
             if V.graph.cpp_wrapper
             else self.python_kernel_name
         )
@@ -5520,11 +5521,13 @@ class ExternKernelOut(ExternKernel):
             kernel_name = "aoti_torch__mm_plus_mm_out"
         else:
             kernel_name = self.get_kernel_name()
+        device = d.type if (d := self.get_device()) else V.graph.device_type
         wrapper.generate_extern_kernel_out(
             kernel_name,
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
+            device,
         )
 
     def __init__(  # type: ignore[no-untyped-def]
