@@ -494,13 +494,15 @@ class RNN(RNNBase):
             h_t = hx
             output = []
             for t in range(seq_len):
+                x_l = x[t]
                 for layer in range(num_layers):
                     h_t[layer] = torch.tanh(
-                        x[t] @ weight_ih[layer].T
+                        x_l @ weight_ih[layer].T
                         + bias_ih[layer]
                         + h_t_minus_1[layer] @ weight_hh[layer].T
                         + bias_hh[layer]
                     )
+                    x_l = h_t[layer]
                 output.append(h_t[-1])
                 h_t_minus_1 = h_t
             output = torch.stack(output)
