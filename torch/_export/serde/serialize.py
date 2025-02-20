@@ -636,19 +636,9 @@ class GraphModuleSerializer(metaclass=Final):
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             # serialize the symbol names of unbacked bindings;
             # reconstruct the key paths to those symbols when deserializing
-            val = node.meta["val"]
-            new_unbacked_bindings = {}
-            for key in unbacked_bindings.values():
-                expr = pytree.key_get(val, key).node.expr
-                if expr.is_symbol and (
-                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
-                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
-                ):
-                    new_unbacked_bindings[expr] = key
-            if new_unbacked_bindings:
-                ret["unbacked_bindings"] = ",".join(
-                    u.name for u in new_unbacked_bindings.keys()
-                )
+            ret["unbacked_bindings"] = ",".join(
+                u.name for u in unbacked_bindings.keys()
+            )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -2720,12 +2710,21 @@ def _dataclass_to_dict(obj):
         return tuple(_dataclass_to_dict(x) for x in obj)
     elif isinstance(obj, dict):
         return {k: _dataclass_to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, float):
+        if obj == math.inf:
+            return "Infinity"
+        elif obj == -math.inf:
+            return "-Infinity"
+        elif obj == math.nan:
+            return "NaN"
+        else:
+            return obj
     else:
         return obj
 
 
 def _to_json_bytes(obj: Any) -> bytes:
-    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder).encode("utf-8")
+    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder, allow_nan=False).encode("utf-8")
 
 
 def serialize(
@@ -2783,6 +2782,8 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
+    elif cls == float:
+        return float(data)
     return data
 
 

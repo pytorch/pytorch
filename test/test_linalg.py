@@ -2230,7 +2230,7 @@ class TestLinalg(TestCase):
         def gen_error_message(input_size, p, keepdim, dim=None):
             return f"norm failed for input size {input_size}, p={p}, keepdim={keepdim}, dim={dim}"
 
-        # 'nuc' norm uses SVD, and thus its precsion is much lower than other norms.
+        # 'nuc' norm uses SVD, and thus its precision is much lower than other norms.
         # test_svd takes @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4}),
         # and here we are doing the same thing for nuc norm.
         class PrecisionContext:
