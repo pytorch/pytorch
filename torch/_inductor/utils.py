@@ -974,6 +974,8 @@ def argsort_sym(
 
 @functools.lru_cache(8)
 def get_dtype_size(dtype: torch.dtype) -> int:
+    if dtype == torch.uint64:
+        return 8
     return torch.empty((), dtype=dtype).element_size()
 
 
