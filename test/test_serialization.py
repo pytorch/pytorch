@@ -524,7 +524,7 @@ class SerializationMixin:
         # test some old tensor serialization mechanism
         class OldTensorBase:
             def __init__(self, new_tensor):
-               self.new_tensor = new_tensor
+                self.new_tensor = new_tensor
 
             def __getstate__(self):
                 return (self.new_tensor.storage(),
