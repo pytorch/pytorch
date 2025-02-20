@@ -58,7 +58,7 @@ on:
         required: false
         type: string
         default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf
-      caching:
+      cachebench:
         description: Run cachebench?
         required: false
         type: boolean
