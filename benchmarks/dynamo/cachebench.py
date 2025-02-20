@@ -14,11 +14,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 TIMEOUT: int = 2000
 
-MODELS: list[str] = [
-    "nanogpt",
-    "BERT_pytorch",
-    "resnet50"
-]
+MODELS: list[str] = ["nanogpt", "BERT_pytorch", "resnet50"]
 
 
 @dataclasses.dataclass
@@ -45,14 +41,14 @@ def _run_torchbench_from_args(model: str, args: list[str]) -> tuple[float, float
         env = os.environ.copy()
         with tempfile.NamedTemporaryFile(suffix=".csv") as file:
             args.append("--output=" + file.name)
-            logger.info(f"Performing cold-start run for {model}")
+            logger.info(f"Performing cold-start run for {model}")  # noqa: G004
             subprocess.check_call(args, timeout=TIMEOUT, env=env)
             cold_compile_time = get_compile_time(file)
 
         args.pop()
         with tempfile.NamedTemporaryFile(suffix=".csv") as file:
             args.append("--output=" + file.name)
-            logger.info(f"Performing warm-start run for {model}")
+            logger.info(f"Performing warm-start run for {model}")  # noqa: G004
             subprocess.check_call(args, timeout=TIMEOUT, env=env)
             warm_compile_time = get_compile_time(file)
 
@@ -70,22 +66,23 @@ def _run_torchbench_model(results: list[RunResult], model: str) -> None:
         sys.executable,
         torchbench_file,
         f"--only={model}",
-        "--repeat=5",
+        "--repeat=1",
         "--performance",
         "--backend=inductor",
     ]
-    for mode in ["inference", "training"]:
-        for dynamic in [False, True]:
+    for mode, mode_args in [
+        ("inference", ["--inference", "--bfloat16"]),
+        ("training", ["--training", "--amp"]),
+    ]:
+        for dynamic, dynamic_args in [
+            (False, []),
+            (True, ["--dynamic-shapes", "--dynamic-batch-only"]),
+        ]:
             args = list(base_args)
-            if mode == "inference":
-                args.extend(["--inference", "--bfloat16"])
-            else:
-                assert mode == "training"
-                args.extend(["--training", "--amp"])
-            if dynamic:
-                args.extend(["--dynamic-shapes", "--dynamic-batch-only"])
+            args.extend(mode_args)
+            args.extend(dynamic_args)
 
-            logger.info(f"Command: {args}")
+            logger.info(f"Command: {args}")  # noqa: G004
             try:
                 cold_compile_t, warm_compile_t = _run_torchbench_from_args(model, args)
                 results.append(
@@ -106,14 +103,11 @@ def _run_torchbench_model(results: list[RunResult], model: str) -> None:
 def _write_results_to_json(results: list[RunResult], output_filename: str) -> None:
     records = []
     for result in results:
-        for metric_name in ["cold_compile_time(s)", "warm_compile_time(s)", "speedup"]:
-            if metric_name.startswith("cold"):
-                value = result.cold_compile_s
-            elif metric_name.startswith("warm"):
-                value = result.warm_compile_s
-            else:
-                assert metric_name == "speedup"
-                value = result.speedup
+        for metric_name, value in [
+            ("cold_compile_time(s)", result.cold_compile_s),
+            ("warm_compile_time(s)", result.warm_compile_s),
+            ("speedup", result.speedup),
+        ]:
             records.append(
                 {
                     "benchmark": {
