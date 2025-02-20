@@ -6,7 +6,6 @@ import sys
 import tempfile
 from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
-import re
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
@@ -91,14 +90,15 @@ def compile_time_strobelight_meta(
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
-            return function(*args, **kwargs)
 
-            # if not StrobelightCompileTimeProfiler.should_profile():
-            #     return function(*args, **kwargs)
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
 
-            # return StrobelightCompileTimeProfiler.profile_compile_time(
-            #     function, phase_name, *args, **kwargs
-            # )
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
 
         return wrapper_function
 
