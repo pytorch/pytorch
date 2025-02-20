@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing import Callable, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -461,3 +461,68 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     from ._cache import CacheArtifactManager, CacheInfo
 
     return CacheArtifactManager.deserialize(serialized_artifacts)
+
+
+if TYPE_CHECKING:
+    from torch._fullgraph import _Package
+
+_FULLGRAPH_PACKAGE: Optional["_Package"] = None
+
+
+# NOTE: [Fullgraph Package] This is an experimental feature that allows users to
+#       explicitly package precompiled artifacts into a single file.
+#       TODO Eventually we should come up with a context manager style API. To
+#       reduce the complexity of landing changes, we first introduce a set of
+#       stateful interfaces as the future building blocks to begin with.
+def _enable_fullgraph_package(*, path: str):
+    from torch._fullgraph import _Package
+
+    global _FULLGRAPH_PACKAGE
+    if _FULLGRAPH_PACKAGE is not None:
+        raise RuntimeError("fullgraph_package() is already enabled")
+
+    package = _Package(path=path)
+    _FULLGRAPH_PACKAGE = package
+    prev_cpp_wrapper, torch._inductor.config.cpp_wrapper = (
+        torch._inductor.config.cpp_wrapper,
+        True,
+    )
+    prev_package, torch._inductor.config.aot_inductor.package = (
+        torch._inductor.config.aot_inductor.package,
+        True,
+    )
+
+    return package, prev_cpp_wrapper, prev_package
+
+
+def _disable_fullgraph_package(flags) -> None:
+    global _FULLGRAPH_PACKAGE
+    (
+        torch._inductor.config.cpp_wrapper,
+        torch._inductor.config.aot_inductor.package,
+    ) = flags
+    _FULLGRAPH_PACKAGE = None
+
+
+def _load_fullgraph_package(*, path: str, names: Sequence[str] = ()):
+    """
+    Load models from a fullgraph package.
+    A list of model names can be provided to load specific models from the package.
+    TODO If no model names are provided, all models in the package shall be loaded.
+    """
+    import torch._inductor.compile_fx
+
+    if len(names) == 0:
+        raise RuntimeError("Implicit loading of fullgraph package NYI")
+
+    import torch._inductor.package
+
+    for name in names:
+        torch._inductor.compile_fx._load_precompile(path, name)
+
+
+def _get_fullgraph_package() -> Optional["_Package"]:
+    """
+    Get the fullgraph package to be used by torch.compile(fullgraph=True).
+    """
+    return _FULLGRAPH_PACKAGE
