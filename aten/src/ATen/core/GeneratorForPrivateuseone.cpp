@@ -34,7 +34,7 @@ at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index) {
   TORCH_CHECK(
       GetGeneratorPrivate().has_value(),
       "Please register a generator to the PrivateUse1 dispatch key, \
-      You should derive PrivateUse1HooksInterface to implememt getNewGenerator.")
+      you should derive PrivateUse1HooksInterface to implememt getNewGenerator.")
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return GetGeneratorPrivate().value()(device_index);
