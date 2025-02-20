@@ -88,7 +88,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, exc, mutation_guard
+from . import config, convert_frame, exc, graph_break_hints, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -1695,7 +1695,7 @@ class GuardBuilder(GuardBuilderBase):
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
                 explanation=f"Attempted to setup NN_MODULE guard on unitialized class {type(val)}.",
-                hints=[],
+                hints=[*graph_break_hints.FUNDAMENTAL],
             )
 
     def FUNCTION_MATCH(self, guard: Guard):

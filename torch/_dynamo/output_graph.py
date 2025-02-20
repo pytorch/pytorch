@@ -65,7 +65,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, logging as torchdynamo_logging, variables
+from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -491,7 +491,7 @@ class OutputGraph:
                     context="",
                     explanation="backward_state (data passed to backward hooks for compiled autograd) "
                     "cannot be used when exporting.",
-                    hints=[],
+                    hints=[*graph_break_hints.FUNDAMENTAL],
                 )
             example_value = BackwardState()
             self.backward_state_proxy = self.root_tracer.create_graph_input(
@@ -1004,7 +1004,10 @@ class OutputGraph:
                 gb_type="Attempt to compile with unrestorable blocks",
                 context="",
                 explanation="Dynamo cannot compile with active Python blocks (i.e. with/try blocks) that cannot be restored.",
-                hints=[],
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                ],
             )
 
         prefix_insts: list[Instruction] = []
