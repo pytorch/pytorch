@@ -89,7 +89,8 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
     return resolve_conj_if_indicated(tensor, true);
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
+  } else if ((tensor_strides[1] == 1) &&
+    (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     transpose_tensor = true;
     return resolve_conj_if_indicated(tensor, true);
   } else {
@@ -1418,6 +1419,27 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out_dtype_,
         use_fast_accum,
         scaling_choice == ScalingType::RowWise);
+  }
+
+  // Add MX format validation for gfx950
+  if (scaling_choice == ScalingType::RowWise) {
+#ifdef USE_ROCM
+    if (IsGfx950Device()) {
+      // Validate matrix dimensions for MX format
+      TORCH_CHECK(ValidateMXFormatRequirements(mat1.size(0), mat2.size(1), mat1.size(1)),
+                 "For MX format on gfx950, matrix dimensions must be multiples of 32. ",
+                 "Got dimensions: ", mat1.sizes(), " x ", mat2.sizes());
+      
+      // Validate data types for MX format
+      TORCH_CHECK(mat1.scalar_type() == at::kFloat8_e8m0fnu && 
+                 mat2.scalar_type() == at::kFloat8_e8m0fnu,
+                 "MX format requires Float8_e8m0fnu type for both input matrices");
+      
+      TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 || 
+                 out.scalar_type() == ScalarType::Half,
+                 "MX format only supports BFloat16 or Half output types");
+    }
+#endif
   }
 
   return out;

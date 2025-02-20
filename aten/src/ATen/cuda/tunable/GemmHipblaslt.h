@@ -453,19 +453,31 @@ class HipBlasLtMatmulDescriptor : public HipBlasLtDescriptor<
   }
 };
 
-// Add helper function to cache device properties
+// Update IsGfx950Device to also check for MX-FP8 support
 static bool IsGfx950Device() {
-  static bool initialized = false;
-  static bool is_gfx950 = false;
+  static std::mutex mutex;
+  static std::unordered_map<int, bool> device_check_cache;
   
-  if (!initialized) {
-    hipDeviceProp_t prop;
-    TORCH_CHECK(hipSuccess == hipGetDeviceProperties(&prop, at::cuda::current_device()));
-    is_gfx950 = (std::string(prop.gcnArchName) == "gfx950");
-    initialized = true;
+  auto device = at::cuda::current_device();
+  
+  std::lock_guard<std::mutex> guard(mutex);
+  auto it = device_check_cache.find(device);
+  if (it != device_check_cache.end()) {
+    return it->second;
   }
   
+  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device);
+  bool is_gfx950 = (std::string(prop->gcnArchName) == "gfx950");
+  device_check_cache[device] = is_gfx950;
   return is_gfx950;
+}
+
+// Add helper function to validate MX format requirements
+static bool ValidateMXFormatRequirements(int64_t m, int64_t n, int64_t k) {
+  constexpr int32_t required_block_size = 32;
+  return (m % required_block_size == 0) && 
+         (n % required_block_size == 0) && 
+         (k % required_block_size == 0);
 }
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
@@ -537,24 +549,25 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
-          
+          // For MX-FP8 on gfx950
 #if ROCM_VERSION >= 60500
-          // Check if device is gfx950 using cached result
           if (IsGfx950Device()) {
-            // MX-format : Set Scale block sizes for matrix A and B (only available on gfx950 with ROCm 6.5+)
-            constexpr int32_t required_block_size = 32;
-            TORCH_CHECK(params->m % required_block_size == 0 && params->k % required_block_size == 0,
-                       "Block sizes must be 32. Got m=", params->m, ", k=", params->k);
-            
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
+            // Validate matrix dimensions for MX format
+            TORCH_CHECK(ValidateMXFormatRequirements(params->m, params->n, params->k),
+                       "Matrix dimensions must be multiples of 32 for MX format. ",
+                       "Got m=", params->m, ", n=", params->n, ", k=", params->k);
+
+            // Set block sizes for MX format
+            constexpr int32_t block_size = 32;
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
           }
 #endif
+          // Set scale pointers (swapped as before)
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
         }
         else
 #endif
