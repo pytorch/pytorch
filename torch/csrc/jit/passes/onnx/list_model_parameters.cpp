@@ -100,7 +100,7 @@ std::vector<IValue> getParamAttributes(
       auto attr = attrModule.attr(name);
       Value* paramConst = nullptr;
 
-      std::string fullName("");
+      std::string fullName;
       for (auto& name : moduleNames) {
         fullName += name + '.';
       }

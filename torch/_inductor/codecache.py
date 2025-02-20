@@ -19,7 +19,6 @@ import shutil
 import struct
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -38,7 +37,6 @@ from typing import (
     cast,
     NoReturn,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -57,6 +55,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.cpp_builder import (
     _set_gpu_runtime_env,
+    _TORCH_PATH,
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
@@ -99,7 +98,6 @@ from .triton_bundler import TritonBundler
 
 if config.is_fbcode():
     from triton.fb import build_paths
-    from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -138,9 +136,6 @@ if TYPE_CHECKING:
     T = TypeVar("T")
 
 
-_HERE = os.path.abspath(__file__)
-_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
-_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
@@ -527,7 +522,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -1532,7 +1527,7 @@ class AotCodeCompiler:
             if fbcode_aot_cpu_re:
                 # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
                 consts_o = str(consts_s.with_suffix(".o"))
-                compile_file(str(consts_s), consts_o, compile_cmd.split())
+                object_builder.build_fbcode(str(consts_s), consts_o)
                 os.chmod(consts_o, 0o644)
             else:
                 run_command_and_check(compile_cmd)
@@ -1676,7 +1671,7 @@ class AotCodeCompiler:
             else:
                 if fbcode_aot_cpu_re:
                     output_o = str(cpp_path_operator.with_suffix(".o"))
-                    compile_file(cpp_path, output_o, compile_cmd.split())
+                    object_builder.build_fbcode(cpp_path, output_o)
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
@@ -1764,7 +1759,7 @@ class AotCodeCompiler:
                         if specified_artifact_name
                         else str(cpp_path_operator.with_suffix(".so"))
                     )
-                    compile_file([output_o, consts_o], output_so, link_cmd.split())
+                    so_builder.build_fbcode([output_o, consts_o], output_so)
                     os.chmod(output_so, 0o755)
                 else:
                     run_command_and_check(link_cmd)
@@ -1830,65 +1825,6 @@ def cpp_prefix() -> str:
         return f'#include "{os.path.basename(filename)}"'
     else:
         return f'#include "{filename}"'
-
-
-# Given a path to an input cpp file and an output path,
-# Attempts to compile the file, storing the output in "output_path"
-def compile_file(
-    input_path: Union[str, list[str]], output_path: str, cmd: list[str]
-) -> None:
-    with dynamo_timed("compile_file"):
-        return _compile_file(input_path, output_path, cmd)
-
-
-def _compile_file(
-    input_path: Union[str, list[str]], output_path: str, cmd: list[str]
-) -> None:
-    input_paths = [input_path] if isinstance(input_path, str) else input_path
-    input_files = [
-        os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
-    ]
-    try:
-        if config.is_fbcode():
-            # Need to copy our header into the same folder as the sourcecode.
-            header_path = cpp_prefix_path()
-            header_name = os.path.basename(header_path)
-            output_name = os.path.basename(output_path)
-            # When we build remotely, we need to make sure to carefully copy any files
-            # that are required during the compilation process into our build directly.
-            # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(_TORCH_PATH, "include")
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                # Copy everything to tmp compilation folder
-                shutil.copy(header_path, os.path.join(tmp_dir, header_name))
-                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
-                for p, f in zip(input_paths, input_files):
-                    shutil.copy(p, os.path.join(tmp_dir, f))
-                dest_include_path = os.path.join(tmp_dir, "include")
-                shutil.copytree(torch_includes_path, dest_include_path)
-                # Run the build
-                output_file_path = _run_build_command(cmd, tmp_dir, output_name)
-                # Copy output from the build
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                shutil.copy(output_file_path, output_path)
-        else:
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode("utf-8")
-        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
-        if openmp_problem and sys.platform == "darwin":
-            instruction = (
-                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
-                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
-                "that has builtin OpenMP support;\n"
-                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
-                "(3) install libomp via brew: `brew install libomp`;\n"
-                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
-                " with `include/omp.h` under it."
-            )
-            output += instruction
-        raise exc.CppCompileError(cmd, output) from e
 
 
 _libgomp: Optional[CDLL] = None
@@ -2074,10 +2010,9 @@ def _worker_compile_cpp(
         )
         if not os.path.exists(binary_path):
             if config.is_fbcode():
-                compile_file(
+                cpp_builder.build_fbcode(
                     fb_input_path,
                     fb_output_path,
-                    shlex.split(cpp_builder.get_command_line()),
                 )
             else:
                 cpp_builder.build()
@@ -2854,9 +2789,7 @@ def _cuda_lib_options() -> list[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(device_type="cuda") + [
-        sysconfig.get_config_var("LIBDIR")
-    ]
+    lpaths = cpp_extension.library_paths(device_type="cuda")
     extra_ldflags: list[str] = []
     if is_linux():
         _transform_cuda_paths(lpaths)
