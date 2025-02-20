@@ -1897,19 +1897,16 @@ def forward(self, x, y):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    size = l_x_.size()
-    getitem = size[0];  size = None
-    le = getitem <= 2;  getitem = None
+    sym_size_int = torch.ops.aten.sym_size.int(l_x_, 0)
+    le = sym_size_int <= 2;  sym_size_int = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_3 = cond[0]
-    sym_size_int = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
-    ge = sym_size_int >= 2
+    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
-    le_1 = sym_size_int <= 2;  sym_size_int = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 2 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
     getitem_2 = cond[0];  cond = None
     return pytree.tree_unflatten([getitem_2], self._out_spec)""",  # noqa: B950
             )

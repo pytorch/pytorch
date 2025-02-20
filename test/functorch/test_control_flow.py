@@ -968,7 +968,7 @@ def forward(self, pred_1):
             result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
             return result
 
-        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
+        gm = make_fx(f, tracing_mode="real", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -981,7 +981,9 @@ def forward(self, pred_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0]
     getitem_1 = cond[1];  cond = None
-    return {'res': [getitem, (getitem_1,)]}""",  # noqa: B950
+    view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
+    view_1 = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
+    return {'res': [view, (view_1,)]}""",  # noqa: B950
         )
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")

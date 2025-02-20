@@ -3,7 +3,7 @@
 import contextlib
 import logging
 import warnings
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -411,17 +411,17 @@ def check_tensor_meta_match(
         )
 
 
-def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
-    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, b)
-    from torch.fx.experimental.symbolic_shapes import (
-        _nested_int_aware_sort,
-        SymIntEqByExpr,
-    )
+def _merge_tensors(
+    a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
+):
+    from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
     from torch.utils._sympy.value_ranges import ValueRanges
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
         return None
+
+    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, b)
 
     # Note: we don't check size,stride and storage_offset because
     # they'll be merged with unbacked symints if they differ.
@@ -533,60 +533,95 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
     """
 
     def _bound_stride(
-        ex_size: torch.Size,
-        ex_stride: tuple[int, ...],
+        a_ex_size: torch.Size,
+        b_ex_size: torch.Size,
+        a_ex_stride: tuple[int, ...],
+        b_ex_stride: tuple[int, ...],
         merged_size: list[Union[int, torch.SymInt]],
     ) -> list[Union[int, torch.SymInt]]:
-        stride_li: list[tuple[Union[int, torch.SymInt], int]] = [
-            (val, -i) for i, val in enumerate(ex_stride)
-        ]
-        stride_li.sort(key=_nested_int_aware_sort)
-        stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
+        from torch._inductor.ir import get_stride_order
+
+        a_sorted_stride_idx = get_stride_order(a_ex_stride, mode.shape_env)
+        b_sorted_stride_idx = get_stride_order(b_ex_stride, mode.shape_env)
+
+        a_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
+            None
+        ] * len(a_ex_stride)
+        b_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
+            None
+        ] * len(b_ex_stride)
+        for i, idx in enumerate(a_sorted_stride_idx):
+            a_stride_li[idx] = (a_ex_stride[i], -i)
+        for i, idx in enumerate(b_sorted_stride_idx):
+            b_stride_li[idx] = (b_ex_stride[i], -i)
+
+        for a_pair, b_pair in zip(a_stride_li, b_stride_li):
+            assert a_pair is not None and b_pair is not None
+            _, a_idx = a_pair
+            _, b_idx = b_pair
+
+            if a_idx != b_idx:
+                raise RuntimeError(
+                    f"The sorted order of strides of the two branches' output doesn't match."
+                    f"this indicates the contiguousness of the two branches are different. "
+                    f"True branch has stride {a_ex_stride} but false branch has stride {b_ex_stride}."
+                    f"Consider using contiguous() to make the two branches have the same contiguousness."
+                )
 
         def _maybe_expr(s: Union[int, torch.SymInt]):
             if isinstance(s, int):
                 return s
             return s.node.expr
 
-        bounded_strides: list[Union[int, torch.SymInt]] = [None] * len(ex_stride)  # type: ignore[list-item]
-        for val, neg_i in stride_li:
+        a_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
+        b_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
+        merged_strides: list[Union[int, torch.SymInt]] = [None] * len(a_ex_stride)  # type: ignore[list-item]
+        for a_pair, b_pair in zip(a_stride_li, b_stride_li):
+            assert a_pair is not None and b_pair is not None
+            a_val, neg_i = a_pair
+            b_val, _ = b_pair
+
             i = -neg_i
-            if val == 0:
-                bounded_strides[i] = val
+            if a_val == 0:
+                assert b_val == 0, (a_val, b_val)
+                merged_strides[i] = 0
                 continue
 
-            if _maybe_expr(val) in stride_expr:
-                bounded_strides[i] = stride_expr[_maybe_expr(val)]
-            else:
+            if _maybe_expr(a_val) in a_stride_expr:
+                a_expr = a_stride_expr[_maybe_expr(a_val)]
                 assert (
-                    val == 1
-                ), "strides that are neither 0 or 1 should be bound already"
-                bounded_strides[i] = val
-            stride_expr[_maybe_expr(val * ex_size[i])] = (
-                bounded_strides[i] * merged_size[i]
-            )
-        return bounded_strides
+                    b_stride_expr[_maybe_expr(b_val)] == a_expr
+                ), f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                merged_strides[i] = a_expr
+            else:
+                if a_val == 1:
+                    assert b_val == 1
+                    a_stride_expr[_maybe_expr(a_val)] = 1
+                    b_stride_expr[_maybe_expr(b_val)] = 1
+                    merged_strides[i] = 1
+                else:
+                    # If we cannot find the expr of a_val in a_stride_expr, it means
+                    # the strides is not a simple accumulative multiplication of sizes.
+                    # In this case, we cannot determine the expr of strides from the new
+                    # shapes so we error out and hint users to call contiguous().
+                    raise RuntimeError(
+                        f"It seems one of cond's output stride is not a simple accumulative multiplication of sizes. "
+                        f"This could be because cond returns a slice of a tensor, which is not dense in memory. "
+                        f"True branch has size {a_ex_size}, stride {a_ex_stride} and false branch has size {b_ex_size} "
+                        f"stride {b_ex_stride}. Hint: can call t.contiguous(). "
+                    )
+            nxt_merged_stride_expr = merged_strides[i] * merged_size[i]
+            a_stride_expr[_maybe_expr(a_val * a_ex_size[i])] = nxt_merged_stride_expr
+            b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
+        return merged_strides
 
-    a_stride: list[Union[int, torch.SymInt]] = _bound_stride(
-        a.size(), a.stride(), merged_size
-    )
-    b_stride: list[Union[int, torch.SymInt]] = _bound_stride(
-        b.size(), b.stride(), merged_size
-    )
-    """
-    Step 3: Check the newly bounded strides of the two tensors are the same. If not, we will raise an error.
-    """
-    torch._check(
-        a_stride == b_stride,
-        lambda: f"Fail to merge two branches output's strides. Consider call contiguous() for outputs before return"
-        f" Specifically, true branch return has size {a.size()} vs False branch return size {b.size()}, torch.cond try to"
-        f" merge into an output of size: {merged_size}. However, calculated merged stride of true branch to be {a_stride}"
-        f" vs False branch stride {b_stride} don't match.",
+    merged_stride: list[Union[int, torch.SymInt]] = _bound_stride(
+        a.size(), b.size(), a.stride(), b.stride(), merged_size
     )
 
     with mode:
         return torch.empty_strided(
-            merged_size, a_stride, dtype=a.dtype, device=a.device
+            merged_size, merged_stride, dtype=a.dtype, device=a.device
         )
 
 
