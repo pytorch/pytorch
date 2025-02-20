@@ -61,6 +61,24 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+from datetime import datetime
+class MetadataLogger:
+    def __init__(self, log_file):
+        self.log_file = log_file
+        self.logger = logging.getLogger('metadata_logger')
+        self.logger.setLevel(logging.INFO)
+        self.handler = logging.FileHandler(self.log_file, mode='a')
+        self.formatter = logging.Formatter('%(asctime)s - %(message)s')
+        self.handler.setFormatter(self.formatter)
+        self.logger.addHandler(self.handler)
+    def log_metadata(self, metadata):
+        self.logger.info(metadata)
+        self.handler.flush()
+    def __del__(self):
+        if hasattr(self, 'handler'):
+            self.handler.flush()
+            self.handler.close()
+
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -4060,8 +4078,12 @@ def run(runner, args, original_dir=None):
             if name in runner.inline_inbuilt_nn_modules_models:
                 inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
 
+            log_file = 'metadata.log'
+            logger = MetadataLogger(log_file)
+            logger.log_metadata(f"operation: {name}\n")
             with guard_ctx:
                 with inline_ctx:
+
                     runner.run_one_model(
                         name,
                         model,

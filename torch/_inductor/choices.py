@@ -363,7 +363,7 @@ class InductorChoices:
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
         if shared_data_score < config.score_fusion_memory_threshold:
-            WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
+            WhyNoFuse(node1, node2)(f"shared_data_score == {shared_data_score}")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
             WhyNoFuse(node1, node2)(

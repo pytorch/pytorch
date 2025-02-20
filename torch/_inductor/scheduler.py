@@ -831,7 +831,26 @@ class BaseSchedulerNode:
         epilogue = nodes[template_index + 1 :]
         return prologue, template_node, epilogue
 
+from datetime import datetime
+class MetadataLogger:
+    def __init__(self, log_file):
+        self.log_file = log_file
+        self.logger = logging.getLogger('metadata_logger')
+        self.logger.setLevel(logging.INFO)
+        self.handler = logging.FileHandler(self.log_file, mode='a')
+        self.formatter = logging.Formatter('%(asctime)s - %(message)s')
+        self.handler.setFormatter(self.formatter)
+        self.logger.addHandler(self.handler)
+    def log_metadata(self, metadata):
+        self.logger.info(metadata)
+        self.handler.flush()
+    def __del__(self):
+        if hasattr(self, 'handler'):
+            self.handler.flush()
+            self.handler.close()
 
+rejected_fusions = []
+rejected_fusions_rw = []
 class WhyNoFuse:
     # TODO when we drop support for Python < 3.10, we can use
     # @dataclass(slots=True) instead of manually specifying __slots__.
@@ -847,6 +866,10 @@ class WhyNoFuse:
         self.reason = reason
         self.args = args
         fusion_log.debug(self)
+        if reason not in ["no shared data", "intermediate nodes between node1 & node2", "node1 must go before node2"]:
+            rejected_fusions.append(str(self))
+            rejected_fusions_rw.append(f"({self.node1.get_name()}: {self.node1.read_writes}, {self.node2.get_name()}: {self.node2.read_writes})")
+
 
     def __str__(self) -> str:
         return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
@@ -2520,6 +2543,20 @@ class Scheduler:
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
+            global rejected_fusions
+            global rejected_fusions_rw
+            rejected_fusions = []
+            rejected_fusions_rw = []
+            only_pointwise = [n for n in node if not n.is_reduction()]
+            possible_fusions = self.get_possible_fusions(only_pointwise)
+            import pprint
+            log_file = 'metadata.log'
+            logger = MetadataLogger(log_file)
+            logger.log_metadata(f"Pointwise fusion rejections:\n{rejected_fusions}")
+            logger.log_metadata(f"Pointwise rejections reads:\n{rejected_fusions_rw}")
+            pf_with_cycle = {(node1, node2): self.will_fusion_create_cycle(node1, node2) for node1, node2 in possible_fusions}
+            logger.log_metadata(f"Remaining possible fusions:\n{pf_with_cycle}")
+
             return nodes
 
     def process_grouped_nodes(self) -> None:
