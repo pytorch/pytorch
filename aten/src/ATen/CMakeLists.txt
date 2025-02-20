@@ -183,6 +183,8 @@ if(USE_FLASH_ATTENTION)
           endif()
         endif()
         message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
+        message(STATUS "Generating CK kernel instances...")
+        add_subdirectory(native/transformers/hip/flash_attn/ck)
         file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
         list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
       endif()
@@ -462,7 +464,7 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
+if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
     # excessively spills intermediate vector registers to the stack
@@ -473,6 +475,8 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PRO
     else()
       set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
     endif()
+  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+    set(SLEEF_ARCH_AARCH64 ON)
   endif()
 
   if(NOT USE_SYSTEM_SLEEF)

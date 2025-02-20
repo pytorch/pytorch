@@ -17,8 +17,6 @@
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <c10/util/CallOnce.h>
-
 #include <mpi.h>
 
 namespace c10d {
@@ -258,7 +256,6 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Global states
   static void initMPIOnce();
   static void mpiExit();
-  static c10::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
   static int mpiThreadSupport_;

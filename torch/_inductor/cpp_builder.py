@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
@@ -32,6 +33,7 @@ from torch.torch_version import TorchVersion
 
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
+    from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -41,21 +43,24 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def use_global_cache() -> bool:
+    def use_global_cache() -> bool:  # type: ignore[misc]
         return False
 
 
 # Windows need setup a temp dir to store .obj files.
 _BUILD_TEMP_DIR = "CxxBuild"
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 # initialize variables for compilation
 _IS_LINUX = sys.platform.startswith("linux")
@@ -681,12 +686,6 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
-            # TODO: this is to avoid FC breakage for fbcode. When using newly
-            # generated model.so on an older verion of PyTorch, need to use
-            # the v1 version for aoti_torch_create_tensor_from_blob
-            create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
-
-            fb_internal_macros.append(create_tensor_from_blob_v1)
             return fb_internal_macros
         else:
             return []
@@ -699,8 +698,6 @@ def _setup_standard_sys_libs(
     aot_mode: bool,
     use_absolute_path: bool,
 ) -> tuple[list[str], list[str], list[str]]:
-    from torch._inductor.codecache import _LINKER_SCRIPT
-
     cflags: list[str] = []
     include_dirs: list[str] = []
     passthrough_args: list[str] = []
@@ -761,16 +758,9 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]
 def _get_torch_related_args(
     include_pytorch: bool, aot_mode: bool
 ) -> tuple[list[str], list[str], list[str]]:
-    from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
+    from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = [
-        os.path.join(_TORCH_PATH, "include"),
-        os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(_TORCH_PATH, "include", "TH"),
-        os.path.join(_TORCH_PATH, "include", "THC"),
-    ]
+    include_dirs = include_paths()
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
@@ -778,7 +768,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS and platform.machine().lower() != "arm64":
+    if _IS_WINDOWS:
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries
@@ -1164,19 +1154,25 @@ def _set_gpu_runtime_env() -> None:
         os.environ["CUDA_HOME"] = build_paths.sdk_home
 
 
+@functools.lru_cache(8)
+def _find_libcudart_static(path: str) -> Optional[Path]:
+    lib_dirs = list(Path(path).rglob("libcudart_static.a"))
+    if lib_dirs:
+        return lib_dirs[0].resolve().parent
+    log_msg = f'"libcudart_static.a" not found under {path}'
+    log.info(log_msg)
+    return None
+
+
 def _transform_cuda_paths(lpaths: list[str]) -> None:
     # This handles two cases:
     # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            try:
-                lib_dir = next(Path(path).rglob("libcudart_static.a")).resolve().parent
-            except StopIteration:
-                log_msg = f'"libcudart_static.a" not found under {path}'
-                log.info(log_msg)
+            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            if lib_dir is None:
                 continue
-
             lpaths[i] = str(lib_dir)
             stub_dir = lib_dir / "stubs"
             if stub_dir.exists():
@@ -1521,6 +1517,49 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    # Given a path to an input cpp file and an output path,
+    # Attempts to compile the file, storing the output in "output_path"
+    def build_fbcode(
+        self,
+        input_path: Union[str, list[str]],
+        output_path: str,
+    ) -> None:
+        from torch._inductor.codecache import cpp_prefix_path
+
+        with dynamo_timed("compile_file"):
+            input_paths = [input_path] if isinstance(input_path, str) else input_path
+            input_files = [
+                os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
+            ]
+            command = self.get_command_line().split()
+            try:
+                assert config.is_fbcode(), "compile_file() is only used in fbcode"
+                # Need to copy our header into the same folder as the sourcecode.
+                header_path = cpp_prefix_path()
+                header_name = os.path.basename(header_path)
+                output_name = os.path.basename(output_path)
+                # When we build remotely, we need to make sure to carefully copy any files
+                # that are required during the compilation process into our build directly.
+                # This is where all of the ATen/c10/Torch includes come from.
+                torch_includes_path = os.path.join(_TORCH_PATH, "include")
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    # Copy everything to tmp compilation folder
+                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                    shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
+                    for p, f in zip(input_paths, input_files):
+                        shutil.copy(p, os.path.join(tmp_dir, f))
+                    dest_include_path = os.path.join(tmp_dir, "include")
+                    shutil.copytree(torch_includes_path, dest_include_path)
+                    # Run the build
+                    output_file_path = _run_build_command(command, tmp_dir, output_name)
+                    # Copy output from the build
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                    shutil.copy(output_file_path, output_path)
+            except subprocess.CalledProcessError as e:
+                output = e.output.decode("utf-8")
+                raise exc.CppCompileError(command, output) from e
 
     def build(self) -> None:
         """

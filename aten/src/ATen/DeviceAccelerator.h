@@ -8,6 +8,7 @@
 
 namespace at::accelerator {
 
+// Note [Accelerator Concept]
 // This file defines the top level Accelerator concept for PyTorch.
 // A device is an accelerator per the definition here if:
 // - It is mutually exclusive with all other accelerators
@@ -24,6 +25,25 @@ TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 
 // Check if the given device type is an accelerator.
 TORCH_API bool isAccelerator(c10::DeviceType device_type);
+
+// Check if the given device type is an accelerator, not an excluded one.
+TORCH_API inline bool isAcceleratorExcluded(
+    c10::DeviceType device_type,
+    c10::DeviceType excluded) {
+  return device_type != excluded && isAccelerator(device_type);
+}
+
+// Check if the given device type is an accelerator, not the excluded ones.
+template <
+    typename... T,
+    typename = std::enable_if_t<(std::is_same_v<T, c10::DeviceType> && ...)>>
+TORCH_API inline bool isAcceleratorExcluded(
+    c10::DeviceType device_type,
+    c10::DeviceType first_excluded,
+    T... rest_excluded) {
+  return device_type != first_excluded &&
+      isAcceleratorExcluded(device_type, rest_excluded...);
+}
 
 // Return the number of the device available. Note that this is *REQUIRED* to
 // not raise any exception.

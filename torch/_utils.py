@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 import copyreg
 import functools
+import importlib
 import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional, TYPE_CHECKING
+from types import ModuleType
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -245,7 +247,7 @@ def _rebuild_tensor_v3(
     return t
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -635,7 +637,7 @@ def _take_tensors(tensors, size_limit):
         Blocks of tensors of same type and within size_limit. The yielded
         tensors are only ordered as the original sequence within its types.
     """
-    buf_dict: DefaultDict[str, List] = defaultdict(lambda: [[], 0])
+    buf_dict: defaultdict[str, list] = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
@@ -674,7 +676,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -693,6 +695,8 @@ def render_call(fn, args, kwargs):
 
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
+
+    __slots__ = ()
 
     def __repr__(self):
         return self
@@ -986,7 +990,7 @@ class _LazySeedTracker:
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
-    def get_calls(self) -> List:
+    def get_calls(self) -> list:
         return self.call_order
 
 
@@ -997,7 +1001,7 @@ P = ParamSpec("P")
 class CallbackRegistry(Generic[P]):
     def __init__(self, name: str):
         self.name = name
-        self.callback_list: List[Callable[P, None]] = []
+        self.callback_list: list[Callable[P, None]] = []
 
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)
@@ -1010,6 +1014,25 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+def try_import(module_name: str) -> Optional[ModuleType]:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        assert spec.loader is not None, "The loader attribute should always be set"
+        spec.loader.exec_module(module)
+        return module
+
+    return None
 
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
