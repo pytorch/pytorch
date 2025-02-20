@@ -182,8 +182,13 @@ def _iterate_state_dict(
                 ret = ret.to(cpu_device)
 
             if companion_obj is not None:
-                # TODO: support DTensor
-                companion_obj.copy_(ret, non_blocking=non_blocking)
+                if isinstance(companion_obj, DTensor):
+                    assert isinstance(ret, DTensor)
+                    companion_obj._local_tensor.copy_(
+                        ret._local_tensor, non_blocking=non_blocking
+                    )
+                else:
+                    companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
@@ -319,6 +324,7 @@ def _offload_state_dict_to_cpu(
     return ret
 
 
+@torch.no_grad()
 def _copy_state_dict(
     state_dict: dict[str, Any],
     copy_state_dict: dict[str, Any],
@@ -368,6 +374,7 @@ def _copy_state_dict(
     )
 
 
+@torch.no_grad()
 def _create_cpu_state_dict(
     state_dict: dict[str, Any], pin_memory: bool = False, share_memory: bool = False
 ) -> dict[str, Any]:
@@ -423,10 +430,26 @@ def _create_cpu_state_dict(
         else:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
+    def dtensor_func(
+        obj: DTensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        _: Any,
+    ) -> DTensor:
+        if len(obj.size()) == 0:
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = cast(DTensor, obj.to(device="cpu"))
+        else:
+            ret = copy.deepcopy(obj)
+        ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
+        return ret
+
     ret = _iterate_state_dict(
         state_dict,
         _identity_func,
-        _identity_func,
+        dtensor_func,
         tensor_func,
         pg=None,
         device=None,
