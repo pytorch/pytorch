@@ -640,10 +640,9 @@ class ShapesCollection:
 
     def __getitem__(self, t):
         t_id = id(t)
-        if t_id in self._shapes:
-            return self._shapes[t_id]
-        else:
-            return None
+        if t_id not in self._shapes:
+            self._shapes[t_id] = {}
+        return self._shapes[t_id]
 
     def __len__(self):
         return len(self._shapes)
