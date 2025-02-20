@@ -499,7 +499,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -528,9 +527,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -652,9 +650,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer = self._get_inline_tracer(tx)
             try:
                 self._setup_exception(tx, args[0])
-            except ObservedException:
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
             retval = self.next_variable(tx)
@@ -727,9 +724,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
