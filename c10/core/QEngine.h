@@ -17,7 +17,6 @@ enum class QEngine : uint8_t {
   QNNPACK = 2,
   ONEDNN = 3,
   X86 = 4,
-  Arm = 5,
 };
 
 constexpr auto kNoQEngine = QEngine::NoQEngine;
@@ -25,7 +24,7 @@ constexpr auto kFBGEMM = QEngine::FBGEMM;
 constexpr auto kQNNPACK = QEngine::QNNPACK;
 constexpr auto kONEDNN = QEngine::ONEDNN;
 constexpr auto kX86 = QEngine::X86;
-constexpr auto kArm = QEngine::Arm;
+
 inline std::string toString(QEngine qengine) {
   switch (qengine) {
     case kNoQEngine:
@@ -37,8 +36,6 @@ inline std::string toString(QEngine qengine) {
     case kONEDNN:
       return "ONEDNN";
     case kX86:
-      return "X86";
-    case kArm:
       return "X86";
     default:
       TORCH_CHECK(
