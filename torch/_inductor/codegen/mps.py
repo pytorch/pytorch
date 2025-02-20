@@ -12,7 +12,7 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import OpsHandler, ReductionType, StoreMode
+    from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -367,12 +367,6 @@ class MetalOverrides(OpOverrides):
 MetalOverrides._initialize_pointwise_overrides("mps")
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
@@ -462,6 +456,16 @@ class MetalKernel(SIMDKernel):
                 self.body,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=dtype,
+            )
+        if reduction_type == "welford_reduce":
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            wf_res = self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+            )
+            return OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
             )
         raise NotImplementedError(reduction_type)
 
