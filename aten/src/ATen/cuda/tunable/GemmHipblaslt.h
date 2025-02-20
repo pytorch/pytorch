@@ -14,6 +14,8 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <ATen/cuda/tunable/GemmMxUtils.h>
+
 #define TORCH_HIPBLASLT_CHECK(EXPR)               \
   do {                                            \
     hipblasStatus_t __err = EXPR;                 \
@@ -452,33 +454,6 @@ class HipBlasLtMatmulDescriptor : public HipBlasLtDescriptor<
     TORCH_HIPBLASLT_CHECK(::hipblasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
-
-// Update IsGfx950Device to also check for MX-FP8 support
-static bool IsGfx950Device() {
-  static std::mutex mutex;
-  static std::unordered_map<int, bool> device_check_cache;
-  
-  auto device = at::cuda::current_device();
-  
-  std::lock_guard<std::mutex> guard(mutex);
-  auto it = device_check_cache.find(device);
-  if (it != device_check_cache.end()) {
-    return it->second;
-  }
-  
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device);
-  bool is_gfx950 = (std::string(prop->gcnArchName) == "gfx950");
-  device_check_cache[device] = is_gfx950;
-  return is_gfx950;
-}
-
-// Add helper function to validate MX format requirements
-static bool ValidateMXFormatRequirements(int64_t m, int64_t n, int64_t k) {
-  constexpr int32_t required_block_size = 32;
-  return (m % required_block_size == 0) && 
-         (n % required_block_size == 0) && 
-         (k % required_block_size == 0);
-}
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 class HipblasltGemmOp : public Callable<ParamsT> {
