@@ -38,6 +38,7 @@ __all__ = [
     "parametrizations",
     "remove_spectral_norm",
     "remove_weight_norm",
+    "pack_linear",
     "rnn",
     "skip_init",
     "spectral_norm",

@@ -4,6 +4,8 @@
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
