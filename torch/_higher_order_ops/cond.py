@@ -423,7 +423,7 @@ def _merge_tensors(
 
     assert type(a) is FakeTensor and type(b) is FakeTensor, (a, b)
 
-    # Note: we don't check size,stride and storage_offset because
+    # Note: we don't check size, stride because
     # they'll be merged with unbacked symints if they differ.
     _meta_to_check = {
         "dtype",
@@ -433,6 +433,7 @@ def _merge_tensors(
         "is_quantized",
         "is_conj",
         "is_sparse",
+        "storage_offset",
     }
     check_tensor_meta_match(
         a,

@@ -7614,10 +7614,12 @@ class GraphModule(torch.nn.Module):
                 b = z.shape[0]
 
                 def true_fn(x):
-                    return (x + a)[2:]
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + a)[2:].clone()
 
                 def false_fn(x):
-                    return (x + b * z)[:2]
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + b * z)[:2].clone()
 
                 ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
                 return y.sum() - ret
@@ -7671,7 +7673,8 @@ class GraphModule(torch.nn.Module):
 
             add: "f32[s0, s1]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
             getitem: "f32[s0 - 2, s1]" = add[slice(2, None, None)];  add = None
-            return (getitem,)
+            clone: "f32[s0 - 2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
 
     class cond_false_0(torch.nn.Module):
         def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
@@ -7681,7 +7684,8 @@ class GraphModule(torch.nn.Module):
             mul: "f32[s0, s1]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
             add: "f32[s0, s1]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s1]" = add[slice(None, 2, None)];  add = None
-            return (getitem,)
+            clone: "f32[2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
 """,  # noqa: B950
             )
 
