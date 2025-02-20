@@ -15,6 +15,7 @@ ciflow_push_tags:
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
+- ciflow/riscv64
 - ciflow/rocm
 - ciflow/s390
 - ciflow/slow
