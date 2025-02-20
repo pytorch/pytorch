@@ -27,6 +27,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cudnn_attention_forward.h>
+#include <ATen/ops/_cudnn_attention_forward_native.h>
 #include <ATen/ops/_efficient_attention_forward.h>
 #include <ATen/ops/_efficient_attention_forward_native.h>
 #include <ATen/ops/_fill_mem_eff_dropout_mask_native.h>
