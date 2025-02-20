@@ -165,7 +165,7 @@ class TestSparseLegacyAndDeprecation(TestCase):
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+
     def test_legacy_ctor_validates(self):
 
         with self.assertRaisesRegex(
