@@ -4448,8 +4448,7 @@ def pool3d_shape_check(
     torch._check(
         dT > 0 and dW > 0 and dH > 0,
         lambda: (
-            f"stride should be greater than zero, but got "
-            f"dT: {dT}, dH: {dH}, dW: {dW}"
+            f"stride should be greater than zero, but got dT: {dT}, dH: {dH}, dW: {dW}"
         ),
     )
     torch._check(
@@ -5724,7 +5723,14 @@ def meta__scaled_dot_product_efficient_attention(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    if torch.version.hip and torch.cuda.is_available():
+        """Please see: https://github.com/pytorch/pytorch/issues/146848
+        longsumexp last dim should be seq length
+        """
+        logsumexp_dim = M if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
