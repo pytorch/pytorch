@@ -2512,13 +2512,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(compiled_result, eager_result)
 
     class TestSAC(TestCase):
-        def test_simple(self):
-            device = "cuda"
-
+        def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
                 def __init__(self):
                     super().__init__()
-
+                    self.curr_run = 0
                     self.op_outputs = defaultdict(list)
 
                 def __torch_dispatch__(
@@ -2530,7 +2528,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 ) -> object:
                     return func(*args, **kwargs)
 
+            return ObserverMode
+
+        def test_simple(self):
+            device = "cuda"
+
             from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            ObserverMode = self._make_observer_mode()
 
             @graphsafe_run_with_rng_state.py_impl(ObserverMode)
             def _(mode, op, *args, **kwargs):
@@ -2567,26 +2572,84 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 obs.op_outputs[aten.rand.default][1],
             )
 
+        def test_cpu_and_cuda_rng(self):
+            device = "cuda"
+
+            ObserverMode = self._make_observer_mode()
+            from torch._prims.rng_prims import (
+                graphsafe_run_with_rng_state,
+                run_and_save_rng_state,
+                run_with_rng_state,
+            )
+
+            for hop in [
+                graphsafe_run_with_rng_state,
+                run_and_save_rng_state,
+                run_with_rng_state,
+            ]:
+
+                def make_impl(hop):
+                    @hop.py_impl(ObserverMode)
+                    def _(mode, *args, **kwargs):
+                        with no_dispatch():
+                            out = hop(*args, **kwargs)
+
+                        op = None
+                        for inp in itertools.chain(args, kwargs.values()):
+                            if isinstance(inp, torch._ops.OpOverload):
+                                op = inp
+                                break
+                        assert op is not None
+                        if hop is run_and_save_rng_state:
+                            mode.op_outputs[op].append(out[1])
+                        else:
+                            mode.op_outputs[op].append(out)
+                        return out
+
+                make_impl(hop)
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def gn2(x):
+                return x * torch.randperm(x.numel(), device=x.device).reshape(x.shape)
+
+            def fn(x, y, z):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                z = torch.utils.checkpoint.checkpoint(gn2, z, use_reentrant=True)
+                return x * z.cuda()
+
+            aot_eager_decomp_partition = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
+
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            y = torch.randn(4, 4, device=device, requires_grad=True)
+            z = torch.randn(4, 4, requires_grad=True)
+
+            fn(x, y, z).sum().backward()
+            for op in [aten.rand.default, aten.randperm.default]:
+                self.assertEqual(len(obs.op_outputs[op]), 2)
+                self.assertEqual(
+                    obs.op_outputs[op][0],
+                    obs.op_outputs[op][1],
+                )
+                self.assertEqual(
+                    obs.op_outputs[op][0].device.type,
+                    "cpu" if op == aten.randperm.default else "cuda",
+                )
+
         @parametrize("order", (list(itertools.permutations([0, 1, 2]))))
         def test_uneven_forward_backward(self, order):
             device = "cuda"
 
-            class ObserverMode(TorchDispatchMode):
-                def __init__(self):
-                    super().__init__()
-                    self.curr_run = 0
-                    self.op_outputs = defaultdict(list)
-
-                def __torch_dispatch__(
-                    self,
-                    func: OpOverload,
-                    types: Sequence[type],
-                    args: Sequence[object] = (),
-                    kwargs: Mapping[str, object] = immutable_dict(),
-                ) -> object:
-                    out = func(*args, **kwargs)
-                    return out
-
+            ObserverMode = self._make_observer_mode()
             from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
             @graphsafe_run_with_rng_state.py_impl(ObserverMode)
@@ -2602,10 +2665,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def gn(x, y):
                 return torch.sigmoid(torch.rand_like(x) * y) * x
 
+            def gn2(x):
+                return x * torch.randperm(x.numel(), device=x.device).reshape(x.shape)
+
             def fn(x, y):
                 x = torch.sin(x)
                 x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
                 x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn2, x, use_reentrant=True)
                 return x
 
             aot_eager_decomp_partition = functools.partial(
@@ -2627,16 +2694,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 outs[idx].sum().backward()
 
             for run in range(len(order)):
-                self.assertEqual(len(obs.op_outputs[(run, aten.rand.default)]), 2)
-                self.assertEqual(
-                    obs.op_outputs[(run, aten.rand.default)][0],
-                    obs.op_outputs[(run, aten.rand.default)][1],
-                )
-                if run != 0:
-                    self.assertNotEqual(
-                        obs.op_outputs[(run - 1, aten.rand.default)][0],
-                        obs.op_outputs[(run, aten.rand.default)][0],
+                for op in (aten.rand.default, aten.randperm.default):
+                    self.assertEqual(len(obs.op_outputs[(run, op)]), 2)
+                    self.assertEqual(
+                        obs.op_outputs[(run, op)][0],
+                        obs.op_outputs[(run, op)][1],
                     )
+                    if run != 0:
+                        self.assertNotEqual(
+                            obs.op_outputs[(run - 1, op)][0],
+                            obs.op_outputs[(run, op)][0],
+                        )
 
         @config.patch(fallback_random=True)
         @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
@@ -2716,22 +2784,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_retain_graph(self):
             device = "cuda"
 
-            class ObserverMode(TorchDispatchMode):
-                def __init__(self):
-                    super().__init__()
-
-                    self.op_outputs = defaultdict(list)
-
-                def __torch_dispatch__(
-                    self,
-                    func: OpOverload,
-                    types: Sequence[type],
-                    args: Sequence[object] = (),
-                    kwargs: Mapping[str, object] = immutable_dict(),
-                ) -> object:
-                    out = func(*args, **kwargs)
-                    return out
-
+            ObserverMode = self._make_observer_mode()
             from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
             @graphsafe_run_with_rng_state.py_impl(ObserverMode)
