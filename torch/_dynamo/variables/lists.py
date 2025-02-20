@@ -24,9 +24,9 @@ from typing import Optional, TYPE_CHECKING
 import torch
 import torch.fx
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -972,7 +972,15 @@ class SliceVariable(VariableTracker):
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
         ):
-            unimplemented("Dynamic slicing on data-dependent value is not supported")
+            unimplemented_v2(
+                gb_type="Dynamic slicing with Tensor arguments",
+                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
+                explanation="Creating slices with Tensor arguments is not supported. "
+                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)
