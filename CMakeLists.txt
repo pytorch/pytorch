@@ -650,9 +650,14 @@ if(MSVC)
   string(APPEND CMAKE_CXX_FLAGS " /FS")
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
 
-  # Add /permissive- flag for conformance mode to the compiler.
-  # This will force more strict check to the code standard.
-  string(APPEND CMAKE_CXX_FLAGS " /permissive-")
+  if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 141)
+    # Add /permissive- flag for conformance mode to the compiler.
+    # This will force more strict check to the code standard.
+    # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+    #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
+    # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
+    string(APPEND CMAKE_CXX_FLAGS " /permissive-")
+  endif()
 
 endif(MSVC)
 
