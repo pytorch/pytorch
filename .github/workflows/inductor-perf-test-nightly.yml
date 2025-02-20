@@ -57,12 +57,7 @@ on:
         description: The list of configs used the benchmark
         required: false
         type: string
-        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf
-      cachebench:
-        description: Run cachebench?
-        required: false
-        type: boolean
-        default: true
+        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf,cachebench
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
