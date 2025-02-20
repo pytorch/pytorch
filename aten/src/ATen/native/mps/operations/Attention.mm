@@ -23,6 +23,10 @@ namespace native {
 static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
   if (x.dim() == 3) {
     return {x.unsqueeze(0), true};
+  } else if (x.dim() > 4) {
+    auto batchSize = static_cast<int64_t>(
+        std::accumulate(x.sizes().begin(), x.sizes().end() - 3, 1ULL, std::multiplies<uint64_t>()));
+    return {x.view({batchSize, x.size(-3), x.size(-2), x.size(-1)}), true};
   } else {
     return {x, false};
   }
@@ -52,6 +56,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto [q_, sq] = ensure_4d(query);
   auto [k_, sk] = ensure_4d(key);
   auto [v_, sv] = ensure_4d(value);
+  Tensor mask_;
+  bool sm = false;
 
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
@@ -113,7 +119,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                       falsePredicateTensor:minusInf
                                                       name:nil];
           } else if (attn_mask) {
-            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
+            auto maskExpandedDims = query.sizes().vec();
+            maskExpandedDims[maskExpandedDims.size() - 1] = maxSeqLength;
+            mask_ = attn_mask.value().expand(maskExpandedDims);
+            std::tie(mask_, sm) = ensure_4d(mask_);
+            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, mask_);
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
           }
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
@@ -133,16 +143,20 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     if (!attn_mask) {
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
     } else {
-      auto mPlaceholder = Placeholder(cachedGraph->maskTensor, *attn_mask);
+      auto mPlaceholder = Placeholder(cachedGraph->maskTensor, mask_);
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, mPlaceholder);
     }
     NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
   }
 
-  // Squeeze back to 3D
-  auto final_out = (sq ? out.squeeze(0) : out);
-  auto final_attn = (sq ? attn.squeeze(0) : attn);
+  // reshape back to original dimension
+  auto final_out = sq ? out.view_as(query) : out;
+  auto final_attn = sq ? (query.dim() == 3 ? attn.squeeze(0) : [&]{
+    std::vector<int64_t> shape(query.sizes().begin(), query.sizes().end() - 3);
+    shape.insert(shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
+    return attn.view(shape);
+  }()) : attn;
 
   return {std::move(final_out), std::move(final_attn)};
 }
