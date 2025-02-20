@@ -180,14 +180,6 @@ PyObject* FrameLocalsMapping::get(int idx) {
   return _framelocals[idx].ptr();
 }
 
-FrameLocalsMapping* get_framelocals_mapping(FrameLocalsFrameType* frame) {
-  return new FrameLocalsMapping(frame);
-}
-
-void framelocals_mapping_free(FrameLocalsMapping* map) {
-  delete map;
-}
-
 PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map) {
   return map->to_dict();
 }
