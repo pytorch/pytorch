@@ -37,7 +37,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 def foreach_map_wrapper(op):
     def wrapper(*args, **kwargs):
-        return foreach_map(op, (args), **kwargs)
+        return foreach_map(op, *args, **kwargs)
 
     wrapper.__name__ = "foreach_map_" + op.__name__
     wrapper.original_op = op
