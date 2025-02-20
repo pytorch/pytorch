@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo_np,
 )
-from torch._dynamo.exc import TorchDynamoException
+import torch._dynamo.exc
 
 
 if TEST_WITH_TORCHDYNAMO:
@@ -528,12 +528,10 @@ class TestBroadcastedAssignments(TestCase):
             assign(a, s_[...], np.ones((2, 1)))
         except Exception as e:
             self.assertTrue(isinstance(e, (ValueError, RuntimeError)))
-        assert_raises(
-            (ValueError, RuntimeError, TorchDynamoException), assign, a, s_[[1, 2, 3],], np.ones((2, 1))
-        )
-        assert_raises(
-            (ValueError, RuntimeError, TorchDynamoException), assign, a, s_[[[1], [2]],], np.ones((2, 2, 1))
-        )
+        with assert_raises( (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)):
+            assign( a, s_[[1, 2, 3],], np.ones((2, 1)))
+        with assert_raises( (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)):
+            assign(a, s_[[[1], [2]],], np.ones((2, 2, 1)))
 
     def test_simple_broadcasting_errors(self):
         assign = self.assign
