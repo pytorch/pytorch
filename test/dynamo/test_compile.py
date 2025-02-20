@@ -212,6 +212,17 @@ class InPlaceCompilationTests(TestCase):
         out = torch.compile(fn)(a)
         self.assertEqual(out, a)
 
+    def test_mm_runtime_error(self):
+        @torch.compile()
+        def test(x, y):
+            return x * y
+
+        with self.assertRaises(
+            RuntimeError,
+            msg="RuntimeError: The size of tensor a (200) must match the size of tensor b (13) at non-singleton dimension 1",
+        ):
+            test(torch.randn(100, 200), torch.randn(7, 13))
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
