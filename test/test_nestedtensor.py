@@ -858,7 +858,7 @@ class TestNestedTensor(NestedTensorTestCase):
             torch.cat([x, y], dim=-1)
 
     def test_nested_view_from_buffer_overflow_errors(self):
-        buffer = torch.tensor([1], dtype=torch.int64)
+        buffer = torch.tensor([1])
         sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
         strides = torch.tensor(
             [[0x41414141], [0x41414141], [0x41414141]], dtype=torch.int64

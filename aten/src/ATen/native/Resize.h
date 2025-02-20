@@ -141,6 +141,25 @@ inline void checkSetStorage(
   TORCH_CHECK(size.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
 #endif
 
+  // storageOffset
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+
+  // set_storage_{device} (except set_storage_meta__symint)
+  // will (unsafely) set the storage offset and then call resize_impl that handles resizing the storage
+  // However, resize_impl will only resize the storage if the sizes/strides changed. For the case
+  // that the sizes/strides remain unchanged, the storage offset is not properly
+  // validated, so we do that here.
+  if (!from_meta_impl) {
+    auto result_tensor_impl = result.unsafeGetTensorImpl();
+    bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
+    bool stride_unchanged =
+        stride.data() ? result_tensor_impl->generic_strides<T>() == stride : true;
+    if (size_unchanged && stride_unchanged) {
+      checkInBoundsForStorage(
+          size, stride, storage_offset, result.dtype(), storage);
+    }
+  }
+
   // storage: note this can't be replaced with result.set_(storage) as the semantics of that
   // function is to set the tensor size to be equal to the size of the storage.
   if (!result.storage().is_alias_of(storage)) {
@@ -158,24 +177,6 @@ inline void checkSetStorage(
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 
-  // storageOffset
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
-
-  // set_storage_{device} (except set_storage_meta__symint)
-  // will (unsafely) set the storage offset and then call resize_impl that handles resizing the storage
-  // However, resize_impl will only resize the storage if the sizes/strides changed. For the case
-  // that the sizes/strides remain unchanged, the storage offset is not properly
-  // validated, so we do that here.
-  if (!from_meta_impl) {
-    auto result_tensor_impl = result.unsafeGetTensorImpl();
-    bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
-    bool stride_unchanged =
-        stride.data() ? result_tensor_impl->generic_strides<T>() == stride : true;
-    if (size_unchanged && stride_unchanged) {
-      checkInBoundsForStorage(
-          size, stride, storage_offset, result.dtype(), result.storage());
-    }
-  }
 }
 
 /**
