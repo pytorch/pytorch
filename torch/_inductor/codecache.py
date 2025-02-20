@@ -19,7 +19,6 @@ import shutil
 import struct
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -38,7 +37,6 @@ from typing import (
     cast,
     NoReturn,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -524,7 +522,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -2791,9 +2789,7 @@ def _cuda_lib_options() -> list[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(device_type="cuda") + [
-        sysconfig.get_config_var("LIBDIR")
-    ]
+    lpaths = cpp_extension.library_paths(device_type="cuda")
     extra_ldflags: list[str] = []
     if is_linux():
         _transform_cuda_paths(lpaths)
