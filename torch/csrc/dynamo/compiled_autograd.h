@@ -154,9 +154,14 @@ struct TensorArgs {
   }
 
   TensorArg& lookup(const SavedVariable& sv) {
-    auto it = _saved_variables.find(&sv);
-    TORCH_INTERNAL_ASSERT(it != _saved_variables.end());
-    return *it->second;
+    if (auto it = _saved_variables.find(&sv); it != _saved_variables.end()) {
+      // unpacked before graph
+      return *it->second;
+    }
+    // unpacked in graph
+    auto it2 = _saved_variables_proxies.find(&sv);
+    TORCH_INTERNAL_ASSERT(it2 != _saved_variables_proxies.end());
+    return *it2->second;
   }
 
   TensorArg& add(const at::Tensor& tensor) {
@@ -175,12 +180,13 @@ struct TensorArgs {
     return arg;
   }
 
-  TensorArg& add_unpacked_sv(
+  void register_sv_proxy(
       const SavedVariable& sv,
-      const at::Tensor& container) {
-    TensorArg& arg = add(container);
-    _saved_variables.emplace(&sv, &arg);
-    return arg;
+      const at::Tensor& dummy, // could also take by rvalue ref
+      at::Tensor&& proxy) {
+    TensorArg& arg = add(dummy);
+    arg.proxy_tensor = std::move(proxy);
+    _saved_variables_proxies.emplace(&sv, &arg);
   }
 
   // the concrete tensors that will get passed into the graph as inputs
@@ -195,6 +201,7 @@ struct TensorArgs {
   // Every TensorArg from this is actually owned by _args (or _undefined) and
   // that's why we have an un-owned pointer here.
   std::unordered_map<const SavedVariable*, TensorArg*> _saved_variables;
+  std::unordered_map<const SavedVariable*, TensorArg*> _saved_variables_proxies;
   TensorArg _undefined;
   uint32_t _next_id = 1; // id=0 used by _undefined
 };
@@ -296,16 +303,18 @@ class CompiledNodeArgs {
     collect(_compiler.tensor_args.add(t));
   }
   void collect(const SavedVariable& sv, bool is_output) {
-    auto hook = sv.get_hook_for_compiled_autograd();
-    if (hook.has_value()) {
-      auto& [unpack_hook, data] = hook.value();
-      size_t unpack_id = _compiler.emplace_hook(std::move(unpack_hook));
-      size_t data_id = _compiler.emplace_hook(std::move(data));
-      TORCH_INTERNAL_ASSERT(data_id == unpack_id + 1);
-      // tensors need to be deduped
-      _compiler.sv_to_hooks.emplace(&sv, unpack_id);
+    if (auto hook_data = sv.retrieve_unpack_hook_data();
+        hook_data.has_value()) {
+      // hooks present, unpack deferred
+      auto& [hook, hook_input] = hook_data.value();
+      size_t hook_id = _compiler.emplace_hook(std::move(hook));
+      // rely on dynamo to dedup tensors stored in the pyobject
+      // TODO: move out of hooks, which is passed as tuple
+      size_t input_id = _compiler.emplace_hook(std::move(hook_input));
+      TORCH_INTERNAL_ASSERT(input_id == hook_id + 1);
+      _compiler.sv_to_hooks.emplace(&sv, hook_id);
     } else {
-      // happy path, no hooks
+      // no hooks, unpack directly
       collect(
           _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
     }

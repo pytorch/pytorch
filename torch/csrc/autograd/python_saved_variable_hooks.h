@@ -19,7 +19,7 @@ struct PySavedVariableHooks : public SavedVariableHooks {
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override;
   std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-  get_hook_for_compiled_autograd() const override;
+  retrieve_unpack_hook_data() const override;
 
  private:
   PyObject* pack_hook_;

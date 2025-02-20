@@ -55,11 +55,11 @@ class TORCH_API SavedVariable {
   }
 
   std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-  get_hook_for_compiled_autograd() const {
+  retrieve_unpack_hook_data() const {
     if (!hooks_) {
       return std::nullopt;
     }
-    return hooks_->get_hook_for_compiled_autograd();
+    return hooks_->retrieve_unpack_hook_data();
   }
 
  private:

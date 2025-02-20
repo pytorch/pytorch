@@ -645,6 +645,17 @@ static PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
+static PyObject* wrap_saved_varables_hooks(
+    std::unordered_map<const SavedVariable*, size_t> sv_to_hooks) {
+  PyObject* pytuple = PyTuple_New(static_cast<Py_ssize_t>(sv_to_hooks.size()));
+  size_t index = 0;
+  for (const auto& [sv, hook_idx] : sv_to_hooks) {
+    PyTuple_SET_ITEM(pytuple, index, PyLong_FromSize_t(hook_idx));
+    index++;
+  }
+  return pytuple;
+}
+
 static PyObject* wrap_string_list(const std::vector<std::string>& strs) {
   PyObject* pystrs = PyList_New(static_cast<Py_ssize_t>(strs.size()));
   for (const auto i : c10::irange(strs.size())) {
@@ -712,18 +723,13 @@ static TraceState call_begin_capture(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr py_node_origins(
       wrap_node_origins(compiler_call, PyTuple_GET_SIZE(py_size_input.get())));
-
-  // utilify
-  PyObject* tuple =
-      PyTuple_New(static_cast<Py_ssize_t>(compiler_call.sv_to_hooks.size()));
-  size_t index = 0;
+  THPObjectPtr sv_hook_ids(
+      wrap_saved_varables_hooks(compiler_call.sv_to_hooks));
   std::vector<at::Tensor> dummies;
-  for (const auto& [sv, hook_idx] : compiler_call.sv_to_hooks) {
+  dummies.reserve(compiler_call.sv_to_hooks.size());
+  for (auto _ : c10::irange(compiler_call.sv_to_hooks.size())) {
     dummies.emplace_back(torch::zeros({0, 123456789}));
-    PyTuple_SET_ITEM(tuple, index, PyLong_FromSize_t(hook_idx));
-    index++;
   }
-  THPObjectPtr sv_hook_ids(tuple);
 
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
@@ -758,12 +764,10 @@ static TraceState call_begin_capture(
   variable_list proxy_unpacked_svs = THPVariable_UnpackList(fake_svs);
   TORCH_INTERNAL_ASSERT(proxy_unpacked_svs.size() == dummies.size());
   size_t idx = 0;
+  // order is deterministic
   for (const auto& [sv, _] : compiler_call.sv_to_hooks) {
-    // these added inputs aren't gonna be used
-    TensorArg& arg =
-        compiler_call.tensor_args.add_unpacked_sv(*sv, dummies[idx]);
-    // assumes deterministic iteration order, is this part of specs?
-    arg.proxy_tensor = proxy_unpacked_svs[idx];
+    compiler_call.tensor_args.register_sv_proxy(
+        *sv, dummies[idx], std::move(proxy_unpacked_svs[idx]));
     idx++;
   }
 
@@ -860,6 +864,7 @@ static CacheNode* _compiled_autograd_impl(
         for (uint i = 0; i < n; i++) {
           auto meta = fn->input_metadata(i);
         }
+        std::cout << "collecting from " << fn->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }

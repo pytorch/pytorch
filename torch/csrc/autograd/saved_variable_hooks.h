@@ -5,14 +5,20 @@
 
 namespace torch::autograd {
 
+// struct SavedVariableUnpackHookData {
+//   c10::SafePyObject hook;
+//   c10::SafePyObject data;
+//   at::Tensor input;
+// };
+
 struct TORCH_API SavedVariableHooks {
   virtual void call_pack_hook(const at::Tensor& tensor) = 0;
   virtual at::Tensor call_unpack_hook() = 0;
   virtual ~SavedVariableHooks() = default;
   virtual std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-  get_hook_for_compiled_autograd() const {
-    return {};
-  }
+  retrieve_unpack_hook_data() const {
+    return std::nullopt;
+  };
 };
 
 } // namespace torch::autograd

@@ -590,7 +590,7 @@ class AutogradCompilerInstance:
             hook_type="unpack_hook",
         )
         unpacked_tensor = self.allocate_dummy()
-        self.bind_tensors_to_proxies([unpacked_tensor], [proxy])
+        self.bind_objects_to_proxies([unpacked_tensor], [proxy])
         return unpacked_tensor
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):

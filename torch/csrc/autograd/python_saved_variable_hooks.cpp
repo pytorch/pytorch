@@ -47,7 +47,7 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
 }
 
 std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-PySavedVariableHooks::get_hook_for_compiled_autograd() const {
+PySavedVariableHooks::retrieve_unpack_hook_data() const {
   Py_INCREF(unpack_hook_);
   Py_INCREF(data_);
   return std::make_pair(
