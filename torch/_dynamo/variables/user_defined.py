@@ -1349,7 +1349,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         if not istype(self.value, (pytree.TreeSpec, pytree.LeafSpec)):
             # TODO loosen this restriction and fix `as_proxy`.
-            unimplemented(
+            raise NotImplementedError(
                 "currently can't reconstruct arbitrary frozen dataclass instances"
             )
 
