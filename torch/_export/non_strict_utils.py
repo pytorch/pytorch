@@ -94,7 +94,12 @@ def fakify(
         return t
 
     if not isinstance(t, torch.Tensor):
-        raise ValueError(f"Unsupported input type {type(t)}")
+        raise ValueError(
+            f"Unsupported input type {type(t)}. "
+            "You should use torch.utils._pytree.register_pytree_node/ for custom types if you want to desugar."
+            "Or if the type is a dataclass, you can use torch.export.register_dataclass instead."
+            "If you don't want to flatten the input at all, you can use torch.utils._pytree.register_constant"
+        )
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
