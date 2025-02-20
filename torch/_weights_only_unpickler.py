@@ -361,7 +361,7 @@ class Unpickler:
                         full_path = (
                             full_path[1:]
                             if len(full_path) > 0 and full_path[0] == "."
-                            else full_path
+                            else "builtins" + full_path
                         )
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
