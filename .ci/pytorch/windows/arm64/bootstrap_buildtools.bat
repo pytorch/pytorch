@@ -26,7 +26,7 @@ if "%MSVC_VERSION%" == "latest" (
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
         --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
-        --log %LOG_FILE%
+        --logFile %LOG_FILE%
 ) else if "%MSVC_VERSION%" == "14.40" (
     "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
@@ -34,7 +34,7 @@ if "%MSVC_VERSION%" == "latest" (
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 ^
         --add Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64
-        --log %LOG_FILE%
+        --logFile %LOG_FILE%
 ) else if "%MSVC_VERSION%" == "14.36" (
     "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
@@ -42,12 +42,13 @@ if "%MSVC_VERSION%" == "latest" (
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.14.36.17.6.ARM64 ^
         --add Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
-        --log %LOG_FILE%
+        --logFile %LOG_FILE%
 )
 
 :: Print the log file to the CI output
 echo ======== Visual Studio Build Tools Installation Log ========
 type %LOG_FILE%
+echo ==========================================================
 
 :: Check if installation was successful
 if %errorlevel% neq 0 (
