@@ -96,7 +96,7 @@ def build_triton(
         # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
         # while release build should only include the version, i.e. 2.1.0
         rocm_version = get_rocm_version()
-        version_suffix = f"+rocm{rocm_version}_{commit_hash[:10]}"
+        version_suffix = f"+rocm{rocm_version}.git{commit_hash[:8]}"
         version += version_suffix
 
     with TemporaryDirectory() as tmpdir:
@@ -124,6 +124,7 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
+        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
         if with_clang_ldd:
             env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
 
@@ -139,8 +140,6 @@ def build_triton(
                 cwd=triton_basedir,
                 shell=True,
             )
-            cur_rocm_ver = get_rocm_version()
-            check_call(["scripts/amd/setup_rocm_libs.sh", cur_rocm_ver], cwd=triton_basedir)
             print("ROCm libraries setup for triton installation...")
 
         # old triton versions have setup.py in the python/ dir,
