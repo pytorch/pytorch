@@ -719,6 +719,20 @@ class TestNN(NNTestCase):
             with self.assertRaises(KeyError):
                 getattr(m, fn)('attribute_name', nn.Module())
 
+    def test_add_module_raises_error_if_attr_exists_in_cls(self):
+        methods_to_test = ['add_module', 'register_module']
+
+        class MyModule(nn.Module):
+            attribute_name = "some value"
+
+        for fn in methods_to_test:
+            m = MyModule()
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', MyModule())
+
+        with self.assertRaises(KeyError):
+            m.attribute_name = MyModule()
+
     @unittest.expectedFailure
     def test_getattr_with_property(self):
         class Model(nn.Module):
