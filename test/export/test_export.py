@@ -76,7 +76,7 @@ from torch.testing._internal.custom_tensor import (
     CustomTensorPlainOut,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -520,6 +520,22 @@ class TestExport(TestCase):
                 self.assertTrue(node.target == torch.ops.aten.linear.default)
 
         self.assertEqual(counter, 1)
+
+    def test_bincount(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                weights = torch.linspace(0, 1, steps=5)
+                bc = x.bincount(weights)
+                return bc
+
+        model = M()
+        ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
+        print(ep)
+        inp = torch.randint(0, 8, (5,), dtype=torch.int64)
+        self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -6380,7 +6396,7 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_gpu
+    @requires_cuda
     def test_export_associative_scan_symbol_dim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -6398,7 +6414,7 @@ def forward(self, b_a_buffer, x):
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    @requires_gpu
+    @requires_cuda
     def test_export_associative_scan_symbol_scandim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -11937,6 +11953,144 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    @contextmanager
+    def distributed_env(self, world_size):
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=0,
+                store=FakeStore(),
+            )
+            yield
+
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_gather(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                ys = [torch.empty_like(x) for _ in range(2)]
+                torch.distributed.all_gather(ys, x)
+                return ys
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2),))
+            inp = (torch.randn(2),)
+            self.assertTrue(
+                torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
+            )
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_gather_into_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(2 * 2)
+                torch.distributed.all_gather_into_tensor(y, x)
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2),))
+            inp = (torch.randn(2),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_all_to_all_single(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(4)
+                torch.distributed.all_to_all_single(y, x)
+                return y
+
+        with self.distributed_env(world_size=4):
+            m = Foo()
+            ep = export(m, (torch.randn(4),))
+            nodes = ep.graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.all_to_all_single.default,
+            )
+            self.assertEqual(len(nodes), 1)
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    def test_distributed_reduce_scatter_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(2)
+                torch.distributed.reduce_scatter_tensor(y, x)
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(2 * 2),))
+            nodes = ep.graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            )
+            self.assertEqual(len(nodes), 1)
+
+    def test_default_decomposition_core_cia_ops(self):
+        """
+        Verify that core ATen ops with Composite Implicit Autograd dispatch are not
+        decomposed by default.
+        """
+
+        # TODO Add avg_pool1d, and adaptive_avg_pool1d when ready.
+        # See issue #116684.
+        core_cia_ops = {
+            "torch.ops.aten.upsample_bilinear2d.vec": (
+                torch.ops.aten.upsample_bilinear2d.vec,
+                {
+                    "align_corners": False,
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+            "torch.ops.aten.upsample_nearest2d.vec": (
+                torch.ops.aten.upsample_nearest2d.vec,
+                {
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+        }
+
+        for op_name, (op, kwargs) in core_cia_ops.items():
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return op(x, **kwargs)
+
+            ep = export(M(), (torch.randn(2, 3, 4, 5),))
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+            decomp_table = default_decompositions()
+
+            ep = ep.run_decompositions(
+                decomp_table=decomp_table,
+            )
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -12508,64 +12662,31 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
-    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
-    @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
-    @testing.expectedFailureRetraceabilityNonStrict
-    @testing.expectedFailureLegacyExportNonStrict
-    def test_distributed_all_reduce(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 3)
-
-            def forward(self, x):
-                y = self.linear(x).abs().clamp(max=1.0) * 2
-                torch.distributed.all_reduce(y)
-                return y
-
-        try:
-            torch.distributed.init_process_group(
-                backend="fake",
-                world_size=2,
-                rank=0,
-                store=FakeStore(),
-            )
-
-            m = Foo()
-            ep = export(m, (torch.randn(4, 4),))
-            inp = (torch.randn(4, 4),)
-            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
-
-        finally:
-            torch.distributed.destroy_process_group()
-
     def test_preserve_cia_op(self):
-        class StaticResizeBilinear2dModule(torch.nn.Module):
+        class StaticResizeTrilinear2dModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.nn.functional.interpolate(
                     x,
-                    size=(x.shape[2] * 2, x.shape[3] * 3),
-                    mode="bilinear",
+                    size=(x.shape[2] * 2, x.shape[3] * 3, x.shape[4] * 4),
+                    mode="trilinear",
                     align_corners=False,
                     antialias=False,
                 )
                 return a
 
-        ep = export(StaticResizeBilinear2dModule(), (torch.randn(2, 3, 4, 5),))
+        ep = export(StaticResizeTrilinear2dModule(), (torch.randn(2, 3, 4, 5, 6),))
         FileCheck().check_count(
-            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+            "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
         decomp_table = default_decompositions()
-        del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
+        del decomp_table[torch.ops.aten.upsample_trilinear3d.vec]
         ep = ep.run_decompositions(
             decomp_table=decomp_table,
         )
 
         FileCheck().check_count(
-            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+            "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
 

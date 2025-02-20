@@ -544,6 +544,11 @@ class MappingProxyVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         # load types.MappingProxyType
+        if self.source:
+            unimplemented(
+                "Can't reconstruct an existing mapping variable because"
+                " the connection to the original dict will be lost"
+            )
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -562,6 +567,16 @@ class MappingProxyVariable(VariableTracker):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
+        if self.source and tx.output.side_effects.has_existing_dict_mutation():
+            unimplemented(
+                "A dict has been modified while we have an existing mappingproxy object. "
+                "A mapping proxy object, as the name suggest, proxies a mapping "
+                "object (usually a dict). If the original dict object mutates, it "
+                "is reflected in the proxy object as well. For an existing proxy "
+                "object, we do not know the original dict it points to. Therefore, "
+                "for correctness we graph break when there is dict mutation and we "
+                "are trying to access a proxy object."
+            )
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
 
