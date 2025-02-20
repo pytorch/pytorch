@@ -46,7 +46,7 @@ class _ContractFn(Protocol, Generic[_P, _T, _TState]):
 @overload
 def contract() -> (
     Callable[
-        [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
+        [Callable[Concatenate[nn.Module, _P], _T]],
         _ContractFn[Concatenate[nn.Module, _P], _T, _State],
     ]
 ):
@@ -57,7 +57,7 @@ def contract() -> (
 def contract(
     state_cls: type[_TState],
 ) -> Callable[
-    [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
+    [Callable[Concatenate[nn.Module, _P], _T]],
     _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
 ]:
     ...
