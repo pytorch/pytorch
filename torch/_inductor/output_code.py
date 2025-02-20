@@ -316,6 +316,8 @@ class CompiledFxGraph(OutputCode):
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
+    partition_input_to_graph_input: Optional[List[List[Optional[int]]]]
+    partition_output_to_graph_output: Optional[List[List[Optional[int]]]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
@@ -377,6 +379,8 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.cudagraph_info = None
+        self.partition_input_to_graph_input = graph.partition_input_to_graph_input
+        self.partition_output_to_graph_output = graph.partition_output_to_graph_output
         self.fx_kwargs = {}
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None

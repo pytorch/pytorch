@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -355,6 +355,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        # for each graph partition, map partition input/output indices
+        #   to graph input/output indices
+        self.partition_input_to_graph_input: Optional[List[List[Optional[int]]]] = None
+        self.partition_output_to_graph_output: Optional[
+            List[List[Optional[int]]]
+        ] = None
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
