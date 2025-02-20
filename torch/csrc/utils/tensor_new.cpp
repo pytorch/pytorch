@@ -638,7 +638,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    auto result = at::unsafeTensorFromTH(cdata, true);
+    result = at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -650,7 +650,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    auto result = at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
+    result = at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
@@ -689,6 +689,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     result =
         new_with_sizes(options, scalar_type, deviceOptional, r.symintlist(0));
   }
+
   if (result.defined()) {
     at::_validate_sparse_coo_tensor_args(
         result._indices(),
