@@ -29,6 +29,8 @@ def device_count() -> int:
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
             If there is no available accelerators, return 0.
+
+    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     return torch._C._accelerator_deviceCount()
 
@@ -38,6 +40,8 @@ def is_available() -> bool:
 
     Returns:
         bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
+
+    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
 
     Example::
 
@@ -56,6 +60,7 @@ def current_accelerator() -> torch.device:
         :func:`torch.accelerator.current_device_index` to know the current index being used.
         And ensure to use :func:`torch.accelerator.is_available` to check if there is an available
         accelerator. If there is no available accelerator, this function will raise an exception.
+        This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
 
     Example::
 
@@ -79,6 +84,8 @@ def current_device_index() -> int:
 
     Returns:
         int: the index of a currently selected device.
+
+    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     return torch._C._accelerator_getDeviceIndex()
 
@@ -97,6 +104,7 @@ def set_device_index(device: _device_t, /) -> None:
             :ref:`accelerator<accelerators>` device type.
 
     .. note:: This function is a no-op if this device index is negative.
+        This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     device_index = _get_device_index(device)
     torch._C._accelerator_setDeviceIndex(device_index)
@@ -118,6 +126,8 @@ def current_stream(device: _device_t = None, /) -> torch.Stream:
 
     Returns:
         torch.Stream: the currently selected stream for a given device.
+
+    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     device_index = _get_device_index(device, True)
     return torch._C._accelerator_getStream(device_index)
@@ -130,6 +140,7 @@ def set_stream(stream: torch.Stream) -> None:
         stream (torch.Stream): a given stream that must match the current :ref:`accelerator<accelerators>` device type.
 
     .. note:: This function will set the current device index to the device index of the given stream.
+        This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     torch._C._accelerator_setStream(stream)
 
@@ -143,6 +154,7 @@ def synchronize(device: _device_t = None, /) -> None:
             use :func:`torch.accelerator.current_device_index` by default.
 
     .. note:: This function is a no-op if the current :ref:`accelerator<accelerators>` is not initialized.
+        This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
 
     Example::
 
