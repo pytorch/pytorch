@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
@@ -68,7 +68,7 @@ def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
 
 
 def mask_list(
-    mask: list[bool], inp: list[Any], other: list[Any] | None = None
+    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
 ) -> list[Any]:
     # Masks elements on an `inp` list.
     # If other is None, then the elements of the `inp` list where the mask is False are removed
