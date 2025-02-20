@@ -6368,6 +6368,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
+    # TODO: Remoe this skip once nccl issue if fixed
+    @unittest.skip(
+        "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
+    )
     def test_ddp_checkpoint(self):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
@@ -6521,6 +6525,16 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             suppress_errors=True, fail_on_recompile_limit_hit=True
         ), self.assertRaises(AssertionError):
             torch.compile(lambda: None)
+
+    def test_str_isalnum(self):
+        def f(x, c):
+            str.isalnum(c)
+            return x.sin()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        c = "foobar"
+        self.assertEqual(f(x, c), opt_f(x, c))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
