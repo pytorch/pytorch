@@ -2949,6 +2949,56 @@ class TestBinaryUfuncs(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @onlyCUDA
+    def test_device_check_op_with_cpu_zero_dim_tensor(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # there's a device check in torch.nextafter
+                x = torch.nextafter(x, y)
+                return x
+
+        model = Model().to(device)
+        x = torch.tensor(1.0, device=device)
+        y = torch.tensor(2.0)
+        output = model(x, y)
+        self.assertEqual(output, torch.tensor(1.0))
+        self.assertEqual(output.device, x.device)
+
+        x = x.cpu()
+        y = y.to(device)
+        output = model(x, y)
+        self.assertEqual(output, torch.tensor(1.0))
+        self.assertEqual(output.device, y.device)
+
+    @onlyCUDA
+    def test_device_check_op_without_cpu_zero_dim_tensor(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # there's a device check in torch.nextafter
+                x = torch.nextafter(x, y)
+                return x
+
+        model = Model().to(device)
+        x = torch.tensor([1.0, 2.0], device=device)
+        y = torch.tensor([2.0, 1.0])
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device.*"
+        ):
+            _ = model(x, y)
+
+        x = x.cpu()
+        y = y.to(device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device.*"
+        ):
+            _ = model(x, y)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16)
     def test_nextafter_bfloat16(self, device, dtype):
