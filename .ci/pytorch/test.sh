@@ -420,6 +420,7 @@ test_inductor_cpp_wrapper_shard() {
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
     --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -517,6 +518,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *h100* ]]; then
+    device=cuda_h100
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
@@ -1438,7 +1441,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
