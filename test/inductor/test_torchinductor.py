@@ -121,6 +121,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -372,20 +373,6 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return x
-    buffer = torch.as_strided(
-        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-    return out
-
-
 def check_model(
     self: TestCase,
     model,
@@ -409,7 +396,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+    ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -422,7 +409,7 @@ def check_model(
             # Eager model may fail if the dtype is not supported
             eager_result = None
 
-        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
         expect_dtypes = [
             x.dtype if isinstance(x, torch.Tensor) else None
             for x in pytree.tree_leaves(eager_result)
@@ -625,7 +612,7 @@ def check_model_gpu(
 
     if copy_to_gpu:
         example_inputs = tuple(
-            clone_preserve_strides(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
         )
 
     check_model(
@@ -788,12 +775,13 @@ def skip_if_halide(fn):
     return wrapper
 
 
-def skip_if_mps(fn):
+def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self):
-        if is_mps_backend(self.device):
-            raise unittest.SkipTest("mps not supported")
-        return fn(self)
+        if not is_mps_backend(self.device):
+            return fn(self)
+        with self.assertRaises(Exception):
+            return fn(self)
 
     return wrapper
 
@@ -2028,6 +2016,15 @@ class CommonTemplate:
             include_complex=False,
             include_half=False,
         ):
+            if not self.is_dtype_supported(dtype):
+                continue
+            # cumsum not implemented for integers on MacOS-13
+            if (
+                self.device == "mps"
+                and not dtype.is_floating_point
+                and MACOS_VERSION < 13.3
+            ):
+                continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
             inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
@@ -2092,6 +2089,15 @@ class CommonTemplate:
             return torch.cumprod(a, -1)
 
         for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+            if not self.is_dtype_supported(dtype):
+                continue
+            # cumsum not implemented on MacOS-13
+            if (
+                self.device == "mps"
+                and not dtype.is_floating_point
+                and MACOS_VERSION < 13.3
+            ):
+                continue
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
             )
@@ -2459,6 +2465,7 @@ class CommonTemplate:
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
+    @xfail_if_mps
     def test_sum_dtype(self):
         def fn(x):
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
@@ -2581,8 +2588,10 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     def test_clamp_type_promotion(self):
+        tgt_dtype = torch.double if self.device != "mps" else torch.half
+
         def fn(a):
-            b = torch.tensor(1.0, dtype=torch.double, device=self.device)
+            b = torch.tensor(1.0, dtype=tgt_dtype, device=self.device)
             c = torch.full((4,), 2, device=self.device)
             return a.clamp(min=b, max=c)
 
@@ -2877,9 +2886,10 @@ class CommonTemplate:
         def fn(a):
             return torch.round(a)
 
+        dtype = torch.float64 if self.device != "mps" else torch.float32
         self.common(
             fn,
-            [torch.arange(-10, 10, 0.1, dtype=torch.float64)],
+            [torch.arange(-10, 10, 0.1, dtype=dtype)],
             check_lowp=False,
         )
 
@@ -4280,6 +4290,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 3, 10, 10),))
 
+    @xfail_if_mps
     def test_to_dtype(self):
         def fn(a, b):
             return (
@@ -5577,11 +5588,12 @@ class CommonTemplate:
         def fn(dist, angle):
             return torch.polar(dist, angle)
 
+        dtype = torch.float64 if self.device != "mps" else torch.float32
         inp = (
-            torch.tensor([1, 2], dtype=torch.float64),
-            torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64),
+            torch.tensor([1, 2], dtype=dtype),
+            torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=dtype),
         )
-        self.common(fn, (*inp,))
+        self.common(fn, (*inp,), reference_in_float=self.device != "mps")
 
     @skip_if_gpu_halide  # incorrect result on CUDA
     def test_cauchy(self):
@@ -5903,12 +5915,14 @@ class CommonTemplate:
             torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     def test_cat(self):
+        tgt_dtype = torch.double if self.device != "mps" else torch.half
+
         def fn(a):
             tmp = a * 2
             return (
                 torch.cat((a, a[:, :4] + 1, a + 2), -1),
                 torch.cat((tmp, tmp), 0),
-                torch.cat((tmp, tmp.double()), 0),
+                torch.cat((tmp, tmp.to(dtype=tgt_dtype)), 0),
             )
 
         self.common(
@@ -7249,9 +7263,10 @@ class CommonTemplate:
             w = z.add_(y)
             return w.mul_(y)
 
+        tgt_dtype = torch.double if self.device != "mps" else torch.half
         inputs = (
             rand_strided((4, 4), (4, 1), device=self.device, dtype=torch.float),
-            rand_strided((4, 4), (4, 1), device=self.device, dtype=torch.double),
+            rand_strided((4, 4), (4, 1), device=self.device, dtype=tgt_dtype),
         )
         out = fn(*inputs)
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
@@ -10720,6 +10735,14 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_single(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (10, 10))
+            return y
+
+        x = torch.rand(1, 1, 1)
+        self.common(fn, (x,))
+
     def test_pad_cast(self):
         def fn(x):
             return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
@@ -11068,10 +11091,6 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
-        if self.device == "cuda" and TEST_WITH_ROCM:
-            raise unittest.SkipTest(
-                "Flash attention support is incomplete on this platform"
-            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
@@ -11794,6 +11813,8 @@ class CommonTemplate:
         o = torch.optim.AdamW(params)
         pt2_optimizer_step(o)
 
+    # Skipped on MPS because avgpool size is not divisible
+    @xfail_if_mps
     @skip_if_gpu_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
@@ -12176,6 +12197,7 @@ class CommonTemplate:
         t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
         self.assertFalse(complex_memory_overlap(t))
 
+    @xfail_if_mps
     def test_generate_rand_fp8(self):
         """
         PyTorch can not generate fp8 tensors with a normal distribution because of
