@@ -165,7 +165,6 @@ class TestCutlassBackend(TestCase):
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("shape_combo", (0,))
     def test_cutlass_backend_subproc_addmm(self, shape_combo):
         """
         Test autotune_in_subproc works for addmm.
@@ -180,11 +179,8 @@ class TestCutlassBackend(TestCase):
             (M, N),
             (M, 1),
             (1, N),
-            (K,),
+            (N,),
         ]
-
-        x_shape = x_shapes[shape_combo]
-        x = torch.randn(x_shape).cuda().half()
 
         alpha = 2.0
         beta = 0.4
@@ -199,9 +195,11 @@ class TestCutlassBackend(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ):
-            Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
-            Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
-            torch.testing.assert_close(Y_compiled, Y)
+            for x_shape in x_shapes:
+                x = torch.randn(x_shape).cuda().half()
+                Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
+                Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+                torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -315,6 +313,57 @@ class TestCutlassBackend(TestCase):
                 "cuda_fused_0.cuda_fused_0",
                 2,
             ).run(codes[0])
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_number_mm_precompiles(self):
+        torch._dynamo.utils.counters.clear()
+        max_autotune_gemm_backends = "CUTLASS"
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                ab = a @ b
+                return ab
+
+        model = MyModel()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+        c = torch.randn(16, 512).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_fallback_to_aten": False,
+                "cuda.cutlass_max_profiling_swizzle_options": [
+                    1,
+                    2,
+                    4,
+                ],  # guarantees > 1 choices
+            }
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            compiled = torch.compile(model, dynamic=True)
+            expected = model(a, b, c)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
+            FileCheck().check_count(
+                "cuda_fused_0.cuda_fused_0",
+                1,
+            ).run(codes[0])
+            # Verifies expected number of precompilations
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"][
+                    "select_algorithm_num_precompiles"
+                ],
+                1,
+            )
 
     # NOTE: right now tuned_mm doesn't support cutlass 2x, which is used by A100
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -568,7 +617,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -784,12 +833,15 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @unittest.skipIf(not SM80OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
+
+        NOTE: For SM90, special alignemnt is needed, since in gemm_template.py,
+        set_alignment has arch specific logic.
         """
 
         def mm(a, b):
@@ -799,7 +851,7 @@ class TestCutlassBackend(TestCase):
         # layouts for this operation, thus the transpose of tensor b.
         # Also, for CUTLASS alignment requirements, number of columns
         # of the first tensor has to be divisible by 16.
-        m, n, k = 100, 16, 100
+        m, n, k = 128, 16, 128
         a = torch.randn(m, k).cuda().half()
         b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
 
@@ -1039,7 +1091,7 @@ class TestCutlassBackend(TestCase):
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
@@ -1139,6 +1191,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
+                # needed for log searching
                 "force_disable_caches": True,
             }
         ):
