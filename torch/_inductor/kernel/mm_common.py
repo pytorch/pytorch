@@ -411,11 +411,6 @@ int8_mm_configs = functools.partial(
     configs=int8_platform_configs,
 )
 
-mixed_mm_configs = functools.partial(
-    filtered_configs,
-    configs=mixed_mm_platform_configs,
-)
-
 persistent_mm_configs = functools.partial(
     filtered_configs,
     configs=persistent_mm_platform_configs,

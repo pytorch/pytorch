@@ -42,7 +42,6 @@ from .mm_common import (
     addmm_epilogue,
     extra_mm_configs,
     int8_mm_configs,
-    mixed_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
