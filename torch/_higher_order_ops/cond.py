@@ -417,7 +417,7 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         _nested_int_aware_sort,
         SymIntEqByExpr,
     )
-    from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
@@ -463,15 +463,18 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         else:
 
             def min_max(s0, s1):
-                def _bound(s: Union[int, torch.SymInt], lower_bound: bool):
-                    assert isinstance(s, (int, torch.SymInt))
-                    if isinstance(s, int):
-                        return s
-                    assert mode.shape_env is not None
-                    vrange = bound_sympy(s.node.expr, mode.shape_env.var_to_range)
-                    return vrange.lower if lower_bound else vrange.upper
+                def _bound(s0, lower_bound: bool):
+                    if isinstance(s0, int):
+                        return s0
+                    r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
+                        s0.node.expr,
+                        torch.utils._sympy.value_ranges.ValueRanges.unknown(),
+                    )
+                    return r.lower if lower_bound else r.upper
 
-                return _bound(min(s0, s1), True), _bound(max(s0, s1), False)
+                return min(_bound(s0, True), _bound(s1, True)), max(
+                    _bound(s0, False), _bound(s1, False)
+                )
 
             assert mode.shape_env is not None
             new_size = mode.shape_env.create_unbacked_symint()
