@@ -35,10 +35,5 @@ RUN git submodule update --init --recursive
 
 # Copy the build script and make it executable
 COPY .github/scripts/ppc64le-build.sh /ppc64le-build.sh
-RUN chmod +x /ppc64le-build.sh
-
-# Verify permissions and ensure Unix line endings
-RUN dos2unix /ppc64le-build.sh || sed -i 's/\r$//' /ppc64le-build.sh
-RUN chmod +x /ppc64le-build.sh
 
 
