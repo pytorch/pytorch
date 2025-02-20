@@ -18,9 +18,10 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional
+from typing import Optional, Union
 
 import torch.nn
+from torch.utils._ordered_set import OrderedSet
 
 from . import utils
 from .bytecode_transformation import (
@@ -36,7 +37,7 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import IncorrectUsage, unimplemented
-from .source import AttrSource, Source
+from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
@@ -73,14 +74,14 @@ class PyCodegen:
         overridden_sources=None,
     ) -> None:
         self.root = root
-        self.top_of_stack: Optional[VariableTracker] = None
+        self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
-        # This determines which VariableTracker should be stored as locals, and
-        # maps the VariableTracker to the local variable name. Note that it
-        # could map to None initially, in which case we'll overwrite it to map
-        # to real temporary names via `add_cache`.
+        # This determines which VariableTracker/Source should be stored as
+        # locals, and maps the VariableTracker/Source to the local variable
+        # name. Note that it could map to None initially, in which case we'll
+        # overwrite it to map to real temporary names via `add_cache`.
         self.tempvars = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
@@ -141,12 +142,37 @@ class PyCodegen:
         """
         Generate code such that top-of-stack (TOS) is set to value.
 
-        `allow_cache` is used to determine whether the following could happen,
-        when `value` is a `VariableTracker`:
-        1. if `value` was codegen-ed previously with `allow_cache=True` and
-           without using source, reuse the generated code by loading from top
-           of stack or tempvars.
-        2. emit code based on `value.source` to handle aliasing.
+        `allow_cache` controls the behavior in the following manner. `value` can
+        either be a VariableTracker or a Source.
+
+        If `value` is a `Source`, `allow_cache` must be True (invariant asserted
+        below). If the source was reconstructed earlier, we will reuse the
+        generated code by loading from top of stack or tempvars.
+
+        If `value` is a `VariableTracker`, we have the following cases:
+
+        1) `allow_cache=True`
+            a) If the value.source is not None, we will emit the code based on
+            `value.source` to handle aliasing.
+            b) If value.source is None (example reconstructing a local list
+            returned by the compiled function), we will reconstruct the variable
+            tracker (w/o any source) to emit bytecode that generates a new
+            python object.
+
+            In both cases of value.source being None or not, if the value was
+            reconstructed earlier, we will reuse the generated code by loading from
+            top of stack or tempvars.
+
+        2) `allow_cache=False` - This is a special case (allow_cache defaults to
+        True).
+            a) If the value.source is not None, we reconstruct the variable
+            tracker and emit a new python object. You might wonder what about
+            aliasing? The place where we use this config also has the followup
+            code where the original python object is assigned to this new python
+            value to handle aliasing (check side_effects.py and search for
+            allow_cache=False).
+
+            b) If value.source is None, this is not allowed. TODO - assert this.
 
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
@@ -158,9 +184,25 @@ class PyCodegen:
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
-            self.call_reconstruct(source)
-            # We don't support dup_top optimization for source yet.
-            self.clear_tos()
+            assert allow_cache is True, "allow_cache must be True for Source"
+            if self.top_of_stack is value:
+                self._output.append(create_dup_top())
+                return
+
+            if self.tempvars.get(source) is not None:
+                self._output.append(self.create_load(self.tempvars[source]))
+                self.top_of_stack = source
+                return
+
+            try:
+                self.call_reconstruct(source)
+            except NotImplementedError:
+                unimplemented(f"reconstruct: {source}")
+
+            self._output.append(create_dup_top())
+            self.add_cache(source)
+            self.top_of_stack = source
+
             return
 
         assert isinstance(value, VariableTracker)
@@ -527,11 +569,46 @@ class PyCodegen:
         global_name = self.tx.output.install_global_by_id(prefix, mod)
         return self.create_load_global(global_name, add=True)
 
+    def mark_source_temp(self, source: Source) -> None:
+        """
+        Mark a source as a temp variable, so that it can be reused.
+        """
+        if source not in self.tempvars:
+            self.tempvars[source] = None
+
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
         graphargs = self.tx.output.graphargs
+
+        seen_sources: OrderedSet[Source] = OrderedSet()
+
+        def collect_temp_source(source):
+            if source in seen_sources:
+                # This source is used atleast twice, so it can be reused
+                self.mark_source_temp(source)
+                # Dont trace source further. This prevents us from marking too
+                # many nodes as temp sources.
+                return
+
+            seen_sources.add(source)
+
+            if isinstance(source, ChainedSource):
+                collect_temp_source(source.base)
+
+            if isinstance(source, DictGetItemSource) and isinstance(
+                source.index, Source
+            ):
+                collect_temp_source(source.index)
+
+        # Collect all the sources that are used more than once, so that we can
+        # generate tmp variables in the generated pre-graph bytecode. This
+        # essentially implements CSE.
+        for arg in graphargs:
+            if arg.source is not None:
+                collect_temp_source(arg.source)
+
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
@@ -550,7 +627,13 @@ class PyCodegen:
         self.extend_output(create_call_function(len(graphargs), False))
 
     def load_import_from(self, module_name, object_name) -> None:
-        self(AttrSource(self.tx.import_source(module_name), object_name))
+        source = AttrSource(self.tx.import_source(module_name), object_name)
+        # Note: This approach is somewhat aggressive because typically, a source is marked
+        # as a tempvar only when it is used more than once. In this case, we're marking it
+        # as a tempvar without performing that analysis. However, this is a simple solution,
+        # and in many cases, load imports are reused multiple times.
+        self.mark_source_temp(source)
+        self(source)
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):

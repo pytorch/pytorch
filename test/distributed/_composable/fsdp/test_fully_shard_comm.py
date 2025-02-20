@@ -267,6 +267,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_reduce_op=None,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
+            all_reduce_hook=None,
             all_reduce_grads=True,
             partial_reduce_output=None,
         )

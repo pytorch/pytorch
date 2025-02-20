@@ -21,11 +21,12 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
     """
     This is the "Base" HOP implementation for a HOP that looks like:
 
-        call_subgraph_hop(subgraph, operands, **kwargs)
+        call_subgraph_hop(subgraph, *operands, **kwargs)
 
     That is:
     1) the HOP stays alive until Inductor
     2) the HOP's semantics are subgraph(*operands)
+    3) kwargs may be some config options but aren't passed directly to the subgraph.
 
     To use this, please subclass this class and override methods as necessary:
     ```
@@ -40,7 +41,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
     @torch.compile(backend="aot_eager")
     def f(x):
-        return invoke_quant(g, (x,), scheme="nf4")
+        return invoke_quant(g, x, scheme="nf4")
     ```
 
     NOTE: don't subclass BaseHOP out of tree! That is not allowed. All
@@ -60,21 +61,16 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             self._call_CompositeExplicitAutograd
         )
 
-    def __call__(self, subgraph, operands, *unused, **kwargs):
-        # We accept *unused (and *_) to make mypy happy. Otherwise mypy
-        # complains that we're violating LSP. We are violating LSP, but it's
-        # OK for the purposes of implementation-sharing (end users should never
-        # subclass these methods; only in-tree PyTorch developers are allowed to).
-        assert len(unused) == 0
+    def __call__(self, subgraph, *operands, **kwargs):
         if not isinstance(subgraph, (torch.fx.GraphModule, FunctionWithNoFreeVars)):
             raise RuntimeError(
                 f"{self._name}: when calling this API without torch.compile, "
                 f"we require that the subgraph be a torch.fx.GraphModule (or "
                 f"a function we know doesn't have free variables)."
             )
-        return super().__call__(subgraph, operands, **kwargs)
+        return super().__call__(subgraph, *operands, **kwargs)
 
-    def _call_Autograd(self, subgraph, operands, *_, **kwargs):
+    def _call_Autograd(self, subgraph, *operands, **kwargs):
         if isinstance(subgraph, torch.fx.GraphModule):
             pass
         if not torch.is_grad_enabled() or pytree.tree_all_only(
@@ -83,45 +79,43 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             operands,
         ):
             with torch._C._AutoDispatchBelowAutograd():
-                return self(subgraph, operands, **kwargs)
+                return self(subgraph, *operands, **kwargs)
 
         # We assume the subgraph doesn't mutate inputs and there is no aliasing.
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
-        return HOPBaseFunction.apply(self, subgraph, kwargs, *operands)
+        return BaseHOPFunction.apply(self, subgraph, kwargs, *operands)
 
-    def _call_CompositeExplicitAutograd(self, subgraph, operands, *_, **kwargs):
+    def _call_CompositeExplicitAutograd(self, subgraph, *operands, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         mode = _get_current_dispatch_mode()
         assert mode is None, "Mode should never be enabled for CPU/CUDA key"
         return subgraph(*operands)
 
-    def _call_ProxyTorchDispatchMode(
-        self, proxy_mode, subgraph, operands, *_, **kwargs
-    ):
+    def _call_ProxyTorchDispatchMode(self, proxy_mode, subgraph, *operands, **kwargs):
         traced_graph = reenter_make_fx(subgraph)(*operands)
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("subgraph")
         proxy_mode.tracer.root.register_module(qualname, traced_graph)
 
-        node_args = (traced_graph, operands)
+        node_args = (traced_graph, *operands)
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[attr-defined]
         proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[attr-defined]
         out_proxy = proxy_mode.tracer.create_proxy(
             "call_function", self, proxy_args, proxy_kwargs
         )
 
-        out = self(subgraph, operands, **kwargs)
+        out = self(subgraph, *operands, **kwargs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
         )
 
-    def _call_FakeTensorMode(self, mode, subgraph, operands, *_, **kwargs):
+    def _call_FakeTensorMode(self, mode, subgraph, *operands, **kwargs):
         # TODO: this should probably route through FakeTensorMode to reuse caching
         with mode:
             return subgraph(*operands)
 
-    def _call_Functionalize(self, ctx, subgraph, operands, *_, **kwargs):
+    def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
         unwrapped_operands = ctx.unwrap_tensors(operands)
         with ctx.redispatch_to_next():
             # We assume the subgraph doesn't mutate inputs and there is no aliasing.
@@ -129,11 +123,11 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             functionalized_subgraph = FunctionWithNoFreeVars(
                 ctx.functionalize(subgraph)
             )
-            out = self(functionalized_subgraph, unwrapped_operands, **kwargs)
+            out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
 
-class HOPBaseFunction(torch.autograd.Function):
+class BaseHOPFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, hop, subgraph, kwargs, *operands):
         ctx.hop = hop
@@ -142,7 +136,7 @@ class HOPBaseFunction(torch.autograd.Function):
         ctx.kwargs = kwargs
 
         with torch._C._AutoDispatchBelowAutograd():
-            return hop(subgraph, operands, **kwargs)
+            return hop(subgraph, *operands, **kwargs)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -175,7 +169,7 @@ class HOPBaseFunction(torch.autograd.Function):
             None,
             None,
             *ctx.hop(
-                FunctionWithNoFreeVars(bwd_fn), (*operands, *grad_outputs), **kwargs
+                FunctionWithNoFreeVars(bwd_fn), *operands, *grad_outputs, **kwargs
             ),
         )
 

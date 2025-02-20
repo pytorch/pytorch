@@ -9,7 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from enum import Enum
-from typing import Any, Callable, Dict, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -1025,7 +1025,7 @@ def _validate_schedule(
     pp_group_size: int,
     num_stages: int,
     num_microbatches: int,
-) -> Dict[int, int]:
+) -> dict[int, int]:
     assert (
         len(actions) == pp_group_size
     ), f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"

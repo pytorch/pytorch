@@ -30,7 +30,7 @@ import itertools
 import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -49,6 +49,7 @@ from ..exc import (
     raise_observed_exception,
     SkipFrame,
     unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
@@ -516,7 +517,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
         return True
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -546,8 +547,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__next__":
             return self.next_variable(tx)
@@ -1136,7 +1137,26 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+            unimplemented_v2(
+                gb_type="Skip calling `torch.compiler.disable()`d function",
+                context=str(self.value),
+                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+        elif self.value is torch._dynamo.graph_break:
+            graph_break_msg = kwargs.get("msg", None)
+            if graph_break_msg:
+                graph_break_msg = graph_break_msg.as_python_constant()
+            unimplemented_v2(
+                gb_type="Call to `torch._dynamo.graph_break()`",
+                context=f"Called `torch._dynamo.graph_break()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"User-inserted graph break. Message: {graph_break_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.graph_break()` call.",
+                ],
+            )
         elif isinstance(self.value, types.WrapperDescriptorType):
             msg = (
                 f"Graph break due to unsupported wrapper descriptor {self.value}. "
@@ -1148,49 +1168,79 @@ class SkipFunctionVariable(VariableTracker):
         else:
             try:
                 path = inspect.getfile(self.value)
-                msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                explanation = (
+                    f"Dynamo developers have intentionally marked that the function `{self.value.__qualname__}` "
+                    f"in file `{path}` should not be traced."
+                )
+                hints = [
+                    f"Avoid calling the function `{self.value.__qualname__}`.",
+                ]
+                # TODO improve trace_rules reasoning to provide better hints.
+                # How do we tell that a function/file should NOT be removed from skip files?
+                # Do a very basic check for now.
+                if "_dynamo" not in path:
+                    hints += [
+                        f"Remove the function `{self.value.__qualname__}` or the file `{path}` "
+                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
+                        "attempting to trace into the function.",
+                        "Please file an issue to PyTorch.",
+                        # TODO suggest mark_force_inline when implemented
+                    ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
                 if self.value.__module__ in known_python_builtin_modules:
-                    msg = (
-                        f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
-                        f"Please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the Python builtin "
+                        f"`{self.value.__module__}.{self.value.__qualname__}`."
                     )
+                    hints = [
+                        "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
+                        "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                        "Please file an issue on GitHub "
+                        "so the PyTorch team can add support for it. ",
+                    ]
                 elif (
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    msg = (
-                        f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
-                        f" Consider using torch.utils._pytree - "
-                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
-                    )
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                    hints = [
+                        " Consider using torch.utils._pytree - "
+                        "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
-                    msg = (
-                        f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{self.value.__qualname__}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
-                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
-                        f"If it is a Python builtin, please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it and see the next case for a workaround. "
-                        f"If it is a third-party C/C++ Python extension, please "
-                        f"either wrap it into a PyTorch-understood custom operator "
-                        f"(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
-                        f"for more details) or, if it is traceable, use "
-                        f"torch.compiler.allow_in_graph."
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
+                    hints = [
+                        "If it is a Python builtin, please file an issue on GitHub "
+                        "so the PyTorch team can add support for it and see the next case for a workaround.",
+                        "If it is a third-party C/C++ Python extension, please "
+                        "either wrap it into a PyTorch-understood custom operator "
+                        "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                        "for more details) or, if it is traceable, use "
+                        "`torch.compiler.allow_in_graph`.",
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
             if self.value.__qualname__ == "allow_in_graph":
-                msg = (
+                explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
+                hints = []
+            reason = self.reason if self.reason else "<missing reason>"
+            unimplemented_v2(
+                gb_type="Attempted to call function marked as skipped",
+                context=f"module: {self.value.__module__}, qualname: {self.value.__qualname__}, skip reason: {reason}",
+                explanation=explanation,
+                hints=hints,
+            )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         return variables.ConstantVariable.create(hasattr(self.value, name))

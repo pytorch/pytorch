@@ -1,12 +1,16 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
+
+if TYPE_CHECKING:
+    from .cuda_template import ArgInfo
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
@@ -153,7 +157,12 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: List["ArgInfo"],
+        runtime_arg_values: List[Any],
+    ) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -162,6 +171,8 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
+        self.runtime_arg_info = runtime_arg_info
+        self.runtime_arg_values = runtime_arg_values
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -244,7 +255,13 @@ class CUDATemplateKernel(CUDAKernel):
             f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
         ]
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        runtime_arg_decls = ",".join(
+            [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
+        )
+        if runtime_arg_decls:
+            runtime_arg_decls += ", "
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -278,7 +295,11 @@ class CUDATemplateKernel(CUDAKernel):
 
         layout_args = self.get_layout_args()
         call_args.extend(layout_args)  # type: ignore[arg-type]
+        for arg in self.runtime_arg_values:
+            call_args.append(arg)
         arg_types.extend("int" for a in layout_args)
+        for arg in self.runtime_arg_info:
+            arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):

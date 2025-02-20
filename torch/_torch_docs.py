@@ -73,6 +73,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         If ``None``, all dimensions are reduced.
 """
     },
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 single_dim_common = merge_dicts(
@@ -699,7 +704,7 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{vec1} \otimes \text{vec2})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -6483,8 +6488,8 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {dim}
-    {keepdim} Default: ``False``.
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
@@ -6499,13 +6504,22 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
+    torch.return_types.max(
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
+    torch.return_types.max(
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
 
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(

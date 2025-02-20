@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed._shard.op_registry_utils import _decorator_func

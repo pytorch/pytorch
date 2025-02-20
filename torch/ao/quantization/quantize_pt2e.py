@@ -188,6 +188,7 @@ _QUANT_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.quantize_per_channel.default,
+    torch.ops.pt2e_quant.quantize_affine,
 ]
 
 

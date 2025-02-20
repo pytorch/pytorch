@@ -1450,20 +1450,26 @@ def _optimize_runtime_with_given_memory(
 from torch.utils._mode_utils import no_dispatch
 
 
+# replace symbols in size and strides with their hints without guarding.
+def _remove_symbols_without_guarding(x: torch.Tensor) -> torch.Tensor:
+    shape = list(x.shape)
+
+    def realize_symbol(d):
+        return hint_int(d, fallback=4096)
+
+    shape = [realize_symbol(s) for s in shape]
+    stride = [realize_symbol(s) for s in x.stride()]
+    print(shape)
+    print(stride)
+    return x.new_empty_strided(shape, stride=stride)
+
+
 def estimate_runtime(node):
     RUNTIME_MODE = config.activation_memory_budget_runtime_estimator
 
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
-            shape = list(x.meta["val"].shape)
-
-            def realize_symbol(d):
-                return hint_int(d, fallback=4096)
-
-            shape = [realize_symbol(s) for s in shape]
-            return x.meta["val"].new_empty_strided(
-                shape, stride=x.meta["tensor_meta"].stride
-            )
+            return _remove_symbols_without_guarding(x.meta["val"])
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
             return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):

@@ -12,7 +12,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -730,7 +730,7 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(torch._higher_order_ops._foreach_map)
+@register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
     This lowers an invocation of foreach_map
@@ -743,7 +743,7 @@ def _foreach_map(subgraph, *args, **kwargs):
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
 
-    inputs = args[0]  # nested tuple
+    inputs = args
 
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
@@ -3777,7 +3777,7 @@ def scatter_fallback(
         op_overload,
         reduce,
         self.get_dtype(),
-        src.get_dtype() if src_is_tensor else type(src),
+        cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):

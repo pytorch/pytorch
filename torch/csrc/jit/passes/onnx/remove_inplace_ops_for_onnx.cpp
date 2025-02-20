@@ -654,7 +654,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
     auto moduleNames =
         findSubModuleAttr(n->inputs().at(0), name, attrModule, graph_);
 
-    std::string fullName("");
+    std::string fullName;
     for (auto& name : moduleNames) {
       fullName += name + '.';
     }

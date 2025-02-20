@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Union
 
 import torch
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -19,6 +20,7 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
@@ -461,10 +463,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return False
 
     def can_inplace(node, mutated_arg):
+        # ls should be a list of tensors that all shares the same storage.
+        def _overlap(ls) -> bool:
+            try:
+                return len(compute_overlapping_tensors(ls)) != 0
+            except GuardOnDataDependentSymNode:
+                # If we fail with data dependent error we assume they all overlap.
+                return True
+
         if isinstance(mutated_arg, (list, tuple)):
+            # TODO Using _overlap here causes a several issues.
             unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
             if len(unique_storages) != len(mutated_arg):
-                # at least two Tensors in mutated_arg alias each other, so we can't reinplace it.
+                # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
@@ -472,7 +483,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if get_node_storage(mutated_arg) is None:
             return False
+
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+
+        # Only keep tensor that might overlap with mutated_arg.
+        shared_view_nodes = [
+            v
+            for v in shared_view_nodes
+            if _overlap([mutated_arg.meta["val"], v.meta["val"]])
+        ]
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
@@ -557,6 +576,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         missed_nodes = []
         missed_args = []
 
+        # TODO this logic can be made more precise using _overlap
         def tensor_with_same_storage_already_reinplaced(arg):
             if isinstance(arg, (list, tuple)):
                 return any(

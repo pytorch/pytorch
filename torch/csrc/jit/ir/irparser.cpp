@@ -88,7 +88,7 @@ struct ParsedLiteral {
   AttributeKind k = AttributeKind::t;
 
   int64_t i = 0;
-  std::string s = "";
+  std::string s;
   double f = 0.0;
   c10::complex<double> c = c10::complex<double>(0, 0);
   TypePtr ty;
