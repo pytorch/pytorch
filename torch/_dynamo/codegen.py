@@ -296,14 +296,13 @@ class PyCodegen:
                 unimplemented_v2(
                     gb_type="Reconstruction failure",
                     context=str(value),
-                    explanation=f"Dynamo has no bytecode reconstruction implemented for variable {value}.",
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
                     hints=[
                         "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
                         "that Dynamo cannot reconstruct, then remove it from the return statement.",
                         *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                        "Report an issue to PyTorch if you need reconstrtuction support. Note that many objects that don't have"
-                        "reconstruction rules are fundamentally unreconstructable "
-                        "(e.g. built-in iterator objects like `map`, `zip`, etc.).",
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that many objects that don't have "
+                        "reconstruction rules are fundamentally unreconstructable.",
                     ],
                 )
             if allow_cache and value in self.tempvars:

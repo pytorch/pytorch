@@ -207,7 +207,7 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
                 from_exc=e,
             )
 
-        tx.generic_context_manager_depth -= 1
+        tx.active_generic_context_managers.pop()
         return x
 
     def supports_graph_breaks(self):

@@ -71,9 +71,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
-from .. import config, mutation_guard, replay_record, trace_rules
+from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, unimplemented
+from ..exc import InternalTorchDynamoError, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -1510,7 +1510,15 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         if len(value.__dict__) == 0:
-            unimplemented(f"uninitialized nn.Module: {typestr(value)}")
+            unimplemented_v2(
+                gb_type="Uninitialized nn.Module",
+                context=typestr(value),
+                explanation=f"Attempted to trace an uninitialized nn.Module of type {typestr(value)}.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    "Ensure your nn.Module instance has called `super().__init__()`.",
+                ],
+            )
         if istype(value, OptimizedModule):
             # Check if the optimized module was disabled
             if inspect.getattr_static(value.forward, "_torchdynamo_disable", False):

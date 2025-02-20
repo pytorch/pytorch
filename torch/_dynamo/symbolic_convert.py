@@ -767,15 +767,18 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.generic_context_manager_depth > 0:
+                if self.active_generic_context_managers:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
                     unimplemented_v2(
                         gb_type="Graph break under GenericContextWrappingVariable",
-                        context="",
-                        explanation="Attempted to graph break in an active context manager that doesn't support graph breaking.",
-                        hints=[],
+                        context=f"Active generic context managers: {self.active_generic_context_managers}",
+                        explanation="Attempted to graph break in an active context manager(s) that doesn't support graph breaking.",
+                        hints=[
+                            "Move the offending context manager(s) to outside the compiled region.",
+                            *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                        ],
                     )
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
@@ -887,9 +890,13 @@ class BytecodeDistpatchTableMeta(type):
         def _missing(opname, *args):
             unimplemented_v2(
                 gb_type="Missing bytecode handler",
-                context=opname,
-                explanation=f"Dynamo does not know how to handle the bytecode instruction {opname}",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                context=f"{opname} with args {args}",
+                explanation=f"Dynamo does not know how to handle the bytecode instruction `{opname}`.",
+                hints=[
+                    f"Do not trace code that produces the `{opname}` bytecode instruction "
+                    "(see https://docs.python.org/3/library/dis.html for bytecode semantics).",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         dispatch_table = {
@@ -1732,7 +1739,16 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation="Dynamo found no exception handler at the top-level compiled function "
+                        "when encounterin an exception. Exception will propagate outside the compiled region.",
+                        hints=[
+                            *graph_break_hints.FUNDAMENTAL,
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -1752,7 +1768,15 @@ class InstructionTranslatorBase(
                         # instruction translater.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            raise Unsupported("Observed exception")
+                            unimplemented_v2(
+                                gb_type="Observed exception (EXCEPT_HANDLER)",
+                                context=str(raised_exception),
+                                explanation="Dynamo found no exception handler at the top-level compiled function "
+                                "when encounterin an exception. Exception will propagate outside the compiled region. "
+                                "This graph break is unexpected.",
+                                hints=[*graph_break_hints.DYNAMO_BUG],
+                            )
+
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
@@ -1806,7 +1830,16 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation="Dynamo found no exception handler at the top-level compiled function "
+                        "when encounterin an exception. Exception will propagate outside the compiled region.",
+                        hints=[
+                            *graph_break_hints.FUNDAMENTAL,
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
@@ -2716,7 +2749,7 @@ class InstructionTranslatorBase(
             isinstance(ctx, GenericContextWrappingVariable)
             and not ctx.supports_graph_breaks()
         ):
-            self.generic_context_manager_depth += 1
+            self.active_generic_context_managers.append(ctx)
 
         # Need this redundant check for mypy
         assert isinstance(
@@ -2970,7 +3003,7 @@ class InstructionTranslatorBase(
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.generic_context_manager_depth = 0
+        self.active_generic_context_managers = []
         self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -3239,7 +3272,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and self.generic_context_manager_depth == 0
+            and not self.active_generic_context_managers
         )
 
     def create_call_resume_at(self, inst):

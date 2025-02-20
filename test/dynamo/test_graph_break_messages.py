@@ -498,6 +498,195 @@ Attempted to call function marked as skipped
             f(x)
         self.assertEqual(len(ws), 2)
 
+    def test_slice_with_tensor(self):
+        def fn(x, y):
+            return x[:y]
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(10),
+                torch.tensor([3]),
+            ),
+            """\
+Dynamic slicing with Tensor arguments
+  Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+
+  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: TensorVariable(), step: ConstantVariable(NoneType: None)
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return x[:y]""",
+        )
+
+    def test_observed_exception(self):
+        def fn():
+            raise RuntimeError("test")
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encounterin an exception. Exception will propagate outside the compiled region.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Dynamo has detected that tracing the code will result in an error. Please double check that your code doesn't contain a similar error when running eager/uncompiled.
+
+  Developer debug context: raised exception ExceptionVariable(<class 'RuntimeError'>)
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    raise RuntimeError("test")""",
+        )
+
+    def test_uninitialized_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                pass
+
+        def fn(mod):
+            return mod(1)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(Foo()),
+            """\
+Uninitialized nn.Module
+  Explanation: Attempted to trace an uninitialized nn.Module of type Foo.
+  Hint: Dynamo has detected that tracing the code will result in an error. Please double check that your code doesn't contain a similar error when running eager/uncompiled.
+  Hint: Ensure your nn.Module instance has called `super().__init__()`.
+
+  Developer debug context: Foo
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return mod(1)""",
+        )
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_class_property(self):
+        class Foo(torch.nn.Module):
+            attr = unittest
+
+        def fn(mod, x):
+            return mod.attr
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                Foo(), torch.randn(3)
+            ),
+            """\
+Unsupported nn.Module attribute type
+  Explanation: Dynamo does not support tracing nn.Module attributes of type `module`
+  Hint: Refactor your code so that `attr` (type `module`) is not an attribute of `Foo`
+  Hint: Currently supported attribute types are methods, classmethods, staticmethods, properties, constants, and tensors.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: nn.Module subclass: Foo, name: attr, attribute type: module
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return mod.attr""",
+        )
+
+    def test_generic_ctx_mgr_graph_break(self):
+        class CtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def fn():
+            with CtxMgr():
+                with CtxMgr():
+                    pass
+                with CtxMgr():
+                    with CtxMgr():
+                        pass
+                    torch._dynamo.graph_break()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Graph break under GenericContextWrappingVariable
+  Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
+  Hint: Move the offending context manager(s) to outside the compiled region.
+  Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break()""",
+        )
+
+    def test_unsupported_bytecode(self):
+        def fn():
+            class Foo:
+                pass
+
+            return Foo
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Missing bytecode handler
+  Explanation: Dynamo does not know how to handle the bytecode instruction `LOAD_BUILD_CLASS`.
+  Hint: Do not trace code that produces the `LOAD_BUILD_CLASS` bytecode instruction (see https:/docs.python.org/3/library/dis.html for bytecode semantics).
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: LOAD_BUILD_CLASS with args (<torch._dynamo.symbolic_convert.InstructionTranslator object at 0xmem_addr>, Instruction(opcode=71, opname='LOAD_BUILD_CLASS', arg=None, argval=None, offset=4, starts_line=634, is_jump_target=False, positions=Positions(lineno=634, end_lineno=635, col_offset=12, end_col_offset=20), target=None, exn_tab_entry=None, argrepr=None))
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    class Foo:""",
+            post_munge=post_munge,
+        )
+
+    def test_reconstruction_failure(self):
+        class Foo:
+            def meth(self):
+                return 0
+
+        def fn():
+            return Foo().meth
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Reconstruction failure
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
+  Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that many objects that don't have reconstruction rules are fundamentally unreconstructable.
+
+  Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return Foo().meth""",
+            post_munge=post_munge,
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

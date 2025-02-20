@@ -3251,6 +3251,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented_v2
 
+            # TODO how to test this???
             unimplemented_v2(
                 gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
                 context=str(e),
