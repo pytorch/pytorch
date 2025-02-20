@@ -238,6 +238,7 @@ def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs)
     # dependency on torch.cuda.graphs, which is believed to cause this error:
     # https://github.com/pytorch/pytorch/pull/140979#issuecomment-2657590366
     from torch.cuda.graphs import _graph_no_gc
+
     if torch.cuda.is_current_stream_capturing():
         # This is a call to torch.while_loop() nested within either
         # torch.while_loop() or another torch.cond() function.

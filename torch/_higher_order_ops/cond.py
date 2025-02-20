@@ -17,7 +17,6 @@ from torch._C._functorch import (
 )
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
     CUDAGraphCaptureControlFlowOpDispatchMode,
@@ -376,6 +375,7 @@ def cond_op_warmup(mode, pred, true_fn, false_fn, operands):
     # dependency on torch.cuda.graphs, which is believed to cause this error:
     # https://github.com/pytorch/pytorch/pull/140979#issuecomment-2657590366
     from torch.cuda.graphs import _graph_no_gc
+
     if torch.cuda.is_current_stream_capturing():
         # This is a call to torch.cond() nested within either
         # torch.while_loop() or another torch.cond() function.
