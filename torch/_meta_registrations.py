@@ -369,6 +369,12 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
+    elif device_hint(self) == "xpu":
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        out = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
@@ -2577,7 +2583,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -6506,7 +6512,8 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+    torch._check_is_size(k)
+    torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
     if len(topKSize) > 0:
