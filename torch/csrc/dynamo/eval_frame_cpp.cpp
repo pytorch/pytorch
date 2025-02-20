@@ -9,6 +9,35 @@
 
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
+// Use RAII to save/restore global state across the dynamo callback
+class PreserveGlobalState {
+  py::object random_state;
+
+ public:
+  PreserveGlobalState() {
+    this->random_state = py::module_::import("random").attr("getstate")();
+  }
+  PreserveGlobalState(const PreserveGlobalState&) = delete;
+  PreserveGlobalState(PreserveGlobalState&&) = delete;
+  PreserveGlobalState& operator=(const PreserveGlobalState&) = delete;
+  PreserveGlobalState& operator=(PreserveGlobalState&&) = delete;
+  ~PreserveGlobalState() {
+    try {
+      py::module_::import("random").attr("setstate")(this->random_state);
+    } catch (py::error_already_set& e) {
+      try {
+        e.restore();
+      } catch (...) {
+        // Intentionally return to silence empty catch linter.
+        // We can't propagate exceptions since we are in a destructor.
+        return;
+      }
+    } catch (...) {
+      return;
+    }
+  }
+};
+
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static py::object dynamo_call_callback(
@@ -229,6 +258,7 @@ PyObject* dynamo__custom_eval_frame(
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
+    // PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
