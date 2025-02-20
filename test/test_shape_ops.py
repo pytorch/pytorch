@@ -581,6 +581,16 @@ class TestShapeOps(TestCase):
         self.compare_with_numpy(torch_fn, np_fn, t_in)
         del t_in
 
+    @onlyCPU
+    @unittest.expectedFailure
+    @dtypes(torch.quint4x2, torch.quint2x4)
+    def test_flip_unsupported_dtype(self, dtype):
+        scale, zero_point = 0.1, 5
+        qt = torch.quantize_per_tensor(
+            torch.randn(16, 16), scale=scale, zero_point=zero_point, dtype=dtype
+        )
+        torch.flip(qt, dims=(0,))
+
     def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
