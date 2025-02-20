@@ -356,12 +356,13 @@ class Unpickler:
                         "``torch.distributed.tensor`` must be imported to load DTensors"
                     )
                 else:
-                    if "builtins" in full_path and "builtins" == full_path[:8]:
-                        full_path = full_path[9:]
+                    builtins_name = "builtins"
+                    if builtins_name in full_path and builtins_name == full_path[:len(builtins_name)]:
+                        full_path = full_path[len(builtins_name):]
                         full_path = (
                             full_path[1:]
                             if len(full_path) > 0 and full_path[0] == "."
-                            else "builtins" + full_path
+                            else builtins_name + full_path
                         )
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
