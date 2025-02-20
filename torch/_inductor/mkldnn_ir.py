@@ -227,7 +227,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert get_device_type(x) == "cpu" and get_device_type(weight) == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
