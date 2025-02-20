@@ -6914,7 +6914,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     beam_idx = 0
                     for _, token in enumerate(x[i]):
                         beam_hyps.append(token)
-                        beam_idx += 1
+                        beam_idx += 1  # noqa: SIM113
 
                         if beam_idx == 6:
                             break
