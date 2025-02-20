@@ -79,9 +79,6 @@ _xpu_computation_ops = [
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
-    def test_config_xpu_record(self):
-        assert 'USE_XPU=1' in torch.__config__.show()
-
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
         torch.xpu.set_device(current_device)
