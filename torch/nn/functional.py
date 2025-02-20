@@ -3264,12 +3264,13 @@ def gaussian_nll_loss(
             var = torch.unsqueeze(var, -1)
 
         # This checks if the var is broadcastable to the input.
+        # This is also a homoscedastic case.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
         # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
             input.ndim == var.ndim
             and all(x == y or y == 1 for x, y in zip(input.size(), var.size()))
-        ):
+        ): # Heteroscedastic case
             pass
 
         # If none of the above pass, then the size of var is incorrect.
