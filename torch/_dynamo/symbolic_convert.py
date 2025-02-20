@@ -3003,7 +3003,7 @@ class InstructionTranslatorBase(
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.active_generic_context_managers = []
+        self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True

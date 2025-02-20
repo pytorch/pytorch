@@ -637,7 +637,13 @@ from user code:
             return Foo
 
         def post_munge(s):
-            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+            s = re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+            s = re.sub(
+                r"Instruction\(.*opname='LOAD_BUILD_CLASS'.*\)\n",
+                "Instruction(LOAD_BUILD_CLASS)",
+                s,
+            )
+            return s
 
         self.assertExpectedInlineMunged(
             Unsupported,
@@ -648,8 +654,7 @@ Missing bytecode handler
   Hint: Do not trace code that produces the `LOAD_BUILD_CLASS` bytecode instruction (see https:/docs.python.org/3/library/dis.html for bytecode semantics).
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: LOAD_BUILD_CLASS with args (<torch._dynamo.symbolic_convert.InstructionTranslator object at 0xmem_addr>, Instruction(opcode=71, opname='LOAD_BUILD_CLASS', arg=None, argval=None, offset=4, starts_line=634, is_jump_target=False, positions=Positions(lineno=634, end_lineno=635, col_offset=12, end_col_offset=20), target=None, exn_tab_entry=None, argrepr=None))
-
+  Developer debug context: LOAD_BUILD_CLASS with args (<torch._dynamo.symbolic_convert.InstructionTranslator object at 0xmem_addr>, Instruction(LOAD_BUILD_CLASS)
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
@@ -676,7 +681,7 @@ Reconstruction failure
   Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
-  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that many objects that don't have reconstruction rules are fundamentally unreconstructable.
+  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't havereconstruction rules may be fundamentally unreconstructable.
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
@@ -685,6 +690,38 @@ from user code:
    File "test_graph_break_messages.py", line N, in fn
     return Foo().meth""",
             post_munge=post_munge,
+        )
+
+    def test_faketensor_nyi(self):
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @foo.register_fake
+        def _(x):
+            raise NotImplementedError
+
+        def fn(x):
+            return torch.ops.mylib.foo(x)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
+NotImplementedError/UnsupportedFakeTensorException when running FX node
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.foo(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
+  Hint: If the op is a PyTorch op, please file an issue to PyTorch.
+
+  Developer debug context: Traceback (most recent call last):
+  File "test_graph_break_messages.py", line N, in _
+    raise NotImplementedError
+NotImplementedError
+
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return torch.ops.mylib.foo(x)""",
         )
 
 

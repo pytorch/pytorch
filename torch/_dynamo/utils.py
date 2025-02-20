@@ -59,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -1396,7 +1395,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -3220,7 +3219,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return (
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                + repr(e)
+            )
 
         from .exc import Unsupported
 
@@ -3251,12 +3253,17 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented_v2
 
-            # TODO how to test this???
+            hints = []
+            if isinstance(e, NotImplementedError):
+                hints = [
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+
             unimplemented_v2(
-                gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
-                context=str(e),
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
+                context="".join(traceback.format_exception(e)),
                 explanation=make_error_message(e),
-                hints=[],
+                hints=hints,
                 from_exc=e,
             )
         except Unsupported:
