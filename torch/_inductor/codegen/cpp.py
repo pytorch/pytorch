@@ -4886,18 +4886,20 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-                    outer_size = functools.reduce(
+                    outer_ranges = functools.reduce(
                         lambda x, y: x * y,
                         cpp_kernel_proxy.ranges[: node.outer_loop_fusion_depth],
                     )
+                    # If the range of the first inner loop is much larger than
+                    # the range of all outer loops, fallback to standard codegen.
                     if (
                         len(cpp_kernel_proxy.ranges) > node.outer_loop_fusion_depth
-                        and isinstance(outer_size, sympy.Integer)
+                        and isinstance(outer_ranges, sympy.Integer)
                         and isinstance(
                             cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth],
                             sympy.Integer,
                         )
-                        and outer_size * 300
+                        and outer_ranges * 300
                         < cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
                     ):
                         for removed_buffer in scope.removed_buffers:
@@ -5350,6 +5352,8 @@ class LoopNest:
         1) Levels without splitting and
         2) All reduction or non-reduction levels
         When the loop is split at the top level, the max depth is 1.
+        When the range of the first inner loop is much larger than the range of all outer loops,
+        change the starting depth of parallelization to the first inner loop, and set the max depth to 1.
         """
         if self.loops is None:
             return 0, 0
@@ -5357,18 +5361,18 @@ class LoopNest:
         max_depth = 0
         start_depth = 0
         is_reduction = self.loops[0].is_reduction
-        size = sympy.Integer(1)
+        loop_sizes = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            size = size * loop.size
+            loop_sizes = loop_sizes * loop.size
             max_depth += 1
 
         if (
             max_depth < len(self.loops)
-            and isinstance(size, sympy.Integer)
+            and isinstance(loop_sizes, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
-            and size * 300 < self.loops[max_depth].size
+            and loop_sizes * 300 < self.loops[max_depth].size
         ):
             start_depth = max_depth
             max_depth = 1

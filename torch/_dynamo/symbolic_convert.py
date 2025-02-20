@@ -1,4 +1,29 @@
 # mypy: allow-untyped-defs
+
+"""
+Core module responsible for converting Python bytecode into TorchDynamo's symbolic execution format.
+
+This module implements the bytecode-level tracing system that allows TorchDynamo to analyze
+and transform Python code. It converts Python bytecode instructions into a symbolic format
+that tracks the flow of tensors and other values through the program.
+
+Key components:
+- InstructionTranslatorBase: Base class for converting bytecode to symbolic execution
+- InstructionTranslator: Main translator for function bytecode
+- InliningInstructionTranslator: Handles inlining of called functions
+- SpeculationLog: Manages state for speculative execution and rollback
+
+The symbolic conversion process handles:
+- Control flow (loops, conditionals, etc.)
+- Function inlining and call stack management
+- Tracking of program values and side effects
+- Graph breaks and resumption points
+- Exception handling and stack frame management
+
+This is a core part of TorchDynamo's tracing system that enables ahead-of-time
+optimization of PyTorch programs.
+"""
+
 import collections
 import collections.abc
 import contextlib
@@ -26,6 +51,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -669,7 +695,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
-                eval_result = value.evaluate_expr(self.output)
+                # if the user is branching on a SymBool, guard on it
+                # if the user has code like:
+                #    if size:
+                #        ...
+                # then they are just testing truthiness: guard that the expr != 0
+                if isinstance(value.sym_num, torch.SymBool):
+                    eval_result = value.evaluate_expr(self.output)
+                else:
+                    eval_result = guard_bool(value.sym_num != 0)
             except exc.UserError as e:
                 if self.should_compile_partial_graph():
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
