@@ -274,7 +274,7 @@ void undo_broadcast(at::Tensor& tensor) {
     }
   }
   tensor = tensor.as_strided(new_shape, new_strides);
-  for (int i = 0; i < unsqueeze_dims.size(); i++) {
+  for (size_t i = 0; i < unsqueeze_dims.size(); i++) {
     tensor = tensor.unsqueeze(unsqueeze_dims[i]);
   }
   return;
