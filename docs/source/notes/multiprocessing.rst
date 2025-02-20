@@ -22,6 +22,24 @@ memory and will only send a handle to another process.
 This allows to implement various training methods, like Hogwild, A3C, or any
 others that require asynchronous operation.
 
+.. _multiprocessing-poison-fork-note:
+
+Poison fork in multiprocessing
+------------------------------
+
+When using multiprocessing with :ref:`accelerators<accelerators>`, a known issue called "poison fork" may occur.
+This happens when the accelerator's runtime is initialized before a process forks, leading to runtime errors in child processes.
+
+.. note::
+    If an accelerator's runtime is initialized in a parent process before forking, child processes that attempt to
+    access the accelerator's runtime APIs may encounter initialization errors.
+    This occurs because the accelerator's runtime resources are not safely inherited or shared across processes
+    when a process is forked. This leads to conflicts when multiple processes attempt to access the same resources.
+
+To prevent such errors:
+    - Use an alternative process start methods, such as ``spawn`` or ``forkserver``, which ensures a clean initialization of each process.
+    - Initialize the accelerator runtime explicitly within each worker process to avoid inheriting any already-initialized runtime resources from the parent process.
+
 .. _multiprocessing-cuda-note:
 
 CUDA in multiprocessing
