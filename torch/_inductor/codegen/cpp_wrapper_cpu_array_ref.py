@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from itertools import count
 from typing import Callable, Optional
 
 import sympy
@@ -42,23 +41,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     """
 
     def __init__(self):
-        if not hasattr(self, "device"):
-            self.device = "cpu"
         super().__init__()
-        self.supports_intermediate_hooks = False
-        self.kernel_callsite_id = count()
-        self.var_array_id = (
-            count()
-        )  # for different types of local array variable declarations
-        self.int_array_id = count()  # for int array local variable declarations
-        self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
-        self.arg_var_id = count()
-        self.cached_output_id = count()
-        self.scalar_to_tensor_id = count()
-        self.custom_op_wrapper_loaded = False
-        self.allow_stack_allocation: Optional[
-            bool
-        ] = config.aot_inductor.allow_stack_allocation
+        assert self.device == "cpu", "ArrayRefTensor only supported on CPU!"
+        self.allow_stack_allocation = config.aot_inductor.allow_stack_allocation
         self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
