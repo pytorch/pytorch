@@ -90,14 +90,6 @@ def flags(enabled=False, deterministic=False, allow_tf32=True):
             set_flags(*orig_flags)
 
 
-def _set_tf32(enabled):
-    torch._C._set_onednn_allow_tf32(enabled)
-    if enabled:
-        torch.set_float32_matmul_precision("high")
-    else:
-        torch.set_float32_matmul_precision("highest")
-
-
 class MkldnnModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
@@ -106,7 +98,9 @@ class MkldnnModule(PropModule):
     deterministic = ContextProp(
         torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
     )
-    allow_tf32 = ContextProp(torch._C._get_onednn_allow_tf32, _set_tf32)
+    allow_tf32 = ContextProp(
+        torch._C._get_onednn_allow_tf32, torch._C._set_onednn_allow_tf32
+    )
 
 
 if TYPE_CHECKING:
