@@ -12642,6 +12642,35 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    def test_export_script_module(self):
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.add_mod = torch.jit.script(Add())._c
+
+            def forward(self, x, y):
+                return self.add_mod.forward(x, y)
+
+        x, y = torch.randn(3, 2), torch.randn(3, 2)
+        mod = Mod()
+        # TODO: strict mode doesn't work because dynamo add_mod is treated as a
+        # user defined variable. We might need to add a CustomModule variable to support it.
+        if self._testMethodName == "test_export_script_module":
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "UserDefined with non-function"
+            ):
+                ep = export(mod, (x, y))
+        else:
+            ep = export(mod, (x, y))
+            self.assertEqual(ep.module()(x, y), mod(x, y))
+            FileCheck().check_count("torch.ops.aten.add.Tensor", 1, exactly=True).run(
+                ep.graph_module.code
+            )
+
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):
             def forward(self, x):
