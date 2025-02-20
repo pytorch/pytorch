@@ -104,7 +104,7 @@ from .exc import (
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
-    unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from .guards import (
@@ -535,7 +535,12 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         if is_generator(code):
-            unimplemented("generator")
+            unimplemented_v2(
+                gb_type="Attempt to trace generator",
+                context="",
+                explanation="Dynamo cannot trace generators as a top-level function.",
+                hints=[],
+            )
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
@@ -793,7 +798,12 @@ def _compile(
                 # We now have a new "last attempt", reset the clock
                 last_attempt_start_time = time.time()
                 if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
+                    unimplemented_v2(
+                        gb_type="Excessive RestartAnalysis() calls",
+                        context="",
+                        explanation="Dynamo attempted to restart analysis 100+ times.",
+                        hints=[],
+                    )
             except exc.SkipFrame as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                     TensorifyState.clear()
@@ -962,7 +972,12 @@ def _compile(
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented(f"{limit_type} reached")
+                unimplemented_v2(
+                    gb_type="Dynamo cache limit exceeded",
+                    context=f"Limit type: {limit_type}",
+                    explanation=f"Dynamo attempted to recompile too many times, exceeding the {limit_type} cache size limit.",
+                    hints=[],
+                )
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
