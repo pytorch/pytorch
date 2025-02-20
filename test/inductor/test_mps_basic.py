@@ -188,6 +188,7 @@ for test_name in [
     "test_slice_scatter4",
     "test_softmax",
     "test_sort",
+    "test_split_cumsum",
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
