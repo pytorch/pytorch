@@ -2539,7 +2539,13 @@ class PythonWrapperCodegen(CodeGen):
         input_names_to_free: dict[str, bool],
         output_nodes: ir.PartitionOutputType,
     ):
-        # input_names_to_free maps the input names to whether they should be freed during the partition call
+        """
+        Generate code to call a partition function.
+
+        partition_id: a unique id of the partition function
+        input_names_to_free: a dictionary mapping input names to whether they should be freed during the partition
+        output_nodes: the output nodes of the partition function
+        """
         inputs = ", ".join(input_names_to_free.keys()) + (
             "," if len(input_names_to_free) == 1 else ""
         )

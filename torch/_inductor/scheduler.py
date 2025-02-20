@@ -3965,6 +3965,7 @@ class Scheduler:
         )
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
+        """Return True if we should partition the inductor graph on this node"""
         if not node.is_gpu():
             return True
 
@@ -3980,6 +3981,10 @@ class Scheduler:
         return False
 
     def get_name_to_nodes(self) -> ir.PartitionInputType:
+        """
+        Return a mapping from name strings to the corresponding graph inputs or
+        base scheduler node outputs.
+        """
         name_to_node: ir.PartitionInputType = {}
         name_to_node.update(V.graph.graph_inputs)
 
@@ -3992,6 +3997,12 @@ class Scheduler:
     def get_graph_partition_signature(
         self, partitions: list[PartitionType]
     ) -> tuple[list[PartitionInputMetadataType], list[ir.PartitionOutputType]]:
+        """
+        Gets the input and output metadata for each partition.
+        For each partition input, map from name to IRNode/Expr, and a boolean
+            on whether deallocating it during the partition.
+        For each partition output, map from name to IRNode.
+        """
         inputs: list[PartitionInputMetadataType] = []
         outputs: list[ir.PartitionOutputType] = []
 
@@ -4006,6 +4017,8 @@ class Scheduler:
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
+            # all reads/writes are partition inputs except those generated
+            # within the partition
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
@@ -4042,6 +4055,10 @@ class Scheduler:
         list[PartitionInputMetadataType],
         list[PartitionOutputType],
     ]:
+        """
+        Given a list of BaseSchedulerNodes, split into a list of
+        graph partitions and compute the partition input/output metadata.
+        """
         partitions: list[PartitionType] = []
 
         cur_partition: PartitionType = []
@@ -4077,6 +4094,7 @@ class Scheduler:
         input_nodes: PartitionInputMetadataType,
         output_nodes: PartitionOutputType,
     ) -> None:
+        """Codegen a partition given its inputs/outputs"""
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
 
@@ -4114,6 +4132,7 @@ class Scheduler:
             if len(partition) > 1:
                 self._codegen_partition_wrapper(partition, input_node, output_node)
             else:
+                # Inline small partitions to avoid overheads from function calls.
                 self._codegen(partition)
 
         num_partitions = next(self._graph_partition_counter)
