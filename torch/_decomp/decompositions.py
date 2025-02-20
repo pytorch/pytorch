@@ -5131,6 +5131,7 @@ def isin_default(elements, test_elements, *, invert=False):
     res = (x == test_elements).any(dim=dim)
     return torch.where(res, not invert, invert)
 
+
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
     elements_flat = elements.flatten()
     test_elements_flat = test_elements.flatten()
