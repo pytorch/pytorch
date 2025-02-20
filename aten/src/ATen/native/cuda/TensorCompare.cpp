@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorCompare.h>
-#include <iostream>
 
 namespace at::native {
 
@@ -11,7 +10,6 @@ namespace {
 // so it is not very memory efficient, but it is fast on CUDA.
 void isin_default_kernel_gpu(
     const Tensor& elements, const Tensor& test_elements, bool invert, const Tensor& out) {
-      std::cout << " Hello there my friend! default_Kernel_gpu \n";
   std::vector<int64_t> bc_shape(elements.dim(), 1);
   bc_shape.push_back(-1);
   out.copy_(invert ? elements.unsqueeze(-1).ne(test_elements.view(bc_shape)).all(-1)
