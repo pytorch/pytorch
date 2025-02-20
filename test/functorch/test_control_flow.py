@@ -968,7 +968,7 @@ def forward(self, pred_1):
             result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
             return result
 
-        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
+        gm = make_fx(f, tracing_mode="real", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -5347,8 +5347,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5364,8 +5364,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5520,8 +5520,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -5537,8 +5537,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -7514,6 +7514,336 @@ class GraphModule(torch.nn.Module):
         model = M()
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
+
+    def test_merge_tensors(self):
+        from torch._higher_order_ops.cond import _merge_tensors
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
+        valid_test_cases = [
+            # [(size1, stride1), (size2, stride2), (expected_stride, expected_size)]
+            [((3,), (1,)), ((4,), (1,)), ("(u0,)", "(1,)")],
+            [((1, 3), (3, 1)), ((3, 2), (2, 1)), ("(u0, u1)", "(u1, 1)")],
+            [((2, 1), (1, 1)), ((7, 3), (3, 1)), ("(u0, u1)", "(u1, 1)")],
+            [((5, 5), (1, 5)), ((4, 5), (1, 4)), ("(u0, 5)", "(1, u0)")],
+            [
+                ((7, 3, 1), (1, 7, 1)),
+                ((4, 3, 3), (3, 12, 1)),
+                ("(u0, 3, u1)", "(u1, u0*u1, 1)"),
+            ],
+            [
+                ((5, 7, 4), (7, 1, 35)),
+                ((7, 4, 4), (4, 1, 28)),
+                ("(u0, u1, 4)", "(u1, 1, u0*u1)"),
+            ],
+            [
+                ((1, 6, 3, 2), (36, 1, 6, 18)),
+                ((4, 2, 2, 6), (24, 1, 2, 4)),
+                ("(u0, u1, u2, u3)", "(u1*u2*u3, 1, u1, u1*u2)"),
+            ],
+            [
+                ((6, 1, 6, 3), (18, 1, 1, 6)),
+                ((2, 1, 3, 4), (12, 1, 1, 3)),
+                ("(u0, 1, u1, u2)", "(u1*u2, 1, 1, u1)"),
+            ],
+            [
+                ((3, 1, 2, 4, 1), (8, 8, 4, 1, 1)),
+                ((2, 4, 1, 4, 1), (16, 4, 4, 1, 1)),
+                ("(u0, u1, u2, 4, 1)", "(4*u1*u2, 4*u2, 4, 1, 1)"),
+            ],
+        ]
+
+        def _inner(case):
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+            (size1, stride1), (size2, stride2), (merged_size, merged_stride) = case
+            with fake_mode:
+                t1 = torch.empty_strided(size1, stride1)
+                t2 = torch.empty_strided(size2, stride2)
+            out = _merge_tensors(t1, t2, fake_mode)
+            self.assertEqual(str(tuple(out.size())), merged_size)
+            self.assertEqual(str(tuple(out.stride())), merged_stride)
+
+        for case in valid_test_cases:
+            _inner(case)
+
+        # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
+        invalid_test_cases = [
+            # [(size1, stride1), (size2, stride2)]
+            [((1,), (1,)), ((1,), (0,))],
+            [
+                ((1, 3), (1, 1)),
+                ((5, 6), (6, 1)),
+            ],  # t1 is not contiguous, t2 is contiguous
+            [
+                ((2, 1), (1, 1)),
+                ((7, 3), (1, 3)),
+            ],  # t1 is contiguous, t2 is not contiguous
+            [
+                ((5, 4), (4, 1)),
+                ((5, 5), (1, 5)),
+            ],  # t1 is contiguous, t2 is not contiguous
+            [((7, 3, 1), (1, 7, 1)), ((4, 3, 3), (9, 1, 3))],  # layout is different
+            [((5, 7, 4), (7, 1, 35)), ((7, 4, 4), (4, 28, 1))],  # layout is different
+            [
+                ((1, 6, 3, 2), (36, 1, 6, 18)),
+                ((4, 1, 1, 6), (1, 4, 4, 4)),
+            ],  # layout is different
+            [
+                ((6, 1, 6, 3), (18, 1, 1, 6)),
+                ((1, 1, 1, 1), (1, 1, 1, 1)),
+            ],  # layout is different
+            [
+                ((6, 1, 1, 6, 3), (3, 18, 18, 18, 1)),
+                ((5, 1, 2, 1, 1), (2, 10, 1, 10, 1)),
+            ],  # layout is different
+        ]
+        for case in invalid_test_cases:
+            with self.assertRaisesRegex(Exception, r"."):
+                _inner(case)
+
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_mismatched_branch_output(self, dynamic, backend):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + a)[2:].clone()
+
+                def false_fn(x):
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + b * z)[:2].clone()
+
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                return y.sum() - ret
+
+        m = M()
+        x, y, z = torch.randn(5, 4), torch.randn(5, 4), torch.randn(5, 4)
+        out = m(x, y, z)
+        if not (backend == "eager" and dynamic and not TEST_WITH_CROSSREF):
+            compiled_out = torch.compile(
+                m, backend=backend, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+        else:
+            bk = EagerAndRecordGraphs()
+            compiled_out = torch.compile(
+                m, backend=bk, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+            self.assertExpectedInline(
+                normalize_gm(bk.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_y_: "f32[s0, s1]", L_z_: "f32[s0, s1]", L_x_: "f32[s0, s1]"):
+        l_y_ = L_y_
+        l_z_ = L_z_
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum()
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+
+        cond_true_0 = self.cond_true_0
+        cond_false_0 = self.cond_false_0
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, s1, s0, s0, l_z_]);  gt = cond_true_0 = cond_false_0 = l_x_ = s1 = s0 = l_z_ = None
+
+        getitem_5: "f32[u0, s1]" = cond[0]
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+        ret: "f32[u0, s1]" = cond[0];  cond = None
+
+        sum_2: "f32[]" = l_y_.sum();  l_y_ = None
+        sub: "f32[u0, s1]" = sum_2 - ret;  sum_2 = ret = None
+        return (sub,)
+
+    class cond_true_0(torch.nn.Module):
+        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+            s1_1 = s1
+
+            add: "f32[s0, s1]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
+            getitem: "f32[s0 - 2, s1]" = add[slice(2, None, None)];  add = None
+            clone: "f32[s0 - 2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
+
+    class cond_false_0(torch.nn.Module):
+        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+            s1_1 = s1
+
+            mul: "f32[s0, s1]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            add: "f32[s0, s1]" = l_x__1 + mul;  l_x__1 = mul = None
+            getitem: "f32[2, s1]" = add[slice(None, 2, None)];  add = None
+            clone: "f32[2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
+""",  # noqa: B950
+            )
+
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_mismatched_branch_strided_output(self, dynamic, backend):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def true_fn(x, y):
+                    return (
+                        (x.swapaxes(-1, 0) + 1)
+                        .unsqueeze(1)
+                        .expand(-1, 5, -1, -1, -1, -1, -1),
+                        torch.empty_strided((3, 3), (0, 1)),
+                    )
+
+                def false_fn(x, y):
+                    return (
+                        (y.swapaxes(-1, 0) + 1)
+                        .unsqueeze(1)
+                        .expand(-1, 4, -1, -1, -1, -1, -1),
+                        torch.empty_strided((4, 5), (0, 1)),
+                    )
+
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x, y))
+                return y.sum() + ret[0]
+
+        m = M()
+        x, y = torch.randn(1, 6, 1, 5, 4, 3), torch.randn(1, 4, 5, 1, 3, 8)
+        out = m(x, y)
+        if backend == "eager" and dynamic and not TEST_WITH_CROSSREF:
+            bk = EagerAndRecordGraphs()
+            compiled_out = torch.compile(
+                m, backend=bk, dynamic=dynamic, fullgraph=True
+            )(x, y)
+            self.assertEqual(compiled_out, out)
+            self.assertExpectedInline(
+                normalize_gm(bk.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", s2: "Sym(s2)", s3: "Sym(s3)", L_x_: "f32[1, s0, 1, s1, s2, s3]", s4: "Sym(s4)", L_y_: "f32[1, s2, s1, 1, s3, s4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sum_1: "f32[]" = l_x_.sum()
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+
+        cond_true_0 = self.cond_true_0
+        cond_false_0 = self.cond_false_0
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [s1, s2, s3, l_x_, s0, l_y_, s4]);  gt = cond_true_0 = cond_false_0 = s1 = s2 = s3 = l_x_ = s0 = s4 = None
+
+        getitem_2: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_2, 0);  getitem_2 = None
+        getitem_3: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int_1: "Sym(u1)" = torch.ops.aten.sym_size.int(getitem_3, 1);  getitem_3 = None
+        getitem_4: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int_2: "Sym(u2)" = torch.ops.aten.sym_size.int(getitem_4, 2);  getitem_4 = None
+        getitem_5: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int_3: "Sym(u3)" = torch.ops.aten.sym_size.int(getitem_5, 3);  getitem_5 = None
+        getitem_6: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int_4: "Sym(u4)" = torch.ops.aten.sym_size.int(getitem_6, 4);  getitem_6 = None
+        getitem_7: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
+        sym_size_int_5: "Sym(u5)" = torch.ops.aten.sym_size.int(getitem_7, 5);  getitem_7 = None
+        getitem_8: "f32[u6, u7]" = cond[1]
+        sym_size_int_6: "Sym(u6)" = torch.ops.aten.sym_size.int(getitem_8, 0);  getitem_8 = None
+        getitem_9: "f32[u6, u7]" = cond[1]
+        sym_size_int_7: "Sym(u7)" = torch.ops.aten.sym_size.int(getitem_9, 1);  getitem_9 = None
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
+        ge: "Sym(u0 >= 2)" = sym_size_int >= 2;  sym_size_int = None
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
+
+        _check_is_size_1 = torch._check_is_size(sym_size_int_1);  _check_is_size_1 = None
+
+        ge_1: "Sym(u1 >= 4)" = sym_size_int_1 >= 4
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 4 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
+        le: "Sym(u1 <= 5)" = sym_size_int_1 <= 5;  sym_size_int_1 = None
+        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_2 = None
+
+        _check_is_size_2 = torch._check_is_size(sym_size_int_2);  _check_is_size_2 = None
+
+        ge_2: "Sym(u2 >= 2)" = sym_size_int_2 >= 2;  sym_size_int_2 = None
+        _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 2 on node 'ge_2'");  ge_2 = _assert_scalar_default_3 = None
+
+        _check_is_size_3 = torch._check_is_size(sym_size_int_3);  _check_is_size_3 = None
+
+        ge_3: "Sym(u3 >= 1)" = sym_size_int_3 >= 1;  sym_size_int_3 = None
+        _assert_scalar_default_4 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 1 on node 'ge_3'");  ge_3 = _assert_scalar_default_4 = None
+
+        _check_is_size_4 = torch._check_is_size(sym_size_int_4);  _check_is_size_4 = None
+
+        ge_4: "Sym(u4 >= 1)" = sym_size_int_4 >= 1;  sym_size_int_4 = None
+        _assert_scalar_default_5 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u4 >= 1 on node 'ge_4'");  ge_4 = _assert_scalar_default_5 = None
+
+        _check_is_size_5 = torch._check_is_size(sym_size_int_5);  _check_is_size_5 = None
+
+        ge_5: "Sym(u5 >= 2)" = sym_size_int_5 >= 2;  sym_size_int_5 = None
+        _assert_scalar_default_6 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u5 >= 2 on node 'ge_5'");  ge_5 = _assert_scalar_default_6 = None
+
+        _check_is_size_6 = torch._check_is_size(sym_size_int_6);  _check_is_size_6 = None
+
+        ge_6: "Sym(u6 >= 3)" = sym_size_int_6 >= 3
+        _assert_scalar_default_7 = torch.ops.aten._assert_scalar.default(ge_6, "Runtime assertion failed for expression u6 >= 3 on node 'ge_6'");  ge_6 = _assert_scalar_default_7 = None
+        le_1: "Sym(u6 <= 4)" = sym_size_int_6 <= 4;  sym_size_int_6 = None
+        _assert_scalar_default_8 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u6 <= 4 on node 'le_1'");  le_1 = _assert_scalar_default_8 = None
+
+        _check_is_size_7 = torch._check_is_size(sym_size_int_7);  _check_is_size_7 = None
+
+        ge_7: "Sym(u7 >= 3)" = sym_size_int_7 >= 3
+        _assert_scalar_default_9 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u7 >= 3 on node 'ge_7'");  ge_7 = _assert_scalar_default_9 = None
+        le_2: "Sym(u7 <= 5)" = sym_size_int_7 <= 5;  sym_size_int_7 = None
+        _assert_scalar_default_10 = torch.ops.aten._assert_scalar.default(le_2, "Runtime assertion failed for expression u7 <= 5 on node 'le_2'");  le_2 = _assert_scalar_default_10 = None
+        getitem: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0];  cond = None
+
+        sum_2: "f32[]" = l_y_.sum();  l_y_ = None
+        add: "f32[u0, u1, u2, u3, u4, u5, 1]" = sum_2 + getitem;  sum_2 = getitem = None
+        return (add,)
+
+    class cond_true_0(torch.nn.Module):
+        def forward(self, s1, s2, s3, l_x__true_branch, s0_true_branch, l_y__false_branch, s4_false_branch):
+            s1_1 = s1
+            s2_1 = s2
+            s3_1 = s3
+
+            swapaxes: "f32[s3, s0, 1, s1, s2, 1]" = l_x__true_branch.swapaxes(-1, 0);  l_x__true_branch = None
+            add: "f32[s3, s0, 1, s1, s2, 1]" = swapaxes + 1;  swapaxes = None
+
+            unsqueeze: "f32[s3, 1, s0, 1, s1, s2, 1]" = add.unsqueeze(1);  add = None
+
+            child: "f32[s3, 5, s0, 1, s1, s2, 1]" = unsqueeze.expand(-1, 5, -1, -1, -1, -1, -1);  unsqueeze = None
+
+            child_1: "f32[3, 3]" = torch.empty_strided((3, 3), (0, 1))
+            return (child, child_1)
+
+    class cond_false_0(torch.nn.Module):
+        def forward(self, s1, s2, s3, l_x__true_branch, s0_true_branch, l_y__false_branch, s4_false_branch):
+            s1_1 = s1
+            s2_1 = s2
+            s3_1 = s3
+
+            swapaxes: "f32[s4, s2, s1, 1, s3, 1]" = l_y__false_branch.swapaxes(-1, 0);  l_y__false_branch = None
+            add: "f32[s4, s2, s1, 1, s3, 1]" = swapaxes + 1;  swapaxes = None
+
+            unsqueeze: "f32[s4, 1, s2, s1, 1, s3, 1]" = add.unsqueeze(1);  add = None
+
+            child: "f32[s4, 4, s2, s1, 1, s3, 1]" = unsqueeze.expand(-1, 4, -1, -1, -1, -1, -1);  unsqueeze = None
+
+            child_1: "f32[4, 5]" = torch.empty_strided((4, 5), (0, 1))
+            return (child, child_1)
+""",  # noqa: B950
+            )
+        else:
+            compiled_out = torch.compile(
+                m, backend=backend, dynamic=dynamic, fullgraph=True
+            )(x, y)
+            self.assertEqual(compiled_out, out)
 
 
 _hop_schema_test_schema_types = [
