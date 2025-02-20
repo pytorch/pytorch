@@ -378,7 +378,8 @@ else
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
     if [ -z "$MAX_JOBS_OVERRIDE" ]; then
-      export MAX_JOBS=$(nproc --ignore=2)
+      MAX_JOBS=$(nproc --ignore=2)
+      export MAX_JOBS
     fi
 
     # NB: Install outside of source directory (at the same level as the root

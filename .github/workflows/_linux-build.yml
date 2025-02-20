@@ -237,9 +237,9 @@ jobs:
           fi
 
           if [[ ${MAX_JOBS_OVERRIDE} == "" ]]; then
-            MAX_JOBS="$(nproc --ignore=2)"
+            export MAX_JOBS="$(nproc --ignore=2)"
           else
-            MAX_JOBS="${MAX_JOBS_OVERRIDE}"
+            export MAX_JOBS="${MAX_JOBS_OVERRIDE}"
           fi
 
           # Leaving 1GB for the runner and other things
