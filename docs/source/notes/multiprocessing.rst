@@ -37,16 +37,16 @@ This happens when the accelerator's runtime is initialized before a process fork
     when a process is forked. This leads to conflicts when multiple processes attempt to access the same resources.
 
 To prevent such errors:
-    - Use an alternative process start methods, such as ``spawn`` or ``forkserver``, which ensures a clean initialization of each process.
     - Initialize the accelerator runtime explicitly within each worker process to avoid inheriting any already-initialized runtime resources from the parent process.
+    - Use an alternative process start methods, such as ``spawn`` or ``forkserver``, which ensures a clean initialization of each process.
 
 .. _multiprocessing-cuda-note:
 
 CUDA in multiprocessing
 -----------------------
 
-The CUDA runtime does not support the ``fork`` start method; either the ``spawn`` or ``forkserver`` start method are
-required to use CUDA in subprocesses.
+The CUDA runtime has the limatation described in :ref:`multiprocessing-poison-fork-note` when using the ``fork`` start method;
+either the ``spawn`` or ``forkserver`` start method are required to use CUDA in subprocesses.
 
 .. note::
   The start method can be set via either creating a context with
