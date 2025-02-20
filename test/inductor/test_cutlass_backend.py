@@ -369,32 +369,30 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self,
         dynamic: bool,
         max_autotune_gemm_backends: str = "CUTLASS",
         use_aoti: bool = False,
+        dtype: torch.dtype = torch.float16,
     ):
         """
-        Make sure autotuning mm in sub processes work without crashes.
+        Main test for mm.
         """
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a, b):
                 return a @ b
 
         model = MyModel()
-        a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        a = torch.randn(128, 16).cuda().to(dtype)
+        b = torch.randn(16, 128).cuda().to(dtype)
 
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_fallback_to_aten": False,
@@ -409,6 +407,87 @@ class TestCutlassBackend(TestCase):
                 )
             else:
                 Y_compiled = torch.compile(model, dynamic=dynamic)(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_addmm(
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        dtype: torch.dtype = torch.float16,
+    ):
+        """
+        Main test for addmm.
+        """
+
+        M, N, K = 4096, 2048, 25728
+
+        a = torch.randn(M, K).cuda().to(dtype)
+        b = torch.randn(K, N).cuda().to(dtype)
+
+        x_shapes = [
+            (M, N),
+            (M, 1),
+            (1, N),
+            (N,),
+        ]
+
+        alpha = 2.0
+        beta = 0.4
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            for x_shape in x_shapes:
+                x = torch.randn(x_shape).cuda().to(dtype)
+
+                op = torch.addmm
+                compiled_op = torch.compile(torch.addmm, dynamic=dynamic)
+
+                Y_compiled = compiled_op(x, a, b, alpha=alpha, beta=beta)
+                Y = op(x, a, b, alpha=alpha, beta=beta)
+                torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_bmm(
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        dtype: torch.dtype = torch.float16,
+    ):
+        """
+        Main test for bmm.
+        """
+
+        B, M, N, K = 10, 4096, 2048, 25728
+
+        a = torch.randn(B, M, K).cuda().to(dtype)
+        b = torch.randn(B, K, N).cuda().to(dtype)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            op = torch.bmm
+            compiled_op = torch.compile(torch.bmm, dynamic=dynamic)
+
+            Y_compiled = compiled_op(a, b)
+            Y = op(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -551,18 +630,6 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    def test_max_autotune_cutlass_backend_simple_bmm(self):
-        def bmm(a, b):
-            return torch.bmm(a, b)
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(  # test bmm
-            fp16=True,
-            expected_fuse_count=0,
-            mm=bmm,
-            batch_size=10,
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
         def mm(a, b):
             return (a @ b) / b.size(1)
@@ -570,115 +637,6 @@ class TestCutlassBackend(TestCase):
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             fp16=True, expected_fuse_count=0, mm=mm
         )
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
-    ):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        def mm(a, b, bias):
-            return torch.nn.functional.linear(a, b, bias)
-
-        a = torch.randn(2048, 4096).cuda().half()
-        bias = torch.randn(2048).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            Y = mm(a, a, bias)
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
-
-    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
-    ):
-        """
-        Make sure autotuning addmm in sub processes work without crashes.
-        """
-
-        def addmm(x, a, b, alpha, beta):
-            return torch.addmm(x, a, b, alpha=alpha, beta=beta)
-
-        def compare_results(
-            m: int, k: int, n: int, alpha: float, beta: float, x_shape: list[int]
-        ) -> None:
-            x = torch.randn(x_shape).cuda().half()
-            a = torch.randn(m, k).cuda().half()
-            b = torch.randn(k, n).cuda().half()
-            y_expected = addmm(x, a, b, alpha, beta)
-
-            compiled_fn = torch.compile(addmm, dynamic=dynamic)
-            y = compiled_fn(x, a, b, alpha, beta)
-            torch.testing.assert_close(y, y_expected)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
-                # unless we tune in a subproc here.
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_op_allowlist_regex": "",
-                "cuda.cutlass_op_denylist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            # No broadcast
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 2048])
-            # Broadcast first dim.
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
-            # Broadcast last dim.
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_addmm_with_expanded_bias(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x, w):
-                bias = torch.zeros(
-                    size=(w.size(1), x.size(0)), dtype=torch.float16, device="cuda"
-                ).t()
-                return torch.addmm(bias, x, w)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            model = MyModel()
-            M, N, K = 2048, 3072, 6144
-            x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
-
-            actual = AOTIRunnerUtil.run(
-                "cuda",
-                model,
-                (x, w),
-            )
-            expected = model(x, w)
-            torch.testing.assert_close(expected, actual)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
