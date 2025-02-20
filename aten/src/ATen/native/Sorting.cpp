@@ -1,3 +1,4 @@
+#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -23,7 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/arange.h>
+#include <ATen/ops/linspace.h>
 #include <ATen/ops/argsort_native.h>
 #include <ATen/ops/broadcast_tensors.h>
 #include <ATen/ops/empty.h>
@@ -88,7 +89,16 @@ TORCH_META_FUNC2(sort, stable)
       : at::infer_dense_strides(self.sizes(), self.strides());
 
   set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
-  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
+  if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
+    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::Byte), {});
+  } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
+    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt16), {});
+  } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
+    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt32), {});
+  } else {
+    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt64), {});
+  }
 }
 
 } // namespace at::meta
@@ -102,7 +112,7 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
+  auto idx_dim = at::linspace(0, dim_size - 1, dim_size, indices.options());
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
   idx_dim_sizes[dim] = dim_size;

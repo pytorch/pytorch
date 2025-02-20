@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/SortStable.h>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -51,11 +52,11 @@ struct offset_t {
 // implementation here is a catch-all, so we're not looking for
 // efficiency, but instead correctness.
 
-template <typename scalar_t>
+template <typename scalar_t, typename idx_scalar_t>
 __global__ void sort_postprocess_kernel(
     const scalar_t* in,
     scalar_t* out,
-    int64_t* index,
+    idx_scalar_t* index,
     const int2* i_s_ptr,
     int nsegments,
     int nsort) {
@@ -66,7 +67,7 @@ __global__ void sort_postprocess_kernel(
     int offset = segment * nsort;
     const scalar_t* in_ = in + offset;
     scalar_t* out_ = out + offset;
-    int64_t* index_ = index + offset;
+    idx_scalar_t* index_ = index + offset;
     const int2* i_s_ptr_ = i_s_ptr + offset;
 
     int idx = i_s_ptr_[j].y;
@@ -88,9 +89,10 @@ __global__ void fill_index_and_segment_kernel(
   }
 }
 
+template <typename idx_scalar_t>
 C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
 __global__ void fill_reverse_indices_kernel(
-    int64_t* data,
+    idx_scalar_t* data,
     int numel,
     at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
   CUDA_KERNEL_LOOP(idx, numel) {
@@ -98,7 +100,7 @@ __global__ void fill_reverse_indices_kernel(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename idx_scalar_t>
 inline void segmented_sort_large_segments(
     const int64_t nsegments,
     const int64_t nsort,
@@ -106,20 +108,20 @@ inline void segmented_sort_large_segments(
     const bool descending,
     const scalar_t* self_ptr,
     scalar_t* values_ptr,
-    int64_t* indices_ptr) {
+    idx_scalar_t* indices_ptr) {
   using namespace at::cuda::detail;
   auto allocator = at::cuda::getCUDADeviceAllocator();
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 block = CUDA_NUM_THREADS;
   dim3 grid = GET_BLOCKS(nsort);
-  c10::DeviceArray<int64_t> indices(*allocator, nsort);
+  c10::DeviceArray<idx_scalar_t> indices(*allocator, nsort);
   at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
       indices.get(), nsort, nsort_divider);
-  const int64_t* initial_indices = indices.get();
+  const idx_scalar_t* initial_indices = indices.get();
 
   for (auto i : c10::irange(nsegments)) {
-    at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
+    at::cuda::cub::radix_sort_pairs<scalar_t, idx_scalar_t>(
         self_ptr, values_ptr, initial_indices, indices_ptr, nsort, descending);
     indices_ptr += nsort;
     self_ptr += nsort;
@@ -127,7 +129,7 @@ inline void segmented_sort_large_segments(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename idx_scalar_t>
 inline void segmented_sort_pairs_by_full_sort(
     const int64_t nsegments,
     const int64_t nsort,
@@ -135,7 +137,7 @@ inline void segmented_sort_pairs_by_full_sort(
     const bool descending,
     const scalar_t* const self_ptr,
     scalar_t* const values_ptr,
-    int64_t* const indices_ptr) {
+    idx_scalar_t* const indices_ptr) {
   int64_t segment_bits = std::max<int64_t>(
       1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
@@ -178,7 +180,7 @@ inline void segmented_sort_pairs_by_full_sort(
       self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename idx_scalar_t>
 void segmented_sort_pairs(
     int64_t nsegments,
     int64_t nsort,
@@ -186,11 +188,11 @@ void segmented_sort_pairs(
     bool descending,
     const scalar_t* self_ptr,
     scalar_t* values_ptr,
-    int64_t* indices_ptr) {
+    idx_scalar_t* indices_ptr) {
   const auto numel = nsort * nsegments;
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto reverse_indices = cuda_allocator->allocate(numel * sizeof(int64_t));
-  int64_t* reverse_indices_ptr = static_cast<int64_t*>(reverse_indices.get());
+  auto reverse_indices = cuda_allocator->allocate(numel * sizeof(idx_scalar_t));
+  idx_scalar_t* reverse_indices_ptr = static_cast<idx_scalar_t*>(reverse_indices.get());
 
   using namespace at::cuda::detail;
   dim3 block = CUDA_NUM_THREADS;
@@ -214,12 +216,13 @@ void segmented_sort_pairs(
 
 } // namespace
 
-void launch_stable_sort_kernel(
+template <typename idx_scalar_t>
+static void do_launch_stable_sort_kernel(
     const TensorBase& self,
     int64_t dim,
     bool descending,
     const TensorBase& values,
-    const TensorBase& indices) {
+    idx_scalar_t* indices_ptr) {
   const auto numel = self.numel();
   if (numel == 0) {
     return;
@@ -230,7 +233,6 @@ void launch_stable_sort_kernel(
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
-  int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&] {
@@ -280,4 +282,17 @@ void launch_stable_sort_kernel(
       });
 }
 
+void launch_stable_sort_kernel(
+    const TensorBase& self,
+    int64_t dim,
+    bool descending,
+    const TensorBase& values,
+    const TensorBase& indices) {
+
+  AT_DISPATCH_V2(indices.scalar_type(), "launch_stable_sort_kernel", AT_WRAP([&] {
+    scalar_t* indices_ptr = indices.mutable_data_ptr<scalar_t>();
+    do_launch_stable_sort_kernel(self, dim, descending, values, indices_ptr);
+  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte);
+
+}
 } // namespace at::native
