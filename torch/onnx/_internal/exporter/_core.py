@@ -1248,6 +1248,8 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrategy:
                 export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
+                export_status.torch_export_draft_export = result.success
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
