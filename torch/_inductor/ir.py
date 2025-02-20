@@ -3908,6 +3908,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     expr: Expr
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        # Can be called when a subgraph returns a TensorBox on
+        # ShapeAsConstantBuffer.
+        return OrderedSet()
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.expr)
 
@@ -5128,6 +5133,11 @@ class ExternKernel(InputsKernel):
                 except NotImplementedError:
                     pass
         if isinstance(x, StorageBox):
+            if isinstance(x.data, ShapeAsConstantBuffer):
+                # This can happen when a subgraph returns a symint, which is
+                # automatically mapped into
+                # TensorBox(StorageBox(ShapeAsConstantBuffer))
+                return x.data
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
