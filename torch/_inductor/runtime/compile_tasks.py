@@ -13,22 +13,6 @@ if TYPE_CHECKING:
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 
-def _reload_triton_kernel_in_subproc(
-    reload_module: Callable[[], ModuleType], kernel_name: str
-) -> CachingAutotuner:
-    return _module_to_triton_kernel(reload_module(), kernel_name)
-
-
-def _module_to_triton_kernel(mod: ModuleType, kernel_name: str) -> CachingAutotuner:
-    kernel = getattr(mod, kernel_name)
-    kernel._reload_in_subproc = functools.partial(
-        _reload_triton_kernel_in_subproc,
-        mod._reload_in_subproc,
-        kernel_name,
-    )
-    return kernel
-
-
 def _reload_python_module_in_subproc(key: str, path: str) -> ModuleType:
     codecache = sys.modules.get("torch._inductor.codecache")
     if codecache:
