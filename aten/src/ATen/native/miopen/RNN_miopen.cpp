@@ -57,7 +57,7 @@ namespace at::native {
 
 #include <ATen/TensorUtils.h>
 
-#include <ATen/native/miopen/Utils_miopen.h>
+#include <c10/hip/HIPCachingAllocator.h>
 
 #include <rocrand/rocrand_xorwow.h>
 
@@ -71,6 +71,30 @@ namespace at::native {
 #include <unordered_map>
 
 namespace at { namespace native {
+
+// Workspace copied from Conv_miopen.cpp but is put here inside anonymous namespace
+// to avoid duplicate symbols and to avoid the need to expose as a public struct.
+
+namespace {
+
+struct Workspace {
+  Workspace(size_t size) : size(size), data(NULL) {
+    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+  }
+  Workspace(const Workspace&) = delete;
+  Workspace(Workspace&&) = default;
+  Workspace& operator=(Workspace&&) = default;
+  ~Workspace() {
+    if (data) {
+      c10::hip::HIPCachingAllocator::raw_delete(data);
+    }
+  }
+
+  size_t size;
+  void* data;
+};
+
+} // anonymous
 
 //RNNDescriptor.
 struct RNNDescriptorParams {
@@ -227,7 +251,7 @@ struct RNNParams {
 struct RNNDescriptors {
     RNNDescriptor rnn_desc;
     DropoutDescriptor dropout_desc;
-    std::unique_ptr<GPUWorkspace> dropout_states;
+    std::unique_ptr<Workspace> dropout_states;
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
     TensorDescriptor hx_desc;
@@ -243,7 +267,7 @@ struct RNNDescriptors {
             miopenDropoutGetStatesSize(handle, &statesSizeInBytes);
             size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
 
-            dropout_states = std::unique_ptr<GPUWorkspace>(new GPUWorkspace(states_size * sizeof(rocrand_state_xorwow)));
+            dropout_states = std::unique_ptr<Workspace>(new Workspace(states_size * sizeof(rocrand_state_xorwow)));
             dropout_desc.set(handle,
                              fn.rnn.dropout_rate,
                              dropout_states->data,
