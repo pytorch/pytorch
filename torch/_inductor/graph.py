@@ -1809,7 +1809,6 @@ class GraphLowering(torch.fx.Interpreter):
         assert (
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
-
         self.wrapper_code = wrapper_code_gen_cls.create(
             is_subgraph,
             subgraph_name,

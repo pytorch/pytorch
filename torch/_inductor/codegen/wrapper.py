@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -920,7 +920,7 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    def write_args(self, input_names: List[str]):
+    def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
         if len(input_names) == 1:
             lhs += ","
@@ -2536,7 +2536,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_partition_call(
         self,
         partition_id: int,
-        input_names_to_free: Dict[str, bool],
+        input_names_to_free: dict[str, bool],
         output_nodes: ir.PartitionOutputType,
     ):
         # input_names_to_free maps the input names to whether they should be freed during the partition call

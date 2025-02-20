@@ -16,9 +16,6 @@ from typing import (
     Any,
     Callable,
     ClassVar,
-    ContextManager,
-    Dict,
-    List,
     Literal,
     Optional,
     overload,
@@ -177,8 +174,8 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
-PartitionInputType = Dict[str, Union["IRNode", sympy.Expr]]
-PartitionOutputType = List["IRNode"]
+PartitionInputType = dict[str, Union["IRNode", sympy.Expr]]
+PartitionOutputType = list["IRNode"]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:

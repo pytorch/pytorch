@@ -14,19 +14,7 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
@@ -84,11 +72,11 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType = List["BaseSchedulerNode"]
+PartitionType = list["BaseSchedulerNode"]
 
 # Mapping from partition input names to IRNode/Expr, and a boolean for whether
 # deallocating it after the partition
-PartitionInputMetadataType = Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]
+PartitionInputMetadataType = dict[str, tuple[Union[ir.IRNode, sympy.Expr], bool]]
 
 
 @dataclasses.dataclass
@@ -4002,10 +3990,10 @@ class Scheduler:
         return name_to_node
 
     def get_graph_partition_signature(
-        self, partitions: List[PartitionType]
-    ) -> Tuple[List[PartitionInputMetadataType], List[ir.PartitionOutputType],]:
-        inputs: List[PartitionInputMetadataType] = []
-        outputs: List[ir.PartitionOutputType] = []
+        self, partitions: list[PartitionType]
+    ) -> tuple[list[PartitionInputMetadataType], list[ir.PartitionOutputType]]:
+        inputs: list[PartitionInputMetadataType] = []
+        outputs: list[ir.PartitionOutputType] = []
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
@@ -4049,12 +4037,12 @@ class Scheduler:
 
     def graph_partition(
         self,
-    ) -> Tuple[
-        List[PartitionType],
-        List[PartitionInputMetadataType],
-        List[PartitionOutputType],
+    ) -> tuple[
+        list[PartitionType],
+        list[PartitionInputMetadataType],
+        list[PartitionOutputType],
     ]:
-        partitions: List[PartitionType] = []
+        partitions: list[PartitionType] = []
 
         cur_partition: PartitionType = []
         for node in self.nodes:
@@ -4131,7 +4119,7 @@ class Scheduler:
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
 
-    def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
+    def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 
