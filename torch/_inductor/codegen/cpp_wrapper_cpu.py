@@ -913,6 +913,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
+
+        # If any output ref represents a temporary tensor, save it off first.  This
+        # prevents situations where the temporary tensor would reinterpret another
+        # output_ref which has already been released.
+        for idx, output in enumerate(output_refs):
+            var_name, call_str = self.create_tmp_raii_handle_var(output)
+            if var_name:
+                self.wrapper_call.writeline(call_str)
+                output_refs[idx] = var_name
+
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
