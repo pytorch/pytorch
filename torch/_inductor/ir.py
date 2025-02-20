@@ -174,7 +174,7 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GraphPartitionSignature:
     # mapping from partition input name to IRNode or Expr. Need the name str since
     # we cannot get name from Expr.
