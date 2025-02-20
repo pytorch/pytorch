@@ -747,42 +747,65 @@ class TestMkldnn(TestCase):
             x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
             self._test_max_pool_base(dim=3, input=x)
 
-
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def _test_max_pool_bf16_base(self, dim, input):
+    def _test_max_pool_lowp_base(self, dim, input, dtype, test_plain=False):
         pool_module = {2: torch.nn.MaxPool2d, 3: torch.nn.MaxPool3d}
-        x_bf16 = input.bfloat16()
+        x_lowp = input.to(dtype=dtype)
+        lowp_support = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+        msg = {
+            torch.bfloat16: f"mkldnn_max_pool{dim:d}d: bf16 path needs the cpu support "
+            "avx_ne_convert or avx512bw, avx512vl and avx512dq",
+            torch.half: f"mkldnn_max_pool{dim:d}d: fp16 path needs the cpu support "
+            "avx_ne_convert or avx512_fp16",
+        }
         for stride in [1, 2, 3]:
             for ceil_mode in [False, True]:
                 max_pool = pool_module[dim](
                     kernel_size=3 if not ceil_mode else 7,
                     stride=stride,
                     padding=1,
-                    ceil_mode=ceil_mode)
+                    ceil_mode=ceil_mode,
+                )
 
-                if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-                    y = max_pool(input.to_mkldnn()).to_dense()
-                    y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
-                    self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
-                else:
-                    msg = f"mkldnn_max_pool{dim:d}d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-                    self.assertRaisesRegex(RuntimeError,
-                                           msg,
-                                           lambda: max_pool(x_bf16.to_mkldnn()))
+                with torch.backends.mkldnn.flags(enabled=True):
+                    if test_plain:
+                        y = max_pool(input)
+                        y_lowp = max_pool(x_lowp).to(dtype=torch.float32)
+                        self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
+                    else:
+                        if lowp_support[dtype]():
+                            y = max_pool(input.to_mkldnn()).to_dense()
+                            y_lowp = max_pool(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                            self.assertEqual(y, y_lowp, atol=0.1, rtol=1e-3)
+                        else:
+                            self.assertRaisesRegex(
+                                RuntimeError, msg[dtype], lambda: max_pool(x_lowp.to_mkldnn())
+                            )
 
-    def test_max_pool2d_bf16(self):
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_max_pool2d_lowp(self, dtype):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
         for H, W in [(64, 64), (35, 39), (16, 19), [7, 8]]:
             x = torch.randn(N, C, H, W, dtype=torch.float32) * 10
-            self._test_max_pool_bf16_base(dim=2, input=x)
+            self._test_max_pool_lowp_base(dim=2, input=x, dtype=dtype)
+            self._test_max_pool_lowp_base(dim=2, input=x, dtype=dtype, test_plain=True)
 
-    def test_max_pool3d_bf16(self):
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_max_pool3d_lowp(self, dtype):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
         for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
             x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
-            self._test_max_pool_bf16_base(dim=3, input=x)
+            self._test_max_pool_lowp_base(dim=3, input=x, dtype=dtype)
+            self._test_max_pool_lowp_base(
+                dim=3,
+                input=x.contiguous(memory_format=torch.channels_last_3d),
+                dtype=dtype,
+                test_plain=True,
+            )
 
     def test_max_pool2d_stride_none(self):
         N = torch.randint(3, 10, (1,)).item()

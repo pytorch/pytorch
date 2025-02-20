@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -9,6 +9,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
@@ -211,7 +212,12 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
+  auto memory_format = input.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast3d || memory_format == at::MemoryFormat::ChannelsLast;
+
+  auto input_t = input.is_mkldnn() ? input : input.contiguous(memory_format);
+
+  const ideep::tensor& x = itensor_from_tensor(input_t, /*from_const_data_ptr*/true);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -220,7 +226,7 @@ static Tensor _mkldnn_pooling(
     // on the right side to match behavior. Adjust output size
     // accordingly.
     const std::vector<int64_t> output_sizes_ceil = pool_output_sizes(
-        input.sizes(),
+        input_t.sizes(),
         kernel_size_vec,
         stride_vec,
         padding_vec,
@@ -232,7 +238,7 @@ static Tensor _mkldnn_pooling(
     bool all_equal = false;
     while (!all_equal) {
       output_sizes = pool_output_sizes(
-          input.sizes(),
+          input_t.sizes(),
           kernel_size_vec,
           stride_vec,
           padding_vec,
@@ -241,7 +247,7 @@ static Tensor _mkldnn_pooling(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (const auto i : c10::irange(2, input.sizes().size())) {
+      for (const auto i : c10::irange(2, input_t.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -250,7 +256,7 @@ static Tensor _mkldnn_pooling(
     }
   } else {
     output_sizes = pool_output_sizes(
-        input.sizes(),
+        input_t.sizes(),
         kernel_size_vec,
         stride_vec,
         padding_vec,
@@ -264,23 +270,51 @@ static Tensor _mkldnn_pooling(
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
   // can reduce the memory use.
   if (ideep::algorithm::pooling_max == algo
-      && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
+      && !((input_t.requires_grad() && at::GradMode::is_enabled()) || input_t._fw_grad(/*level */ 0).defined())) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
 
-  ideep::tensor y;
-  ideep::pooling_forward::compute(
-      x,
-      {output_sizes.cbegin(), output_sizes.cend()},
-      y,
-      {stride_vec.cbegin(), stride_vec.cend()},
-      {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
-      {padding_vec_r.cbegin(), padding_vec_r.cend()},
-      algo,
-      aprop_kind);
-
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
+  if (is_channels_last) {
+    auto output = at::empty(
+        output_sizes,
+        input_t.options().memory_format(input_t.suggest_memory_format()));
+    ideep::tensor y =
+        itensor_view_from_dense(output, /*from_const_data_ptr*/ true);
+    ideep::pooling_forward::compute(
+        x,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec_r.cbegin(), padding_vec_r.cend()},
+        algo,
+        aprop_kind);
+    return output;
+  } else {
+    ideep::tensor y;
+    ideep::pooling_forward::compute(
+        x,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec_r.cbegin(), padding_vec_r.cend()},
+        algo,
+        aprop_kind);
+    if (input_t.is_mkldnn()) {
+      return new_with_itensor_mkldnn(
+          std::move(y),
+          optTypeMetaToScalarType(input_t.options().dtype_opt()),
+          input_t.options().device_opt());
+    } else {
+      return mkldnn_to_dense(new_with_itensor_mkldnn(
+          std::move(y),
+          optTypeMetaToScalarType(input_t.options().dtype_opt()),
+          input_t.options().device_opt()));
+    }
+  }
 }
 
 static Tensor _mkldnn_pooling_backward(
@@ -368,7 +402,12 @@ Tensor mkldnn_max_pool2d(
       "mkldnn_max_pool2d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool2d: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  }
+
+  if (input.scalar_type() == ScalarType::Half) {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+        "mkldnn_max_pool2d: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   return _mkldnn_pooling(
@@ -392,7 +431,11 @@ Tensor mkldnn_max_pool3d(
       "mkldnn_max_pool3d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool3d: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  }
+  if (input.scalar_type() == ScalarType::Half) {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+        "mkldnn_max_pool3d: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   return _mkldnn_pooling(
