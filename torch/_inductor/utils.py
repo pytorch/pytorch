@@ -2548,9 +2548,6 @@ def register_op_dtype_propagation_rules(
 def get_current_backend() -> str:
     from torch._inductor.virtualized import V
 
-    # cpp backend doesnt set current device - TODO: fix
-    if V.graph.current_device is None:
-        return "cpp"
     device_str = V.graph.get_current_device_or_throw().type
     if device_str == "cpu":
         return config.cpu_backend
