@@ -748,7 +748,7 @@ def slice_forward(
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
-    sizes[dim] = (len + step - 1) // step
+    sizes[dim] = 0 if len == 0 else 1 + (len - 1) // step  # round-up, avoiding overflow
     strides[dim] *= step
 
     if self.is_quantized:
