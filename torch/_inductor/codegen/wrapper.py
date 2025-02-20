@@ -733,14 +733,13 @@ class PythonWrapperCodegen(CodeGen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[ir.PartitionInputType] = None,
-        output_nodes: Optional[ir.PartitionOutputType] = None,
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
             return SubgraphPythonWrapperCodegen(
-                subgraph_name, parent_wrapper, input_nodes, output_nodes
+                subgraph_name, parent_wrapper, partition_signatures
             )
         return PythonWrapperCodegen()
 
@@ -2536,18 +2535,14 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_partition_call(
         self,
         partition_id: int,
-        input_names_to_free: dict[str, bool],
-        output_nodes: ir.PartitionOutputType,
+        partition_signatures: ir.GraphPartitionSignature,
     ):
-        """
-        Generate code to call a partition function.
+        """Generate code to call a graph partition"""
+        input_deallocation = partition_signatures.input_deallocation
+        output_nodes = partition_signatures.output_nodes
 
-        partition_id: a unique id of the partition function
-        input_names_to_free: a dictionary mapping input names to whether they should be freed during the partition
-        output_nodes: the output nodes of the partition function
-        """
-        inputs = ", ".join(input_names_to_free.keys()) + (
-            "," if len(input_names_to_free) == 1 else ""
+        inputs = ", ".join(input_deallocation.keys()) + (
+            "," if len(input_deallocation) == 1 else ""
         )
 
         output_names = [node.get_name() for node in output_nodes]
@@ -2555,8 +2550,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"partition{partition_id}_args = [{inputs}]")
-        for name in input_names_to_free:
-            if input_names_to_free[name]:
+        for name in input_deallocation:
+            if input_deallocation[name]:
                 self.writeline(f"del {name}")
 
         # Call the subgraph launcher function
@@ -2741,18 +2736,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
         subgraph_name: str,
         parent_wrapper: PythonWrapperCodegen,
-        input_nodes: Optional[ir.PartitionInputType] = None,
-        output_nodes: Optional[ir.PartitionOutputType] = None,
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
 
-        if input_nodes is not None:
-            assert output_nodes is not None
-            self.subgraph_input_nodes = input_nodes
-            self.subgraph_output_nodes = output_nodes
+        if partition_signatures is not None:
+            self.partition_signatures = partition_signatures
 
         super().__init__()
 

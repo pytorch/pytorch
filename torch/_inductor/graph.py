@@ -67,9 +67,8 @@ from .ir import (
     DonatedBuffer,
     FixedLayout,
     get_device_type,
+    GraphPartitionSignature,
     InputBuffer,
-    PartitionInputType,
-    PartitionOutputType,
     Pointwise,
     Reduction,
     StorageBox,
@@ -307,7 +306,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
-        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject]] = {}
+        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
@@ -1786,8 +1785,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[PartitionInputType] = None,
-        output_nodes: Optional[PartitionOutputType] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1813,8 +1811,7 @@ class GraphLowering(torch.fx.Interpreter):
             is_subgraph,
             subgraph_name,
             parent_wrapper_code,
-            input_nodes,
-            output_nodes,
+            partition_signatures,
         )
 
         if self.const_module:
@@ -2131,8 +2128,7 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_nodes: Optional[PartitionInputType] = None,
-        output_nodes: Optional[PartitionOutputType] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,

@@ -42,9 +42,9 @@ from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import (
     ComputedBuffer,
     get_device_type,
+    GraphPartitionSignature,
     MultiOutput,
     MultiOutputLayout,
-    PartitionOutputType,
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -76,7 +76,7 @@ PartitionType = list["BaseSchedulerNode"]
 
 # Mapping from partition input names to IRNode/Expr, and a boolean for whether
 # deallocating it after the partition
-PartitionInputMetadataType = dict[str, tuple[Union[ir.IRNode, sympy.Expr], bool]]
+# PartitionInputMetadataType = dict[str, tuple[Union[ir.IRNode, sympy.Expr], bool]]
 
 
 @dataclasses.dataclass
@@ -3980,12 +3980,14 @@ class Scheduler:
 
         return False
 
-    def get_name_to_nodes(self) -> ir.PartitionInputType:
+    def get_name_to_nodes(
+        self,
+    ) -> dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]]:
         """
         Return a mapping from name strings to the corresponding graph inputs or
         base scheduler node outputs.
         """
-        name_to_node: ir.PartitionInputType = {}
+        name_to_node: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]] = {}
         name_to_node.update(V.graph.graph_inputs)
 
         for node in self.nodes:
@@ -3996,15 +3998,12 @@ class Scheduler:
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType]
-    ) -> tuple[list[PartitionInputMetadataType], list[ir.PartitionOutputType]]:
+    ) -> list[GraphPartitionSignature]:
         """
-        Gets the input and output metadata for each partition.
-        For each partition input, map from name to IRNode/Expr, and a boolean
-            on whether deallocating it during the partition.
-        For each partition output, map from name to IRNode.
+        Gets signature for each graph partition, including input nodes, output nodes, and
+        whether deallocating an input within graph partition.
         """
-        inputs: list[PartitionInputMetadataType] = []
-        outputs: list[ir.PartitionOutputType] = []
+        signatures = []
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
@@ -4031,33 +4030,36 @@ class Scheduler:
             for node in partition:
                 buffer_names_to_free.update(node.last_usage)
 
-            inputs.append(
-                {
-                    name: (
-                        name_to_node[name],
-                        True if name in buffer_names_to_free else False,
-                    )
-                    for name in partition_input_names
-                    if name in name_to_node
-                }
+            input_nodes = {
+                name: name_to_node[name]
+                for name in partition_input_names
+                if name in name_to_node
+            }
+            input_deallocation = {
+                name: True if name in buffer_names_to_free else False
+                for name in partition_input_names
+                if name in name_to_node
+            }
+            output_nodes = [name_to_node[name] for name in returned_output_names]
+            signatures.append(
+                GraphPartitionSignature(
+                    input_nodes,
+                    output_nodes,
+                    input_deallocation,
+                )
             )
-            outputs.append([name_to_node[name] for name in returned_output_names])
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
 
-        return inputs[::-1], outputs[::-1]
+        return signatures[::-1]
 
     def graph_partition(
         self,
-    ) -> tuple[
-        list[PartitionType],
-        list[PartitionInputMetadataType],
-        list[PartitionOutputType],
-    ]:
+    ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
         """
         Given a list of BaseSchedulerNodes, split into a list of
-        graph partitions and compute the partition input/output metadata.
+        graph partitions and compute partition input/output signatures.
         """
         partitions: list[PartitionType] = []
 
@@ -4074,9 +4076,7 @@ class Scheduler:
         if cur_partition:
             partitions.append(cur_partition)
 
-        inputs, outputs = self.get_graph_partition_signature(partitions)
-
-        return partitions, inputs, outputs
+        return partitions, self.get_graph_partition_signature(partitions)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -4091,8 +4091,7 @@ class Scheduler:
     def _codegen_partition_wrapper(
         self,
         partition: PartitionType,
-        input_nodes: PartitionInputMetadataType,
-        output_nodes: PartitionOutputType,
+        signature: GraphPartitionSignature,
     ) -> None:
         """Codegen a partition given its inputs/outputs"""
         parent_wrapper_code = V.graph.wrapper_code
@@ -4103,34 +4102,28 @@ class Scheduler:
                 is_subgraph=True,
                 subgraph_name=f"partition_{graph_partition_id}",
                 parent_wrapper_code=parent_wrapper_code,
-                input_nodes={name: input_nodes[name][0] for name in input_nodes},
-                output_nodes=output_nodes,
+                partition_signatures=signature,
             )
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
 
-        input_names_to_free = {name: input_nodes[name][1] for name in input_nodes}
-        V.graph.wrapper_code.codegen_partition_call(
-            graph_partition_id, input_names_to_free, output_nodes
-        )
+        V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(
-            [node.get_name() for node in output_nodes]
+            [node.get_name() for node in signature.output_nodes]
         )
 
     def _codegen_partitions(self) -> None:
-        partitions, input_nodes, output_nodes = self.graph_partition()
+        partitions, signatures = self.graph_partition()
 
-        for partition, input_node, output_node in zip(
-            partitions, input_nodes, output_nodes
-        ):
+        for partition, signature in zip(partitions, signatures):
             assert (
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
 
             if len(partition) > 1:
-                self._codegen_partition_wrapper(partition, input_node, output_node)
+                self._codegen_partition_wrapper(partition, signature)
             else:
                 # Inline small partitions to avoid overheads from function calls.
                 self._codegen(partition)
