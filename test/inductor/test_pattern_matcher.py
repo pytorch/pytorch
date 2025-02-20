@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -147,6 +147,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_fused_int_mm_mul(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -247,6 +248,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_fused_int_mm_mul_epilogue(self):
         def fn1(a, b, c):
             return (
@@ -293,6 +295,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -347,6 +350,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -382,6 +386,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_exhaustive_dtypes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -408,6 +413,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -439,6 +445,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -469,6 +476,7 @@ class TestPatternMatcher(TestCase):
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
