@@ -149,6 +149,18 @@ void Context::setAllowTF32OneDNN(bool b){
 #endif
 }
 
+bool Context::enabledOneDNNPrimitiveCache() const {
+  return enabled_onednn_primitive_cache;
+}
+
+void Context::setEnabledOneDNNPrimitiveCache(bool e) {
+#ifdef USE_XPU
+  enabled_onednn_primitive_cache = e;
+#else
+  TORCH_WARN("The primitive cache of OneDNN is for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }

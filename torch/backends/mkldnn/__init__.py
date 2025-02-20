@@ -64,11 +64,12 @@ class verbose:
         return False
 
 
-def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None):
+def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None, _enabled_primitive_cache=None):
     orig_flags = (
         torch._C._get_mkldnn_enabled(),
         torch._C._get_mkldnn_deterministic(),
         torch._C._get_onednn_allow_tf32(),
+        torch._C._get_onednn_enabled_primitive_cache(),
     )
     if _enabled is not None:
         torch._C._set_mkldnn_enabled(_enabled)
@@ -76,13 +77,15 @@ def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None):
         torch._C._set_mkldnn_deterministic(_deterministic)
     if _allow_tf32 is not None:
         torch._C._set_onednn_allow_tf32(_allow_tf32)
+    if _enabled_primitive_cache is not None:
+        torch._C._set_onednn_enabled_primitive_cache(_enabled_primitive_cache)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False, deterministic=False, allow_tf32=True):
+def flags(enabled=False, deterministic=False, allow_tf32=True, enabled_primitive_cache=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, deterministic, allow_tf32)
+        orig_flags = set_flags(enabled, deterministic, allow_tf32, enabled_primitive_cache)
     try:
         yield
     finally:
@@ -103,6 +106,9 @@ class MkldnnModule(PropModule):
     )
     allow_tf32 = ContextProp(
         torch._C._get_onednn_allow_tf32, torch._C._set_onednn_allow_tf32
+    )
+    enabled_primitive_cache = ContextProp(
+        torch._C._get_onednn_enabled_primitive_cache, torch._C._set_onednn_enabled_primitive_cache
     )
 
 

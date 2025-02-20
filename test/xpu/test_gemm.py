@@ -1308,13 +1308,14 @@ class TestBasicGEMM(TestCase):
     @parametrize("m", [128])
     @parametrize("k", [512, 1024])
     @parametrize("n", [512, 1024])
-    def test__int4_mm(self, device, m, k, n):
+    @parametrize("data_type", [torch.float16, torch.bfloat16])
+    def test__int4_mm(self, device, m, k, n, data_type):
         q_group = 32
         inner_k_tiles = 2
 
         torch.manual_seed(1)
-        a_bf16 = torch.rand((m, k), dtype=torch.float32, device=device)
-        b_bf16 = torch.rand((k, n), dtype=torch.float32, device=device)
+        a_bf16 = torch.randn((m, k), dtype=torch.float32, device=device)
+        b_bf16 = torch.randn((k, n), dtype=torch.float32, device=device)
 
         def convert_weight_to_int4pack(b):
             # b_uint8 [n, k //2]
@@ -1331,18 +1332,64 @@ class TestBasicGEMM(TestCase):
                 a, b_int4pack, q_group, qscale, qzeros
             )
 
+        def unpack_weight(qweight, scales, qzeros, q_config):
+            group_size = q_config["group_size"]
+            bits = q_config["bits"]
+            s32_bits = 32
+
+            assert bits == 4
+            # Int32 can store 8 * 4bits data. This is the offset for each data.
+            wf = (
+                torch.tensor(list(range(0, s32_bits, bits)), dtype=torch.int32)
+                .unsqueeze(0)
+                .to("xpu")
+            )
+            zeros = qzeros
+            if qzeros is not None:
+                zeros = zeros.to(torch.int8)
+
+            weight = torch.bitwise_right_shift(
+                torch.unsqueeze(qweight, 1).expand(-1, 32 // bits, -1), wf.unsqueeze(-1)
+            ).to(torch.int16 if bits == 8 else torch.int8)
+            torch.bitwise_and(weight, (2**bits) - 1, out=weight)
+
+            return weight, scales, zeros
+
+        def dequantize(qweight, scales, qzeros, group_size, g_idx=None):
+            q_config = {"group_size": group_size, "bits": 4}
+            weight, gptq_scales, gptq_zeros = unpack_weight(
+                qweight, scales, qzeros, q_config
+            )
+            # gptq_zeros = (torch.ones_like(gptq_zeros) * 8).to("xpu")  # hard code zp
+            if len(weight.shape) > 2:
+                weight = weight.reshape(-1, weight.shape[-1])
+            infeatures = weight.shape[0]
+            if g_idx is None:
+                g_idx = torch.tensor(
+                    [i // q_config["group_size"] for i in range(infeatures)],
+                    dtype=torch.int32,
+                )
+            if gptq_zeros is None:
+                return (weight - 8) * gptq_scales[g_idx]
+            else:
+                return (weight - gptq_zeros[g_idx]) * gptq_scales[g_idx]
+
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
 
-        for dtype in [torch.bfloat16, torch.float16]:
-            a = a_bf16.to(dtype=dtype)
-            b = b_bf16.to(dtype=dtype)
-            b_scales = b_scales.to(dtype=dtype)
-            ref = torch.mm(a, b)
+        a = a_bf16.to(dtype=data_type)
+        b = b_bf16.to(dtype=data_type)
+        b_scales = b_scales.to(dtype=data_type)
 
+        b_f = dequantize(b_int4pack.T, b_scales, zeros_int8, q_group).cpu()
+        a_f = a.cpu()
+
+        ref = torch.mm(a_f, b_f)
+
+        with torch.backends.mkldnn.flags(enabled_primitive_cache=True):
             res = weight_int4pack_mm(a, b_int4pack, b_scales, zeros_int8)
 
-            mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+        mean_err = ((res.cpu() - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)

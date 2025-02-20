@@ -2,6 +2,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <torch/library.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 
@@ -465,7 +466,12 @@ Tensor _weight_int4pack_mm_xpu(
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+  if (at::native::onednn::enable_primitive_cache()) {
+    at::native::onednn::dnnl_matmul_w4a16_pri_cache(C, A, B, std::nullopt, qScale, qZeros, qGroupSize, std::nullopt);
+  }
+  else {
+    at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+  }
 
   return C;
 }

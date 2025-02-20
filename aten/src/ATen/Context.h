@@ -192,6 +192,9 @@ class TORCH_API Context {
 
   static bool setFlushDenormal(bool on);
 
+  bool enabledOneDNNPrimitiveCache() const;
+  void setEnabledOneDNNPrimitiveCache(bool); 
+
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
   // whether or not CuDNN is actually usable.  Use cudnn_is_acceptable
@@ -444,6 +447,7 @@ class TORCH_API Context {
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
   bool allow_tf32_onednn = false;
+  bool enabled_onednn_primitive_cache = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||
