@@ -556,7 +556,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def size_args(self):
 
         X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
+        Y = self.output_node, I 
 
         GroupCount = self.groups
         NBatch = X.shape[0] 
@@ -574,3 +574,4 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                FilterSize_0, FilterSize_1, InputSize_0, InputSize_1, \
                ConvolutionStrides_0, ConvolutionStrides_1, Dilations_0, Dilations_1, \
                LeftPads_0, LeftPads_1, RightPads_0, RightPads_1
+    
