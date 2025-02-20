@@ -84,6 +84,12 @@ class StrobelightCompileTimeProfiler:
     ignored_profile_runs: int = 0
     inside_profile_compile_time: bool = False
     enabled: bool = False
+
+    # A list of comma seperated inegers. ex: 1,2,3 if not empty then we only profile the compile ids in the list.
+    frame_id_filter: list[int] = [
+        int(x) for x in os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER", "")
+    ]
+
     # A unique identifier that is used as the run_user_name in the strobelight profile to
     # associate all compile time profiles together.
     identifier: Optional[str] = None
@@ -102,6 +108,23 @@ class StrobelightCompileTimeProfiler:
     sample_each: int = int(
         float(os.environ.get("COMPILE_STROBELIGHT_SAMPLE_RATE", 1e7))
     )
+
+    @classmethod
+    def should_profile(cls) -> bool:
+        if not cls.enabled:
+            return False
+
+        if len(cls.frame_id_filter)==0:
+            return True 
+
+        from torch._guards import CompileContext
+        compile_id = CompileContext.current_trace_id().compile_id
+        frame_id = compile_id.frame_id
+        should_run = cls.frame_id_filter.__contains__(frame_id)
+        if not should_run:
+            logger.info(f"compile_id: {compile_id} will be skipped from profiling due to frame_id_filter")
+        return should_run
+            
 
     @classmethod
     def enable(cls, profiler_class: Any = StrobelightCLIFunctionProfiler) -> None:
