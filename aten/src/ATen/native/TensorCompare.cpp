@@ -374,22 +374,22 @@ Tensor is_close(
   }
 
   Tensor output = at::empty({0}, self.options());
+  const bool equal_nan_and_fp_complex =
+      equal_nan && (cast_self.is_floating_point() || cast_self.is_complex());
 
-  if (self.scalar_type() != at::kComplexHalf &&
+  if (!(equal_nan_and_fp_complex) &&
       (self.device().type() == at::kCPU || self.device().type() == at::kCUDA)) {
-    // kComplexHalf can't go through this codepath because TensorIterator lacks
-    // the ability to handle dynamic casting needed.
     auto iter = TensorIteratorConfig()
                     .add_output(output)
                     .add_const_input(cast_self)
                     .add_const_input(cast_other)
+                    .promote_inputs_to_common_dtype(true)
                     .build();
 
     isclose_stub(iter.device_type(), iter, rtol, atol, equal_nan);
   } else {
     Tensor close = cast_self == cast_other;
-    if (equal_nan &&
-        (cast_self.is_floating_point() || cast_self.is_complex())) {
+    if (equal_nan_and_fp_complex) {
       // For CompositeCompliance, if `other` is a CCT and `self` is a regular
       // Tensor, then we can't perform inplace op into `self` with `other`.
       // NOTE: Inplacing into `close` is fine because it is generated from
@@ -991,7 +991,7 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
   if (elements.numel() == 0) {
     return;
   }
-
+  std::cout << "We are inside of this meta function :) \n";
   // Heuristic taken from numpy's implementation.
   // See
   // https://github.com/numpy/numpy/blob/fb215c76967739268de71aa4bda55dd1b062bc2e/numpy/lib/arraysetops.py#L575

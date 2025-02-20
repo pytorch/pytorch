@@ -419,7 +419,7 @@ void isclose_kernel_impl_real(
     }
 
     if (std::isfinite(static_cast<double>(a)) && std::isfinite(static_cast<double>(b))) {
-      auto allowed_error = static_cast<double>(atol + rtol * std::abs(b));
+      auto allowed_error = static_cast<double>(atol + rtol * std::abs(static_cast<double>(b)));
       return std::abs(a - b) <= allowed_error;
     }
 
@@ -451,12 +451,12 @@ void isclose_kernel_impl_complex(
     if (rtol == 0 && atol == 0) {
       return false;
     }
-;
+
     bool is_a_finite = std::isfinite(cast_a.real()) && std::isfinite(cast_a.imag());
     bool is_b_finite = std::isfinite(cast_b.real()) && std::isfinite(cast_b.imag());
 
     if (is_a_finite && is_b_finite) {
-      auto abs_b = std::abs(cast_b);
+      auto abs_b = static_cast<double>(std::abs(cast_b));
       auto allowed_error = static_cast<double>(atol + rtol * abs_b);
       return std::abs(cast_a - cast_b) <= allowed_error;
     }
