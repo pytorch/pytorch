@@ -144,8 +144,6 @@ bool Context::allowTF32OneDNN() const {
 void Context::setAllowTF32OneDNN(bool b){
 #ifdef USE_XPU
   allow_tf32_onednn = b;
-  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
-
 #else
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
 #endif
