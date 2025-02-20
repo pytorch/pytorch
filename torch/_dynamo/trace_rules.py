@@ -19,7 +19,7 @@ import typing
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Dict, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -122,7 +122,7 @@ If you are removing an existing torch level API:
 
 
 """
-manual_torch_name_rule_map = {
+manual_torch_name_rule_map: Dict[str, Any] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -3197,10 +3197,8 @@ def _as_posix_path(path):
 
 
 def _strip_init_py(s):
-    # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
-    if s.endswith(suffix):
-        s = s[: -len(suffix)]
+    s = s.removesuffix(suffix)
     return _as_posix_path(s)
 
 
@@ -3777,7 +3775,7 @@ def lookup_inner(
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
         elif name == "__torch_function__" or (
-            obj and obj.__name__ == "__torch_function__"
+            obj and getattr(obj, "__name__", None) == "__torch_function__"
         ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
