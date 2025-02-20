@@ -131,52 +131,12 @@ __global__ void indexing_backward_kernel_stride_1(
   using opmath_t = at::opmath_type<scalar_t>;
 
   // Number of values processed by each thread (grain size)
-#ifdef USE_ROCM
-  // This path avoid serilized loads by fetching 2 at a time.
-  union x2lng { int64_t l[2]; long2 l2; } tmpl2;
-  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z)
-  for (int64_t _y = 0; _y < 4; _y++) { // unroll indices_per_block here
-    int64_t idx = blockIdx.x * 4 + _y;
-    bool oneDup = false;
-    if (idx >= numel) continue;
-    if (_y > 0) {
-      tmpl2.l[0] = tmpl2.l[1]; // old current is new prior
-      if ((idx + 1) < numel) {
-        x2lng tm; tm.l2 = *((long2*)(&sorted_indices[idx]));
-        tmpl2.l[1] = tm.l[0];
-        oneDup = (tm.l[0] != tm.l[1]);
-      } else {
-        tmpl2.l[1] = sorted_indices[idx];
-      }
-    } else {
-      if (idx != 0 ) {
-        tmpl2.l2   = *((long2*)(&sorted_indices[idx - 1]));
-      } else {
-        tmpl2.l[1] = sorted_indices[idx]; tmpl2.l[0] = tmpl2.l[1]-1;
-      }
-    }
-
-    int64_t crnt_sorted_idx = tmpl2.l[1];
-
-    // skip duplicate walk and wave reduce
-    if (oneDup && accumulate && (crnt_sorted_idx != tmpl2.l[0])) {
-        opmath_t gradient = (opmath_t)0.0;
-        const opmath_t scale = (opmath_t)1.0;
-        int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
-        gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
-        const int64_t weight_row = crnt_sorted_idx * stride + z * stride_before;
-        grad_weight[weight_row] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row]) + gradient);
-        continue;
-    }
-    if (crnt_sorted_idx != tmpl2.l[0])
-#else
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
     int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
     int64_t crnt_sorted_idx = sorted_indices[idx];
 
     if ((idx < numel) &&
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
-#endif
     {
       // Determine the number of duplicates in advance
       int64_t num_duplicates = 1;
@@ -193,11 +153,6 @@ __global__ void indexing_backward_kernel_stride_1(
         grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
         grad_weight[weight_row] =
           static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row]) * scale);
-      } else if (num_duplicates == 1) { // skip wave reduce
-        opmath_t gradient = (opmath_t)0.0;
-        grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
-        gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
-        grad_weight[weight_row] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row]) + gradient);
       } else {
         opmath_t gradient = (opmath_t)0.0;
 
@@ -548,9 +503,6 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       if (sliceSize == 1) {
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
-#ifdef USE_ROCM
-        dim3 block(warp_size, 1);
-#endif
         AT_DISPATCH_V2(
           expandedValue.scalar_type(),
           "indexing_backward_kernel_stride_1",
@@ -721,7 +673,6 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
           qmin,
           qmax);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
-
       });
 
       if (permuted) {
