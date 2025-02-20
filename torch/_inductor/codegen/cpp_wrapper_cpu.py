@@ -2390,7 +2390,17 @@ if (custom_op_wrapper.get() == NULL) {
                     f"const {self.c_type_for_prim_type(None, element_type)}* {var_name} = nullptr;"
                 )
             else:
-                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+                result = [self.val_to_arg_str(x, element_type) for x in val]
+                if isinstance(element_type, torch.TensorType):
+                    # If any tensor in the list represents a temporary tensor, save it
+                    # off first.  This increases memory usage in these cases (since the
+                    # saved handle is currently permanent), but prevents segfaults.
+                    for i, tensor in enumerate(result):
+                        tmp_var_name, call_str = self.create_tmp_raii_handle_var(tensor)
+                        if tmp_var_name:
+                            self.writeline(call_str)
+                            result[i] = tmp_var_name
+                result = f"{{{', '.join(result)}}}"
                 self.writeline(
                     f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
                 )
