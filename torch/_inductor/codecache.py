@@ -47,7 +47,6 @@ from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
-import torch.version
 from torch import SymInt, Tensor
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -70,7 +69,6 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
-    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -360,10 +358,11 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: str = "") -> str:
+def code_hash(code: Union[str, bytes], extra: Union[str, bytes] = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
-    if extra != "":
-        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
+    if extra:
+        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
+        hashing_str = hashing_str + b"||" + extra_b
     return "c" + sha256_hash(hashing_str)
 
 
@@ -1429,8 +1428,7 @@ class AotCodeCompiler:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        vec_isa_cmd_line = vec_isa_cmd_gen.get_command_line()
-        cpp_command = repr(vec_isa_cmd_line)
+        cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
         # Meta internal AOTInductor CPU
         fbcode_aot_cpu_re = (
@@ -1645,32 +1643,14 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            compile_command = {
-                "vec_isa": picked_vec_isa,
-                "device_type": device_type,
-                "aot_mode": graph.aot_mode,
-                "use_absolute_path": use_absolute_path,
-                "use_mmap_weights": use_mmap_weights,
-            }
             object_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
                 compile_only=True,
-                **compile_command,  # type: ignore[arg-type]
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
             )
-
-            # potentially, precompile the AOT header for this device
-            if config.aot_inductor.precompile_headers:
-                header_file = _get_cpp_wrapper_header(
-                    device_type, aot_mode=graph.aot_mode
-                )
-                object_build_options.set_precompiled_header(
-                    _precompile_header(
-                        header_file,
-                        vec_isa_cmd_line,
-                        object_build_options.get_compiler(),
-                        compile_command,
-                    )
-                )
-
             object_builder = CppBuilder(
                 name=str(cpp_path_operator.stem),
                 sources=cpp_path,
@@ -1959,55 +1939,6 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
-# Precompiled headers are persistent past program runtime, but associated with one
-# specific compiler version and set of flags.  We explicitly use default_cache_dir here
-# because these headers need to be global, rather than ignored by fresh_inductor_cache.
-_HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
-
-
-def _precompile_header(
-    header: str, hashable_cmd_line: str, compiler: str, compile_command: dict[str, Any]
-) -> str:
-    compiler_version = get_compiler_version_info(compiler)
-    header_hash, header_full_path = write(
-        content=f"#include <{header}>\n",
-        extension="h",
-        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__} {torch.version.build_uuid}",
-        specified_dir=_HEADER_DIR,
-    )
-    header_build_option = CppTorchDeviceOptions(
-        precompiling=True,
-        **compile_command,
-    )
-    cpp_builder = CppBuilder(
-        name=header_full_path,
-        sources=header_full_path,
-        BuildOption=header_build_option,
-    )
-    # _worker_compile_cpp will automatically ignore any compilation whose result already
-    # exists, so this is always safe.
-    _worker_compile_cpp(
-        os.path.join(get_lock_dir(), f"{header_hash}.lock"),
-        cpp_builder,
-        header_full_path,
-        cpp_builder.get_target_file_path(),
-    )
-
-    return header_full_path
-
-
-def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
-    """Given a device type (and optionally whether we're in AOT Inductor mode), returns
-    the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
-    is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
-    return (
-        "torch/csrc/inductor/"
-        f"{'aoti_include' if aot_mode else 'cpp_wrapper'}/"
-        f"{'array_ref' if is_array_ref else base_device}.h"
-    )
-
-
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
@@ -2042,14 +1973,6 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        """
-        Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
-        """
-        return None
-
-    @classmethod
     def load_async(
         cls,
         source_code: str,
@@ -2066,8 +1989,9 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        cpp_build_option = CppTorchDeviceOptions(**compile_command)
-        command_gen = CppBuilder(name="o", sources="i", BuildOption=cpp_build_option)
+        command_gen = CppBuilder(
+            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
+        )
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
         # So we need get a command_line which contains isa related parameter as a part of hash key.
@@ -2089,19 +2013,7 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and (
-                header_file := cls._get_uncompiled_header(device_type)
-            ):
-                cpp_build_option.set_precompiled_header(
-                    _precompile_header(
-                        header_file,
-                        vec_isa_cmd,
-                        cpp_build_option.get_compiler(),
-                        compile_command,
-                    )
-                )
-
+            cpp_build_option = CppTorchDeviceOptions(**compile_command)
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2412,14 +2324,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
-
-    @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        """
-        Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
-        """
-        return _get_cpp_wrapper_header(device)
 
 
 @clear_on_fresh_inductor_cache
@@ -2912,10 +2816,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-class TritonCodeCache:
-    @classmethod
-    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
+def _load_triton_kernel_from_source(
+    kernel_name: str, source_code: str
+) -> CachingAutotuner:
+    return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3322,30 +3226,12 @@ class CodeCacheFuture:
         raise NotImplementedError
 
 
-class TritonFuture(CodeCacheFuture):
-    kernel: CachingAutotuner
-
-    def __init__(
-        self,
-        kernel: Any,
-        future: Optional[Future[Any]],
-    ) -> None:
-        self.kernel = kernel
-        self.future = future
-
-    def result(self) -> Callable[..., Any]:
-        if self.future is not None:
-            # If the worker failed this will throw an exception.
-            result = self.future.result()
-            assert result is None
-            self.future = None
-            self.kernel.precompile()
-        return self.kernel
-
-
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn: Callable[..., Any]) -> None:
+    def __init__(
+        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+    ) -> None:
         self.result_fn = result_fn
+        self.future = future
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()

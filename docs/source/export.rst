@@ -1141,6 +1141,7 @@ API Reference
 .. autoclass:: torch.export.graph_signature.CustomObjArgument
 
 .. py:module:: torch.export.dynamic_shapes
+.. py:module:: torch.export.custom_ops
 
 .. automodule:: torch.export.unflatten
     :members:

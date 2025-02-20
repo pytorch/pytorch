@@ -148,6 +148,10 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class UnknownPropertiesDuringBackwardTrace(Unsupported):
+    pass
+
+
 class RecompileError(TorchDynamoException):
     pass
 
