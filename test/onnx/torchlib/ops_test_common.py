@@ -15,13 +15,10 @@ import warnings
 from typing import (
     Any,
     Callable,
-    Collection,
-    Iterable,
-    Mapping,
     Optional,
-    Sequence,
     TypeVar,
 )
+from collections.abc import Collection, Iterable, Mapping, Sequence
 
 import error_reproduction
 import numpy as np
