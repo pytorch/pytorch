@@ -12,6 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+from torch.export import _draft_export
 from torch.utils import _pytree
 
 
@@ -223,6 +224,36 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         )
 
 
+class TorchExportDraftExportStrategy(CaptureStrategy):
+    def _capture(
+        self, model, args, kwargs, dynamic_shapes
+    ) -> torch.export.ExportedProgram:
+        ep, _report = _draft_export.draft_export(
+            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+        )
+        # The report is logged and displayed by draft_export already, so we don't need to print it again.
+        return ep
+
+    def _enter(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`..."
+        )
+
+    def _success(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ✅"
+        )
+
+    def _failure(self, model, e) -> None:
+        del e  # Unused
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ❌"
+        )
+
+
 class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
@@ -320,5 +351,6 @@ class JitTraceConvertStrategy(CaptureStrategy):
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrategy,
+    TorchExportDraftExportStrategy,
     JitTraceConvertStrategy,
 )
