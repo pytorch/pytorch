@@ -2584,21 +2584,23 @@ def compile(
 
         @functools.wraps(model)
         def wrapper(*args, **kwargs):
+            from torch.fx.experimental.dynamism import (
+                track_dynamism_across_examples,
+                clone_and_convert_to_meta
+            )
+
             nonlocal compiled_fn
 
             if len(example_inputs) <= delay:
                 sig = inspect.signature(model)
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
-                example_inputs.append(bound.arguments)
+                example_inputs.append(clone_and_convert_to_meta(bound.arguments))
 
             if len(example_inputs) <= delay:
                 return model(*args, **kwargs)
             else:
                 if compiled_fn is None:
-                    from torch.fx.experimental.dynamism import (
-                        track_dynamism_across_examples,
-                    )
 
                     dynamism = track_dynamism_across_examples(example_inputs)
                     compiled_fn = torch._dynamo.optimize(

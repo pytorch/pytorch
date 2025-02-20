@@ -1,6 +1,6 @@
 import torch
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
-from torch.utils._pytree import tree_flatten_with_path
+from torch.utils._pytree import tree_flatten_with_path, tree_map
 
 KeyPath = Tuple[Any, ...]
 NonTensorShapeFn = Callable[[Union[int, float]], Tuple[Any, ...]]
@@ -54,3 +54,15 @@ def track_dynamism_across_examples(
         key_str = "L" + ''.join(f"{str(k)}" for k in key_path)
         output[key_path[0].key] = {key_str: final_dyn}
     return output
+
+def clone_and_convert_to_meta(example_input: Any) -> Any:
+    """
+    This function takes a list of example inputs and for each tensor, clones it and converts it to device=meta.
+    For non-tensor values, it keeps the reference. It uses pytree to handle nested structures recursively.
+    """
+    def transform_fn(value: Any) -> Any:
+        if isinstance(value, torch.Tensor):
+            return value.clone().to(device='meta')
+        return value
+
+    return tree_map(transform_fn, example_input)
