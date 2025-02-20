@@ -166,6 +166,20 @@ class TestSparseLegacyAndDeprecation(TestCase):
             self.assertEqual(len(cm.warnings), 1)
 
 
+    def test_legacy_ctor_validates(self):
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "size is inconsistent with indices: for dim 0, size is 1 but found index 4702111234474983745"
+        ):
+            x = torch.sparse.FloatTensor(
+                torch.tensor([[4702111234474983745], [0]]),
+                torch.tensor([4774451407313060418], dtype=torch.float32),
+                (1, 1)
+            )
+
+
+
 class TestSparseBase(TestCase):
     def run(self, result=None):
         if TEST_WITH_CROSSREF:
