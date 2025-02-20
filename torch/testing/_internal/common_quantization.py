@@ -15,7 +15,7 @@ import torch.ao.nn.quantized.dynamic as nnqd
 from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
-
+import platform
 from torch.export import export_for_training
 from torch.ao.quantization import (
     QuantType,
@@ -402,14 +402,14 @@ def skipIfNoX86(fn):
 def skipIfNoArm(fn):
     reason = 'Quantized operations require Arm.'
     if isinstance(fn, type):
-        if 'arm' not in torch.backends.quantized.supported_engines:
+        if platform.processor() != "arm":
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = reason
         return fn
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        if 'arm' not in torch.backends.quantized.supported_engines:
+        if platform.processor() != "arm":
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)

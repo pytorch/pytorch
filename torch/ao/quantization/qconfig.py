@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import platform
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Union
@@ -265,13 +264,6 @@ def get_default_qconfig(backend="x86", version=0):
     Return:
         qconfig
     """
-    # qconfig check for arm
-    if platform.processor() == "arm" and backend in ["fbgemm", "x86", "qnnpack"]:
-        if backend in ["fbgemm", "qnnpack"]:
-            warnings.warn(
-                f"Warning: The qconfig '{backend}' is not supported on ARM platforms. Falling back to 'arm' qconfig."
-            )
-        backend = "arm"
     supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
     if backend not in supported_backends:
         raise AssertionError(
@@ -387,13 +379,6 @@ def get_default_qat_qconfig(backend="x86", version=1):
     Return:
         qconfig
     """
-    # qconfig check for arm
-    if platform.processor() == "arm" and backend in ["fbgemm", "x86", "qnnpack"]:
-        if backend in ["fbgemm", "qnnpack"]:
-            warnings.warn(
-                f"Warning: The qconfig '{backend}' is not supported on ARM platforms. Falling back to 'arm' qconfig."
-            )
-        backend = "arm"
     supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
     if backend not in supported_backends:
         raise AssertionError(
