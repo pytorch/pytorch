@@ -675,21 +675,18 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
 
         wrapped_args = []
-        for x in args:
-            pieces = x.split(", ")
-            for piece in pieces:
-                # We only really *need* borrow_arrayref_tensor_as_tensor for
-                # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
-                # which borrow_arrayref_tensor_as_tensor would blindly coerce to int,
-                # so just avoid wrapping integers.
-                # Name matching is to find tensor is hacky, but fixing all the
-                # ArrayRefTensor issues is not a priority for now.
-                if isinstance(piece, str) and piece.startswith(
-                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
-                ):
-                    self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-                    piece = f"borrow_arrayref_tensor_as_tensor({piece})"
-                wrapped_args.append(piece)
+        for arg in args:
+            # We only really *need* borrow_arrayref_tensor_as_tensor for
+            # ArrayRefTensors. The code flowing into here uses `0` for nullptr, which
+            # borrow_arrayref_tensor_as_tensor would blindly coerce to int, so just
+            # avoid wrapping integers.  Name matching is to find tensor is hacky, but
+            # fixing all the ArrayRefTensor issues is not a priority for now.
+            if isinstance(arg, str) and arg.startswith(
+                ("buf", "arg", "wrap_with_raii_handle_if_needed")
+            ):
+                self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+                arg = f"borrow_arrayref_tensor_as_tensor({arg})"
+            wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
             kernel, wrapped_args, device, debug_args=args
@@ -922,21 +919,3 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
-
-    def create_tmp_raii_handle_var(self, base_handle):
-        if base_handle.startswith(
-            (
-                "borrow_arrayref_tensor_as_tensor",
-                "copy_arrayref_tensor_to_tensor",
-                "wrap_with_raii_handle_if_needed",
-            )
-        ):
-            # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
-            # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
-            tmp_var_name = f"var_{next(self.arg_var_id)}"
-            return (
-                tmp_var_name,
-                f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};\n",
-            )
-        else:
-            return "", ""
