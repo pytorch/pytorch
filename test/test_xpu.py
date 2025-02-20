@@ -29,6 +29,14 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
+class TestXpuConfig(TestCase):
+    def test_xpu_record(self):
+        config = torch.__config__.show()
+        assert 'USE_XPU=0' in config or 'USE_XPU=1' in config
+
+    def test_xccl_record(self):
+        config = torch.__config__.show()
+        assert 'USE_XCCL=0' in config or 'USE_XCCL=1' in config
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 
@@ -71,6 +79,9 @@ _xpu_computation_ops = [
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
+    def test_config_xpu_record(self):
+        assert 'USE_XPU=1' in torch.__config__.show()
+
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
         torch.xpu.set_device(current_device)
