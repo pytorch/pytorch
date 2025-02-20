@@ -88,6 +88,10 @@ jobs:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
           path: "pytorch"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -107,10 +111,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
