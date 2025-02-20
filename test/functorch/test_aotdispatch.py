@@ -2349,11 +2349,18 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=True),
         ]
+        inp_grad_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+
         f_compiled = aot_function(f, nop)
-        with self.assertRaisesRegex(
-            AssertionError, "input to the backward that was mutated during the backward"
-        ):
-            f_compiled(*inp_grad)
+        out = f_compiled(*inp_grad)
+        out.mul(2).sum().backward()
+        out_ref = f(*inp_grad_ref)
+        out_ref.mul(2).sum().backward()
+        self.assertEqual(inp_grad[0].grad, inp_grad_ref[0].grad)
+        self.assertEqual(inp_grad[1].grad, inp_grad_ref[1].grad)
 
     def test_backward_mutation_forward_inputs(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
@@ -3960,6 +3967,10 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
             y = torch.ops.aten.dropout.default(x, 0.1, train=False)
@@ -6505,21 +6516,6 @@ symbolic_aot_autograd_failures = {
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
-    # many complex operators incorrect striding, metadata
-    xfail("fft.fft", ""),
-    xfail("fft.hfft2", ""),
-    xfail("fft.hfft", ""),
-    xfail("fft.hfftn", ""),
-    xfail("fft.ifft", ""),
-    xfail("fft.ihfft2", ""),
-    xfail("fft.ihfft", ""),
-    xfail("fft.ihfftn", ""),
-    xfail("fft.irfft2", ""),
-    xfail("fft.irfft", ""),
-    xfail("fft.irfftn", ""),
-    xfail("fft.rfft2", ""),
-    xfail("fft.rfft", ""),
-    xfail("fft.rfftn", ""),
     xfail("stft", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 

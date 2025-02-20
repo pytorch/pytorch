@@ -11,6 +11,7 @@ import pickle
 import unittest
 import weakref
 from unittest.mock import patch
+import io
 
 import numpy as np
 import torch
@@ -1931,6 +1932,24 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    def test_fft_hfft2_issue145522(self):
+        with FakeTensorMode():
+            s0 = 5
+            s1 = 6
+            s2 = 7
+            s3 = 3
+            s4 = 10
+            s5 = 2
+            x = torch.randn(s0, s1, s2)
+            out = torch.randn(s0, s3, s4)
+            kwargs = {
+                's': (s3, s4),
+                'dim': (1, s5),
+                'norm': 'ortho',
+            }
+            r = torch._C._fft.fft_hfft2(x, **kwargs, out=out)
+            self.assertEqual(r.shape, out.shape)
+
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.
@@ -2046,6 +2065,24 @@ class FakeTensorDispatchCache(TestCase):
             out = f(x)
             out.sum().backward()
             self.assertEqual(x.shape, x.grad.shape)
+
+    def test_from_buffer(self):
+        with FakeTensorMode():
+            obj = [1, 2]
+            f = io.BytesIO()
+            pickle.Pickler(f).dump(obj)
+            storage = torch.UntypedStorage.from_buffer(f.getvalue(), dtype=torch.uint8)
+
+            t = torch.ByteTensor(storage)
+            self.assertTrue(isinstance(t, FakeTensor))
+            self.assertEqual(t.device, torch.device('cpu'))
+
+    def test_meta_tensor_to_fake_cpu(self):
+        x = torch.randn(4, 4, device='meta')
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            x_cpu = x.to(device='cpu')
+        self.assertTrue(isinstance(x_cpu, FakeTensor))
+        self.assertEqual(x_cpu.device, torch.device('cpu'))
 
     def test_cache_tuple_outputs(self):
         """

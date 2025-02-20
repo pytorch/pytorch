@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, List, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -182,7 +182,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
-):
+) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
@@ -787,7 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
@@ -1052,7 +1052,7 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 def all_gather_tensor_inplace(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
-    group,  # TODO add a type,
+    group=None,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0,
