@@ -4153,22 +4153,23 @@ class AssociativeScanTests(TestCase):
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the output of the operator
-            # needs to match the lenght of the pytree of the input",
+            # Should be:
+            # RuntimeError,
+            # r"The number of leaves of the pytree of the output of the operator.*",
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
     def test_associative_scan_non_pointwise(self):
-        x = torch.randn(3, 10, 2)
+        device = torch.device("cuda")
+        x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(
             # Should be:
-            # RuntimeError,
-            # r"For combine_mode='pointwise', the combine_fn needs to be pointwise",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            RuntimeError,
+            r"For combine_mode='pointwise', the combine_fn needs to be pointwise",
         ):
             associative_scan(
                 get_scan_combine_fn("non_pointwise", True),
@@ -4177,36 +4178,38 @@ class AssociativeScanTests(TestCase):
                 combine_mode="pointwise",
             )
 
+    @requires_cuda
     def test_associative_scan_input_mutation(self):
+        device = torch.device("cuda")
+
         def fct_input_mutation(x, y):
             x.add_(1)
             return x + y
 
-        x = torch.randn(3, 2, 2)
+        x = torch.randn(3, 2, 2, device=device)
 
         with self.assertRaisesRegex(
             # Should be
-            # RuntimeError,
-            # "Combine_fn might be modifying the input!",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            RuntimeError,
+            "Combine_fn might be modifying the input!",
         ):
             associative_scan(fct_input_mutation, x, 0)
 
+    @requires_cuda
     def test_associative_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
 
-        x = torch.randn(3, 2, 2)
-        y = torch.randn(3, 2, 2)
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
 
         with self.assertRaisesRegex(
             # Should be
-            # RuntimeError,
-            # "Combine_fn might be aliasing the input!",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            RuntimeError,
+            "Combine_fn might be aliasing the input!",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 

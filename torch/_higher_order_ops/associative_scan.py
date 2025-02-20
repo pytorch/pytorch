@@ -425,7 +425,6 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,

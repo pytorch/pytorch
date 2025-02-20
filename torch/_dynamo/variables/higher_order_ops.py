@@ -1330,6 +1330,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+
         from torch._higher_order_ops.utils import (
             _has_potential_branch_input_alias,
             _has_potential_branch_input_mutation,
@@ -1347,10 +1349,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in additional_inputs.items
             ]
             sub_args_fake = xs_fake + additional_fake
-
             pre_dispatch = False
-
-            combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
 
             fx = _maybe_fake_tracing(
                 combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
