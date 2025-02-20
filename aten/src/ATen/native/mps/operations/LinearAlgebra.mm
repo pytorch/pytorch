@@ -188,7 +188,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
       MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
-                                                                                   matrices:batchSize
+                                                                                   matrices:1
                                                                                    rowBytes:aCols * aElemSize
                                                                                 matrixBytes:aRows * aCols * aElemSize
                                                                                    dataType:getMPSDataType(A_)];

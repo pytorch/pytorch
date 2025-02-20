@@ -86,6 +86,44 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {
   p.emplace(j.template get<T>());
 }
 
+class F64 {
+ public:
+  double get() const {
+    return value_;
+  }
+
+  void set(double value) {
+    value_ = value;
+  }
+
+ private:
+  double value_;
+};
+
+inline void to_json(nlohmann::json& j, const F64& f) {
+  if (std::isinf(f.get())) {
+    j = "Infinity";
+  } else if (std::isinf(-f.get())) {
+    j = "-Infinity";
+  } else if (std::isnan(f.get())) {
+    j = "NaN";
+  } else {
+    j = f.get();
+  }
+}
+
+inline void from_json(const nlohmann::json& j, F64& f) {
+  if (j == "Infinity") {
+    f.set(std::numeric_limits<double>::infinity());
+  } else if (j == "-Infinity") {
+    f.set(-std::numeric_limits<double>::infinity());
+  } else if (j == "NaN") {
+    f.set(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    f.set(j.get<double>());
+  }
+}
+
 class Argument;
 class BufferMutationSpec;
 class ConstantValue;
@@ -215,7 +253,7 @@ class SymExprHint {
   };
 
  private:
-  std::variant<Void, int64_t, bool, double> variant_;
+  std::variant<Void, int64_t, bool, F64> variant_;
   Tag tag_;
 
  public:
@@ -239,11 +277,11 @@ class SymExprHint {
     variant_.emplace<2>(std::move(def));
   }
 
-  const double& get_as_float() const {
+  const F64& get_as_float() const {
     return std::get<3>(variant_);
   }
 
-  void set_as_float(double def) {
+  void set_as_float(F64 def) {
     variant_.emplace<3>(std::move(def));
   }
 
@@ -276,7 +314,7 @@ class SymExprHint {
       return;
     }
     if (nlohmann_json_j.contains("as_float")) {
-      nlohmann_json_t.variant_.emplace<3>(nlohmann_json_j.at("as_float").template get<double>());
+      nlohmann_json_t.variant_.emplace<3>(nlohmann_json_j.at("as_float").template get<F64>());
       nlohmann_json_t.tag_ = Tag::AS_FLOAT;
       return;
     }
@@ -379,7 +417,7 @@ class SymFloat {
   };
 
  private:
-  std::variant<Void, SymExpr, double> variant_;
+  std::variant<Void, SymExpr, F64> variant_;
   Tag tag_;
 
  public:
@@ -395,11 +433,11 @@ class SymFloat {
     variant_.emplace<1>(std::move(def));
   }
 
-  const double& get_as_float() const {
+  const F64& get_as_float() const {
     return std::get<2>(variant_);
   }
 
-  void set_as_float(double def) {
+  void set_as_float(F64 def) {
     variant_.emplace<2>(std::move(def));
   }
 
@@ -423,7 +461,7 @@ class SymFloat {
       return;
     }
     if (nlohmann_json_j.contains("as_float")) {
-      nlohmann_json_t.variant_.emplace<2>(nlohmann_json_j.at("as_float").template get<double>());
+      nlohmann_json_t.variant_.emplace<2>(nlohmann_json_j.at("as_float").template get<F64>());
       nlohmann_json_t.tag_ = Tag::AS_FLOAT;
       return;
     }
@@ -631,7 +669,7 @@ class SymFloatArgument {
   };
 
  private:
-  std::variant<Void, std::string, double> variant_;
+  std::variant<Void, std::string, F64> variant_;
   Tag tag_;
 
  public:
@@ -647,11 +685,11 @@ class SymFloatArgument {
     variant_.emplace<1>(std::move(def));
   }
 
-  const double& get_as_float() const {
+  const F64& get_as_float() const {
     return std::get<2>(variant_);
   }
 
-  void set_as_float(double def) {
+  void set_as_float(F64 def) {
     variant_.emplace<2>(std::move(def));
   }
 
@@ -675,7 +713,7 @@ class SymFloatArgument {
       return;
     }
     if (nlohmann_json_j.contains("as_float")) {
-      nlohmann_json_t.variant_.emplace<2>(nlohmann_json_j.at("as_float").template get<double>());
+      nlohmann_json_t.variant_.emplace<2>(nlohmann_json_j.at("as_float").template get<F64>());
       nlohmann_json_t.tag_ = Tag::AS_FLOAT;
       return;
     }
@@ -901,7 +939,7 @@ class Argument {
   };
 
  private:
-  std::variant<Void, bool, TensorArgument, std::vector<TensorArgument>, int64_t, std::vector<int64_t>, double, std::vector<double>, std::string, std::vector<std::string>, SymIntArgument, std::vector<SymIntArgument>, ScalarType, MemoryFormat, Layout, Device, bool, std::vector<bool>, SymBoolArgument, std::vector<SymBoolArgument>, GraphArgument, std::vector<OptionalTensorArgument>, CustomObjArgument, std::string, SymFloatArgument, std::vector<SymFloatArgument>> variant_;
+  std::variant<Void, bool, TensorArgument, std::vector<TensorArgument>, int64_t, std::vector<int64_t>, F64, std::vector<F64>, std::string, std::vector<std::string>, SymIntArgument, std::vector<SymIntArgument>, ScalarType, MemoryFormat, Layout, Device, bool, std::vector<bool>, SymBoolArgument, std::vector<SymBoolArgument>, GraphArgument, std::vector<OptionalTensorArgument>, CustomObjArgument, std::string, SymFloatArgument, std::vector<SymFloatArgument>> variant_;
   Tag tag_;
 
  public:
@@ -949,19 +987,19 @@ class Argument {
     variant_.emplace<5>(std::move(def));
   }
 
-  const double& get_as_float() const {
+  const F64& get_as_float() const {
     return std::get<6>(variant_);
   }
 
-  void set_as_float(double def) {
+  void set_as_float(F64 def) {
     variant_.emplace<6>(std::move(def));
   }
 
-  const std::vector<double>& get_as_floats() const {
+  const std::vector<F64>& get_as_floats() const {
     return std::get<7>(variant_);
   }
 
-  void set_as_floats(std::vector<double> def) {
+  void set_as_floats(std::vector<F64> def) {
     variant_.emplace<7>(std::move(def));
   }
 
@@ -1241,12 +1279,12 @@ class Argument {
       return;
     }
     if (nlohmann_json_j.contains("as_float")) {
-      nlohmann_json_t.variant_.emplace<6>(nlohmann_json_j.at("as_float").template get<double>());
+      nlohmann_json_t.variant_.emplace<6>(nlohmann_json_j.at("as_float").template get<F64>());
       nlohmann_json_t.tag_ = Tag::AS_FLOAT;
       return;
     }
     if (nlohmann_json_j.contains("as_floats")) {
-      nlohmann_json_t.variant_.emplace<7>(nlohmann_json_j.at("as_floats").template get<std::vector<double>>());
+      nlohmann_json_t.variant_.emplace<7>(nlohmann_json_j.at("as_floats").template get<std::vector<F64>>());
       nlohmann_json_t.tag_ = Tag::AS_FLOATS;
       return;
     }
@@ -1550,7 +1588,7 @@ class ConstantValue {
   };
 
  private:
-  std::variant<Void, bool, int64_t, double, std::string, bool> variant_;
+  std::variant<Void, bool, int64_t, F64, std::string, bool> variant_;
   Tag tag_;
 
  public:
@@ -1574,11 +1612,11 @@ class ConstantValue {
     variant_.emplace<2>(std::move(def));
   }
 
-  const double& get_as_float() const {
+  const F64& get_as_float() const {
     return std::get<3>(variant_);
   }
 
-  void set_as_float(double def) {
+  void set_as_float(F64 def) {
     variant_.emplace<3>(std::move(def));
   }
 
@@ -1635,7 +1673,7 @@ class ConstantValue {
       return;
     }
     if (nlohmann_json_j.contains("as_float")) {
-      nlohmann_json_t.variant_.emplace<3>(nlohmann_json_j.at("as_float").template get<double>());
+      nlohmann_json_t.variant_.emplace<3>(nlohmann_json_j.at("as_float").template get<F64>());
       nlohmann_json_t.tag_ = Tag::AS_FLOAT;
       return;
     }

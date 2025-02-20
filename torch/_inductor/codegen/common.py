@@ -538,8 +538,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",

@@ -707,7 +707,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
-        from torch._higher_order_ops import PrimHOPBase
+        from torch._higher_order_ops import BaseHOP
 
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
@@ -755,8 +755,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
-        elif isinstance(value, PrimHOPBase):
-            return PrimHOPBaseVariable(value, source, **kwargs)
+        elif isinstance(value, BaseHOP):
+            return BaseHOPVariable(value, source, **kwargs)
         elif value.__name__ == "custom_function_call":
             return CustomFunctionHigherOrderOperatorVariable(value, source, **kwargs)
         else:
@@ -2579,17 +2579,64 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                tx,
-                bwd_fn,
-                bwd_args,
-                kwargs,
-                "autograd.Function",
-                enable_grad=False,
-                set_subgraph_inputs="manual",
-                restore_side_effects=False,
-                tracer=bwd_tracer,
-            )
+            try:
+                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                    tx,
+                    bwd_fn,
+                    bwd_args,
+                    kwargs,
+                    "autograd.Function",
+                    enable_grad=False,
+                    set_subgraph_inputs="manual",
+                    restore_side_effects=False,
+                    tracer=bwd_tracer,
+                )
+            except torch._dynamo.exc.Unsupported as e:
+                if isinstance(
+                    e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
+                ):
+                    from unittest import mock
+
+                    bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                        tx.output,
+                        parent=fwd_tracer,
+                        source_target="autograd.Function",
+                    )
+                    from .._trace_wrapped_higher_order_op import (
+                        autograd_function_backward_rewritten,
+                    )
+
+                    if isinstance(self.bwd_graph, types.FunctionType):
+                        bwd_fn = UserFunctionVariable(
+                            autograd_function_backward_rewritten(self.bwd_graph)
+                        )
+                    elif isinstance(self.bwd_graph, types.MethodType):
+                        bwd_fn = UserMethodVariable(
+                            autograd_function_backward_rewritten(
+                                self.bwd_graph.__func__
+                            ),
+                            UserDefinedClassVariable(self.bwd_graph.__class__),
+                        )
+                    else:
+                        unimplemented("non-function or method")
+
+                    with mock.patch(
+                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                        [],
+                    ):
+                        (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                            tx,
+                            bwd_fn,
+                            bwd_args,
+                            kwargs,
+                            "autograd.Function",
+                            enable_grad=False,
+                            set_subgraph_inputs="manual",
+                            restore_side_effects=False,
+                            tracer=bwd_tracer,
+                        )
+                else:
+                    raise e
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
@@ -2874,7 +2921,7 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
-class PrimHOPBaseVariable(WrapHigherOrderVariable):
+class BaseHOPVariable(WrapHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",

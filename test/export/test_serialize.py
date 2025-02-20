@@ -21,6 +21,7 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _to_json_bytes,
     canonicalize,
     deserialize,
     ExportedProgramDeserializer,
@@ -455,6 +456,26 @@ def forward(self, x):
             name = output.name
             self.assertNotIn(name, seen)
             seen.add(name)
+
+    def test_infinity_inputs(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Scalar(x, math.inf)
+
+        fn = Module()
+        ep = torch.export.export(
+            fn,
+            (torch.randn(3, 2),),
+        )
+        json_bytes = _to_json_bytes(
+            ExportedProgramSerializer().serialize(ep).exported_program
+        )
+        import json
+
+        def parse_constant(x):
+            raise RuntimeError(f"Invalid JSON float: {x}")
+
+        json.loads(json_bytes, parse_constant=parse_constant)
 
     def test_multi_return_some_unused(self) -> None:
         """
