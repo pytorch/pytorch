@@ -2150,13 +2150,13 @@ class CppKernel(Kernel):
                 loop_nest.max_parallel_depth(), threads
             )
 
-        is_reduction = (
+        is_reduction_loop = (
             loop_nest.loops is not None
             and loop_nest.loops[par_depth.start_depth].is_reduction
         )
         with contextlib.ExitStack() as stack:
             if par_depth.parallel_depth:
-                if is_reduction:
+                if is_reduction_loop:
                     # need to close the worksharing scope to define reduction vars outside it
                     worksharing.close()
                 else:
@@ -2212,7 +2212,7 @@ class CppKernel(Kernel):
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
                         code.splice(reduction_prefix)
-                    if is_reduction and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         worksharing.parallel(threads)
                         if kernel.local_reduction_init:
                             assert kernel.local_reduction_stores
@@ -2220,7 +2220,7 @@ class CppKernel(Kernel):
 
                     gen_loop_at(_loop_nest, depth)
 
-                    if is_reduction and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         if kernel.local_reduction_stores:
                             code.splice(kernel.local_reduction_stores)
                         worksharing.close()
@@ -4901,28 +4901,6 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-                    outer_ranges = functools.reduce(
-                        lambda x, y: x * y,
-                        cpp_kernel_proxy.ranges[: node.outer_loop_fusion_depth],
-                    )
-                    # If the range of the first inner loop is much larger than
-                    # the range of all outer loops, fallback to standard codegen.
-                    if (
-                        len(cpp_kernel_proxy.ranges) > node.outer_loop_fusion_depth
-                        and isinstance(outer_ranges, sympy.Integer)
-                        and isinstance(
-                            cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth],
-                            sympy.Integer,
-                        )
-                        and outer_ranges * 300
-                        < cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
-                    ):
-                        for removed_buffer in scope.removed_buffers:
-                            # Restore the removed buffers by this context before
-                            # fallback to codegen without using Local Buffer
-                            V.graph.removed_buffers.remove(removed_buffer)
-                        return False
-
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
@@ -5371,7 +5349,7 @@ class LoopNest:
         change the starting depth of parallelization to the first inner loop, and set the max depth to 1.
         """
         if self.loops is None:
-            return 0, 0
+            return ParallelDepth(parallel_depth=0, start_depth=0)
 
         max_depth = 0
         start_depth = 0
