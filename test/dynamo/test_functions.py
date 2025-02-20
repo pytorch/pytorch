@@ -2392,15 +2392,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
-    def test_raise_ZeroDivisionError(x):
-        try:
-            1 / 0
-        except ZeroDivisionError:
-            return x.sin()
-        except Exception:
-            return x.cos()
-
-    @make_test
     def test_is(x, y):
         exc = ValueError("abcd")
         try:

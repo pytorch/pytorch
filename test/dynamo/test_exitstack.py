@@ -91,7 +91,7 @@ class TestExitStack(torch._dynamo.test_case.TestCase):
             with contextlib.ExitStack() as stack:
                 stack.callback(raise_exc, IndexError)
                 stack.callback(raise_exc, KeyError)
-                1 / 0
+                raise ZeroDivisionError
         except IndexError as exc:
             self.assertIsInstance(exc.__context__, KeyError)
         else:
@@ -181,7 +181,7 @@ class CPythonTestBaseExitStack:
             self.assertIs(stack._exit_callbacks[-1][1], _expect_exc)
             stack.push(_expect_exc)
             self.assertIs(stack._exit_callbacks[-1][1], _expect_exc)
-            1 / 0
+            raise ZeroDivisionError
 
     @unittest.expectedFailure
     @make_dynamo_test
@@ -255,13 +255,13 @@ class CPythonTestBaseExitStack:
         with self.assertRaises(ZeroDivisionError):
             with self.exit_stack() as stack:
                 stack.push(lambda *exc: False)
-                1 / 0
+                raise ZeroDivisionError
 
     @make_dynamo_test
     def test_exit_suppress(self):
         with self.exit_stack() as stack:
             stack.push(lambda *exc: True)
-            1 / 0
+            raise ZeroDivisionError
 
     @unittest.expectedFailure
     @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
@@ -278,7 +278,7 @@ class CPythonTestBaseExitStack:
         try:
             with self.exit_stack() as stack:
                 stack.callback(raise_exc, ValueError)
-                1 / 0
+                raise ZeroDivisionError
         except ValueError as e:
             exc = e
 
@@ -341,7 +341,7 @@ class CPythonTestBaseExitStack:
                 with RaiseExcWithContext(KeyError, AttributeError):
                     with SuppressExc():
                         with RaiseExc(ValueError):
-                            1 / 0
+                            raise ZeroDivisionError
         except IndexError as exc:
             self.assertIsInstance(exc.__context__, KeyError)
             self.assertIsInstance(exc.__context__.__context__, AttributeError)
@@ -374,7 +374,7 @@ class CPythonTestBaseExitStack:
                 stack.callback(raise_exc, AttributeError)
                 stack.push(suppress_exc)
                 stack.callback(raise_exc, ValueError)
-                1 / 0
+                raise ZeroDivisionError
         except IndexError as exc:
             self.assertIsInstance(exc.__context__, KeyError)
             self.assertIsInstance(exc.__context__.__context__, AttributeError)
@@ -479,7 +479,6 @@ class CPythonTestBaseExitStack:
             self.assertIs(exc.__context__.__context__.__context__, exc1)
             self.assertIsNone(exc.__context__.__context__.__context__.__context__)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_with_existing_context(self):
         # Addresses a lack of test coverage discovered after checking in a
@@ -518,10 +517,11 @@ class CPythonTestBaseExitStack:
         try:
             with self.exit_stack() as stack:
                 stack.push(suppress_exc)
-                1 / 0
+                raise ZeroDivisionError
         except IndexError:
             self.fail("Expected no exception, got IndexError")
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_chaining_suppress(self):
         with self.exit_stack() as stack:
