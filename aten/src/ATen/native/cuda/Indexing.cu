@@ -712,7 +712,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }),
           AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-          AT_EXPAND(AT_FLOAT8_TYPES),
+          // AT_EXPAND(AT_FLOAT8_TYPES),
+          // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+          // should not be supported here, then reenable AT_FLOAT8_DTYPES
+          kFloat8_e4m3fn,
+          kFloat8_e5m2,
+          kFloat8_e4m3fnuz,
+          kFloat8_e5m2fnuz,
           kComplexHalf,
           kHalf,
           kBool,
@@ -738,7 +744,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             }),
             AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-            AT_EXPAND(AT_FLOAT8_TYPES),
+            // AT_EXPAND(AT_FLOAT8_TYPES),
+            // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+            // should not be supported here, then reenable AT_FLOAT8_DTYPES
+            kFloat8_e4m3fn,
+            kFloat8_e5m2,
+            kFloat8_e4m3fnuz,
+            kFloat8_e5m2fnuz,
             kComplexHalf,
             kHalf,
             kBool,
@@ -762,7 +774,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               }),
               AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-              AT_EXPAND(AT_FLOAT8_TYPES),
+              // AT_EXPAND(AT_FLOAT8_TYPES),
+              // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+              // should not be supported here, then reenable AT_FLOAT8_DTYPES
+              kFloat8_e4m3fn,
+              kFloat8_e5m2,
+              kFloat8_e4m3fnuz,
+              kFloat8_e5m2fnuz,
               kComplexHalf,
               kHalf,
               kBool,
@@ -784,7 +802,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               }),
               AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-              AT_EXPAND(AT_FLOAT8_TYPES),
+              // AT_EXPAND(AT_FLOAT8_TYPES),
+              // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+              // should not be supported here, then reenable AT_FLOAT8_DTYPES
+              kFloat8_e4m3fn,
+              kFloat8_e5m2,
+              kFloat8_e4m3fnuz,
+              kFloat8_e5m2fnuz,
               kComplexHalf,
               kHalf,
               kBool,
@@ -809,7 +833,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             }),
             AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-            AT_EXPAND(AT_FLOAT8_TYPES),
+            // AT_EXPAND(AT_FLOAT8_TYPES),
+            // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+            // should not be supported here, then reenable AT_FLOAT8_DTYPES
+            kFloat8_e4m3fn,
+            kFloat8_e5m2,
+            kFloat8_e4m3fnuz,
+            kFloat8_e5m2fnuz,
             kComplexHalf,
             kHalf,
             kBool,

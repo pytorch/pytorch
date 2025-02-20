@@ -373,6 +373,7 @@ class ScalarType(Enum):
     Float8_e5m2fnuz = auto()
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
+    Float8_e8m0fnu = auto()
 
     def __str__(self) -> str:
         return self.name
