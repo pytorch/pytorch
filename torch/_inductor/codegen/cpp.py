@@ -440,6 +440,12 @@ def stride_at_vec_range(
     return stride_at(index, var)
 
 
+@dataclasses.dataclass
+class ParallelDepth:
+    parallel_depth: int
+    start_depth: int
+
+
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(  # type: ignore[override]
@@ -2144,15 +2150,18 @@ class CppKernel(Kernel):
                 loop_nest.max_parallel_depth(), threads
             )
 
-        is_reduction_only = loop_nest.is_reduction_only()
+        is_reduction_loop = (
+            loop_nest.loops is not None
+            and loop_nest.loops[par_depth.start_depth].is_reduction
+        )
         with contextlib.ExitStack() as stack:
-            if par_depth:
-                if loop_nest.is_reduction_only():
+            if par_depth.parallel_depth:
+                if is_reduction_loop:
                     # need to close the worksharing scope to define reduction vars outside it
                     worksharing.close()
                 else:
                     worksharing.parallel(threads)
-                loop_nest.mark_parallel(par_depth)
+                loop_nest.mark_parallel(par_depth.parallel_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
@@ -2160,7 +2169,7 @@ class CppKernel(Kernel):
             def gen_kernel(_loop_nest: LoopNest):
                 def is_parallel_reduction():
                     assert _loop_nest.loops
-                    root = _loop_nest.loops[0]
+                    root = _loop_nest.loops[par_depth.start_depth]
                     return root.is_reduction and root.parallel
 
                 kernel = _loop_nest.get_kernel()
@@ -2203,7 +2212,7 @@ class CppKernel(Kernel):
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
                         code.splice(reduction_prefix)
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         worksharing.parallel(threads)
                         if kernel.local_reduction_init:
                             assert kernel.local_reduction_stores
@@ -2211,7 +2220,7 @@ class CppKernel(Kernel):
 
                     gen_loop_at(_loop_nest, depth)
 
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         if kernel.local_reduction_stores:
                             code.splice(kernel.local_reduction_stores)
                         worksharing.close()
@@ -2284,7 +2293,11 @@ class CppKernel(Kernel):
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
-        ranges = self.call_ranges[:max_parallel_depth]
+        ranges = self.call_ranges[
+            max_parallel_depth.start_depth : (
+                max_parallel_depth.start_depth + max_parallel_depth.parallel_depth
+            )
+        ]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -2303,7 +2316,9 @@ class CppKernel(Kernel):
         # to manage the serial vs. parallel.
         if config.cpp.dynamic_threads and depth == 0 and len(ranges) > 0:
             depth = 1
-        return depth
+        return ParallelDepth(
+            parallel_depth=depth, start_depth=max_parallel_depth.start_depth
+        )
 
     @contextlib.contextmanager
     def write_to_suffix(self):
@@ -4281,7 +4296,7 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: list[LoopNest] = []
 
-    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
+    def decide_parallel_depth(self, max_parallel_depth, threads):
         kernels_parallel_depth = []
         nested_kernels: list[CppKernel] = [
             loop_nest.get_kernel() for loop_nest in self.inner
@@ -4292,11 +4307,21 @@ class OuterLoopFusedKernel(CppKernel):
             call_ranges = kernel.call_ranges
             assert call_ranges is not None
             kernels_parallel_depth.append(
-                kernel.decide_parallel_depth(len(call_ranges), threads)
+                kernel.decide_parallel_depth(
+                    ParallelDepth(
+                        parallel_depth=(
+                            len(call_ranges) - max_parallel_depth.start_depth
+                        ),
+                        start_depth=max_parallel_depth.start_depth,
+                    ),
+                    threads,
+                ).parallel_depth
             )
-        return min(
-            max_parallel_depth,
-            max(kernels_parallel_depth),
+        return ParallelDepth(
+            parallel_depth=min(
+                max_parallel_depth.parallel_depth, max(kernels_parallel_depth)
+            ),
+            start_depth=max_parallel_depth.start_depth,
         )
 
 
@@ -5320,34 +5345,41 @@ class LoopNest:
         1) Levels without splitting and
         2) All reduction or non-reduction levels
         When the loop is split at the top level, the max depth is 1.
+        When the range of the first inner loop is much larger than the range of all outer loops,
+        change the starting depth of parallelization to the first inner loop, and set the max depth to 1.
         """
         if self.loops is None:
-            return 0
+            return ParallelDepth(parallel_depth=0, start_depth=0)
 
         max_depth = 0
+        start_depth = 0
         is_reduction = self.loops[0].is_reduction
+        loop_sizes = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
+            loop_sizes = loop_sizes * loop.size
             max_depth += 1
-        return max_depth
 
-    def is_reduction_only(self):
-        """
-        Whether all the loops are for reduction. Reduction loops
-        are always the inner most ones.
-        """
-        return self.loops is not None and self.loops[0].is_reduction
+        if (
+            max_depth < len(self.loops)
+            and isinstance(loop_sizes, sympy.Integer)
+            and isinstance(self.loops[max_depth].size, sympy.Integer)
+            and loop_sizes * 300 < self.loops[max_depth].size
+        ):
+            start_depth = max_depth
+            max_depth = 1
+        return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
-    def mark_parallel(self, par_depth):
+    def mark_parallel(self, parallel_depth):
         assert (
-            par_depth <= self.max_parallel_depth()
+            parallel_depth <= self.max_parallel_depth().parallel_depth
         ), "Parallel depth cannot exceed the maximal allowed parallel depth"
         assert self.loops is not None
-        assert len(self.loops) >= par_depth
-        loop = self.loops[0]
-        loop.parallel = par_depth
-        for i in range(1, par_depth):
+        assert len(self.loops) >= parallel_depth
+        loop = self.loops[self.max_parallel_depth().start_depth]
+        loop.parallel = parallel_depth
+        for i in range(1, parallel_depth):
             self.loops[i].collapsed = True
 
     def tile(self, depth, factor):
