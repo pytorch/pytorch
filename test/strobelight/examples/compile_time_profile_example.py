@@ -7,7 +7,7 @@ if __name__ == "__main__":
     # You can pass TORCH_COMPILE_STROBELIGHT=True instead.
     StrobelightCompileTimeProfiler.enable()
 
-    # You use the the code below to filter what frames to be profiled.
+    # You can use the code below to filter what frames to be profiled.
     StrobelightCompileTimeProfiler.frame_id_filter = "1/.*"
     # StrobelightCompileTimeProfiler.frame_id_filter='0/.*'
     # StrobelightCompileTimeProfiler.frame_id_filter='.*'

@@ -86,7 +86,7 @@ class StrobelightCompileTimeProfiler:
     inside_profile_compile_time: bool = False
     enabled: bool = False
 
-    # A list of comma seperated inegers. ex: 1,2,3 if not empty then we only profile the compile ids in the list.
+    # A regex that can be used to filter out what frames to profile. ex: "1/.*"
     frame_id_filter: Optional[str] = os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER")
 
     # A unique identifier that is used as the run_user_name in the strobelight profile to
@@ -192,7 +192,7 @@ class StrobelightCompileTimeProfiler:
             logger.info(
                 "profile_compile_time is requested for phase: %s, frame %s, while already in running phase: %s,"
                 "frame %s, recursive call ignored",
-                frame_id,
+                phase_name,
                 frame_id,
                 cls.current_phase,
                 frame_id,
