@@ -32,7 +32,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 class TestXpuConfig(TestCase):
     def test_xpu_record(self):
         config = torch.__config__.show()
-        assert 'USE_XPU=0' in config or 'USE_XPU=1' in config
+        assert f'USE_XPU={int(torch.xpu._is_compiled())}` in config
 
     def test_xccl_record(self):
         config = torch.__config__.show()
