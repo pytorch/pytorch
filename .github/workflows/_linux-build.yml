@@ -237,9 +237,9 @@ jobs:
           fi
 
           if [[ ${MAX_JOBS_OVERRIDE} == "" ]]; then
-            export MAX_JOBS="$(nproc --ignore=2)"
+            MAX_JOBS="$(nproc --ignore=2)"
           else
-            export MAX_JOBS="${MAX_JOBS_OVERRIDE}"
+            MAX_JOBS="${MAX_JOBS_OVERRIDE}"
           fi
 
           # Leaving 1GB for the runner and other things
@@ -253,7 +253,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS \
+            -e MAX_JOBS=${MAX_JOBS} \
             -e MAX_JOBS_OVERRIDE \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
