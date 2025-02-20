@@ -250,53 +250,6 @@ def mark_nodes_dislike_padding(
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: list[ir.IRNode]
 
-    def symbolic_sizes_strides(
-        self, ex: torch.Tensor
-    ) -> tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
-        """
-        Support dynamic shapes and dynamic strides by assigning variables
-        to each dimension.  We duck-shape tensors, so if two tensors
-        have the same size they get assigned the same symbolic variable.
-        """
-        if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
-        else:
-            from torch._dynamo.source import ConstantSource
-
-            # TODO: this should not be needed once #93059 lands
-            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
-            # TODO: make a dedicated UnknownSource for this?
-            # NB: This is using the legacy default behavior from
-            # create_symbolic_sizes_strides_storage_offset but we hope we can
-            # just delete this entirely
-            source = ConstantSource(
-                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
-            )
-            (
-                size,
-                stride,
-                _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
-                ex,
-                source,
-            )
-
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return r_size, r_stride
-
-    def static_sizes_strides(
-        self, ex: torch.Tensor
-    ) -> tuple[list[sympy.Expr], list[sympy.Expr]]:
-        """
-        Primarily used to weights
-        """
-        size = [sympy.Integer(i) for i in ex.size()]
-        stride = [sympy.Integer(i) for i in ex.stride()]
-        return size, stride
-
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -341,9 +294,6 @@ class GraphLowering(torch.fx.Interpreter):
             self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
-        # We are going to start code generating runtime asserts, so make sure
-        # you don't start adding new ones in the lowering process
-        shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: dict[
             Optional[sympy.Symbol], list[RuntimeAssert]
@@ -473,6 +423,56 @@ class GraphLowering(torch.fx.Interpreter):
         self.placeholder_idx = -1
 
         self.bw_donated_idxs = get_donated_idxs()
+
+    def freeze_runtime_asserts(self) -> None:
+        self._shape_env.freeze_runtime_asserts()
+
+    def symbolic_sizes_strides(
+        self, ex: torch.Tensor
+    ) -> tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
+        """
+        Support dynamic shapes and dynamic strides by assigning variables
+        to each dimension.  We duck-shape tensors, so if two tensors
+        have the same size they get assigned the same symbolic variable.
+        """
+        if self.reuse_shape_env:
+            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+                ex.stride()
+            )
+        else:
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            # NB: This is using the legacy default behavior from
+            # create_symbolic_sizes_strides_storage_offset but we hope we can
+            # just delete this entirely
+            source = ConstantSource(
+                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
+                ex,
+                source,
+            )
+
+        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
+        return r_size, r_stride
+
+    def static_sizes_strides(
+        self, ex: torch.Tensor
+    ) -> tuple[list[sympy.Expr], list[sympy.Expr]]:
+        """
+        Primarily used to weights
+        """
+        size = [sympy.Integer(i) for i in ex.size()]
+        stride = [sympy.Integer(i) for i in ex.stride()]
+        return size, stride
 
     def get_allocation_size(
         self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
@@ -1381,16 +1381,15 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = OrderedSet([n])
+        # origins: OrderedSet[Union[Node, ir.IRNode]] = OrderedSet([n])
+        origins: OrderedSet[Any] = OrderedSet([n])
         is_call_function = n.op == "call_function"
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
+        with ir.IRNode.current_origins(origins), self.set_current_node(
             n
-        ), V.set_current_node(
-            n
-        ):
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
