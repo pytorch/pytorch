@@ -170,7 +170,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_raise_match(self):
         a = AttributeError
@@ -222,13 +221,11 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             with ctx():
                 raise e
         except Exception as exc:
-            self.assertIsInstance(exc, a)
-            self.assertIsInstance(exc.__context__, b)
-            self.assertIsInstance(exc.__context__.__context__, c)
-            self.assertIsInstance(exc.__context__.__context__.__context__, d)
-            self.assertIsInstance(
-                exc.__context__.__context__.__context__.__context__, e
-            )
+            assert isinstance(exc, a)
+            assert isinstance(exc.__context__, b)
+            assert isinstance(exc.__context__.__context__, c)
+            assert isinstance(exc.__context__.__context__.__context__, d)
+            assert isinstance(exc.__context__.__context__.__context__.__context__, e)
 
     # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_another_exception2(self):
@@ -540,12 +537,11 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_reraise_first_exc(self):
         def fn():
             try:
-                1 / 0
+                raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
                     raise ValueError
@@ -563,7 +559,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_ensure_exception_is_active_after_try_except_block(self):
         try:
             try:
-                1 / 0
+                raise ZeroDivisionError
             except ZeroDivisionError:
                 for exc in (KeyError, IndexError):
                     try:
@@ -573,12 +569,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise
         except ZeroDivisionError:
             pass
+        assert sys.exc_info()[0] is None
 
     @make_dynamo_test
     def test_ensure_exception_is_active_inside_try_except_block(self):
         try:
             try:
-                1 / 0
+                raise ZeroDivisionError
             except ZeroDivisionError:
                 for exc in (KeyError, IndexError):
                     try:
@@ -588,8 +585,8 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise
         except ZeroDivisionError:
             pass
+        assert sys.exc_info()[0] is None
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_handle_all_exceptions(self):
         def cm():
@@ -609,7 +606,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             pass
         assert sys.exc_info()[0] is None
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_reraise(self):
         try:
@@ -621,7 +617,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             pass
         assert sys.exc_info()[0] is None
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_raise_finally_simple(self):
         def fn():
