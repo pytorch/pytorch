@@ -9,6 +9,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._ops import TorchDispatchMode
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -493,11 +494,21 @@ class RingFlexAttentionTest(DTensorTestBase):
         k_dist = distribute_tensor(k, device_mesh, [Replicate()])
         v_dist = distribute_tensor(v, device_mesh, [Replicate()])
         assert isinstance(q_dist, DTensor)
-        out_dt = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
+        with CPMode():
+            out_dt = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
 
 
-@flex_attention_hop.py_impl(DTensor)
+class CPMode(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        return func(*args, **kwargs)
+
+
+@flex_attention_hop.py_impl(CPMode)
 def cp_flex_attention(
+    mode,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
