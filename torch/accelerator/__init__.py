@@ -75,8 +75,6 @@ def current_accelerator() -> torch.device:
         >>>     is_half_supported = torch.xpu.get_device_properties().has_fp16
         >>> elif current_device.type == 'cpu':
         >>>     is_half_supported = True
-
-    .. note:: This API may cause issues in forked processes. See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     return torch._C._accelerator_getAccelerator()
 
