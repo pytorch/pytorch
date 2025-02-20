@@ -4954,7 +4954,8 @@ class TestLinalg(TestCase):
 
         validators = get_tunableop_validators()
         self.assertTrue("ROCBLAS_VERSION" in validators)
-        self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"])) # format: [major].[minor].[patch].[tweak].[commit id] according to https://github.com/ROCm/rocBLAS/blob/160c08b458e06fb2dc223736948695c2212a455c/library/include/internal/rocblas-version.h.in#L29-L33
+        # format: [major].[minor].[patch].[tweak].[commit id]
+        self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]))
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
