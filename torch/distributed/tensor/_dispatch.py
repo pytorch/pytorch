@@ -160,10 +160,6 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
-        print(
-            # f"[rank {dist.get_rank()}] custom op: {op_call} with args: {args} and kwargs: {kwargs}"
-            f"[rank {dist.get_rank()}] custom op: {op_call}"
-        )
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
