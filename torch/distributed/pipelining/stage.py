@@ -658,7 +658,7 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_is_last_backward(True)
                     fsdp_module.set_reshard_after_backward(True)
                     fsdp_module.set_requires_gradient_sync(True)
-                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[arg-type]
+                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
                     for state in fsdp_state._state_ctx.all_states:
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
