@@ -394,9 +394,6 @@ def cond_op_warmup(mode, pred, true_fn, false_fn, operands):
         return cond_op_dense(pred, true_fn, false_fn, operands)
 
 
-# return torch.cond(pred, true_fn, false_fn, operands)
-
-
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(
