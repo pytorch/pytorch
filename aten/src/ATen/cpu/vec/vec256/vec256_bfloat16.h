@@ -207,7 +207,7 @@ public:
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-    for (const auto i : c10::irange(size())) {
+    for (const auto i : c10::irange(count, size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
