@@ -2732,4 +2732,3 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
-
