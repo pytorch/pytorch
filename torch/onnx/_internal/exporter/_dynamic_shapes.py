@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from typing import Any, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.export.dynamic_shapes import _Dim, _DimHint
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.utils import _pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def from_dynamic_axes_to_dynamic_shapes(
