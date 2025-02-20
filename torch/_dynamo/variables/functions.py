@@ -30,7 +30,7 @@ import itertools
 import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -515,7 +515,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
         return True
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -544,8 +544,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__next__":
             return self.next_variable(tx)
@@ -975,6 +975,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn=None,
+        setattr_values=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -989,6 +990,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
+        self.setattr_values: dict[str, VariableTracker] = setattr_values or {}
 
     def self_args(self):
         return []
@@ -1022,6 +1024,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             assert isinstance(annotations, dict)
             func.__annotations__ = annotations
         return func
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        self.setattr_values[name_var] = val
+        return ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
 
     def has_closure(self):
         return self.closure is not None
@@ -1062,6 +1078,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen):
+        if self.setattr_values:
+            unimplemented("NestedUserFunctionVariable with setattr_values")
+
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
