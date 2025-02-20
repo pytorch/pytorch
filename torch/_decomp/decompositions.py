@@ -5091,7 +5091,10 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
     if not isinstance(elements, torch.Tensor):
         elements = torch.tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
-        test_elements = torch.tensor(test_elements, device=elements.device)
+        if invert:
+            return torch.ne(elements, test_elements)
+        else:
+            return torch.eq(elements, test_elements)
 
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
@@ -5123,15 +5126,10 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
-
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
-    if not invert:
-        cmp = x == test_elements
-    else:
-        cmp = x != test_elements
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
-    return cmp.any(dim=dim)
-
+    res = (x == test_elements).any(dim=dim)
+    return torch.where(res, not invert, invert)
 
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
     elements_flat = elements.flatten()
