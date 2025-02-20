@@ -20,8 +20,9 @@ MODELS: list[str] = ["nanogpt", "BERT_pytorch", "resnet50"]
 @dataclasses.dataclass
 class RunResult:
     model: str
-    mode: str
+    mode: str  # inference or training
     dynamic: bool
+    device: str  # cuda or cpu
     cold_compile_s: float
     warm_compile_s: float
     speedup: float
@@ -55,7 +56,7 @@ def _run_torchbench_from_args(model: str, args: list[str]) -> tuple[float, float
         return cold_compile_time, warm_compile_time
 
 
-def _run_torchbench_model(results: list[RunResult], model: str) -> None:
+def _run_torchbench_model(results: list[RunResult], model: str, device: str) -> None:
     cur_file = os.path.abspath(__file__)
     torchbench_file = os.path.join(os.path.dirname(cur_file), "torchbench.py")
     assert os.path.exists(
@@ -69,6 +70,7 @@ def _run_torchbench_model(results: list[RunResult], model: str) -> None:
         "--repeat=1",
         "--performance",
         "--backend=inductor",
+        f"--device={device}",
     ]
     for mode, mode_args in [
         ("inference", ["--inference", "--bfloat16"]),
@@ -90,6 +92,7 @@ def _run_torchbench_model(results: list[RunResult], model: str) -> None:
                         "model",
                         mode,
                         dynamic,
+                        device,
                         cold_compile_t,
                         warm_compile_t,
                         cold_compile_t / warm_compile_t,
@@ -115,6 +118,7 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
                         "mode": result.mode,
                         "extra_info": {
                             "is_dynamic": result.dynamic,
+                            "device": result.device,
                         },
                     },
                     "model": {
@@ -141,6 +145,7 @@ def parse_cmd_args() -> argparse.Namespace:
         "--model",
         help="Name of the model to run",
     )
+    parser.add_argument("-d", "--device", default="cuda", help="cpu or cuda")
     parser.add_argument(
         "--output",
         required=True,
@@ -156,10 +161,10 @@ def main() -> None:
     results: list[RunResult] = []
 
     if args.model is not None:
-        _run_torchbench_model(results, args.model)
+        _run_torchbench_model(results, args.model, args.device)
     else:
         for model in MODELS:
-            _run_torchbench_model(results, model)
+            _run_torchbench_model(results, model, args.device)
     _write_results_to_json(results, args.output)
 
 
