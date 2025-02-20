@@ -2394,14 +2394,21 @@ if (custom_op_wrapper.get() == NULL) {
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
-    def create_tmp_raii_handle_var(self, base_handle):
-        if base_handle.startswith(("wrap_with_raii_handle_if_needed",)):
-            # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
-            # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+    def create_tmp_raii_handle_var(self, base_handle: str) -> tuple[str, str]:
+        if base_handle.startswith(
+            (
+                "borrow_arrayref_tensor_as_tensor(",
+                "copy_arrayref_tensor_to_tensor(",
+                "wrap_with_raii_handle_if_needed(",
+                "RAIIAtenTensorHandle(",
+            )
+        ):
+            # these operations create a temp RAIIAtenTensorHandle, so we need to
+            # explicitly store them to avoid destroying them early
             tmp_var_name = f"var_{next(self.arg_var_id)}"
             return (
                 tmp_var_name,
-                f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};\n",
+                f"auto {tmp_var_name} = {base_handle};\n",
             )
         else:
             return "", ""
