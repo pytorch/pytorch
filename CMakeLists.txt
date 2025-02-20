@@ -649,6 +649,11 @@ if(MSVC)
 
   string(APPEND CMAKE_CXX_FLAGS " /FS")
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
+
+  # Add /permissive- flag for conformance mode to the compiler.
+  # This will force more strict check to the code standard.
+  string(APPEND CMAKE_CXX_FLAGS " /permissive-")
+
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
@@ -1197,11 +1202,6 @@ endif()
 
 if(USE_XPU)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
-  if(WIN32)
-    # Need to add /permissive- flag for conformance mode for the compiler.
-    # This will fix the build errors with old C++ standard usage.
-    string(APPEND CMAKE_CXX_FLAGS " /permissive-")
-  endif()
 endif()
 
 if(EMSCRIPTEN)
