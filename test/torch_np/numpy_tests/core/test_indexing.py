@@ -11,6 +11,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 import pytest
 from pytest import raises as assert_raises
 
+import torch._dynamo.exc
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -20,7 +21,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo_np,
 )
-import torch._dynamo.exc
 
 
 if TEST_WITH_TORCHDYNAMO:
@@ -528,9 +528,13 @@ class TestBroadcastedAssignments(TestCase):
             assign(a, s_[...], np.ones((2, 1)))
         except Exception as e:
             self.assertTrue(isinstance(e, (ValueError, RuntimeError)))
-        with assert_raises( (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)):
-            assign( a, s_[[1, 2, 3],], np.ones((2, 1)))
-        with assert_raises( (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)):
+        with assert_raises(
+            (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)
+        ):
+            assign(a, s_[[1, 2, 3],], np.ones((2, 1)))
+        with assert_raises(
+            (ValueError, RuntimeError, torch._dynamo.exc.TorchDynamoException)
+        ):
             assign(a, s_[[[1], [2]],], np.ones((2, 2, 1)))
 
     def test_simple_broadcasting_errors(self):
