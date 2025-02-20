@@ -314,6 +314,57 @@ class TestCutlassBackend(TestCase):
                 2,
             ).run(codes[0])
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_number_mm_precompiles(self):
+        torch._dynamo.utils.counters.clear()
+        max_autotune_gemm_backends = "CUTLASS"
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                ab = a @ b
+                return ab
+
+        model = MyModel()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+        c = torch.randn(16, 512).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_fallback_to_aten": False,
+                "cuda.cutlass_max_profiling_swizzle_options": [
+                    1,
+                    2,
+                    4,
+                ],  # guarantees > 1 choices
+            }
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            compiled = torch.compile(model, dynamic=True)
+            expected = model(a, b, c)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
+            FileCheck().check_count(
+                "cuda_fused_0.cuda_fused_0",
+                1,
+            ).run(codes[0])
+            # Verifies expected number of precompilations
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"][
+                    "select_algorithm_num_precompiles"
+                ],
+                1,
+            )
+
     # NOTE: right now tuned_mm doesn't support cutlass 2x, which is used by A100
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
@@ -772,12 +823,15 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @unittest.skipIf(not SM80OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
+
+        NOTE: For SM90, special alignemnt is needed, since in gemm_template.py,
+        set_alignment has arch specific logic.
         """
 
         def mm(a, b):
@@ -787,7 +841,7 @@ class TestCutlassBackend(TestCase):
         # layouts for this operation, thus the transpose of tensor b.
         # Also, for CUTLASS alignment requirements, number of columns
         # of the first tensor has to be divisible by 16.
-        m, n, k = 100, 16, 100
+        m, n, k = 128, 16, 128
         a = torch.randn(m, k).cuda().half()
         b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
 
