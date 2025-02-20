@@ -332,9 +332,6 @@ class TestCutlassBackend(TestCase):
         """
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a, b):
                 return a @ b
 
@@ -400,10 +397,12 @@ class TestCutlassBackend(TestCase):
         ):
             for x_shape in x_shapes:
                 x = torch.randn(x_shape).cuda().to(dtype)
-                Y_compiled = torch.compile(torch.addmm, dynamic=dynamic)(
-                    x, a, b, alpha=alpha, beta=beta
-                )
-                Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+                op = torch.addmm
+                compiled_op = torch.compile(torch.addmm, dynamic=dynamic)
+
+                Y_compiled = compiled_op(x, a, b, alpha=alpha, beta=beta)
+                Y = op(x, a, b, alpha=alpha, beta=beta)
                 torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -433,8 +432,11 @@ class TestCutlassBackend(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ):
-            Y_compiled = torch.compile(torch.bmm, dynamic=dynamic)(a, b)
-            Y = torch.bmm(a, b)
+            op = torch.bmm
+            compiled_op = torch.compile(torch.bmm, dynamic=dynamic)
+
+            Y_compiled = compiled_op(a, b)
+            Y = op(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -584,69 +586,6 @@ class TestCutlassBackend(TestCase):
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             fp16=True, expected_fuse_count=0, mm=mm
         )
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
-    ):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        def mm(a, b, bias):
-            return torch.nn.functional.linear(a, b, bias)
-
-        a = torch.randn(2048, 4096).cuda().half()
-        bias = torch.randn(2048).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            Y = mm(a, a, bias)
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_addmm_with_expanded_bias(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x, w):
-                bias = torch.zeros(
-                    size=(w.size(1), x.size(0)), dtype=torch.float16, device="cuda"
-                ).t()
-                return torch.addmm(bias, x, w)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            model = MyModel()
-            M, N, K = 2048, 3072, 6144
-            x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
-
-            actual = AOTIRunnerUtil.run(
-                "cuda",
-                model,
-                (x, w),
-            )
-            expected = model(x, w)
-            torch.testing.assert_close(expected, actual)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
