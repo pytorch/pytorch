@@ -3270,7 +3270,7 @@ def gaussian_nll_loss(
         elif (
             input.ndim == var.ndim
             and all(x == y or y == 1 for x, y in zip(input.size(), var.size()))
-        ): # Heteroscedastic case
+        ):  # Heteroscedastic case
             pass
 
         # If none of the above pass, then the size of var is incorrect.
