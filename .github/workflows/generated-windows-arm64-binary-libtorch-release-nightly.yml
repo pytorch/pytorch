@@ -28,7 +28,7 @@ env:
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
   ENABLE_OPENBLAS: 0
-  MSVC_VERSION : "14.40"
+  MSVC_VERSION : latest
   AWS_DEFAULT_REGION: us-east-1
 
 jobs:

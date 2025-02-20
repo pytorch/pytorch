@@ -91,23 +91,6 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_sscache
           aws-region: us-east-1
           role-duration-seconds: 18000
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Select all requested test configurations (if the test matrix is available)
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-          job-name: ${{ steps.get-job-id.outputs.job-name }}
-      - name: Parse ref
-        id: parse-ref
-        shell: bash
-        run: python3 .github/scripts/parse_ref.py
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
