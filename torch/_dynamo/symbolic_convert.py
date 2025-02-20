@@ -21,6 +21,7 @@ The symbolic conversion process handles:
 This is a core part of TorchDynamo's tracing system that enables ahead-of-time
 optimization of PyTorch programs.
 """
+from __future__ import annotations
 
 import collections
 import collections.abc
@@ -933,7 +934,7 @@ def break_graph_if_unsupported(
             speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
-            self: "InstructionTranslatorBase",
+            self: InstructionTranslatorBase,
             inst: Instruction,
             reason: GraphCompileReason,
         ) -> None:
@@ -3398,7 +3399,7 @@ class InstructionTranslatorBase(
 
 class InstructionTranslator(InstructionTranslatorBase):
     @staticmethod
-    def current_tx() -> "InstructionTranslator":
+    def current_tx() -> InstructionTranslator:
         return tls.current_tx
 
     @contextlib.contextmanager
