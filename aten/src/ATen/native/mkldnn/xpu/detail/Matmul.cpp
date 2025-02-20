@@ -7,6 +7,7 @@
 #include <Attr.h>
 #include <Utils.h>
 
+#include <c10/core/ScalarType.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
@@ -109,9 +110,9 @@ sycl::event matmul(
   b = b.contiguous(); // avoid reorder 2 times
 
   // xpu matmul support both ab/ba shape for m2 tensor, we don't check any more
-  auto m1_usr_dt = get_onednn_dtype(m1);
-  auto m2_usr_dt = get_onednn_dtype(m2);
-  auto dst_usr_dt = get_onednn_dtype(dst);
+  auto m1_usr_dt = get_onednn_dtype_include_double(m1);
+  auto m2_usr_dt = get_onednn_dtype_include_double(m2);
+  auto dst_usr_dt = get_onednn_dtype_include_double(dst);
 
   auto m1_dt = m1_usr_dt;
   auto m2_dt = m2_usr_dt;
@@ -165,7 +166,7 @@ sycl::event matmul(
 
   if (with_bias) {
     bias_dims = get_onednn_dims(b);
-    bias_dt = get_onednn_dtype(b);
+    bias_dt = get_onednn_dtype_include_double(b);
     bias_strides = get_onednn_strides(b);
   }
 
