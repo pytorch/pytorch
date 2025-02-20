@@ -4,6 +4,7 @@ import types
 from typing import Any, Callable, Optional, Union
 
 import torch
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 
