@@ -46,9 +46,6 @@ Important if you want to run on AMD GPU:
 
 Tools which are only situationally useful:
 
-* [docker](docker) - Dockerfile for running (but not developing)
-  PyTorch, using the official conda binary distribution.  Context:
-  https://github.com/pytorch/pytorch/issues/1619
 * [download_mnist.py](download_mnist.py) - Download the MNIST
   dataset; this is necessary if you want to run the C++ API tests.
 
