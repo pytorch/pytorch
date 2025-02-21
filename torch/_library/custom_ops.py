@@ -346,16 +346,30 @@ class CustomOpDef:
                         )
                         return result
 
+                    need_python_dispatch = isinstance(
+                        self._opoverload, torch._ops.CustomOpOverload
+                    )
+
                     if device_type is None:
-                        self._lib.impl(
-                            self._name, backend_impl, "CompositeExplicitAutograd"
-                        )
+                        if need_python_dispatch:
+                            self._opoverload.py_impl(
+                                _C.DispatchKey.CompositeExplicitAutograd
+                            )(backend_impl)
+                        else:
+                            self._lib.impl(
+                                self._name, backend_impl, "CompositeExplicitAutograd"
+                            )
                     else:
-                        self._lib.impl(
-                            self._name,
-                            backend_impl,
-                            _C._dispatch_key_for_device(device_type),
-                        )
+                        if need_python_dispatch:
+                            self._opoverload.py_impl(
+                                _C._dispatch_key_for_device(device_type)
+                            )(backend_impl)
+                        else:
+                            self._lib.impl(
+                                self._name,
+                                backend_impl,
+                                _C._dispatch_key_for_device(device_type),
+                            )
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
@@ -609,6 +623,8 @@ class CustomOpDef:
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
+        need_python_dispatch = isinstance(self._opoverload, torch._ops.CustomOpOverload)
+
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
@@ -619,12 +635,22 @@ class CustomOpDef:
                     f"Please use `{self._init_fn.__name__}.register_fake` to add an "
                     f"fake impl."
                 )
+            if need_python_dispatch:
+                args = args[1:]
             return self._abstract_fn(*args, **kwargs)
 
-        lib._register_fake(self._name, fake_impl, _stacklevel=4)
-
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
-        lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
+
+        if need_python_dispatch:
+            self._opoverload.py_impl(torch._subclasses.fake_tensor.FakeTensorMode)(
+                fake_impl
+            )
+            self._opoverload.py_impl(_C.DispatchKey.Autograd, with_keyset=True)(
+                autograd_impl
+            )
+        else:
+            lib._register_fake(self._name, fake_impl, _stacklevel=4)
+            lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
@@ -640,12 +666,17 @@ class CustomOpDef:
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
                     )
 
-            lib.impl(
-                self._name,
-                adinplaceorview_impl,
-                "ADInplaceOrView",
-                with_keyset=True,
-            )
+            if need_python_dispatch:
+                self._opoverload.py_impl(_C.DispatchKey.ADInplaceOrView)(
+                    adinplaceorview_impl
+                )
+            else:
+                lib.impl(
+                    self._name,
+                    adinplaceorview_impl,
+                    "ADInplaceOrView",
+                    with_keyset=True,
+                )
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """

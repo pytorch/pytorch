@@ -96,6 +96,8 @@ class OperatorBase:
         # HigherOrderOperator
         self.functorch_table = {}
 
+        self.needs_keyset = set()
+
     def __call__(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -116,8 +118,11 @@ class OperatorBase:
             TransformType,
             DispatchKey,
         ],
+        with_keyset: bool = False,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+            if with_keyset:
+                self.needs_keyset.add(k)
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
@@ -449,10 +454,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         if dispatch_key != DispatchKey.PreDispatch:
             self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
-        # It's illegal to register DispatchKey to py_kernels, since there's no
-        # C++ kernel to call into
-        assert not isinstance(kernel, DispatchKey)
-        return kernel(*args, **kwargs)
+        if final_key in self.needs_keyset:
+            key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            return kernel(key_set, *args, **kwargs)
+        else:
+            # It's illegal to register DispatchKey to py_kernels, since there's no
+            # C++ kernel to call into
+            assert not isinstance(kernel, DispatchKey)
+            return kernel(*args, **kwargs)
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
@@ -925,6 +934,83 @@ class OpOverload(OperatorBase):
     # TODO: add more methods to expose information about input and output arguments
 
 
+class CustomOpOverload(OpOverload):
+    def __repr__(self):
+        return "<CustomOpOverload(op='{}.{}', overload='{}')>".format(
+            *self._schema.name.split("::"), self._overloadname
+        )
+
+    def _fallthrough_keys(self) -> list[DispatchKey]:
+        # TODO: we should be calling the fallback for these, but a fallthrough is almost close
+        # enough to the fallback in most cases that we care about.
+        _DEFAULT_FALLTHROUGH_KEYS = [
+            DispatchKey.Autograd,
+            DispatchKey.AutogradCPU,
+            DispatchKey.AutogradCUDA,
+            DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
+            DispatchKey.PythonTLSSnapshot,
+            DispatchKey.PythonDispatcher,
+        ]
+
+        def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):
+            if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), key):
+                return torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                    self.name(), key
+                )
+
+            return (
+                key not in self.py_kernels
+                or self.py_kernels[key] is torch.library.fallthrough_kernel
+            )
+
+        return [
+            key
+            for key in _DEFAULT_FALLTHROUGH_KEYS
+            if _may_use_fallthrough_instead_of_fallback(key)
+        ]
+
+    def __call__(self, /, *args, **kwargs):
+        return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+
+    def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
+        non_fallthrough_keys = torch._C._dispatch_keyset_full()
+        for key in fallthrough_keys:
+            non_fallthrough_keys = non_fallthrough_keys.remove(key)
+
+        dispatch_key_set = _compute_keyset(args, kwargs, non_fallthrough_keys)
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+
+        handler = (
+            self._get_dispatch(dispatch_key)
+            if dispatch_key not in self._dispatch_cache
+            else self._dispatch_cache[dispatch_key]
+        )
+
+        if isinstance(handler, DispatchKey):
+            # fallthrough keys can be registered at runtime via torch.library.impl
+            # so need to add it to fallthrough_keys and re-dispatch.
+            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                self.name(), dispatch_key
+            ):
+                return self._dispatch_in_python(
+                    args, kwargs, fallthrough_keys + [dispatch_key]
+                )
+
+            raise RuntimeError(
+                f"Custom op {self} received a Pytree input when dispatching {handler}."
+                f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
+            )
+
+        assert isinstance(handler, Callable)  # type: ignore[arg-type]
+        return handler(*args, **kwargs)
+
+
+def _has_pytree_object_arg(schema: torch.FunctionSchema) -> bool:
+    return any(isinstance(arg.type, torch.AnyType) for arg in schema.arguments)
+
+
 # TorchBindOpOverload are those custom ops which have at least one overload's
 # schema consists of torch.ScriptObject (i.e. custom class) input.
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
@@ -1125,11 +1211,12 @@ class OpOverloadPacket:
 
             op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = (
-                OpOverload(self, op_, op_dk_, schema, tags)
-                if not _has_script_object_arg(schema)
-                else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
-            )
+            if _has_pytree_object_arg(schema):
+                overload = CustomOpOverload(self, op_, op_dk_, schema, tags)
+            elif _has_script_object_arg(schema):
+                overload = TorchBindOpOverload(self, op_, op_dk_, schema, tags)
+            else:
+                overload = OpOverload(self, op_, op_dk_, schema, tags)
             # cache the overload object
             setattr(self, key, overload)
             self._dir.append(key)

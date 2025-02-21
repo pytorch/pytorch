@@ -124,7 +124,9 @@ def infer_schema(
         annotation_type, _ = unstringify_type(param.annotation)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type.__origin__ is tuple:
+            if annotation_type in torch.utils._pytree.SUPPORTED_NODES:
+                schema_type = "Any"
+            elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -141,8 +143,8 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
-
-        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
+        else:
+            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
