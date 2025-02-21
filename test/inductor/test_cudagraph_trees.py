@@ -2581,6 +2581,78 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 obs.op_outputs[aten.rand.default][2],
             )
 
+        def test_cudagraph_uneven_forward_backward(self):
+            # torch.compile cudagraphs are difficult to test
+            # the rng updating bc is sensitive to duration of pending backwards, etc.
+            # this is a short repro to mimic the runtime wrappers integration
+            # and show that updating the backward rng state with cudagraphs works:
+            def forward():
+                state = torch.cuda.get_rng_state()
+                perm = torch.randperm(10, device="cuda")
+                return state, perm
+
+            def backward(rng_state):
+                current_state = torch.cuda.get_rng_state()
+                torch.cuda.set_rng_state(rng_state.cpu())
+                perm = torch.randperm(10, device="cuda")
+                torch.cuda.set_rng_state(current_state)
+                return perm
+
+            def normal_test():
+                state, perm = forward()
+                repro_perm = backward(state)
+                return perm, repro_perm
+
+            def graphsafe_forward():
+                perm = torch.randperm(10, device="cuda")
+                return perm
+
+            def graphsafe_backward(generator, new_state):
+                current_state = generator.graphsafe_get_state()
+                generator.graphsafe_set_state(new_state)
+                perm = torch.randperm(10, device="cuda")
+                generator.graphsafe_set_state(current_state)
+                return perm
+
+            def graph_test(generator, capture_cuda_graph):
+                if capture_cuda_graph:
+                    graph = torch.cuda.CUDAGraph()
+
+                # state should be cloned before the graph
+                old_state = generator.graphsafe_get_state()
+                new_state = old_state.clone_state()
+
+                if capture_cuda_graph:
+                    # state should be register to the graph
+                    graph.register_generator_state(new_state)
+
+                    # only capturing the backward
+                    with torch.cuda.graph(graph):
+                        repro_perm = graphsafe_backward(generator, new_state)
+
+                # some number of uneven forwards
+                graphsafe_forward()
+                graphsafe_forward()
+                graphsafe_forward()
+
+                # state prior to rng invocation
+                state = generator.get_state()
+                perm = graphsafe_forward()
+
+                new_state.set_state(state)
+
+                if capture_cuda_graph:
+                    graph.replay()
+                else:
+                    repro_perm = graphsafe_backward(generator, new_state)
+
+                return perm, repro_perm
+
+            self.assertEqual(*normal_test())
+            generator = torch.cuda.default_generators[0]
+            self.assertEqual(*graph_test(generator, capture_cuda_graph=False))
+            self.assertEqual(*graph_test(generator, capture_cuda_graph=True))
+
         def test_cpu_and_cuda_rng(self):
             device = "cuda"
 

@@ -66,6 +66,7 @@ from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     _get_symint_hints,
     contain_metadata_mutation_ops,
+    get_cuda_generator_meta_val,
     make_boxed_func,
     strict_zip,
     unlift_tokens,
@@ -678,12 +679,14 @@ def aot_dispatch_autograd(
                 return_new_outs=False
             )
 
-            # TODO - no "Fake Generator"
-            rng_states = [
-                torch.cuda.default_generators[0].clone_state()
-                for _ in range(fw_metadata.num_graphsafe_rng_states)
-            ]
-            adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
+            if rng_states:
+                index = fw_metadata.graphsafe_rng_state_index
+                assert index is not None
+                rng_states = [
+                    get_cuda_generator_meta_val(index)
+                    for _ in range(fw_metadata.num_graphsafe_rng_states)
+                ]
+                adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
 
             (
                 fw_module,

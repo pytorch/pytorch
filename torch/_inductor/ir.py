@@ -4989,7 +4989,7 @@ class ExternKernel(InputsKernel):
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
         example_args: list[
-            Union[torch.Tensor, torch._C.ScriptObject, torch._C.Generator]
+            Union[torch.Tensor, torch._C.ScriptObject, torch.Generator]
         ] = []
 
         # We need to retain the constant values of fake tensors that we originally
@@ -5006,14 +5006,11 @@ class ExternKernel(InputsKernel):
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, torch._inductor.ir.GeneratorState):
-                ex_inp = V.graph.example_inputs
-                assert ex_inp is not None
-                generator = next(
-                    (e for e in reversed(ex_inp) if isinstance(e, torch._C.Generator)),
-                    None,
+                device_index = x.device.index
+                assert x.device.type == "cuda" and device_index is not None
+                example_args.append(
+                    torch.cuda.default_generators[device_index].clone_state()
                 )
-                assert generator is not None
-                example_args.append(generator)
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -7566,6 +7563,7 @@ class TorchBindObject(NonTensorObj):
 @ir_dataclass
 class GeneratorState(NonTensorObj):
     name: str
+    device: torch.device
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name

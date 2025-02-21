@@ -40,7 +40,7 @@ from ._activation_checkpointing.knapsack import (
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import is_with_effects
+from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -632,7 +632,23 @@ def apply_graphsafe_rng_functionalization(
     last_fwd_input: torch.fx.Node,
     last_bwd_input: torch.fx.Node,
 ):
-    """Applies graph-safe RNG functionalization to forward and backward nodes in a CUDA device context.
+    """
+    Note [CUDA Graph Safe RNG Functionalization]
+
+    CUDA Graph capture is not compatible with get_rng_state and set_rng_state. As an alternative mechanism to
+    setting the same rng state in the forward and backward for an rng op, we use `graphsafe_set_state`.
+
+    `graphsafe_set_state` takes in a CUDA Generator that registered is to the CUDA Graph
+    prior to CUDA Graph Capture. For each forward, backward pair of an rng operator, we construct a pair of generators
+    which are initialized with the same value. Then, each fwd and bwd invocation of the op will advance the respective generator an
+    equal amount. This keeps the generators in sync so that each forward and backward invocation gets rng op outputs with the same value.
+
+    In the case that forward is invoked multiple times before invoking the backward, so that the forward & backward are out of sync,
+    we will save the rng state of the forward that so that we can update state of the backward Generator prior to invoking the backward.
+    Before each CUDA Graph replay, `replay_prologue` will update the cuda tensors which were captured as rng pointers with its current rng
+    state, which makes it so the updated state of the backward Generator is reflected in the graph replay.
+
+    For more context, see: https://github.com/pytorch/pytorch/issues/113541
 
     This function modifies the forward and backward computation graphs by:
     1. Creating RNG state placeholders for both passes
@@ -646,27 +662,20 @@ def apply_graphsafe_rng_functionalization(
     graphsafe_run_with_rng_state = torch._prims.rng_prims.graphsafe_run_with_rng_state
 
     # Handle forward pass
+
+    # Note: [Generator arguments in AOTDispatcher]
+    # Generator arguments in AOTDispatcher are added to support graphsafe rng
+    # functionalization. See note above [CUDA Graph Safe RNG Functionalization]
     with fw_module.graph.inserting_after(last_fwd_input):
         fwd_rng_state = fw_module.graph.placeholder(f"fwd_rng_state_{rng_count}")
-        # Note: a newly cloned generator will not contain tensors. it is only Generators that are
-        # registered to a CUDAGraph that contain tensors. since this does not contain Tensor
-        # it is fine to use in the meta.
-        fwd_rng_state.meta["val"] = (
-            torch.cuda.default_generators[device_idx]
-            .graphsafe_get_state()
-            .clone_state()
-        )
+        fwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
         last_fwd_input = fwd_rng_state
 
     # Handle backward pass
     with bw_module.graph.inserting_after(last_bwd_input):
         bwd_rng_state = bw_module.graph.placeholder(f"bwd_rng_state_{rng_count}")
         # as above, clone so that meta val generator will not contain tensors
-        bwd_rng_state.meta["val"] = (
-            torch.cuda.default_generators[device_idx]
-            .graphsafe_get_state()
-            .clone_state()
-        )
+        bwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
         last_bwd_input = bwd_rng_state
 
     # Update forward node

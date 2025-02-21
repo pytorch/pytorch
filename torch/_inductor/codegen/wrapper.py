@@ -1539,7 +1539,8 @@ class PythonWrapperCodegen(CodeGen):
                     add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
                 elif isinstance(value, ir.GeneratorState):
                     add_expr_input(
-                        name, "torch.cuda.default_generators[0].graphsafe_get_state()"
+                        name,
+                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
                     )
                 else:
                     shape = [

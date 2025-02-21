@@ -1855,6 +1855,25 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+        # For additional context see Note [CUDA Graph Safe RNG Functionalization]
+        # Each pair forward, backward rng states must be equal prior to its invocation on any
+        # iteration of forward, backward. Because they are initialized equal, and are computing the same rng op,
+        # running forward then backward advances them the same amount and keeps them equal.
+        # However, a user may invoke multiple forwards, then backwards, such that they are not in sync.
+        # Initially we have:
+        # fwd_state0 == bwd_state0.
+        # Lets say we run:
+        # fwd0: fwd_state0 -> fwd_state1
+        # fwd1: fwd_state1 -> fwd_state2
+        # fwd2: fwd_state2 -> fwd_state3
+        # If we now invoke bwd2,
+        # we need to update bwd_state equal to the rng that was observed in fwd2.
+        # we save the rng_state fwd_state2 in forward because we detect that it is not the
+        # current backward state and therefore would not be accessible if we do not save it.
+        # Similarly, if we are going to update the backward state to a new value, and there is a pending
+        # forwards which needs its current state, we will save it.
+        # Within the autograd context, we keep track of the curr iteration so that on backward
+        # we know what the generator state must be before the backward is run.
         num_rng = fw_metadata.num_graphsafe_rng_states
         graphsafe_idx = fw_metadata.graphsafe_rng_state_index
         fwd_rng_states: list[torch.Generator] = []
@@ -1862,7 +1881,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         curr_fwd_iter = itertools.count(0)
         backward_state_position = 0
         pending_forwards: set[int] = set()
-        saved_backward_states: dict[int, list[torch.Generator]] = {}
+        saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1898,8 +1917,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # if this state is not contained in the backward,
                     # we need to save it for when its backward pass happens
                     if _curr_iter != backward_state_position:
-                        saved_backward_states[_curr_iter] = [
-                            rng_state.clone_state() for rng_state in fwd_rng_states
+                        saved_backward_tensor_states[_curr_iter] = [
+                            rng_state.get_state() for rng_state in fwd_rng_states
                         ]
 
                     pending_forwards.add(_curr_iter)
@@ -2043,26 +2062,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # or this state may be needed again because of retain graph
                     if (
                         backward_state_position in pending_forwards
-                        and backward_state_position not in saved_backward_states
+                        and backward_state_position not in saved_backward_tensor_states
                         and (
                             backward_state_position != curr_backward_iter
                             or retain_graph
                         )
                     ):
-                        saved_backward_states[backward_state_position] = [
-                            rng_state.clone_state() for rng_state in bwd_rng_states
+                        saved_backward_tensor_states[backward_state_position] = [
+                            rng_state.get_state() for rng_state in bwd_rng_states
                         ]
 
                     # Restore saved states if needed
-                    if curr_backward_iter in saved_backward_states:
+                    if curr_backward_iter in saved_backward_tensor_states:
                         if backward_state_position != curr_backward_iter:
                             for bwd_state, saved_state in zip(
                                 bwd_rng_states,
-                                saved_backward_states[curr_backward_iter],
+                                saved_backward_tensor_states[curr_backward_iter],
                             ):
-                                bwd_state.graphsafe_set_state(saved_state)
+                                bwd_state.set_state(saved_state)
                         if not retain_graph:
-                            del saved_backward_states[curr_backward_iter]
+                            del saved_backward_tensor_states[curr_backward_iter]
                     else:
                         assert backward_state_position == curr_backward_iter
 

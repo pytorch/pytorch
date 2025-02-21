@@ -1015,13 +1015,14 @@ class GraphLowering(torch.fx.Interpreter):
             # Alternately we could filter this out in AotAutograd
             self.graph_input_names.append(target)
             return None
-        elif isinstance(example, torch._C.Generator):
+        # See note: Note: [Generator arguments in AOTDispatcher]
+        elif isinstance(example, torch.Generator):
             assert (
                 len(V.graph.current_node.users) == 1
                 and next(iter(V.graph.current_node.users)).target
                 is torch._prims.rng_prims.graphsafe_run_with_rng_state
             )
-            obj = ir.GeneratorState(name=target)
+            obj = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return obj
