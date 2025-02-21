@@ -443,8 +443,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         torch.manual_seed(10)
         dtype = torch.float32
         bs = 8
-        query_tokens = 64 * self.world_size
-        context_tokens = 64 * self.world_size
+        query_tokens = 512 * self.world_size
+        context_tokens = 512 * self.world_size
         dim = 32
         nheads = 8
 
@@ -496,6 +496,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         with CPMode():
             out_dt = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
 
+        self.assertEqual(out_dt.full_tensor(), out)
+
 
 class CPMode(TorchDispatchMode):
     def __init__(self):
@@ -509,16 +511,16 @@ class CPMode(TorchDispatchMode):
 @flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
     mode,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
     score_mod: Callable,
     block_mask: tuple,
     scale: float,
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[DTensor, DTensor]:
     print("Congrats! Flex attention is successfully dispatched!")
 
     assert isinstance(query, DTensor)
@@ -535,26 +537,26 @@ def cp_flex_attention(
     cp_rank = cp_mesh.get_local_rank()
     cp_group_size = cp_mesh.size()
 
-    assert len(block_mask) == 12
-    kv_num_blocks = block_mask[2]
-    q_num_blocks = block_mask[6]
+    assert len(block_mask) == 13
+    Q_LEN = block_mask[0]
+    KV_LEN = block_mask[1]
+    # kv_num_blocks = block_mask[2]
+    # q_num_blocks = block_mask[6]
     mask_mod: _mask_mod_signature = block_mask[-1]
-    Q_BLOCK_SIZE: int = block_mask[-2]
-    KV_BLOCK_SIZE: int = block_mask[-3]
+    Q_BLOCK_SIZE: int = block_mask[-3]
+    KV_BLOCK_SIZE: int = block_mask[-2]
     # TODO: assume Q_BLOCK_SIZE == KV_BLOCK_SIZE
     assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
 
     # TODO: assume no load-balancing for now, will add it later
     sharding_plan = regular_sharding(
-        q_num_blocks, kv_num_blocks, cp_group_size, device_type
+        Q_LEN, KV_LEN, Q_BLOCK_SIZE, KV_BLOCK_SIZE, cp_group_size, device_type
     )
 
     # rewrite block_mask
     cp_mask_mod = rewrite_mask_mod_for_cp(
         mask_mod, cp_rank, Q_BLOCK_SIZE, sharding_plan
     )
-    Q_LEN = q_num_blocks * Q_BLOCK_SIZE
-    KV_LEN = kv_num_blocks * KV_BLOCK_SIZE
     cp_block_mask = create_block_mask_cached(
         cp_mask_mod,
         B=1,
@@ -592,10 +594,17 @@ def create_block_mask_cached(score_mod, B, H, M, N, device, BLOCK_SIZE):
 
 
 def regular_sharding(
-    q_num_blocks: int, kv_num_blocks: int, cp_size: int, device_type: str
+    Q_LEN: int,
+    KV_LEN: int,
+    Q_BLOCK_SIZE: int,
+    KV_BLOCK_SIZE: int,
+    cp_size: int,
+    device_type: str,
 ) -> torch.Tensor:
-    assert q_num_blocks == kv_num_blocks
-    assert q_num_blocks % cp_size == 0
+    assert Q_LEN == KV_LEN
+    assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
+    assert Q_LEN % (Q_BLOCK_SIZE * cp_size) == 0
+    q_num_blocks = Q_LEN // Q_BLOCK_SIZE
     local_num_blk = q_num_blocks // cp_size
     return torch.arange(q_num_blocks, device=device_type).view(cp_size, local_num_blk)
 
