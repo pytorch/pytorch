@@ -797,6 +797,7 @@ def functionalize_rng_ops(
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
+        and not multi_cuda_devices
         and (
             not ind_config.fallback_random
             or ind_config.test_configs.graphsafe_rng_func_ignores_fallback_random
@@ -815,8 +816,7 @@ def functionalize_rng_ops(
         bw_graph = bw_module.graph
 
         if (
-            not multi_cuda_devices
-            and use_rng_graphsafe_rng_functionalization
+            use_rng_graphsafe_rng_functionalization
             and device is not None
             and device.type == "cuda"
         ):
