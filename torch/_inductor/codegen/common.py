@@ -551,7 +551,7 @@ def deduce_output_dtype_by_name(
 
 
 def check_dtype(
-    buffer: IndentedBuffer, var: Union[str, CSEVariable], dtype: torch.dtype
+    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
@@ -559,12 +559,12 @@ def check_dtype(
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
-        is_vec = isinstance(var, CppCSEVariable) and var.is_vec
-        if dtype == torch.bool and is_vec:
+        assert isinstance(var, CppCSEVariable)
+        if dtype == torch.bool and var.is_vec:
             is_same_dt = f"IsVecMaskType<decltype({var})>::value"
         else:
             c_var_type = f"decltype({var})"
-            if is_vec:
+            if var.is_vec:
                 c_var_type = f"typename {c_var_type}::value_type"
             is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
             if dtype == torch.bool:
