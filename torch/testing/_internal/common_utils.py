@@ -49,15 +49,11 @@ from statistics import mean
 from typing import (
     Any,
     Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
     Optional,
-    Type,
     TypeVar,
     Union,
 )
+from collections.abc import Iterable, Iterator
 from unittest.mock import MagicMock
 
 import expecttest
@@ -646,7 +642,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
+        self.arg_names: list[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -689,7 +685,7 @@ class parametrize(_TestParametrizer):
             for idx, values in enumerate(self.arg_values):
                 maybe_name = None
 
-                decorators: List[Any] = []
+                decorators: list[Any] = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
@@ -942,11 +938,7 @@ parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SL
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
 parser.add_argument('--rerun-disabled-tests', action='store_true')
 parser.add_argument('--pytest-single-test', type=str, nargs=1)
-if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
-else:
-    parser.add_argument('--showlocals', action='store_true', default=False)
-    parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
+parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -1173,10 +1165,10 @@ def sanitize_pytest_xml(xml_file: str):
     tree.write(xml_file)
 
 
-def get_pytest_test_cases(argv: List[str]) -> List[str]:
+def get_pytest_test_cases(argv: list[str]) -> list[str]:
     class TestCollectorPlugin:
         def __init__(self) -> None:
-            self.tests: List[Any] = []
+            self.tests: list[Any] = []
 
         def pytest_collection_finish(self, session):
             for item in session.items:
@@ -1301,14 +1293,9 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
-        if not RERUN_DISABLED_TESTS:
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            sys.exit(0 if exit_code == 5 else exit_code)
-        else:
-            # Only record the test report and always return a success code when running under rerun
-            # disabled tests mode
-            sys.exit(0)
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        sys.exit(0 if exit_code == 5 else exit_code)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -1732,6 +1719,41 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
     return decorator
+
+
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(fn)
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+    ) -> None:
+        def dummy(fn: Callable[..., Any]) -> None:
+            fn(self)
+
+        actual = CompileCounter()
+
+        dummy(fn)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn(fn)
+        reset()
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+        )
+
+    return test_fn
 
 
 # Run PyTorch tests with translation validation on.
@@ -2637,7 +2659,7 @@ def check_if_enable(test: unittest.TestCase):
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             if matches_test(disabled_test):
-                platform_to_conditional: Dict = {
+                platform_to_conditional: dict = {
                     "mac": IS_MACOS,
                     "macos": IS_MACOS,
                     "win": IS_WINDOWS,
@@ -2678,6 +2700,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
+            # Probably test has disable issue but not for this platform
             skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
@@ -2706,7 +2729,7 @@ class RelaxedBooleanPair(BooleanPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
         # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
-        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *self._supported_number_types, *tensor_or_array_types)
         if not (
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2763,7 +2786,7 @@ class RelaxedNumberPair(NumberPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
-        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *tensor_or_array_types)
         if not (
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2849,7 +2872,7 @@ class UnittestPair(Pair):
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
-    CLS: Union[Type, tuple[Type, ...]]
+    CLS: Union[type, tuple[type, ...]]
     TYPE_NAME: Optional[str] = None
 
     def __init__(self, actual, expected, **other_parameters):
@@ -3075,13 +3098,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
+        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            if post_munge:
+                munged = post_munge(munged)
             self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+                munged, expect, skip=1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -3142,6 +3168,15 @@ class TestCase(expecttest.TestCase):
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
+
+        # We disable size_asserts for test_ops since some tests fail
+        # due to mismatch of strides returned from eager v.s. meta kernels
+        # Only some of the ops has this problem, but since tests in
+        # test_op.py are parametrized, it's hard to do this specifically
+        # for the affected ops.
+        # It's not a big deal since these problems are captured by
+        # test_torchinductor_opinfo.py as well.
+        should_disable_size_asserts = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -3152,9 +3187,10 @@ class TestCase(expecttest.TestCase):
                     if TEST_WITH_TORCHINDUCTOR:
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
+                        should_reset_dynamo = True
 
-                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
-                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
+                        if filename == "test_ops":
+                            should_disable_size_asserts = True
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -3187,34 +3223,49 @@ class TestCase(expecttest.TestCase):
             suppress_errors = not strict_mode
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super_run)
-            elif TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-            elif TEST_WITH_TORCHDYNAMO:
-                # TorchDynamo optimize annotation
-                # Assume eager-generated GraphModules will not error out.
-                # If we do, this is probably a Dynamo bug!
-                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
-                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
-                def expect_failure(f, test_name):
+        maybe_disable_size_asserts = (
+            torch._inductor.config.patch(size_asserts=False)
+            if should_disable_size_asserts
+            else contextlib.nullcontext()
+        )
+
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
+            if TEST_WITH_AOT_EAGER:
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+            elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
+                if TEST_WITH_TORCHINDUCTOR:
+                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                else:
+                    # Assume eager-generated GraphModules will not error out.
+                    # If we do, this is probably a Dynamo bug!
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
+                        raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_expected_failures:
-                    method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method, key))
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_expected_failures"
+                    from .dynamo_test_failures import inductor_expected_failures as expected_failures
+                else:
+                    subdir = "test/dynamo_expected_failures"
+                    from .dynamo_test_failures import dynamo_expected_failures as expected_failures
 
-                def ignore_failure(f, test_name):
+                if key in expected_failures:
+                    method = getattr(self, self._testMethodName)
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, expect_failure(method, file_name))
+
+                def ignore_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
@@ -3225,12 +3276,20 @@ class TestCase(expecttest.TestCase):
                         if getattr(method, "__unittest_expecting_failure__", False):
                             self.skipTest("unexpected success")
                         else:
-                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
+                            self.skipTest(f"This test passed, maybe we can remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_skips:
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_skips"
+                    from .dynamo_test_failures import inductor_skips as skips
+                else:
+                    subdir = "test/dynamo_skips"
+                    from .dynamo_test_failures import dynamo_skips as skips
+
+                if key in skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method, key))
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
             super_run(result=result)
 
@@ -5072,8 +5131,8 @@ def get_tensors_from(args, kwargs):
 
 
 # Returns scalar tensor representation of a list of integer byte values
-def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
-    dtype_to_ctype: Dict[torch.dtype, Any] = {
+def bytes_to_scalar(byte_list: list[int], dtype: torch.dtype, device: torch.device):
+    dtype_to_ctype: dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
         torch.uint16: ctypes.c_uint16,

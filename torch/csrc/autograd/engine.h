@@ -15,8 +15,6 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <exception>
 #include <functional>
 #include <memory>
@@ -47,6 +45,8 @@ TORCH_API void validate_outputs(
     const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
+TORCH_API std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges);
 
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;

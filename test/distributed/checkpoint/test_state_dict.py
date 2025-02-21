@@ -4,7 +4,7 @@ import copy
 import functools
 import sys
 from itertools import chain
-from typing import Callable, Tuple, Type, Union
+from typing import Callable, Union
 
 import torch
 import torch.distributed as dist
@@ -47,7 +47,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MultiProcessTestCase,
     with_comms,
 )
-from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
+from torch.testing._internal.distributed.common_state_dict import (
+    FusionEmbedding,
+    FusionEmbeddingWithHook,
+    FusionEmbeddingWithModifier,
+    VerifyStateDictMixin,
+)
 from torch.utils._pytree import tree_all, tree_all_only
 
 
@@ -154,9 +159,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         *,
         use_orig_params: bool,
         use_dtensor: bool,
-        wrapping: Tuple[nn.Module] = (),
+        wrapping: tuple[nn.Module] = (),
         compile_model: bool = False,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
     ) -> None:
         if not use_orig_params:
             return
@@ -232,7 +237,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         *,
         reshard_after_forward: Union[bool, int],
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
     ):
@@ -272,7 +277,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp2,
         )
 
-    def _test_ddp(self, use_composable: bool, optimizer_class: Type[Optimizer]) -> None:
+    def _test_ddp(self, use_composable: bool, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -303,7 +308,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_fsdp_ddp(
         self,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         optim_in_backward: bool = False,
         test_frozen: bool = False,
     ) -> None:
@@ -347,7 +352,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp_ddp,
         )
 
-    def _test_single_gpu(self, optimizer_class: Type[Optimizer]) -> None:
+    def _test_single_gpu(self, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -399,7 +404,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     def _test_cpu_offload_full_state_dict(
-        self, optimizer_class: Type[Optimizer]
+        self, optimizer_class: type[Optimizer]
     ) -> None:
         orig_model = CompositeParamModel(device=torch.device("cuda"))
         device_mesh = init_device_mesh("cuda", (self.world_size,))
@@ -918,6 +923,20 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True, strict=False
                 ),
             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_hook_on_keys(self) -> None:
+        with torch.device("meta"):
+            metamodel = FusionEmbedding(4, 4, 4)
+        with torch.device("cuda"):
+            gpumodel = FusionEmbeddingWithHook(4, 4, 4)
+        gpumodel_state_dict = get_model_state_dict(gpumodel)
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            set_model_state_dict(metamodel, gpumodel_state_dict)
+        with torch.device("meta"):
+            metamodel_modified = FusionEmbeddingWithModifier(4, 4, 4)
+        set_model_state_dict(metamodel_modified, gpumodel_state_dict)
 
 
 class TestNoComm(MultiProcessTestCase):

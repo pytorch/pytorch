@@ -16,7 +16,8 @@ import numpy as np
 import numpy.typing as npt
 from torch import inf, nan
 
-from typing import Any, Dict, List, Tuple, Union, Sequence
+from typing import Any, Union
+from collections.abc import Sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
@@ -30,7 +31,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
+    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
     _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
@@ -3992,7 +3993,7 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Ordered as shapes for input, weight, bias,
     # and a dict of values of (stride, padding, dilation, groups)
-    cases: Tuple = (
+    cases: tuple = (
         ((1, 3, 4), (3, 3, 3), (3,), {'stride': (2,), 'padding': 2, 'groups': 1}),
         ((2, 4, 8), (2, 2, 3), (2,), {'stride': 3, 'padding': 1, 'groups': 2, 'dilation': 2}),
         ((1, 4, 5), (1, 4, 3), None, {'stride': (2,), 'padding': 'valid'}),
@@ -4140,7 +4141,7 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, groups, dilation)
-    cases: Tuple = (
+    cases: tuple = (
         ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
             {'stride': (2, 2), 'padding': 2, 'groups': 1}),
         ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
@@ -4185,7 +4186,7 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 
     # Ordered as shapes for input, weight, bias
     # and dict of values of (stride, padding, dilation, groups)
-    cases: Tuple = (
+    cases: tuple = (
         ((1, 1, 4, 4, 4), (1, 1, 1, 1, 1), (1,), {'padding': 'same'}),
         ((1, 1, 4, 4, 4), (1, 1, 4, 4, 4), (1,), {'stride': (2, 2, 2)}),
         ((1, 1, 5, 5, 5), (1, 1, 3, 3, 3), (1,), {'dilation': 2}),
@@ -4658,7 +4659,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
-    batch_options: List[List[int]] = [
+    batch_options: list[list[int]] = [
         [],  # no batch
         [0],
         [8],
@@ -4684,7 +4685,7 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
-    batch_options: List[List[int]] = [
+    batch_options: list[list[int]] = [
         [],  # no batch
         [0],
         [8],
@@ -4706,7 +4707,7 @@ def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_glu(self, device, dtype, requires_grad, **kwargs):
     features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
-    batch_options: List[List[int]] = [
+    batch_options: list[list[int]] = [
         [],  # no batch
         [0],
         [8],
@@ -5003,6 +5004,14 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 return_indices=return_indices,
             )
 
+    yield SampleInput(
+        make_arg((1, 1, 16, 16)),
+        (1, 1),
+        output_ratio=(0.5, 0.5),
+        return_indices=True,
+        _random_samples=make_tensor((1, 1, 2), device=device, dtype=dtype, requires_grad=False),
+    )
+
 def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5063,7 +5072,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, kwargs
-    cases: List[tuple[tuple[int, ...], Union[int, tuple[int, ...]], Dict]] = [
+    cases: list[tuple[tuple[int, ...], Union[int, tuple[int, ...]], dict]] = [
         ((2, 3, 9), (3,), {}),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
@@ -5082,7 +5091,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-    cases: List[tuple[tuple[int, ...], Union[int, tuple[int, ...]], Dict]] = [
+    cases: list[tuple[tuple[int, ...], Union[int, tuple[int, ...]], dict]] = [
         ((2, 3, 3, 4, 4), (2, 2, 2), {}),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
@@ -6637,7 +6646,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
     batch_size, num_classes = shape = (2, 3)
     reductions = ("mean", "sum", "none")
 
-    input_shape_and_kwargs: List[tuple[tuple[int, ...], Dict[str, Any]]] = [
+    input_shape_and_kwargs: list[tuple[tuple[int, ...], dict[str, Any]]] = [
         (shape, {}),
         ((*shape, 1), {}),
         ((*shape, 1, 2), {}),
@@ -6828,17 +6837,17 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
                            requires_grad: bool,
-                           *, variant: str, **kwargs) -> List[SampleInput]:
+                           *, variant: str, **kwargs) -> list[SampleInput]:
     if variant == 'variadic':
         def make_inputs(
-                tensors: List[torch.Tensor]) -> tuple[Union[torch.Tensor,
-                                                            List[torch.Tensor]],
+                tensors: list[torch.Tensor]) -> tuple[Union[torch.Tensor,
+                                                            list[torch.Tensor]],
                                                       tuple[torch.Tensor, ...]]:
             return tensors
     elif variant == 'list':
         def make_inputs(
-                tensors: List[torch.Tensor]) -> tuple[Union[torch.Tensor,
-                                                            List[torch.Tensor]],
+                tensors: list[torch.Tensor]) -> tuple[Union[torch.Tensor,
+                                                            list[torch.Tensor]],
                                                       tuple[torch.Tensor, ...]]:
             return [tensors]
     else:
@@ -6848,7 +6857,7 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
 
     SCALAR = torch.Size([])
     VECTOR = torch.Size([3])
-    test_cases: List[List[torch.Size]] = [
+    test_cases: list[list[torch.Size]] = [
         [SCALAR],
         [VECTOR],
         [VECTOR, SCALAR],
@@ -9664,7 +9673,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                     args.pop()
 
 
-foreach_unary_op_db: List[OpInfo] = [
+foreach_unary_op_db: list[OpInfo] = [
     ForeachFuncInfo(
         'exp',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
@@ -10835,7 +10844,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
 ]
 
-foreach_binary_op_db: List[OpInfo] = [
+foreach_binary_op_db: list[OpInfo] = [
     ForeachFuncInfo(
         "add",
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
@@ -11130,7 +11139,7 @@ foreach_binary_op_db: List[OpInfo] = [
     )
 ]
 
-foreach_pointwise_op_db: List[ForeachFuncInfo] = [
+foreach_pointwise_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
         sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
@@ -11184,7 +11193,7 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
-foreach_reduce_op_db: List[ForeachFuncInfo] = [
+foreach_reduce_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "max",
         sample_inputs_func=foreach_max_sample_func(1, False, False),
@@ -11267,7 +11276,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
-foreach_other_op_db: List[ForeachFuncInfo] = [
+foreach_other_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
         sample_inputs_func=foreach_inputs_sample_func(3, True, True),
@@ -11665,7 +11674,7 @@ def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
 
 
 # Operator database (sorted alphabetically)
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
                    ref=np.abs,
@@ -15250,6 +15259,10 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -15295,6 +15308,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
                ),
            ),
            skips=(
@@ -16202,7 +16219,7 @@ op_db: List[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
+        decorators=[skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',

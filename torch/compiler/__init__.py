@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -209,7 +209,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
 def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
-    This allows the compiler to optimize away your function
+    This allows the compiler to optimize away your function.
     Returns The same function `fn`
 
     Args:
@@ -227,8 +227,8 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides a decorator to disable compilation on a function
-    It also provides the option of recursively disabling called functions
+    This function provides a decorator to disable compilation on a function.
+    It also provides the option of recursively disabling called functions.
 
     Args:
         fn (optional): The function to disable
@@ -432,7 +432,7 @@ def is_exporting() -> bool:
     return _is_exporting_flag
 
 
-def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     """
     Serializes all the cache artifacts that were created during the compilation
 
