@@ -96,11 +96,33 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 }
 
 struct cublasCommonArgs {
-  cublasCommonArgs(const Tensor& mat1, const Tensor& mat2, Tensor& c) {
+  cublasCommonArgs(
+      const Tensor& mat1,
+      const Tensor& mat2,
+      Tensor& c,
+      const c10::optional<Tensor>& scale_a = c10::nullopt,
+      const c10::optional<Tensor>& scale_b = c10::nullopt,
+      const c10::optional<Tensor>& scale_result = c10::nullopt) {
     bool transpose_result = false, transpose_mat1 = false, transpose_mat2 = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
     matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+
+    // Handle scale tensors if provided
+    if (scale_a && scale_b) {
+      // By default since we return in row-major we run the gemm
+      // as B.T @ A.T, check transpose_result to determine if we flip the scales
+      scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr();
+      scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type();
+      scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr();
+      scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
+    }
+
+    if (scale_result) {
+      scale_result_ptr = scale_result->data_ptr();
+      scale_result_dtype = scale_result->scalar_type();
+    }
+
     auto mat1_sizes = mat1.sizes();
     auto mat2_sizes = mat2.sizes();
     if (transpose_result) {
@@ -116,13 +138,23 @@ struct cublasCommonArgs {
     lda = mata->stride((transpose_mat1 == transpose_result) ? 1 : 0);
     ldb = matb->stride((transpose_mat2 == transpose_result) ? 1 : 0);
     result_ld = result->stride(transpose_result ? 0 : 1);
-    transa = transpose_mat1 ?  mata->is_conj() ? 'c' : 't' : 'n';
-    transb = transpose_mat2 ?  matb->is_conj() ? 'c' : 't' : 'n';
+    transa = transpose_mat1 ? mata->is_conj() ? 'c' : 't' : 'n';
+    transb = transpose_mat2 ? matb->is_conj() ? 'c' : 't' : 'n';
   }
+
+  // Matrix members
   char transa, transb;
   int64_t m, n, k;
   int64_t lda, ldb, result_ld;
   c10::MaybeOwned<Tensor> mata, matb, result;
+
+  // Scale members
+  void* scale_mata_ptr = nullptr;
+  void* scale_matb_ptr = nullptr;
+  void* scale_result_ptr = nullptr;
+  c10::optional<c10::ScalarType> scale_mata_dtype;
+  c10::optional<c10::ScalarType> scale_matb_dtype;
+  c10::optional<c10::ScalarType> scale_result_dtype;
 };
 } // namespace
 
@@ -1117,7 +1149,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #endif
 
-  cublasCommonArgs args(mat1, mat2, out);
+  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, scale_result);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
 
@@ -1199,7 +1231,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
   else
 #endif
-  {
+ {
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1207,19 +1239,19 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.n,
         args.k,
         args.mata->data_ptr(),
-        scale_a.data_ptr(),
+        args.scale_mata_ptr,
         args.lda,
         args.mata->scalar_type(),
-        scale_a.scalar_type(),
+        args.scale_mata_dtype.value(),
         args.matb->data_ptr(),
-        scale_b.data_ptr(),
+        args.scale_matb_ptr,
         args.ldb,
         args.matb->scalar_type(),
-        scale_b.scalar_type(),
+        args.scale_matb_dtype.value(),
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
-        scale_result ? scale_result->data_ptr() : nullptr,
+        args.scale_result_ptr,
         args.result_ld,
         out_dtype_,
         use_fast_accum,
