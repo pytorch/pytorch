@@ -39,6 +39,7 @@ def rotary_embedding(
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
     position_ids: Optional[torch.Tensor] = None,
+    *,
     interleaved: bool = False,
     num_heads: int = 0,
     rotary_embedding_dim: int = 0,

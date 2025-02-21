@@ -22,7 +22,7 @@ class Model(torch.nn.Module):
         # It is also possible to specify the overload:
         # torch.ops.onnx.RotaryEmbedding.opset23
         return torch.ops.onnx.RotaryEmbedding(
-            input_data, cos_cache_data, sin_cache_data, position_ids_data
+            input_data, cos_cache_data, sin_cache_data, position_ids_data, interleaved=True
         )
 
 
