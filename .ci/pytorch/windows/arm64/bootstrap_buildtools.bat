@@ -7,7 +7,7 @@ if not exist "%DOWNLOADS_DIR%" mkdir "%DOWNLOADS_DIR%"
 if not exist "%DEPENDENCIES_DIR%" mkdir "%DEPENDENCIES_DIR%"
 
 :: Set download URL for the Visual Studio Installer
-set DOWNLOAD_URL=https://aka.ms/vs/17/release.ltsc.17.12/vs_buildtools.exe
+set DOWNLOAD_URL=https://aka.ms/vs/17/release/vs_BuildTools.exe
 set INSTALLER_FILE=%DOWNLOADS_DIR%\vs_BuildTools.exe
 
 :: Download installer
@@ -19,6 +19,12 @@ echo Installing Visual Studio Build Tools with C++ components...
 echo Installing MSVC %MSVC_VERSION%
 if "%MSVC_VERSION%" == "latest" (
     "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+        --add Microsoft.VisualStudio.Component.Roslyn.Compiler ^
+        --add Microsoft.Component.MSBuild ^
+        --add Microsoft.VisualStudio.Component.CoreBuildTools ^
+        --add Microsoft.VisualStudio.Workload.MSBuildTools ^
+        --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
+        --add icrosoft.VisualStudio.Component.VC.Redist.14.Latest ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
         --add Microsoft.VisualStudio.Component.VC.ASAN ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
