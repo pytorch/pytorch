@@ -69,14 +69,17 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
-    # need to be updated with more information rather than just True/False
-    indirect_broadcast: bool = False
+    # store the replacements for the index when normalizing
+    replacement: tuple[tuple[sympy.Symbol, sympy.Expr], ...] = ()
+    # store the indirect broadcast dimensions
+    indirect_broadcast: tuple[sympy.Symbol, sympy.Symbol] = ()
 
+    
     def __repr__(self) -> str:
         maybe_mode = ""
         if self.mode is not None:
             maybe_mode = f", {self.mode}"
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode})"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode}, replacement={self.replacement}, indirect_broadcast={self.indirect_broadcast})"
 
     @property
     def num_vars(self) -> int:
@@ -151,10 +154,15 @@ class MemoryDep(Dep):
         this method does not reorder loops while normalize_with_stride_order reorder
         loops based on stride order.
         """
+        index, var_names, sizes, replacement = self.canonicalize(self.index)
         return MemoryDep(
             self.name,
-            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
+            index,
+            var_names,
+            sizes,
+            replacement,
             self.mode,
+            self.indirect_broadcast,
         )
 
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
@@ -213,6 +221,8 @@ class MemoryDep(Dep):
             var_names=self.var_names,
             size=self.size,
             mode=self.mode,
+            replacement=self.replacement,
+            indirect_broadcast=self.indirect_broadcast,
         )
 
     def get_numel(self) -> sympy.Expr:
@@ -234,6 +244,8 @@ class MemoryDep(Dep):
                 var_names=self.var_names,
                 size=self.size,
                 mode=self.mode,
+                replacement=self.replacement,
+                indirect_broadcast=self.indirect_broadcast,
             )
         return self
 
@@ -290,14 +302,15 @@ class MemoryDep(Dep):
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
-    def set_indirect_broadcast_to_True(self) -> "MemoryDep":
+    def set_indirect_broadcast(self, indirect_broadcast: tuple[sympy.Symbol, sympy.Symbol]) -> "MemoryDep":
         return MemoryDep(
             name=self.name,
             index=self.index,
             var_names=self.var_names,
             size=self.size,
             mode=self.mode,
-            indirect_broadcast=True,
+            replacement=self.replacement,
+            indirect_broadcast=indirect_broadcast,
         )
 
 
@@ -483,7 +496,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     @classmethod
     def _normalize(
         cls, index: sympy.Expr, var_ranges: VarRanges
-    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
+    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...], tuple[tuple[sympy.Symbol, sympy.Expr], ...]]:
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
@@ -504,7 +517,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
-        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
+        return index, tuple(new_vars), tuple(new_sizes), tuple(replacement.items())  # type: ignore[arg-type]
 
     def canonicalize(
         self, index: sympy.Expr
@@ -516,7 +529,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
             self.drop_unused_symbols(index, var_names, sizes)
 
-            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
+            return index, tuple(var_names), tuple(sizes), tuple()  # type: ignore[return-value, arg-type]
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
             for k, v in self._var_ranges.items()
@@ -526,7 +539,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self._normalize(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._reads.add(MemoryDep(name, *self.canonicalize(index)))
+        index, var_names, sizes, replacement = self.canonicalize(index)
+        self._reads.add(MemoryDep(name, index, var_names, sizes, replacement=replacement))
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int) -> str:
@@ -536,14 +550,16 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def store(
         self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
     ) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
+        index, var_names, sizes, replacement = self.canonicalize(index)
+        self._writes.add(MemoryDep(name, index, var_names, sizes, replacement=replacement, mode=mode))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> str:
         return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> str:
-        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+        index, var_names, sizes, _ = self.canonicalize(index)
+        self._index_exprs.add(IndexExprDep(index, var_names, sizes))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
@@ -651,6 +667,7 @@ def extract_loop_body_with_args(
     from .loop_body import MemoryUsageType
 
     # Fast path to avoid tracing when we already have a LoopBody
+
     inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
     name_to_index = fn.indexing_from_args(args)
     repl = {}
@@ -692,19 +709,40 @@ def extract_loop_body_with_args(
     # detect indirect broadcast
     repl_reverse = {v: k for k, v in repl.items()}  # type: ignore[assignment]
     replacement_mem_dep = {}
-    for i, read in enumerate(inner._reads):
-        if isinstance(read, MemoryDep):
-            for free_symbol in read.index.free_symbols:
-                if free_symbol in repl_reverse:
-                    for node in fn.root_block.graph.nodes:
-                        if (
-                            node.name == f"set_{repl_reverse[free_symbol].name}"
-                            and len(node.args) == 1
-                            and node.args[0].name.startswith("load")
-                        ):
-                            # not sure if this is the correct way to update deps
-                            read_new = read.set_indirect_broadcast_to_True()
-                            replacement_mem_dep[read] = read_new
+    name_to_node = {node.name: node for node in fn.root_block.graph.nodes}
+    for read in inner._reads:
+        if isinstance(read, MemoryDep) and read.replacement:
+            indirect_load_dim_indexing_expr = None
+            indirect_vars = [free_symbol for free_symbol in read.index.free_symbols if free_symbol in repl_reverse]
+            if len(indirect_vars) != 1:
+                continue
+            indirect_var = indirect_vars[0] 
+            set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
+            if len(set_indirect_node.args) == 1 and set_indirect_node.args[0].name.startswith("load"):
+                the_load_node = set_indirect_node.args[0]
+                arg_pattern = [str(arg) for arg in the_load_node.args]
+                if len(arg_pattern) == 3 and arg_pattern[0] == 'ops' and arg_pattern[2].startswith('get_index'):
+                    the_load_index_node = the_load_node.args[2]
+                    if len(the_load_index_node.args) == 1:
+                        indexing = fn.indexing_exprs.get(the_load_index_node.args[0])
+                        # do we need to consider cases like index0 = p0 + 32*p1?
+                        if indexing is not None and indexing in fn.iter_vars:
+                            indirect_load_dim_indexing_expr = indexing
+            if indirect_load_dim_indexing_expr is None:
+                continue
+            broadcast_dim_indexing = None
+            other_free_symbols = [free_symbol for free_symbol in read.index.free_symbols if free_symbol not in repl_reverse]
+            if len(other_free_symbols) != 1:
+                continue
+            other_free_symbol = other_free_symbols[0]
+            replacement = dict(read.replacement)
+            replacement_reverse = {v: k for k, v in replacement.items()}
+            assert other_free_symbol in replacement_reverse
+            d_symbol = replacement_reverse[other_free_symbol]
+            d_p_replacement = {v:k for k,v in fn.replacement.items()}
+            broadcast_dim_indexing = d_p_replacement[d_symbol]
+            read_new = read.set_indirect_broadcast((indirect_load_dim_indexing_expr, broadcast_dim_indexing))
+            replacement_mem_dep[read] = read_new
     for read, read_new in replacement_mem_dep.items():
         inner._reads.remove(read)
         inner._reads.add(read_new)

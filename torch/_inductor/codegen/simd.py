@@ -2055,58 +2055,29 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
-        indirect_broadcast = False
         # save iter vars in indirect broadcast memory reads
-        iter_vars_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-        other_dims: list[sympy.Symbol] = []
-
+        indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
         if len(node_schedule) == 1:
             for read in node_schedule[0].read_writes.reads:
-                if hasattr(read, "indirect_broadcast") and read.indirect_broadcast:
-                    indirect_broadcast = True
-                    for asymbol in read.index.free_symbols:
-                        if not INDIRECT_PATTERN.search(asymbol.name):
-                            iter_vars_symbols.add(asymbol)
-            if indirect_broadcast:
-                indices = OrderedSet(
-                    [
-                        var
-                        for read in node_schedule[0].read_writes.reads
-                        for var in read.var_names
-                    ]
-                )
-                indices_list = list(indices)
-                indices_list.sort(key=lambda d: d.name)
-                assert len(indices_list) == len(node_schedule[0]._body.iter_vars), (
-                    indices_list,
-                    node_schedule[0]._body.iter_vars,
-                )
-                assert all(
-                    v not in node_schedule[0]._body.iter_vars for v in indices_list
-                ), f"{node_schedule[0]._body.iter_vars=}, {indices_list=}"
-                # map iter vars in mem deps to ir iter vars
-                replacements = dict(zip(indices_list, node_schedule[0]._body.iter_vars))
-                iter_vars_symbols_list = [
-                    replacements[iter_var] for iter_var in iter_vars_symbols
-                ]
-                other_dims = [
-                    iter_var
-                    for iter_var in node_schedule[0]._body.iter_vars
-                    if iter_var not in iter_vars_symbols_list
-                ]
-                iter_vars_symbols_list.sort(
-                    key=lambda iter_var: node_schedule[0]._body.var_ranges[iter_var]
-                )
-                new_order = [
-                    node_schedule[0]._body.iter_vars.index(dim)
-                    for dim in iter_vars_symbols_list
-                ] + [node_schedule[0]._body.iter_vars.index(dim) for dim in other_dims]
-                # we only check iter vars, not reduction vars
+                if isinstance(read, MemoryDep) and hasattr(read, "indirect_broadcast") and read.indirect_broadcast:
+                    indirect_broadcast_pairs.append(read.indirect_broadcast)
+
+            if indirect_broadcast_pairs:
+                tail = []
+                for pair in indirect_broadcast_pairs:
+                    idx_first = node_schedule[0]._body.iter_vars.index(pair[0])
+                    idx_second = node_schedule[0]._body.iter_vars.index(pair[1])
+                for idx in [idx_second, idx_first]:
+                    if idx in tail:
+                        tail.remove(idx)
+                    tail.append(idx)
+                remaining = [i for i in range(len(node_schedule[0]._body.iter_vars)) if i not in tail]
+                new_order = remaining + tail
                 if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
                     node_schedule[0].apply_new_loop_order(new_order)
 
         # Optionally, prefer tiling into as many dimensions as possible.
-        if config.triton.prefer_nd_tiling or indirect_broadcast:
+        if config.triton.prefer_nd_tiling or indirect_broadcast_pairs:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
                 + ranked_tilings
