@@ -413,9 +413,7 @@ if HAS_CPU:
                 example_inputs=example_inputs,
                 device=self.device,
                 kwargs=kwargs,
-                is_cpp_code=isinstance(
-                    get_scheduling_for_device(self.device)(None), CppScheduling
-                ),
+                is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
             )
 
     copy_tests(
