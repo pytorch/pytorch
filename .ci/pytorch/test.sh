@@ -1515,6 +1515,8 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
+  install_torchaudio cuda
+  install_torchvision
   checkout_install_torchbench nanogpt BERT_pytorch resnet50
   test_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
