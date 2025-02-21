@@ -43,8 +43,8 @@ from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     import unittest
+    from collections.abc import Sequence
 
     from torch.testing._internal.opinfo import core as opinfo_core
 
