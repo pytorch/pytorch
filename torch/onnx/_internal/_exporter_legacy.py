@@ -81,11 +81,13 @@ class ONNXFakeContext:
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
 )
 class OnnxRegistry:
     """Registry for ONNX functions.
+
+    .. deprecated:: 2.7
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     The registry maintains a mapping from qualified names to symbolic functions under a
     fixed opset version. It supports registering custom onnx-script functions and for
@@ -229,11 +231,14 @@ class OnnxRegistry:
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=None,
 )
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
+
+    .. deprecated:: 2.7
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
         dynamic_shapes: Shape information hint for input/output tensors.
@@ -276,6 +281,10 @@ class ExportOptions:
         self.diagnostic_options = diagnostic_options or DiagnosticOptions()
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=None,
+)
 class ResolvedExportOptions(ExportOptions):
     """Consolidates :class:`ExportOptions` with default values.
     All unspecified options from :class:`ExportOptions` are assigned a default value.
@@ -385,6 +394,10 @@ def enable_fake_mode():
     It is highly recommended to initialize the model in fake mode when exporting models that
     are too large to fit into memory.
 
+    .. note::
+        This function does not support torch.onnx.export(..., dynamo=True, optimize=True).
+        Please call ONNXProgram.optimize() outside of the function after the model is exported.
+
     Example::
 
         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
@@ -400,7 +413,7 @@ def enable_fake_mode():
         ...     # They do not take up memory so we can initialize large models
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)
-        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
+        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True, optimize=False)
         >>> # Saving model WITHOUT initializers (only the architecture)
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
@@ -440,11 +453,13 @@ def enable_fake_mode():
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
 )
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    .. deprecated:: 2.7
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
         session_options: ONNX Runtime session options.
@@ -697,10 +712,6 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
         raise missing_opset("onnxscript")
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
-)
 def dynamo_export(
     model: torch.nn.Module | Callable,
     /,
@@ -709,6 +720,9 @@ def dynamo_export(
     **model_kwargs,
 ) -> _onnx_program.ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
+
+    .. deprecated:: 2.7
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:
         model: The PyTorch model to be exported to ONNX.

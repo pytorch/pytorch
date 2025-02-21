@@ -9,7 +9,9 @@
 #include <ATen/ATen.h>
 #if !defined(USE_ROCM)
 #include <cuda_bf16.h>
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
 #include <cuda/atomic>
+#endif
 #endif
 namespace c10d::symmetric_memory {
 
@@ -48,7 +50,7 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   return 0;
 #else
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
-  ref.compare_exchange_strong(compare, val, Sem);
+  ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
 #endif
 }
