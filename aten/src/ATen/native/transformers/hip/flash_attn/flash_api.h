@@ -8,6 +8,9 @@
 
 namespace pytorch_flash {
 
+// check AOTriton GPU support
+void check_aotriton_gpu_arch(hipStream_t stream);
+
 // AOTriton Implementation
 TORCH_API
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -228,6 +231,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 #if defined(USE_CK_FLASH_ATTENTION)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
+    TORCH_WARN_ONCE("Using CK backend for Flash Attention forward...");
+
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
     return mha_fwd_ck(
         q,
@@ -243,6 +248,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         gen_,
         dummy_attn_bias); // Not used in flash attention
   } else {
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention forward...");
     return mha_fwd_aot(q,
                       k,
                       v,
@@ -258,7 +264,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
    }
 #else
-     return mha_fwd_aot(q,
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention forward...");
+    return mha_fwd_aot(q,
                       k,
                       v,
                       out_,
@@ -296,6 +303,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 #if defined(USE_CK_FLASH_ATTENTION)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
+    TORCH_WARN_ONCE("Using CK backend for Flash Attention varlen forward...");
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
     return mha_varlen_fwd_ck(
         q,
@@ -317,6 +325,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         gen_,
         dummy_attn_bias); // Not used in flash attention
   } else {
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention varlen forward...");
     return mha_varlen_fwd_aot(q,
                               k,
                               v,
@@ -338,6 +347,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                               gen_);
     }
 #else
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention varlen forward...");
     return mha_varlen_fwd_aot(q,
                               k,
                               v,
@@ -384,6 +394,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 #if defined(USE_CK_FLASH_ATTENTION)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
+    TORCH_WARN_ONCE("Using CK backend for Flash Attention backward...");
     std::optional<at::Tensor> non_null_dbias = std::nullopt;
     auto[dQuery,
          dKey,
@@ -413,6 +424,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     // for FA return [dQ, dV, dK, dSoftmax]
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue), std::move(dSoftmax));
   } else {
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention backward...");
     return mha_bwd_aot(dout,
                        q,
                        k,
@@ -437,6 +449,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     at::ROCmFABackend::Ck) {
     TORCH_WARN_ONCE("Warning! You have opted to use CK flash attention backend in a build that was not compiled using USE_CK_FLASH_ATTENTION=1. Please set this variable and try again. Defaulting to use aotriton backend...");
   }
+  TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention backward...");
   return mha_bwd_aot(
       dout,
       q,
@@ -487,6 +500,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 #if defined(USE_CK_FLASH_ATTENTION)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
+    TORCH_WARN_ONCE("Using CK backend for Flash Attention varlen backward...");
     std::optional<at::Tensor> non_null_dbias = std::nullopt;
     auto[dQuery,
          dKey,
@@ -521,6 +535,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     // for FA return [dQ, dV, dK, dSoftmax]
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue), std::move(dSoftmax));
   } else {
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention varlen backward...");
     return mha_varlen_bwd_aot(dout,
                               q,
                               k,
@@ -546,6 +561,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                               philox_offset);
    }
 #else
+    TORCH_WARN_ONCE("Using AOTriton backend for Flash Attention varlen backward...");
     return mha_varlen_bwd_aot(dout,
                               q,
                               k,

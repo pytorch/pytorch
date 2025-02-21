@@ -71,9 +71,7 @@
 
 namespace pytorch_flash {
 
-namespace {
-
-void check_gpu_arch(hipStream_t stream) {
+void check_aotriton_gpu_arch(hipStream_t stream) {
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
       TORCH_CHECK(false,
@@ -81,6 +79,8 @@ void check_gpu_arch(hipStream_t stream) {
                   " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
 }
+
+namespace {
 
 // We want to checkpoint and save the RNG state for backward if dropout
 // We get the default generator and return the seed and offset which will
@@ -133,7 +133,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
             const bool return_softmax,
             std::optional<at::Generator> gen_) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-  check_gpu_arch(stream);
+  check_aotriton_gpu_arch(stream);
 
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -275,7 +275,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
 
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-  check_gpu_arch(stream);
+  check_aotriton_gpu_arch(stream);
 
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -444,7 +444,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   // Cast to char to avoid compiler warning about narrowing
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-  check_gpu_arch(stream);
+  check_aotriton_gpu_arch(stream);
 
   bool is_dropout = p_dropout > 0.0;
 
@@ -631,7 +631,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   // Cast to char to avoid compiler warning about narrowing
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-  check_gpu_arch(stream);
+  check_aotriton_gpu_arch(stream);
+  
 
   bool is_dropout = p_dropout > 0.0;
 

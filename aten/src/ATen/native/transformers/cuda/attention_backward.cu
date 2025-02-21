@@ -413,6 +413,8 @@ _efficient_attention_backward(
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_CK_FLASH_ATTENTION)
+    TORCH_WARN_ONCE("Using CK backend for Efficient Attention backward...");
+
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
@@ -454,12 +456,10 @@ _efficient_attention_backward(
                 "ROCM does not support num_split_keys in _efficient_attention_forward");
     TORCH_CHECK(!window_size.has_value(),
                 "ROCM does not support window_size in _efficient_attention_forward");
-    auto ret = aotriton::v2::flash::check_gpu(stream);
-    if (hipSuccess != ret) {
-      TORCH_CHECK(false,
-                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
-                  " (gfx90a/gfx942/gfx1100/gfx1201)")
-    }
+    pytorch_flash::check_aotriton_gpu_arch(stream);
+
+    TORCH_WARN_ONCE("Using AOTriton backend for Efficient Attention backward...");
+
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
     if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
