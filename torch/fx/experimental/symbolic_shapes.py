@@ -287,6 +287,7 @@ def uninteresting_files() -> set[str]:
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
+    import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
 
@@ -303,6 +304,8 @@ def uninteresting_files() -> set[str]:
         torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
+        torch._logging._internal,
+        torch._logging.structured,
     ]
     import torch._dynamo.guards
 
@@ -4218,6 +4221,7 @@ class ShapeEnv:
         symbol: sympy.Symbol,
         vr: ValueRanges,
         source: Optional[Source] = None,
+        sym_node: Optional[SymNode] = None,
     ) -> None:
         is_debug = config.extended_debug_create_symbol is not None and str(
             symbol
@@ -4241,11 +4245,10 @@ class ShapeEnv:
             "create_unbacked_symbol",
             metadata_fn=lambda: {
                 "symbol": str(symbol),
+                "node_id": id(sym_node),
                 "vr": f"[{vr.lower}, {vr.upper}]",
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(),
             },
         )
 
@@ -4267,9 +4270,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
 
-        self._log_create_unbacked_symbol("create_unbacked_symfloat", symbol, vr)
+        sym_node = SymNode(symbol, self, float, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symfloat", symbol, vr, sym_node=sym_node
+        )
 
-        return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
+        return SymFloat(sym_node)
 
     @record_shapeenv_event()
     def create_unbacked_symint(self, source: Optional[Source] = None) -> SymInt:
@@ -4289,9 +4295,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr, source)
+        sym_node = SymNode(symbol, self, int, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
+        )
 
-        return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
+        return SymInt(sym_node)
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
@@ -4315,9 +4324,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
 
-        self._log_create_unbacked_symbol("create_unbacked_symbool", symbol, vr)
+        sym_node = SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symbool", symbol, vr, sym_node=sym_node
+        )
 
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
+        return SymBool(sym_node)
 
     @record_shapeenv_event()
     def create_unspecified_symbol(
@@ -5891,6 +5903,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5929,6 +5942,18 @@ class ShapeEnv:
             + maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
+        )
+
+        dtrace_structured(
+            "guard_on_data_dependent_error",
+            metadata_fn=lambda: {
+                "expr": repr(expr),
+                "unhinted_expr": repr(unhinted_expr),
+                "expr_id": id(expr_sym_node),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
@@ -6467,11 +6492,8 @@ class ShapeEnv:
                 for s in x.node.expr.free_symbols:
                     if str(s) in frame_symbols:  # type: ignore[operator]
                         continue
-                    frame_symbols[str(s)] = (  # type: ignore[index]
-                        self.var_to_sources[s][0].name()  # type: ignore[assignment]
-                        if s in self.var_to_sources
-                        else None  # unbacked
-                    )
+                    if s in self.var_to_sources:
+                        frame_symbols[str(s)] = self.var_to_sources[s][0].name()  # type: ignore[assignment]
                 return str(x)
             return None
 
@@ -6552,10 +6574,16 @@ class ShapeEnv:
         size_oblivious: bool = False,
         *,
         forcing_spec: bool = False,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
-                orig_expr, hint, fx_node, size_oblivious, forcing_spec=forcing_spec
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec=forcing_spec,
+                expr_sym_node=expr_sym_node,
             )
         except Exception:
             self.log.warning(
@@ -6575,6 +6603,7 @@ class ShapeEnv:
         size_oblivious: bool = False,
         *,
         forcing_spec: bool = False,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -6741,6 +6770,7 @@ class ShapeEnv:
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
+                                "expr_node_id": id(expr_sym_node),
                             },
                         )
                         dtrace_structured(
@@ -6748,13 +6778,13 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
+                                "expr_node_id": id(expr_sym_node),
+                                "user_stack": structured.get_user_stack(3),
+                                "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },
@@ -6768,6 +6798,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
+                            expr_sym_node=expr_sym_node,
                         )
                 else:
                     expr = new_expr

@@ -4,7 +4,8 @@ import itertools
 import logging
 import re
 from collections.abc import Sequence
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
@@ -15,6 +16,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
+from .ops_handler import DefaultHandler
 from .utils import (
     get_dtype_size,
     reduction_num_outputs,
@@ -23,7 +25,7 @@ from .utils import (
     sympy_subs,
     VarRanges,
 )
-from .virtualized import OpsHandler, ReductionType, V
+from .virtualized import ReductionType, V
 
 
 T = TypeVar("T")
@@ -37,7 +39,7 @@ class Dep(abc.ABC):
     index: sympy.Expr
 
     @abc.abstractmethod
-    def rename(self, renames: dict[str, str]) -> "Dep":
+    def rename(self, renames: dict[str, str]) -> Self:
         pass
 
     @abc.abstractmethod
@@ -56,7 +58,7 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
-    def normalize_with_stride_order(self, prefix: str = "t") -> "Dep":
+    def normalize_with_stride_order(self, prefix: str = "t") -> Self:
         return self
 
 
@@ -737,19 +739,16 @@ def canonicalization_prefix() -> str:
 
 
 # ops handler which computes all the free unbacked symbols for an IR
-class FreeUnbackedSymbolsOpsHandler:
+class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
     symbols: OrderedSet[sympy.Symbol]
 
     def __init__(self) -> None:
         self.symbols = OrderedSet()
 
-    def __getattr__(self, name: str) -> Callable[..., Any]:
-        def inner(*args: Sequence[Any], **kwargs: Dict[Any, Any]) -> None:
-            for a in itertools.chain(args, kwargs.values()):
-                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
-                    self.symbols |= free_unbacked_symbols(a)
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        for a in itertools.chain(args, kwargs.values()):
+            if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                self.symbols |= free_unbacked_symbols(a)
 
     def indirect_indexing(
         self,
@@ -789,12 +788,6 @@ class FreeUnbackedSymbolsOpsHandler:
         assert callable(body), "masked body must always be callable."
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
-
-
-def _typecheck_FreeUnbackedSymbolsOpsHandler(
-    h: FreeUnbackedSymbolsOpsHandler,
-) -> OpsHandler[None]:
-    return h
 
 
 def extract_free_unbacked_symbols(

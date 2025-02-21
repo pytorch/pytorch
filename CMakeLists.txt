@@ -252,15 +252,8 @@ cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
-# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
-# Using TH_BINARY_BUILD to check whether is binary build.
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
-if(DEFINED ENV{TH_BINARY_BUILD})
-  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
-                         "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
-else()
-  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
-endif()
+cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -702,6 +695,13 @@ if(ANDROID
     # initialization.
     string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
   endif()
+endif()
+
+if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
+    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
+      set(USE_KLEIDIAI OFF)
+      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
+    endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.

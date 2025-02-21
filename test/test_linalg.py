@@ -1119,6 +1119,15 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvalsh(t, out=out)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigh_lwork_lapack(self, device, dtype):
+        # test that the calculated lwork does not cause a crash, see https://github.com/pytorch/pytorch/issues/145801
+        t = torch.rand(3000, 3000, device=device, dtype=dtype)
+        y = torch.linalg.eigh(t)
+        self.assertEqual(y.eigenvalues.shape, (3000,))
+
     @dtypes(*floating_and_complex_types())
     def test_kron(self, device, dtype):
 
@@ -2221,7 +2230,7 @@ class TestLinalg(TestCase):
         def gen_error_message(input_size, p, keepdim, dim=None):
             return f"norm failed for input size {input_size}, p={p}, keepdim={keepdim}, dim={dim}"
 
-        # 'nuc' norm uses SVD, and thus its precsion is much lower than other norms.
+        # 'nuc' norm uses SVD, and thus its precision is much lower than other norms.
         # test_svd takes @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4}),
         # and here we are doing the same thing for nuc norm.
         class PrecisionContext:
