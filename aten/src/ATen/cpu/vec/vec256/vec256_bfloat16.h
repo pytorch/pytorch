@@ -231,7 +231,7 @@ LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
-#if !defined(__aarch64__) || CPU_CAPABILITY_SVE
+#if !defined(__aarch64__) || defined(CPU_CAPABILITY_SVE)
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 #endif
 
