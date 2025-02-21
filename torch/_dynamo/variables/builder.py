@@ -1966,7 +1966,9 @@ class VariableBuilder:
             elif (
                 isinstance(base_source, LocalSource)
                 and base_source.dynamism is not None
-                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[0]
+                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
+                    0
+                ]
                 or not config.assume_static_by_default
             ):
                 dynamic_dim = DimDynamic.DYNAMIC
@@ -2827,14 +2829,11 @@ def _automatic_dynamic(
         if isinstance(base_source, ChainedSource):
             base_source = base_source.get_base()
 
-        if (
-            marked_dynamic
-            or (
-                isinstance(base_source, LocalSource)
-                and base_source.dynamism is not None
-                and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
-                or not config.assume_static_by_default
-            )
+        if marked_dynamic or (
+            isinstance(base_source, LocalSource)
+            and base_source.dynamism is not None
+            and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+            or not config.assume_static_by_default
         ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this

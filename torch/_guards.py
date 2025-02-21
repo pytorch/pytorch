@@ -1017,7 +1017,7 @@ class ChainedSource(Source):
         return self.base.is_ephemeral()
 
     def get_base(self) -> Source:
-        current = self
+        current: Source = self
         while isinstance(current, ChainedSource):
             current = current.base
         return current

@@ -1,20 +1,22 @@
+import re
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
-import re
 from torch.utils._pytree import tree_flatten_with_path, tree_map
 
 
 KeyPath = Tuple[Any, ...]
 NonTensorShapeFn = Callable[[Union[int, float]], Tuple[Any, ...]]
 
+
 def normalize_source_name(name: str) -> str:
     # Match attribute access like .x and replace with ['x']
     return re.sub(r"\.([a-zA-Z_][a-zA-Z0-9_]*)", r"['\1']", name)
 
-def module_to_nested_dict(module):
+
+def module_to_nested_dict(module: torch.nn.Module) -> Dict[str, Any]:
     """Recursively converts an nn.Module into a nested dictionary with explicit 'parameters' and 'modules' keys."""
-    self_dict = {}
+    self_dict: Dict[str, Any] = {}
 
     self_dict["_parameters"] = {}
     self_dict["_modules"] = {}
@@ -22,7 +24,11 @@ def module_to_nested_dict(module):
     for attr_name in dir(module):
         if not attr_name.startswith("_") and not callable(getattr(module, attr_name)):
             attr_value = getattr(module, attr_name)
-            if not isinstance(attr_value, torch.nn.Module) and isinstance(attr_value, (int, float, torch.Tensor)) and type(attr_value) is not bool:  # Ensure it's not a submodule
+            if (
+                not isinstance(attr_value, torch.nn.Module)
+                and isinstance(attr_value, (int, float, torch.Tensor))
+                and type(attr_value) is not bool
+            ):  # Ensure it's not a submodule
                 self_dict[attr_name] = attr_value
 
     for name, param in module.named_parameters(recurse=False):
@@ -34,6 +40,7 @@ def module_to_nested_dict(module):
         self_dict["_modules"][name] = module_to_nested_dict(submodule)
 
     return self_dict
+
 
 def track_dynamism_across_examples(
     example_inputs: List[Any],
@@ -49,15 +56,15 @@ def track_dynamism_across_examples(
     tracking: Dict[KeyPath, Tuple[List[Set[Any]], bool]] = {}
 
     for ex in example_inputs:
-        if 'self' in ex and isinstance(ex['self'], torch.nn.Module):
-            ex['self'] = module_to_nested_dict(ex['self'])
-            print(ex['self'])
+        if "self" in ex and isinstance(ex["self"], torch.nn.Module):
+            ex["self"] = module_to_nested_dict(ex["self"])
+            print(ex["self"])
         leaves_with_paths, _ = tree_flatten_with_path(ex)
         for key_path, value in leaves_with_paths:
             if not isinstance(value, (int, float, torch.Tensor)):
                 continue
             if isinstance(value, torch.Tensor):
-                shape = tuple(value.shape)
+                shape: tuple[int | float, ...] = tuple(value.shape)
                 is_tensor = True
             else:
                 shape = (value,)
@@ -77,9 +84,10 @@ def track_dynamism_across_examples(
     for key_path, (dim_sets, _is_tensor) in tracking.items():
         final_dyn = tuple(len(s) > 1 for s in dim_sets)
         key_str = "L" + "".join(f"{str(k)}" for k in key_path)
-        if key_path[0].key not in output:
-            output[key_path[0].key] = {}
-        output[key_path[0].key][key_str] = final_dyn
+        key = key_path[0].key  # type: ignore[attr-defined]
+        if key not in output:
+            output[key] = {}
+        output[key][key_str] = final_dyn
     return output
 
 
