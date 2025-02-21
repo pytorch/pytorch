@@ -109,7 +109,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -122,13 +122,19 @@ jobs:
         with:
           no-sudo: true
 
+      - name: Setup QEMU
+        if: inputs.build-environment == 'linux-riscv64-binary-manywheel'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
@@ -137,13 +143,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -153,7 +159,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -181,7 +187,7 @@ jobs:
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
@@ -205,6 +211,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
+          DOCKER_IMAGE_RISCV64: ${{ inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
@@ -222,6 +229,13 @@ jobs:
             DOCKER_SHELL_CMD="sleep 12h"
 
             # since some steps are skipped on s390x, if they are necessary, run them here
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          elif [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
+            JENKINS_USER=
+            USED_IMAGE="${DOCKER_IMAGE_RISCV64}"
+
+            # since some steps are skipped on riscv64, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
             env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           else
@@ -282,7 +296,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -292,7 +306,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3 for split build
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
@@ -300,18 +314,18 @@ jobs:
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
 
-      - name: Store PyTorch Build Artifacts for s390x
+      - name: Store PyTorch Build Artifacts for s390x or riscv64
         uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && ( inputs.build-environment == 'linux-s390x-binary-manywheel' || inputs.build-environment == 'linux-riscv64-binary-manywheel' )
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
 
-      - name: Store PyTorch Build Artifacts for s390x for split build
+      - name: Store PyTorch Build Artifacts for s390x or riscv64 for split build
         uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && ( inputs.build-environment == 'linux-s390x-binary-manywheel' || inputs.build-environment == 'linux-riscv64-binary-manywheel' )
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
@@ -319,7 +333,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
         uses: ./.github/actions/upload-sccache-stats
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -327,12 +341,12 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-riscv64-binary-manywheel'
 
       - name: Cleanup docker
-        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: always() && ( inputs.build-environment == 'linux-s390x-binary-manywheel' || inputs.build-environment == 'linux-riscv64-binary-manywheel' )
         shell: bash
         run: |
-          # on s390x stop the container for clean worker stop
+          # on s390x or riscv64 stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true

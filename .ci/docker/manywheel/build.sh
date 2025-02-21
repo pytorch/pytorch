@@ -65,6 +65,13 @@ case ${GPU_ARCH_TYPE} in
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
+    cpu-riscv64)
+        TARGET=final
+        DOCKER_TAG=cpu-riscv64
+        GPU_IMAGE=""
+        DOCKER_GPU_BUILD_ARG=""
+        MANY_LINUX_VERSION="riscv64"
+        ;;
     cuda)
         TARGET=cuda_final
         DOCKER_TAG=cuda${GPU_ARCH_VERSION}
@@ -121,7 +128,7 @@ fi
 (
     set -x
 
-    if [ "$(uname -m)" != "s390x" ]; then
+    if [ "$(uname -m)" != "s390x" ] && [ "${GPU_ARCH_TYPE}" != "cpu-riscv64" ]; then
         # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
         # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
         sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
