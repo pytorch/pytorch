@@ -51,6 +51,23 @@
 
 namespace at::native {
 
+#ifdef USE_ROCM
+// Custom configuration for vectorized elementwise kernel
+// with template instantiation.
+namespace vectorized_templated_config {
+constexpr int num_threads() {
+  return 512;
+}
+
+constexpr int thread_work_size() {
+  return 32;
+}
+
+constexpr int block_work_size() {
+  return thread_work_size() * num_threads();
+}
+} // namespace vectorized_templated_config
+#endif
 
 template <typename args_t, size_t... Is>
 constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
@@ -167,6 +184,32 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   }
 }
 
+#ifdef USE_ROCM
+template <
+    int vec_size,
+    typename func_t,
+    typename array_t,
+    typename OutputType,
+    typename... InputTypes>
+C10_LAUNCH_BOUNDS_1(vectorized_templated_config::num_threads())
+__global__ void vectorized_templated_elementwise_kernel(
+    int N,
+    func_t f,
+    array_t data) {
+  templated_elementwise_kernel_helper<
+      vectorized_templated_config::thread_work_size()>(
+      f,
+      memory::policies::vectorized_templated<
+          vectorized_templated_config::thread_work_size(),
+          vectorized_templated_config::num_threads(),
+          vectorized_templated_config::block_work_size(),
+          vec_size,
+          array_t,
+          OutputType,
+          InputTypes...>(data));
+}
+#endif
+
 template <
     typename func_t,
     typename array_t,
@@ -254,6 +297,70 @@ static inline void launch_vectorized_kernel(
       TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
 }
+
+#ifdef USE_ROCM
+// This function assume trivial 1d and supports template specialization
+// to avoid dynamic casting.
+// Input vectorization size is based on runtime information, i.e.
+// the actual data types of the input and output tensor and cannot
+// be determined using the functor type, as in regular non-templated
+// vectorized kernels. The caller is in charge of selecting the correct input
+// vectorization length.
+template <
+    typename func_t,
+    typename array_t,
+    typename OutputType,
+    typename... InputTypes>
+static inline void launch_vectorized_templated_kernel(
+    int64_t N,
+    const func_t& f,
+    array_t data) {
+  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  using traits = function_traits<func_t>;
+  int64_t grid = (N + vectorized_templated_config::block_work_size() - 1) /
+      vectorized_templated_config::block_work_size();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  switch (vec_size) {
+    case 8:
+      vectorized_templated_elementwise_kernel<
+          8,
+          func_t,
+          array_t,
+          OutputType,
+          InputTypes...>
+          <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
+              N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
+    case 4:
+      vectorized_templated_elementwise_kernel<
+          4,
+          func_t,
+          array_t,
+          OutputType,
+          InputTypes...>
+          <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
+              N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
+    case 2:
+      vectorized_templated_elementwise_kernel<
+          2,
+          func_t,
+          array_t,
+          OutputType,
+          InputTypes...>
+          <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
+              N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
+    default:
+      // vector size 1 is not handled as part of vectorize_templated kernel
+      TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
+  }
+}
+#endif
 
 template <
     typename func_t,
@@ -392,6 +499,47 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   });
 }
 
+#ifdef USE_ROCM
+namespace {
+template <typename TupleLike, size_t arity, size_t arg_num = 0>
+struct check_types {
+  constexpr static inline bool check() {
+    bool current = false;
+    if constexpr (arity != 2)
+      return false;
+    if constexpr (arg_num == 0) {
+      using SelectedType = std::tuple_element_t<arg_num, TupleLike>;
+      if constexpr (std::is_same_v<float, SelectedType>)
+        return check_types<TupleLike, arity, arg_num + 1>::check();
+    } else if constexpr (arg_num == 1) {
+      using SelectedType2 = std::tuple_element_t<arg_num, TupleLike>;
+      if constexpr (std::is_same_v<float, SelectedType2>)
+        return check_types<TupleLike, arity, arg_num + 1>::check();
+    }
+    return false;
+  }
+};
+
+// Bottom case: if we got this far, assume correct type matching except
+// when there are no arguments (arity == 0).
+template <typename TupleLike, size_t arity>
+struct check_types<TupleLike, arity, arity> {
+  constexpr static inline bool check() {
+    if constexpr (arity != 0)
+      return true;
+    return false;
+  }
+};
+
+template <typename TupleLike>
+struct check_types<TupleLike, 0, 0> {
+  constexpr static inline bool check() {
+    return false;
+  }
+};
+} // namespace
+#endif
+
 template <typename func_t>
 void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   if (!needs_dynamic_casting<func_t>::check(iter)) {
@@ -416,6 +564,36 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   if (contiguous) {
 #ifdef USE_ROCM
+    // Attempt to call specialized vectorized elementwise kernel
+    // that enables interleaving.
+    using float_map = c10::CppTypeToScalarType<float>;
+    using bfloat16_map = c10::CppTypeToScalarType<BFloat16>;
+    int64_t grid =
+        (numel + vectorized_templated_config::block_work_size() - 1) /
+        vectorized_templated_config::block_work_size();
+    // The number of iterations need to be a perfect multiple of the grid size
+    // to avoid bound checking and enabling loop unrolling/vectorization without
+    // intervening basic blocks, which prevents interleaving.
+    if (iter.ninputs() == 2 && iter.input_dtype(0) == float_map::value &&
+        iter.input_dtype(1) == bfloat16_map::value &&
+        !(numel % (vectorized_templated_config::block_work_size() * grid))) {
+      // constexpr to reduce the amount of kernels (empty) generated for
+      // unrolled templated elementwise and limit which functors are actually
+      // applied to the load and store at compile time.
+      using func_tuple = typename traits::ArgsTuple;
+      if constexpr (
+          std::is_same_v<float, arg0_t> && traits::arity == 2 &&
+          check_types<func_tuple, traits::arity, 0>::check()) {
+        launch_vectorized_templated_kernel<
+            func_t,
+            std::array<char*, ntensors>,
+            float,
+            float,
+            BFloat16>(numel, f, data);
+        return;
+      }
+    }
+
     std::array<ScalarType, ntensors> dtypes;
     auto inner_strides = iter.get_inner_strides();
     std::array<int, ntensors> strides;
