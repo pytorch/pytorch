@@ -501,6 +501,25 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, n)
         self.assertEqual(ref, res)
 
+    def test_mark_traceable_captured_external_tensor(self):
+        cst = torch.ones(1)
+
+        @torch._dynamo.mark_traceable
+        def trace_me(x, y):
+            torch._dynamo.graph_break()
+            return x * y + cst
+
+        def fn(x, y):
+            return trace_me(x, y)
+
+        x, y = torch.randn(10), torch.randn(10)
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
     def test_mark_traceable_no_action_at_a_distance(self):
         def trace_me(x):
             torch._dynamo.graph_break()
