@@ -1,10 +1,10 @@
 #pragma once
 
-#include <Python.h>
+#include <array>
 #include <filesystem>
 #include <optional>
-#include <vector>
 
+#include <Python.h>
 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
 #include <pybind11/gil.h>
 namespace py = pybind11;

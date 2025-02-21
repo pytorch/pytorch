@@ -1,8 +1,8 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <optional>
-#include <vector>
 
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model.h>
