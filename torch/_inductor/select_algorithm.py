@@ -1755,7 +1755,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 return no_op
 
             precompile_key = create_precompile_key(name, inputs_key, choices)
-            if precompile_func := self.precompile_cache.get(precompile_key):
+            if (
+                precompile_func := self.precompile_cache.get(precompile_key)
+                and not config.force_disable_caches
+            ):
                 return precompile_func
 
             log.info(
