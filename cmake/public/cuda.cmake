@@ -171,7 +171,7 @@ endif()
 
 # nvToolsExt
 if(USE_SYSTEM_NVTX)
-  find_path(nvtx3_dir NAMES nvtx3)
+  find_path(nvtx3_dir NAMES nvtx3 PATHS ${CUDA_INCLUDE_DIRS})
 else()
   find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
 endif()
