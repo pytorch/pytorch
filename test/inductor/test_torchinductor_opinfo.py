@@ -12,8 +12,6 @@ from unittest.mock import patch
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
-from torch._inductor.codegen.common import get_scheduling_for_device
-from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
