@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, Union
+from typing import Any, Callable, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims
@@ -3362,6 +3362,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     torch._check(
         window is None or window.device == input.device,
@@ -3369,6 +3370,10 @@ def stft(
             f"stft input and window must be on the same device but got self on {input.device}"
             + f" and window on {window.device}"  # type: ignore[union-attr]
         ),
+    )
+    torch._check(
+        not center or align_to_window is None,
+        "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3433,6 +3438,9 @@ def stft(
         window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
 
     input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+    if not center and align_to_window:
+        input_pad_amount = (n_fft - win_length_) // 2
+        input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
     if window is not None:
         input = input * window
 
@@ -4201,8 +4209,10 @@ def tensor_split(
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
-            msg = "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
-            f" but received one with dtype {indices_or_sections.dtype}"
+            msg = (
+                "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
+                f" but received one with dtype {indices_or_sections.dtype}"
+            )
             raise ValueError(msg)
 
     # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
@@ -4238,8 +4248,10 @@ def tensor_split(
         indices = indices_or_sections
         if isinstance(indices_or_sections, TensorLike):
             if indices_or_sections.ndim != 1:
-                msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
-                f"but received a tensor with {indices_or_sections.ndim} dimensions"
+                msg = (
+                    "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
+                    f"but received a tensor with {indices_or_sections.ndim} dimensions"
+                )
                 raise ValueError(msg)
 
             indices = indices_or_sections.tolist()

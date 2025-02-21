@@ -39,6 +39,19 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
+def prologue_fusion_enabled() -> bool:
+    ENABLE_PROLOGUE_FUSION_VERSION = 0
+
+    if "TORCHINDUCTOR_PROLOGUE_FUSION" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_PROLOGUE_FUSION") == "1"
+    elif is_fbcode():
+        jk_name = "pytorch/inductor:prologue_fusion_version"
+        version = torch._utils_internal.justknobs_getval_int(jk_name)
+        return version <= ENABLE_PROLOGUE_FUSION_VERSION
+    else:
+        return True
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -148,6 +161,9 @@ allow_buffer_reuse = True
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
+# Enable to allow using ftz variant of exponenet instruction in triton codegen.
+use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -164,7 +180,7 @@ benchmark_harness = True
 epilogue_fusion = True
 
 # fuse pointwise into template prologues
-prologue_fusion = False
+prologue_fusion = prologue_fusion_enabled()
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -340,7 +356,7 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
-autotune_num_choices_displayed = 10
+autotune_num_choices_displayed: Optional[int] = 10
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1245,6 +1261,9 @@ class cuda:
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
 
+    # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
@@ -1276,6 +1295,16 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = None
+
+    # Non-negative integer which determines how many kernels are instantiated.
+    # 0 = 0000 generates the fewest kernels, 9999 generates all possible combinations.
+    # increasing first digit reduces schedule / mixed type pruning,
+    # increasing second digit generates more cluster sizes,
+    # increasing third digit generates more MMA multipliers,
+    # increasing fourth digit generates more instruction shapes.
+    cutlass_instantiation_level: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
+    )
 
 
 class rocm:

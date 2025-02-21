@@ -355,7 +355,7 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
 }
 
 static size_t GetHipblasltWorkspaceSize() {
-  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+  static const char * env = getenv("HIPBLASLT_WORKSPACE_SIZE");
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
@@ -364,7 +364,7 @@ static size_t GetHipblasltWorkspaceSize() {
   size_t workspace_size = 76*1024;
   if (env) {
     try {
-      workspace_size = std::stoi(env.value());
+      workspace_size = std::stoi(env);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -597,13 +597,6 @@ auto GetHipBlasLtTypeStringAndOps() {
         HIPBLAS_COMPUTE_32F,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
-
-  // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
-  std::sort(heuristic_result.begin(),
-      heuristic_result.end(),
-      [](hipblasLtMatmulHeuristicResult_t& a, hipblasLtMatmulHeuristicResult_t& b) {
-      return hipblaslt_ext::getIndexFromAlgo(a.algo) < hipblaslt_ext::getIndexFromAlgo(b.algo);
-      });
 
   int returned_algo_count = heuristic_result.size();
   std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;

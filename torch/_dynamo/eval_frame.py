@@ -2,10 +2,25 @@
 # mypy: disable-error-code="method-assign"
 
 """
-Functions in this file are responsible for modifying the eval frame
-handler at RUNTIME.  Therefore, all functions in this file are hot.
-Functions that only execute at compile time should be placed
-in torch._dynamo.convert_frame.
+This module implements the core frame evaluation handler for TorchDynamo's compilation system.
+The eval frame handler intercepts Python bytecode execution at runtime to enable dynamic
+compilation and optimization of PyTorch code.
+
+Key components defined here:
+- Frame evaluation handlers that intercept and analyze Python execution frames
+- Guards management for tracking dependencies and invalidating compiled code
+- Optimization contexts and decorators (optimize, run_once, disable, etc.)
+- Export functionality for saving optimized graphs
+- Backend compiler integrations and callback management
+
+Functions in this file are responsible for modifying the eval frame handler at RUNTIME.
+Therefore, all functions in this file are hot and performance-critical. Functions that
+only execute at compile time should be placed in torch._dynamo.convert_frame.
+
+The eval frame handler is the core mechanism that enables TorchDynamo to dynamically
+intercept, analyze and optimize PyTorch code during execution. It works by registering
+a custom frame evaluation function that gets called for every Python frame, allowing
+us to detect PyTorch operations and trigger compilation as needed.
 """
 
 from __future__ import annotations
@@ -833,6 +848,13 @@ def is_inductor_supported():
         return False
 
 
+def check_for_incompatible_configs():
+    # Some of the configs should be mutually exclusive
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
+
+
 def optimize(*args, **kwargs):
     def rebuild_ctx():
         ca_kwargs_override = config.compiled_autograd_kwargs_override
@@ -885,6 +907,7 @@ def _optimize(
             ...
     """
     check_if_dynamo_supported()
+    check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
