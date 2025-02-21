@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+
 using namespace ::testing;
 
 TEST(irangeTest, range_test) {
