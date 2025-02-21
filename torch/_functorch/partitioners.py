@@ -648,17 +648,25 @@ def apply_graphsafe_rng_functionalization(
     # Handle forward pass
     with fw_module.graph.inserting_after(last_fwd_input):
         fwd_rng_state = fw_module.graph.placeholder(f"fwd_rng_state_{rng_count}")
-        fwd_rng_state.meta["val"] = torch.cuda.default_generators[
-            device_idx
-        ].graphsafe_get_state()
+        # Note: a newly cloned generator will not contain tensors. it is only Generators that are
+        # registered to a CUDAGraph that contain tensors. since this does not contain Tensor
+        # it is fine to use in the meta.
+        fwd_rng_state.meta["val"] = (
+            torch.cuda.default_generators[device_idx]
+            .graphsafe_get_state()
+            .clone_state()
+        )
         last_fwd_input = fwd_rng_state
 
     # Handle backward pass
     with bw_module.graph.inserting_after(last_bwd_input):
         bwd_rng_state = bw_module.graph.placeholder(f"bwd_rng_state_{rng_count}")
-        bwd_rng_state.meta["val"] = torch.cuda.default_generators[
-            device_idx
-        ].graphsafe_get_state()
+        # as above, clone so that meta val generator will not contain tensors
+        bwd_rng_state.meta["val"] = (
+            torch.cuda.default_generators[device_idx]
+            .graphsafe_get_state()
+            .clone_state()
+        )
         last_bwd_input = bwd_rng_state
 
     # Update forward node
