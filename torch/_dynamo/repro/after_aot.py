@@ -61,7 +61,6 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._inductor.output_code import OutputCode
-from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -373,9 +372,7 @@ def save_graph_repro(
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(
-            has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
-        ):
+        if any(has_free_symbols(a) for a in args):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")

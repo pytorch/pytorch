@@ -299,14 +299,10 @@ def pack_padded_sequence(
         lengths (Tensor or list(int)): list of sequence lengths of each batch
             element (must be on the CPU if provided as a tensor).
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
-            format, ``T x B x *`` otherwise. Default: ``False``.
+            format, ``T x B x *`` otherwise.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
             contain sequences sorted by length in a decreasing order. If
             ``False``, the input will get sorted unconditionally. Default: ``True``.
-
-    .. warning::
-        The dim of ``input`` tensor will be truncated if its length larger than
-        correspond value in ``length``.
 
     Returns:
         a :class:`PackedSequence` object

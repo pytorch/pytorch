@@ -567,7 +567,7 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if isinstance(obj, torch.ScriptObject):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -619,28 +619,21 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     """
 
     def _override(self, func, args, kwargs):
-        if torch.distributed.is_available():
+        if torch.distributed.is_available() and func is torch.distributed.all_reduce:
+            # Redirect to a corresponding functional collective, following Dynamo.
+            # See torch/distributed/_functional_collectives.py for details.
             from torch.distributed._functional_collectives import (
+                all_reduce_inplace,
                 REDUCE_OP_TO_STR,
-                traceable_collective_remaps,
             )
 
-            if func in traceable_collective_remaps:
-                # Redirect to a corresponding functional collective, following Dynamo.
-                # See torch/distributed/_functional_collectives.py for details.
-                # The following is an adaptation of CollectiveFunctionRewriteVariable.
-                mapped_func = traceable_collective_remaps[func]
-                signature = inspect.signature(func)
-                kwargs = dict(signature.bind(*args, **kwargs).arguments)
-                args = ()
-                if func in (
-                    torch.distributed.all_reduce,
-                    torch.distributed.reduce_scatter_tensor,
-                    torch.distributed._reduce_scatter_base,
-                ):
-                    if "op" in kwargs:
-                        kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
-                return mapped_func, args, kwargs
+            # see CollectiveFunctionRewriteVariable for remapping logic
+            signature = inspect.signature(func)
+            kwargs = dict(signature.bind(*args, **kwargs).arguments)
+            args = ()
+            if "op" in kwargs:
+                kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
+            return all_reduce_inplace, args, kwargs
         if func is torch.tensor:
             # Redirect to Python implementation of torch.tensor for data with symints.
             # NOTE(avik): We don't unconditionally redirect to this implementation

@@ -134,7 +134,6 @@ class StateDictOptions:
     strict: bool = True
     broadcast_from_rank0: bool = False
     flatten_optimizer_state_dict: bool = False
-    dsd_fqn_modifiers: str = "_fqn_modifiers"
 
 
 @dataclass
@@ -156,7 +155,6 @@ class _StateDictInfo(StateDictOptions):
 def _get_fqns(
     model: nn.Module,
     name: str,
-    dsd_fqn_modifiers: str = "_fqn_modifiers",
     skip_ddp_prefix: bool = True,
     skip_compiler_prefix: bool = True,
 ) -> FQNS_T:
@@ -206,14 +204,6 @@ def _get_fqns(
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
-            # In some modeuls, _fqn_modifiers would not shown in the state_dict keys,
-            # skip them in the fqn to ensure load stat dict successfully for them.
-            if hasattr(curr_obj, dsd_fqn_modifiers):
-                if removed_fqn := getattr(curr_obj, dsd_fqn_modifiers)().get(
-                    curr_obj_name
-                ):
-                    if hasattr(curr_obj, removed_fqn):
-                        curr_obj = getattr(curr_obj, removed_fqn)
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -228,7 +218,7 @@ class _EXTRA_STATE:
     pass
 
 
-def _iterate_valid_model_state(model, dsd_fqn_modifiers="_fqn_modifiers"):
+def _iterate_valid_model_state(model):
     visited_modules: set[nn.Module] = set()
 
     def recurse(module: nn.Module, curr_fqn: str) -> Generator:
@@ -238,16 +228,7 @@ def _iterate_valid_model_state(model, dsd_fqn_modifiers="_fqn_modifiers"):
         for name, submodule in module.named_children():
             if submodule in visited_modules:
                 continue
-            # if user have state_dict_hooks in their model, they can add the state_dict key changes
-            # at dsd_fqn_modifiers in input to align with the function of state_dict_hook
-            if (
-                hasattr(module, dsd_fqn_modifiers)
-                and name in getattr(module, dsd_fqn_modifiers)().values()
-            ):
-                # skip _fqn_modifiers here thus remove the last `.` added
-                new_fqn = curr_fqn[:-1]
-            else:
-                new_fqn = f"{curr_fqn}{name}"
+            new_fqn = f"{curr_fqn}{name}"
             yield from recurse(submodule, new_fqn)
 
         for name, obj in chain(
@@ -546,14 +527,10 @@ def _load_model_state_dict(
         return _IncompatibleKeys({}, {})
 
     local_state_dict = {}
-    for key, value in _iterate_valid_model_state(model, info.dsd_fqn_modifiers):
-        fqns = _get_fqns(model, key, info.dsd_fqn_modifiers)
+    for key, value in _iterate_valid_model_state(model):
+        fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
-            model,
-            key,
-            info.dsd_fqn_modifiers,
-            skip_ddp_prefix=False,
-            skip_compiler_prefix=False,
+            model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
         )
 
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):

@@ -23,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, Set, TYPE_CHECKING, Union
 
 import torch
 import torch._logging.structured as structured
@@ -494,9 +494,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return int(r)
         except Exception:
@@ -506,9 +504,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return float(r)
         except Exception:
@@ -518,9 +514,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return bool(r)
         except Exception:
@@ -577,7 +571,6 @@ class SymNode:
             self.hint,
             fx_node=self.fx_node,
             size_oblivious=True,
-            expr_sym_node_id=id(self),
         )
         try:
             return bool(r)
@@ -1233,7 +1226,7 @@ def _make_node_magic(method, func):
     else:
         method_attr = method
 
-    def uninteresting_files() -> set[str]:
+    def uninteresting_files() -> Set[str]:
         import torch
 
         mods = [

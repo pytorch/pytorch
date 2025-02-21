@@ -331,31 +331,6 @@ class TestDynamicShapes(common_utils.TestCase):
         }
         self.assertEqual(unflatten_dynamic_shapes, expected_dynamic_shapes)
 
-    def test__flatten_dynamic_shapes_to_axes_with_leaves_that_are_supported_by_exported_program(
-        self,
-    ):
-        dim = torch.export.Dim("dim")
-        dynamic_shapes = (
-            {
-                "input_a": {0: dim, 1: None},
-                "input_b": {1: torch.export.Dim.AUTO, 3: 512},
-            },
-            (
-                [torch.export.Dim.STATIC, torch.export.Dim.DYNAMIC, None],
-                [dim, 512],
-            ),
-        )
-        flatten_dynamic_shapes, _ = _dynamic_shapes._flatten_dynamic_shapes_to_axes(
-            dynamic_shapes
-        )
-        expected_flattened = [
-            {0: dim, 1: None},
-            {1: torch.export.Dim.AUTO, 3: 512},
-            [torch.export.Dim.STATIC, torch.export.Dim.DYNAMIC, None],
-            [dim, 512],
-        ]
-        self.assertEqual(flatten_dynamic_shapes, expected_flattened)
-
     @common_utils.parametrize(
         "model, args, kwargs, input_names, output_names, dynamic_axes, expected_dynamic_shapes",
         [
@@ -493,22 +468,22 @@ class TestDynamicShapes(common_utils.TestCase):
         _, tree2 = _pytree.tree_flatten(expected_dynamic_shapes)
         self.assertEqual(tree1, tree2)
 
-    def test_convert_str_to_export_dim_returns_the_original_dynamic_shapes_when_there_is_no_str_and_dim(
+    def test_convert_str_to_export_dim_returns_the_original_dynamic_shapes_when_there_is_no_str(
         self,
     ):
         # 1. Dict
         dynamic_shapes = {
             "input_x": [
                 {
-                    0: torch.export.Dim.AUTO,
+                    0: torch.export.Dim("customx_dim_0"),
                     1: torch.export.Dim.AUTO,
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim.AUTO,
+                    1: torch.export.Dim("customx_dim_1"),
                 },
             ],
-            "input_b": {2: torch.export.Dim.AUTO},
+            "input_b": {2: torch.export.Dim("customb_dim_0")},
         }
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
@@ -520,15 +495,15 @@ class TestDynamicShapes(common_utils.TestCase):
         dynamic_shapes = (
             [
                 {
-                    0: torch.export.Dim.AUTO,
+                    0: torch.export.Dim("customx_dim_0"),
                     1: torch.export.Dim.AUTO,
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim.AUTO,
+                    1: torch.export.Dim("customx_dim_1"),
                 },
             ],
-            {2: torch.export.Dim.AUTO},
+            {2: torch.export.Dim("customb_dim_0")},
         )
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
@@ -536,7 +511,7 @@ class TestDynamicShapes(common_utils.TestCase):
         self.assertEqual(dynamic_shapes_with_export_dim, dynamic_shapes)
         self.assertFalse(need_axis_mapping)
 
-    def test_convert_str_to_export_dim_returns_the_converted_dynamic_shapes_when_there_is_str_or_dim(
+    def test_convert_str_to_export_dim_returns_the_converted_dynamic_shapes_when_there_is_str(
         self,
     ):
         dimx = torch.export.Dim("customx_dim_1")

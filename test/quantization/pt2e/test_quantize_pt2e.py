@@ -2545,10 +2545,12 @@ class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
                 return self.linear(x)
 
         node_occurrence = {
-            torch.ops.pt2e_quant.quantize_affine: 1,
+            torch.ops.pt2e_quant.quantize_affine: 2,
             torch.ops.pt2e_quant.dequantize_affine: 2,
         }
         node_list = [
+            torch.ops.pt2e_quant.quantize_affine,
+            torch.ops.pt2e_quant.dequantize_affine,
             torch.ops.pt2e_quant.quantize_affine,
             torch.ops.pt2e_quant.dequantize_affine,
         ]

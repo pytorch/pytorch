@@ -3,7 +3,7 @@ import datetime
 import tempfile
 from collections import defaultdict
 from types import ModuleType
-from typing import Any, Optional, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -73,7 +73,7 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
+    benchmark_name: str, benchmark_all_configs: Optional[Dict[Any, Any]]
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -184,7 +184,7 @@ def parse_profile_event_list(
         """
         return ev.self_device_time_total / 1000 / nruns  # type: ignore[attr-defined]
 
-    all_events: dict[str, list[ProfileEvent]] = defaultdict(list)
+    all_events: Dict[str, list[ProfileEvent]] = defaultdict(list)
 
     def add_event(
         ev: torch.autograd.profiler_util.EventList,

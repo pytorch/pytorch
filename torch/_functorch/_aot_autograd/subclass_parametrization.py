@@ -1,7 +1,6 @@
 import dataclasses
 import itertools
-from collections.abc import Iterable
-from typing import Any, Union
+from typing import Any, Iterable, Union
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass

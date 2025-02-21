@@ -29,7 +29,6 @@ from torch._inductor.codecache import (
     PyCodeCache,
 )
 from torch._inductor.utils import get_gpu_type, is_gpu
-from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
-
     from .codegen.common import WorkspaceArg
 
 from . import config
@@ -51,7 +49,7 @@ from .virtualized import V
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 EXIT_HANDLER_REGISTERED = False
 
-log = getArtifactLogger(__name__, "autotuning")
+log = logging.getLogger(__name__)
 
 
 # Used to synchronize between parent and child processes

@@ -293,6 +293,24 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
+    def test_optree_graph_break_message(self):
+        import optree
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            d = {"a": 1}
+            optree.tree_flatten(d)
+            return torch.sin(x)
+
+        fn(torch.randn(4))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+        )
+
     def test_scalar_device_movement(self):
         if not torch._dynamo.config.assume_static_by_default:
             self.skipTest("Doesn't work with symints")
@@ -305,6 +323,74 @@ class MiscTests(torch._inductor.test_case.TestCase):
         add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
         res_compiled = add_fn(2, 3, torch.tensor(0.0))
         self.assertEqual(res, res_compiled)
+
+    @scoped_load_inline
+    @skipIfNNModuleInlined("fails internal CI")
+    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
+    def test_cpp_extension_recommends_custom_ops(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        with self.assertWarnsOnceRegex(
+            UserWarning,
+            ".*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
+        ):
+            f(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
+        )
+
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
 
     def test_callpacked(self):
         def call_packed(args):
@@ -8881,7 +8967,7 @@ def ___make_guard_fn():
         # and so the guard story for the objects passed into input just isn't there atm.
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Unsupported method call",
+            "^call_method UserDefinedObjectVariable\\(set\\).*",
         ):
             foo(inp)
 
@@ -10557,7 +10643,7 @@ ShapeEnv not equal: field values don't match:
         # Should only be one restart per event
         (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
-            "User-inserted graph break" in restart_reason,
+            "skip function graph_break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
@@ -10567,7 +10653,7 @@ ShapeEnv not equal: field values don't match:
 
         (restart_reason,) = metrics[1].restart_reasons
         self.assertTrue(
-            "User-inserted graph break" in restart_reason,
+            "skip function graph_break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
@@ -10759,35 +10845,6 @@ fn
 
         fn(torch.tensor([3, 3]))
 
-    @torch._dynamo.config.patch(assume_static_by_default=True)
-    def test_mark_unbacked_strict(self):
-        @torch.compile()
-        def fn(x, y):
-            return torch.mul(x, y)
-
-        x = torch.ones(5, 5)
-        torch._dynamo.decorators.mark_unbacked(x, 0, strict=True)
-        torch._dynamo.decorators.mark_unbacked(x, 1, strict=True)
-        y = torch.randn(5, 5)
-
-        with self.assertRaisesRegex(RuntimeError, "RelaxedUnspecConstraint"):
-            fn(x, y)
-
-    def test_sym_max_unbacked_sizelike_simplification(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def cf(x):
-            u0, u1 = x.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
-            torch._check(u0 + u1 == 20)
-            if guard_size_oblivious(torch.sym_max(1, u0 + u1) == 20):
-                return torch.tensor(True)
-            else:
-                return torch.tensor(False)
-
-        # Previously would have thrown guard on data dependent
-        cf(torch.tensor([10, 10])).item()
-
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
         # This code, in fact, does NOT work in eager
@@ -10799,23 +10856,6 @@ fn
             return y
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
-
-    @torch.fx.experimental._config.patch(no_data_dependent_graph_break=True)
-    def test_unbacked_strict_mode(self):
-        @torch.compile()
-        def fn(x, y):
-            if x.shape[0] == 5:
-                return torch.randn(5)
-            return torch.mul(x, y)
-
-        x = torch.ones(5, 5)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
-        torch._dynamo.decorators.mark_unbacked(x, 1)
-        y = torch.randn(5, 5)
-        with self.assertRaisesRegex(
-            RuntimeError, "Could not guard on data-dependent expression"
-        ):
-            fn(x, y)
 
     def test_guard_size_oblivious_backed(self):
         @torch.compile(backend="eager", fullgraph=True)
