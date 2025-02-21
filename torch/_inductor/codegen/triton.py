@@ -1272,6 +1272,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
+    def int_truediv(a, b):
+        # TODO: as mentioned in the original common.py::int_truediv, this is not completely correct
+        # This is replicated here rather than using ops.truediv
+        # since truediv has different data type propagation rules from
+        # int_truediv.
+        return f"{a} / {b}"
+
+    @staticmethod
     def sign(x):
         z = ops.constant(0, torch.int32)
         left = ops.to_dtype((ops.lt(z, x)), torch.int8)
