@@ -2447,7 +2447,7 @@ class PythonWrapperCodegen(CodeGen):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(outputs) == 1:
-                        return go(outputs[0].get_name(), keypath)
+                        return go(outputs[0].get_name(), keypath[1:])
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(outputs[keypath[0].idx].get_name(), keypath[1:])
