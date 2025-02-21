@@ -121,7 +121,7 @@ aten = torch.ops.aten
 
 """ [Note: Inductor IR]
 
-Inductor's IR is produced by executing 'lowering' code (see.py).  Each
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
 lowering is registered to a particular aten operator, and expects inputs that
 correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
 expect Inductor TensorBox inputs.

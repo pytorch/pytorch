@@ -1362,6 +1362,33 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_mismatched_branch_output(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dynamic_shapes = None
+        if dynamic:
+            # Note the minimum has to be 4 because the model
+            # is slicing over the first dim with [2:], if first
+            # dim is 2 or 3, the slicing will be 0/1 specialized,
+            # causing a constraint violation eror.
+            dim0_a = Dim("s0", min=4, max=1024)
+            dim0_b = Dim("s1", min=4, max=1024)
+            dynamic_shapes = {
+                "p": {},
+                "x": {0: dim0_a, 1: None},
+                "y": {0: dim0_b, 1: None},
+                "z": {0: dim0_a, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.MismatchedOutputSize(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_cond_symint_input(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
