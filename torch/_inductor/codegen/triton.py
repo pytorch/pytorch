@@ -84,7 +84,6 @@ from .simd import (
     IterationRanges,
     IterationRangesEntry,
     IterationRangesRoot,
-    pexpr,
     SIMDKernel,
     SIMDScheduling,
 )
@@ -95,6 +94,7 @@ from .triton_utils import (
     should_unwrap_unspec_arg,
     signature_to_meta,
 )
+from .wrapper import SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -3180,7 +3180,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
 
-    def codegen_kernel_benchmark(self, num_gb, grid=None):
+    def kernel_benchmark_extra_args(self) -> list[str]:
+        args = []
+        if self.need_numel_args():
+            numel_args: list[sympy.Expr] = []
+            self.add_numel_to_call_args("", numel_args, [])
+            for arg in numel_args:
+                if isinstance(arg, (int, sympy.Integer)):
+                    args.append(str(arg))
+                elif isinstance(arg, SymbolicCallArg):
+                    args.append(str(V.graph.sizevars.size_hint(arg.inner_expr)))
+                else:
+                    raise ValueError(f"Unsupported numel argument type: {type(arg)}")
+        return args
+
+    def codegen_kernel_benchmark(self, num_gb):
         result = IndentedBuffer()
         _argdefs, call_args, signature, _ = self.args.python_argdefs()
 
@@ -3221,25 +3235,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f"Don't find the buffer or const tensor for {arg_name}"
                     )
                 var_names.append(var_name)
+            var_names.extend(self.kernel_benchmark_extra_args())
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
-        if grid is None:
-            grid = []
-            extra_args = []
-            extra_args_str = None
-            for tree in self.active_range_trees():
-                expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
-                extra_args.append(expr)
-                if not tree.is_reduction:
-                    grid.append(expr)
-            if self.need_numel_args():
-                extra_args_str = ", ".join(map(str, extra_args)) + ", "
-            else:
-                extra_args_str = ""
-            grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
-        else:
-            grid_arg = f"grid={grid}"
         current_device = V.graph.get_current_device_or_throw()
         index = current_device.index
         with result.indent():
@@ -3251,7 +3250,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
-                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {grid_arg}, stream={stream_name})"
+                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -3263,7 +3262,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {grid_arg})"
+                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args)"
                 )
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])

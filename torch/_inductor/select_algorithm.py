@@ -1025,6 +1025,14 @@ class TritonTemplateKernel(TritonKernel):
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
+    def kernel_benchmark_extra_args(self) -> list[str]:
+        return [
+            *map(
+                str,
+                self.grid_fn(*V.graph.sizevars.size_hints(self.call_sizes), self.meta),
+            )
+        ]
+
 
 @functools.lru_cache(None)
 def _jinja2_env():
@@ -2051,7 +2059,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
-                    raise
                     raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )

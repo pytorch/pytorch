@@ -782,6 +782,7 @@ class TestMaxAutotune(TestCase):
             x = torch.mm(x, x)
             return torch.cat([x, y])
 
+        torch.compiler.reset()
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         inps = [
             torch.randn(32, 32, device=GPU_TYPE),
@@ -802,7 +803,6 @@ class TestMaxAutotune(TestCase):
             out = torch.cat([x, y])
             return out, x + 1
 
-        torch._dynamo.reset()
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)

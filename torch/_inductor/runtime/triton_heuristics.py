@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import hashlib
 import inspect
+import itertools
 import logging
 import math
 import operator
@@ -137,7 +138,7 @@ def disable_pointwise_autotuning(inductor_meta):
     return not inductor_meta.get("autotune_pointwise", True)
 
 
-def _dump_launch_params(args, kwargs, launcher, kernel_name):
+def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
     call_kwargs = {}
     for arg in args:
@@ -145,23 +146,16 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
             call_args.append(str(arg))
         else:
             call_args.append("T")
-    for k, v in kwargs.items():
-        if isinstance(arg, (int, bool)):
-            call_kwargs[k] = v
-        else:
-            call_kwargs[k] = v
-    for k, v in launcher.config.kwargs.items():
+    for k, v in itertools.chain(kwargs.items(), launcher.config.kwargs.items()):
         call_kwargs[k] = v
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
-    args_str = ""
-    args_str += ", ".join(call_args)
-    for k, v in call_kwargs.items():
-        args_str += f", {k}={v}"
-
+    args_str = [*call_args]
+    args_str.extend(f"{k}={v}" for k, v in call_kwargs.items())
+    args_str = ", ".join(args_str)
     abs_path = os.path.abspath(sys.argv[0])
     with open(f"{abs_path}.launch_params", "a") as f:
-        f.write(f"{kernel_name} | {args_str}\n")
+        f.write(f"{kernel_name} | {args_str} | {grid!r}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -655,8 +649,8 @@ class CachingAutotuner(KernelInterface):
                 else:
                     budget -= size
 
-        for i, arg in enumerate(args):
-            maybe_copy(self.fn.arg_names[i], arg)
+        for name, arg in zip(self.fn.arg_names, args):
+            maybe_copy(name, arg)
 
         for name, arg in kwargs.items():
             maybe_copy(name, arg)
@@ -713,10 +707,10 @@ class CachingAutotuner(KernelInterface):
                 return arg
 
         cloned_args = [
-            prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
+            prepare_arg(name, arg)
+            for name, arg in itertools.zip_longest(self.fn.arg_names[: len(args)], args)
         ]
         cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
-
         return cloned_args, cloned_kwargs
 
     def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
@@ -887,7 +881,7 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         if self.triton_interpret:
-            grid = self._compute_grid_slow(args, self.configs[0])
+            args, grid = self._interpret_args_grid(args, self.configs[0])
             return self.fn[grid](
                 *args,
                 **kwargs,
@@ -916,7 +910,8 @@ class CachingAutotuner(KernelInterface):
         args = self._get_args_with_constexprs(args, launcher)
 
         if self.dump_launch_params:
-            _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
+            new_args, grid = self._interpret_args_grid(args, self.launchers[0].config)
+            _dump_launch_params(new_args, kwargs, launcher, self.fn.__name__, grid)
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
@@ -952,18 +947,23 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-    def _compute_grid_slow(
+    def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
-    ) -> tuple[int, int, int]:
-        """Slow fallback that is only used in interpret mode."""
-        scope = dict(zip(self.fn.arg_names, args))
-        grid_obj = GridExpr.from_meta(self.inductor_meta, cfg)
-        for line in grid_obj.prefix:
-            exec(line, scope)
-        exec(f"grid_0 = {grid_obj.x_grid}", scope)
-        exec(f"grid_1 = {grid_obj.y_grid}", scope)
-        exec(f"grid_2 = {grid_obj.z_grid}", scope)
-        return scope["grid_0"], scope["grid_1"], scope["grid_2"]
+    ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
+        grid = GridExpr.from_meta(self.inductor_meta, cfg).eval_slow(
+            dict(
+                zip(
+                    [
+                        *self.fn.arg_names,
+                        *self.inductor_meta.get("extra_launcher_args", ()),
+                    ],
+                    args,
+                )
+            )
+        )
+        if self.inductor_meta.get("extra_launcher_args"):
+            args = args[: -len(self.inductor_meta["extra_launcher_args"])]
+        return args, grid
 
 
 class _ConstRepr:
@@ -2268,6 +2268,15 @@ class GridExpr:
             cfg = config_to_dict(cfg)
         grid.generate(cfg)
         return grid
+
+    def eval_slow(self, meta: dict[str, int]) -> tuple[int, int, int]:
+        scope = {**meta}
+        for line in self.prefix:
+            exec(line, scope)
+        exec(f"grid_0 = {self.x_grid}", scope)
+        exec(f"grid_1 = {self.y_grid}", scope)
+        exec(f"grid_2 = {self.z_grid}", scope)
+        return scope["grid_0"], scope["grid_1"], scope["grid_2"]
 
 
 class Grid1D(GridExpr):
