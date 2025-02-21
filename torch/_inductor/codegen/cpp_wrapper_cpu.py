@@ -6,7 +6,7 @@ import sys
 import textwrap
 from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Protocol, Union
 
 import sympy
 
@@ -19,7 +19,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, normalize_name
+from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -31,6 +31,11 @@ from .wrapper import (
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
+
+
+class HasWriteLine(Protocol):
+    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None:
+        ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -917,11 +922,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # If any output ref represents a temporary tensor, save it off first.  This
         # prevents situations where the temporary tensor would reinterpret another
         # output_ref which has already been released.
-        for idx, output in enumerate(output_refs):
-            var_name, call_str = self.create_tmp_raii_handle_var(output)
-            if var_name:
-                self.wrapper_call.writeline(call_str)
-                output_refs[idx] = var_name
+        output_refs = [
+            self.create_tmp_raii_handle_var(o, self.wrapper_call)
+            for o in output_refs
+            if self.is_tmp_raii_handle(o)
+        ]
 
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
@@ -2057,13 +2062,8 @@ if (custom_op_wrapper.get() == NULL) {
 
                 # Store AtenTensorHandle as void*
                 base_handle = raw_arg.codegen_reference()
-                (
-                    tmp_raii_handle_var,
-                    tmp_raii_handle_var_decl,
-                ) = self.create_tmp_raii_handle_var(base_handle)
-                if tmp_raii_handle_var:
-                    lines.append(tmp_raii_handle_var_decl)
-                    base_handle = tmp_raii_handle_var
+                if self.is_tmp_raii_handle(base_handle):
+                    base_handle = self.create_tmp_raii_handle_var(base_handle, lines)
                 return f"PyCapsule_New(reinterpret_cast<void*>({base_handle}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.OptionalType):
                 return generate_py_arg_inner(lines, raw_arg, arg_type.getElementType())
@@ -2366,13 +2366,8 @@ if (custom_op_wrapper.get() == NULL) {
                 # type_ is Optional[Tensor]
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                 base_handle = self.val_to_arg_str(val, element_type)
-                (
-                    tmp_raii_handle_var,
-                    tmp_raii_handle_var_decl,
-                ) = self.create_tmp_raii_handle_var(base_handle)
-                if tmp_raii_handle_var:
-                    self.writeline(tmp_raii_handle_var_decl)
-                    base_handle = tmp_raii_handle_var
+                if self.is_tmp_raii_handle(base_handle):
+                    base_handle = self.create_tmp_raii_handle_var(base_handle)
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
@@ -2395,11 +2390,11 @@ if (custom_op_wrapper.get() == NULL) {
                     # If any tensor in the list represents a temporary tensor, save it
                     # off first.  This increases memory usage in these cases (since the
                     # saved handle is currently permanent), but prevents segfaults.
-                    for i, tensor in enumerate(result):
-                        tmp_var_name, call_str = self.create_tmp_raii_handle_var(tensor)
-                        if tmp_var_name:
-                            self.writeline(call_str)
-                            result[i] = tmp_var_name
+                    result = [
+                        self.create_tmp_raii_handle_var(t)
+                        for t in result
+                        if self.is_tmp_raii_handle(t)
+                    ]
                 result = f"{{{', '.join(result)}}}"
                 self.writeline(
                     f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
@@ -2414,21 +2409,29 @@ if (custom_op_wrapper.get() == NULL) {
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
-    def create_tmp_raii_handle_var(self, base_handle: str) -> tuple[str, str]:
-        if base_handle.startswith(
+    @staticmethod
+    def is_tmp_raii_handle(handle: str) -> bool:
+        """Determines whether handle represents an un-saved temporary tensor."""
+        return handle.startswith(
             (
                 "borrow_arrayref_tensor_as_tensor(",
                 "copy_arrayref_tensor_to_tensor(",
                 "wrap_with_raii_handle_if_needed(",
                 "RAIIAtenTensorHandle(",
             )
-        ):
-            # these operations create a temp RAIIAtenTensorHandle, so we need to
-            # explicitly store them to avoid destroying them early
-            tmp_var_name = f"var_{next(self.arg_var_id)}"
-            return (
-                tmp_var_name,
-                f"auto {tmp_var_name} = {base_handle};\n",
-            )
+        )
+
+    def create_tmp_raii_handle_var(
+        self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
+    ) -> str:
+        """Assumes that handle passes is_tmp_raii_handle()."""
+        tmp_var_name = f"var_{next(self.arg_var_id)}"
+        call_str = f"auto {tmp_var_name} = {handle};"
+
+        writer = writer or self
+        if isinstance(writer, list):
+            writer.append(call_str)
         else:
-            return "", ""
+            writer.writeline(call_str)
+
+        return tmp_var_name
