@@ -1771,7 +1771,10 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
 
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
+        if config.triton.unique_user_kernel_names:
+            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
+        else:
+            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         from .triton import gen_common_triton_imports, TritonKernel
 
@@ -1803,9 +1806,11 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        compile_wrapper.splice(
-            user_defined_triton_kernel_transitive_closure_source_code(kernel)
-        )
+        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        if config.triton.unique_user_kernel_names:
+            # We replace the original_name with the unique name.
+            kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
