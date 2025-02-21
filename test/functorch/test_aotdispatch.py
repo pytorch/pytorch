@@ -1087,6 +1087,30 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @patch("torch._functorch.config.view_replay_for_aliased_outputs", False)
+    def test_alias_of_intermediate(self):
+        def fn(x):
+            x = x + 1
+            a = x.transpose(0, 1)
+            return a.detach(), a
+
+        def inp_fn():
+            t = torch.ones(3, 3, requires_grad=True)
+            torch._dynamo.mark_dynamic(t, 0)
+            torch._dynamo.mark_dynamic(t, 1)
+            return t
+
+        x_ref = inp_fn()
+        y_ref = fn(x_ref)
+
+        x = inp_fn()
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(y_ref, y)
+
+        sum(y_ref).sum().backward()
+        sum(y).sum().backward()
+        self.assertEqual(x_ref.grad, x.grad)
+
     def test_input_mutation_storage_resize_up(self):
         def f(a):
             torch.ops.inductor.resize_storage_bytes_(a, 32)
