@@ -881,7 +881,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_input_size_asserts(self) -> None:
         for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             if isinstance(buf, ir.GeneratorState):
@@ -897,7 +897,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             line = f"assert not {name}.isnan().any().item()"
@@ -1348,6 +1348,8 @@ class PythonWrapperCodegen(CodeGen):
                 if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
+        elif isinstance(value, ir.TorchBindObject):
+            return
         elif isinstance(value, ir.GeneratorState):
             return
         else:
@@ -1493,6 +1495,8 @@ class PythonWrapperCodegen(CodeGen):
         def add_torchbind_input(name, value):
             import pickle
 
+            assert isinstance(value, torch.ScriptObject)
+
             output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
 
         output.writelines(
@@ -1531,7 +1535,13 @@ class PythonWrapperCodegen(CodeGen):
                     # SingletonInts belong to metadata that should only live on
                     # the subclass.
                     continue
-                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                if isinstance(value, ir.TorchBindObject):
+                    if len(V.graph.torchbind_constants) == 0:
+                        # otherwise we have already imported the pickle package
+                        output.writeline("import pickle")
+                    output.writeline(f"global {name}")
+                    add_torchbind_input(name, value.get_real_obj())
+                elif isinstance(value, sympy.Expr):  # Don't need to add symbolic
                     # TODO: this fallback and those below actually will generate possibly
                     # invalid benchmark code, because it's not guaranteed 42
                     # is actually a valid value for the kernel in question.
@@ -2263,7 +2273,7 @@ class PythonWrapperCodegen(CodeGen):
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
-    def make_buffer_free(self, buffer: BufferLike):
+    def make_buffer_free(self, buffer: Union[BufferLike, ir.TorchBindObject]):
         return f"del {buffer.get_name()}"
 
     def make_free_by_names(self, names_to_del: list[str]):
@@ -2346,7 +2356,7 @@ class PythonWrapperCodegen(CodeGen):
         name = buffer.get_name()
 
         # can be freed but not reused
-        if isinstance(buffer, ir.InputBuffer):
+        if isinstance(buffer, (ir.InputBuffer, ir.TorchBindObject)):
             self.writeline(self.make_buffer_free(buffer))
             return
 

@@ -21,23 +21,18 @@ import tempfile
 import textwrap
 import time
 import unittest
+from collections.abc import Collection, Iterator, Mapping, MutableMapping, MutableSet
 from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
     Callable,
     cast,
-    Collection,
     Generic,
-    Iterator,
     Literal,
-    Mapping,
-    MutableMapping,
-    MutableSet,
     NamedTuple,
     Optional,
     Protocol,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -974,6 +969,10 @@ def argsort_sym(
 
 @functools.lru_cache(8)
 def get_dtype_size(dtype: torch.dtype) -> int:
+    # TODO: Investigate why uint64 tensor creation causes overflow error:
+    # Workaround for RuntimeError in memory size calculation, but underlying cause unclear
+    if dtype == torch.uint64:
+        return 8
     return torch.empty((), dtype=dtype).element_size()
 
 
@@ -1361,7 +1360,7 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 @functools.lru_cache(None)
 def try_import_ck_lib() -> (
-    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], Type[Any]]
+    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
 ):
     try:
         import ck4inductor  # type: ignore[import]
@@ -2609,7 +2608,7 @@ class ScopedDict(MutableMapping[KeyType, ValType]):
 
 
 @dataclass_transform(frozen_default=True)
-def ir_dataclass(cls: Optional[Type[Any]] = None, /, *, frozen: bool = True) -> Any:
+def ir_dataclass(cls: Optional[type[Any]] = None, /, *, frozen: bool = True) -> Any:
     def wrap(cls: _T) -> _T:
         if sys.version_info >= (3, 10):
             return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]

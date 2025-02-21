@@ -1253,7 +1253,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(4, 4).to(device)
         opt_fn = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "skip function graph_break in file"
+            torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
             opt_fn(x)
 
