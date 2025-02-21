@@ -88,6 +88,7 @@ jobs:
       build-environment: linux-focal-rocm6.3-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
+      tests-to-include: "test_torch test_cuda test_ops"
     secrets: inherit
 
   # Moved from inductor-rocm-mi300.yml
