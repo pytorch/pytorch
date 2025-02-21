@@ -10515,6 +10515,47 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_enforcing_placeholder_order(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.register_buffer("buffer1", torch.randn(4, 4))
+                self.register_buffer("buffer2", torch.randn(4, 4), persistent=False)
+                self.register_buffer("buffer3", torch.randn(4, 4))
+                self.const = torch.randn(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                out1 = self.linear1(x)
+                out2 = self.linear2(
+                    out1 + self.const + self.buffer1 + self.buffer2 + self.buffer3
+                )
+                return out2
+
+        mod = M()
+        inputs = (torch.randn(4, 4),)
+        ep = torch.export.export(mod, inputs)
+        # check that graph is behaviorally correct
+        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
+
+        expected_names = [
+            ("p_linear1_weight", InputKind.PARAMETER),
+            ("p_linear1_bias", InputKind.PARAMETER),
+            ("p_linear2_weight", InputKind.PARAMETER),
+            ("p_linear2_bias", InputKind.PARAMETER),
+            ("b_buffer1", InputKind.BUFFER),
+            # persistent buffers should come before non-persistent ones
+            ("b_buffer3", InputKind.BUFFER),
+            ("b_buffer2", InputKind.BUFFER),
+            ("c_const", InputKind.CONSTANT_TENSOR),
+            ("x", InputKind.USER_INPUT),
+        ]
+        real_names = [
+            (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
+        ]
+        self.assertEqual(expected_names, real_names)
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
