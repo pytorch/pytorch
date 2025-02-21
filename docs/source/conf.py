@@ -1,3 +1,4 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 #
 # PyTorch documentation build configuration file, created by
 # sphinx-quickstart on Fri Dec 23 13:31:47 2016.
@@ -63,7 +64,8 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx_copybutton",
     "sphinx_panels",
-    "myst_parser",
+    # "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
 ]
 
