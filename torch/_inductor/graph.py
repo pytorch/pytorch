@@ -67,6 +67,7 @@ from .ir import (
     DonatedBuffer,
     FixedLayout,
     get_device_type,
+    GraphPartitionSignature,
     InputBuffer,
     Pointwise,
     Reduction,
@@ -305,7 +306,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
-        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject]] = {}
+        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
@@ -1321,6 +1322,14 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
+    @contextmanager
+    def set_current_wrapper_code(self) -> Iterator[None]:
+        old = self.wrapper_code
+        try:
+            yield
+        finally:
+            self.wrapper_code = old
+
     def propagate_mutation(
         self,
         fx_node: torch.fx.Node,
@@ -1776,6 +1785,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1798,7 +1808,10 @@ class GraphLowering(torch.fx.Interpreter):
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph, subgraph_name, parent_wrapper_code
+            is_subgraph,
+            subgraph_name,
+            parent_wrapper_code,
+            partition_signatures,
         )
 
         if self.const_module:
@@ -2115,6 +2128,7 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,
