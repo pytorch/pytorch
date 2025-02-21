@@ -441,6 +441,18 @@ def _get_onnxscript_opset(opset_version: int) -> onnxscript.values.Opset:
     return onnxscript.values.Opset("", opset_version)
 
 
+def _is_onnx_op(op: torch._ops.OpOverload) -> bool:
+    """Whether the op overload is an ONNX custom op implemented with PyTorch."""
+    return op.name().startswith("onnx::")
+
+
+def _parse_onnx_op(op: torch._ops.OpOverload) -> tuple[str, int]:
+    """Parse the ONNX custom op overload name to get the op type and opset version."""
+    name = op.name()[len("onnx::") :]
+    name, _, opset = name.partition(".opset")
+    return name, int(opset)
+
+
 def _handle_call_function_node_with_lowering(
     model: ir.Model,
     node: torch.fx.Node,
@@ -476,17 +488,6 @@ def _handle_call_function_node_with_lowering(
             # use SequenceAt to get the value. This is handled by torchlib
             pass
 
-    # Find the matching ONNX overload for the node
-    # NOTE: Create different registries for different ONNX opset versions
-    # TODO: Log the message here to expose false positives
-    onnx_function, message = _dispatching.dispatch(node, registry)
-
-    if onnx_function is None:
-        # TODO(justinchuby): Fall back to ATen op or do something else?
-        raise _errors.DispatchError(
-            f"No ONNX function found for {node.target!r}. Failure message: {message}"
-        )
-
     # Map FX inputs to ONNX inputs and fill optional inputs.
     # torch_args and torch_kwargs are for op-level validation
     fx_args = node.args
@@ -510,19 +511,64 @@ def _handle_call_function_node_with_lowering(
             # TODO(justinchuby): Maybe keep it as None?
             onnx_kwargs[key] = -1
 
-    with onnxscript.evaluator.default_as(
-        tracer := _building.OpRecorder(opset, constant_farm)
-    ):
-        global current_tracer
-        current_tracer = tracer
-        try:
-            outputs = onnx_function(*onnx_args, **onnx_kwargs)
-        except Exception as e:
-            raise _errors.GraphConstructionError(
-                f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
-            ) from e
-        finally:
-            current_tracer = None
+    if _is_onnx_op(node.target):
+        # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
+        op_type, opset_version = _parse_onnx_op(node.target)
+        onnx_node = ir.Node(
+            "",
+            op_type,
+            onnx_args,
+            ir.convenience.convert_attributes(onnx_kwargs),
+            name=node.name,
+            num_outputs=len(node.target._schema.returns),
+            version=opset_version,
+        )
+        # Store the single node in a list to be consistent with the rest of the code for further processing
+        onnx_nodes = [onnx_node]
+        if len(onnx_node.outputs) == 1:
+            outputs = onnx_node.outputs[0]
+        else:
+            outputs = onnx_node.outputs
+    else:
+        # Find the matching ONNX overload for the node
+        # NOTE: Create different registries for different ONNX opset versions
+        # TODO: Log the message here to expose false positives
+        onnx_function, message = _dispatching.dispatch(node, registry)
+
+        if onnx_function is None:
+            raise _errors.DispatchError(
+                f"No ONNX function found for {node.target!r}. Failure message: {message}"
+            )
+
+        with onnxscript.evaluator.default_as(
+            tracer := _building.OpRecorder(opset, constant_farm)
+        ):
+            global current_tracer
+            current_tracer = tracer
+            try:
+                outputs = onnx_function(*onnx_args, **onnx_kwargs)
+            except Exception as e:
+                raise _errors.GraphConstructionError(
+                    f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
+                ) from e
+            finally:
+                current_tracer = None
+
+        # Add the defined functions to the model
+        for identifier, onnxscript_function in tracer.functions.items():
+            if identifier in model.functions:
+                continue
+            if isinstance(onnxscript_function, ir.Function):
+                ir_function = onnxscript_function
+            else:
+                # TODO: Get IR function directly when onnxscript is updated
+                proto = onnxscript_function.to_function_proto()
+                ir_function = ir.serde.deserialize_function(proto)
+            model.functions[identifier] = ir_function
+            # Opset imports are added to the model in the final add_opset_imports pass
+
+        onnx_nodes = tracer.nodes
+        del tracer  # tracer is no longer needed
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
@@ -541,26 +587,14 @@ def _handle_call_function_node_with_lowering(
         node_name_to_values[node.name] = outputs
         outputs.name = node.name
 
-    for ir_node in tracer.nodes:
+    for ir_node in onnx_nodes:
         ir_node.meta["node"] = node
         # Record the nn.Module stack for the node
         _set_node_metadata(node, ir_node)
 
     # Add the traced nodes to the current graph
     # Must add nodes to this graph, not model.graph, because it can be a subgraph that is currently being constructed
-    graph_like.extend(tracer.nodes)
-    # Add the defined functions to the model
-    for identifier, onnxscript_function in tracer.functions.items():
-        if identifier in model.functions:
-            continue
-        if isinstance(onnxscript_function, ir.Function):
-            ir_function = onnxscript_function
-        else:
-            # TODO: Get IR function directly when onnxscript is updated
-            proto = onnxscript_function.to_function_proto()
-            ir_function = ir.serde.deserialize_function(proto)
-        model.functions[identifier] = ir_function
-        # Opset imports are added to the model in the final add_opset_imports pass
+    graph_like.extend(onnx_nodes)
 
 
 def _handle_placeholder_node(
