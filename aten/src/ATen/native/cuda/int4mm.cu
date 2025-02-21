@@ -137,7 +137,7 @@ using VecT = T __attribute__((ext_vector_type(Rank)));
 static bool isCDNA2orLater(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx90a", "gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
@@ -151,7 +151,7 @@ static bool isCDNA2orLater(int index) {
 constexpr int32_t kWarpSize = 32;
 #endif
 
-#if defined (__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined (__gfx90a__) || defined(__gfx942__)
 #define CDNA2_OR_LATER 1
 #else
 #define CDNA2_OR_LATER 0
