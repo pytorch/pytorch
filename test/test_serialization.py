@@ -117,6 +117,13 @@ class FilelikeMock:
     def was_called(self, name):
         return name in self.calls
 
+class ClassAMock:
+    class Nested:
+        pass
+
+class ClassBMock:
+    class Nested:
+        pass
 
 def up_size(size):
     return (*size[:-1], size[-1] * 2)
@@ -1156,6 +1163,21 @@ class TestSerialization(TestCase, SerializationMixin):
         _test_save_load_attr(t)
         _test_save_load_attr(torch.nn.Parameter(t))
 
+    def test_serialization_nested_class(self) -> None:
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(
+                dict(
+                    a_nested=ClassAMock.Nested(),
+                    b_nested=ClassBMock.Nested(),
+                ),
+                checkpoint
+            )
+            checkpoint.seek(0)
+            torch.serialization.add_safe_globals(
+                [ClassAMock, ClassBMock, getattr, ClassAMock.Nested, ClassBMock.Nested]
+            )
+            torch.load(checkpoint, weights_only=True)
+
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
@@ -1168,7 +1190,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL print"):
                 torch.load(f, weights_only=True)
             with torch.serialization.safe_globals([print]):
                 f.seek(0)
@@ -1260,8 +1282,12 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(sd, f, pickle_protocol=pickle_protocol)
             f.seek(0)
             if unsafe_global:
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` or .* to allowlist"):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "use `torch.serialization.add_safe_globals"
+                    r"\(\[torch.testing._internal.two_tensor.TwoTensor\]\)`"
+                    " or .* to allowlist"
+                ):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
