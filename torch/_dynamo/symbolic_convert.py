@@ -2939,12 +2939,15 @@ class InstructionTranslator(InstructionTranslatorBase):
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    if dynamism:
+                        dynamism = frozenset(dynamism.get(name, {}).items())
+
                     var = LazyVariableTracker.create(
                         value,
                         LocalSource(
                             name,
                             is_input=True,
-                            dynamism=frozenset(dynamism.get(name, {}).items()),
+                            dynamism=dynamism,
                         ),
                     )
                     self.symbolic_locals[name] = var
