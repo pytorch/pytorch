@@ -58,7 +58,6 @@ def track_dynamism_across_examples(
     for ex in example_inputs:
         if "self" in ex and isinstance(ex["self"], torch.nn.Module):
             ex["self"] = module_to_nested_dict(ex["self"])
-            print(ex["self"])
         leaves_with_paths, _ = tree_flatten_with_path(ex)
         for key_path, value in leaves_with_paths:
             if not isinstance(value, (int, float, torch.Tensor)):
