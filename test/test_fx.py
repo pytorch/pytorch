@@ -19,14 +19,25 @@ import types
 import typing
 import unittest
 import warnings
-from collections import namedtuple
-from copy import deepcopy
 from math import sqrt
+from torch.multiprocessing import Process
+from torch.testing import FileCheck
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+import torch.utils._pytree as pytree
+import torch.fx._pytree as fx_pytree
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
+from torch.fx.node import Target, Argument, ArgumentT, _format_arg
+from torch.fx.passes import shape_prop
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from copy import deepcopy
+from collections import namedtuple
 from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
-import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
+
 from functorch.experimental import control_flow
 
 from fx.named_tup import MyNamedTup
@@ -46,36 +57,10 @@ from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
-from torch.fx import (
-    CodeGen,
-    Graph,
-    GraphModule,
-    Interpreter,
-    Node,
-    PH,
-    Proxy,
-    symbolic_trace,
-    Tracer,
-    Transformer,
-    wrap,
-)
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.node import _format_arg, Argument, Target
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from torch.fx.passes import shape_prop
 
 from torch.fx.proxy import TraceError
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCPU,
-    ops,
-)
-from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -4414,7 +4399,15 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             if len(contained) > 0 and contained[0] is not Ellipsis:
                 return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
             else:
-                return f"Callable{contained_type_str}"
+                return f'Callable{contained_type_str}'
+
+        if t is ArgumentT:
+            # ArgumentT is a TypeVar bound to torch.fx.node.Argument
+            return f'torch.fx.node.Argument{contained_type_str}'
+
+        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
+                           f'Please add support for this type and confirm with the '
+                           f'FX team that your signature change is valid.')
 
         raise RuntimeError(
             f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."
