@@ -303,6 +303,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
+    safe_tensors: bool = False,
 ) -> WriteResult:
     offset = stream.tell()
 
@@ -316,10 +317,15 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, transform_to)
+        if not safe_tensors:
+            torch.save(data, transform_to)
+
     transform_to.close()
 
-    length = stream.tell() - offset
+    if not safe_tensors or isinstance(data, io.BytesIO):
+        length = stream.tell() - offset
+    else:
+        length = data.numel() * data.element_size()
 
     # For consistency with earlier versions, leave this field out of the
     # metadata if there are no extensions.
@@ -348,6 +354,7 @@ def _write_files_from_queue(
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
+    safe_tensors: bool,
 ) -> None:
     try:
         while True:
@@ -389,14 +396,35 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(transforms, stream, data, write_item, storage_key)
+                        _write_item(
+                            transforms,
+                            stream,
+                            data,
+                            write_item,
+                            storage_key,
+                            safe_tensors,
+                        )
                     )
 
+                tensor_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(transforms, stream, tensor, write_item, storage_key)
+                        _write_item(
+                            transforms,
+                            stream,
+                            tensor,
+                            write_item,
+                            storage_key,
+                            safe_tensors,
+                        )
                     )
+                    tensor_dict[write_item.index.fqn] = tensor
+
+                if safe_tensors:
+                    from safetensors.torch import save
+
+                    stream.write(save(tensor_dict))
 
                 if use_fsync:
                     try:
@@ -512,7 +540,6 @@ class FileSystem(FileSystemBase):
 
 
 class _FileSystemWriter(StorageWriter):
-
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -618,6 +645,14 @@ class _FileSystemWriter(StorageWriter):
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, [item]))
 
+        return self._write_data(planner, file_queue)
+
+    def _write_data(
+        self,
+        planner: SavePlanner,
+        file_queue: queue.Queue,
+        safe_tensors: bool = False,
+    ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
         threads = []
@@ -633,6 +668,7 @@ class _FileSystemWriter(StorageWriter):
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
+                    safe_tensors,
                 ),
             )
             t.start()
@@ -647,6 +683,7 @@ class _FileSystemWriter(StorageWriter):
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
+            safe_tensors=safe_tensors,
         )
 
         for t in threads:
