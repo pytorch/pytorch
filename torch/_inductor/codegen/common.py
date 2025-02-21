@@ -18,8 +18,6 @@ from typing import (
     cast,
     ClassVar,
     Generic,
-    Iterator,
-    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -37,10 +35,11 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
+from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -49,14 +48,16 @@ from ..utils import (
     ir_dataclass,
     ScopedDict,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
+    triton_type,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, MutableMapping, Sequence
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
@@ -535,8 +536,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",
@@ -761,11 +761,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
-class OpOverrides(OpDecompositions):
-    def __init__(self, parent: OpsHandler[OpVarT]) -> None:
-        super().__init__()
-        self._parent = parent
-
+class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -776,9 +772,6 @@ class OpOverrides(OpDecompositions):
             # don't put extra parens for strings that are already wrapped in parens
             return string
         return f"({string})"
-
-    def __getattr__(self, item: str) -> Callable[..., Any]:
-        return getattr(self._parent, item)
 
     @staticmethod
     def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
@@ -852,15 +845,148 @@ class OpOverrides(OpDecompositions):
     def load_seed(name: str, offset: OpVarT) -> OpVarT:
         return ops.load(name, sympy.Integer(offset))
 
+    def indirect_indexing(
+        self,
+        var: OpVarT,
+        size: Union[sympy.Expr, int],
+        check: bool = True,
+        wrap_neg: bool = True,
+    ) -> sympy.Symbol:
+        return sympy_index_symbol(str(var))
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
+        )
+
+    def load(self, name: str, index: sympy.Expr) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: load should be handled by CSEProxy"
+        )
+
+    def store(
+        self, name: str, index: sympy.Expr, value: OpVarT, mode: StoreMode = None
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
+        )
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[OpVarT, tuple[OpVarT, ...]],
+    ) -> Union[OpVarT, tuple[OpVarT, ...]]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: reduction should be handled by CSEProxy"
+        )
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [tuple[OpVarT, ...], tuple[OpVarT, ...]],
+            tuple[OpVarT, ...],
+        ],
+        values: tuple[OpVarT, ...],
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: scan should be handled by CSEProxy"
+        )
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[OpVarT, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: sort should be handled by CSEProxy"
+        )
+
+    def bucketize(
+        self,
+        values: OpVarT,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: OpVarT,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[OpVarT] = None,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: bucketize should be handled by CSEProxy"
+        )
+
+    def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def inline_asm_elementwise(
+        self,
+        *inputs: OpVarT,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
+        )
+
+    def output(self, *args: OpVarT) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear at codegen time"
+        )
+
+    def placeholder(self, index: int) -> OpVarT:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear at codegen time"
+        )
+
+    @staticmethod
+    def _unimplemented(name: str) -> Callable[..., OpVarT]:
+        def unimplemented(self: OpOverrides, *args: Any, **kwargs: Any) -> OpVarT:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not implement ops.{name}"
+            )
+
+        unimplemented.__name__ = name
+        unimplemented.is_unimplemented = True  # type: ignore[attr-defined]
+        return unimplemented
+
+    @classmethod
+    def _is_unimplemented(cls, name: str) -> bool:
+        fn = getattr(cls, name, None)
+        default_fn = getattr(OpsHandler, name, None)
+        return not fn or fn == default_fn or getattr(fn, "is_unimplemented", False)
+
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
-        assert target in ("triton", "cpp", "cppvec"), target
+        assert target in ("triton", "cpp", "cppvec", "halide", "mps"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
             if impl is None:
-                continue
-            setattr(cls, funcname, staticmethod(impl))
+                if cls._is_unimplemented(funcname):
+                    setattr(cls, funcname, cls._unimplemented(funcname))
+            else:
+                assert (
+                    funcname not in cls.__dict__
+                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                impl.__name__ = funcname
+                setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
@@ -874,6 +1000,8 @@ class OverridesData:
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
+    halide: Optional[Callable[..., str]] = None
+    mps: Optional[Callable[..., str]] = None
 
 
 # NB: if you add a new special function, don't forget to update
@@ -1104,11 +1232,6 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[OpVarT]:
-    return h
-
-
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1213,6 +1336,11 @@ class KernelArgs:
             )
         )
 
+    @staticmethod
+    def _buffer_is_marked_removed(name: Any) -> bool:
+        # this function is needed by MTIA
+        return isinstance(name, RemovedArg)
+
     def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
@@ -1241,8 +1369,19 @@ class KernelArgs:
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
+            alive_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if not isinstance(val, RemovedArg)
+            ]
+            removed_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if isinstance(val, RemovedArg)
+            ]
+            inplace_buffer_idx = len(unique(alive_buffers)) + len(removed_buffers)
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                f"in_out_ptr{inplace_buffer_idx}",
                 [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
@@ -1658,6 +1797,15 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
+
+                    if (
+                        assignment
+                        and config.test_configs.runtime_triton_dtype_assert
+                        and dtype is not None
+                    ):
+                        assert_line = f"tl.static_assert({self.prefix}{var}.dtype == {triton_type(dtype)})"
+                        buffer.writeline(assert_line)
+
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
@@ -1704,7 +1852,7 @@ class CodeGen:
 class Kernel(CodeGen, Generic[CSEVariableType]):
     newvar_prefix: str = ""
     suffix: str = ""
-    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    overrides: Optional[Callable[[], OpsHandler[Any]]] = None
 
     def __init__(
         self, args: Optional[KernelArgs] = None, increase_kernel_count: bool = True
@@ -1889,346 +2037,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def __enter__(self) -> typing.Self:
-        # TODO: hoist this to top level
-        class CSEProxy:
-            name = "CSEProxy"
-            vr_analysis = ValueRangeAnalysis()
-
-            @staticmethod
-            def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
-                def inner(*args: Any, **kwargs: Any) -> CSEVariable:
-                    bounds = CSEProxy._bound_variable(name, *args, **kwargs)
-
-                    value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-                    dtype_handler = DtypePropagationOpsHandler()
-
-                    output_idx = 0
-
-                    def do_cse(v: str) -> CSEVariable:
-                        # cpp backend doesnt set current device - TODO: fix
-                        if V.graph.current_device is not None:
-                            device_str = V.graph.get_current_device_or_throw().type
-                            triton_backend = (
-                                config.cpu_backend == "triton"
-                                if device_str == "cpu"
-                                else config.cuda_backend == "triton"
-                                if device_str != "mps"
-                                else False
-                            )
-                        else:
-                            triton_backend = False
-
-                        # only triton backend tracks dtype currently
-                        if triton_backend:
-                            if name == "masked":
-                                output_dtype = value.dtype
-                            else:
-                                output_dtype = getattr(
-                                    dtype_handler,
-                                    name,
-                                )(*args, **kwargs)
-                        else:
-                            # cpp backend doesnt track dtype yet
-                            output_dtype = None
-
-                        csevar = V.kernel.cse.generate(
-                            V.kernel.compute,
-                            v,
-                            bounds=bounds,
-                            dtype=output_dtype,
-                        )
-
-                        nonlocal output_idx
-                        if (
-                            config.test_configs.runtime_triton_dtype_assert
-                            and triton_backend
-                        ):
-                            from torch._inductor.codegen.triton import triton_type
-
-                            # we tree_map over the output, so we need to fetch corresponding dtype
-                            if isinstance(output_dtype, (list, tuple)):
-                                output_dtype = output_dtype[output_idx]
-
-                            V.kernel.compute.writeline(
-                                f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
-                            )
-                        output_idx += 1
-
-                        csevar.update_on_args(name, args, kwargs)
-
-                        return csevar
-
-                    return pytree.tree_map(do_cse, value)
-
-                return inner
-
-            @staticmethod
-            def _bound_variable(
-                name: str, *args: Any, **kwargs: Any
-            ) -> ValueRanges[Any]:
-                """
-                If the variable comes from an FX node, we forward the bound we have already computed
-                Else, if the variable when codegen'ing another op, we try to compute its bounds
-                """
-                from ..select_algorithm import TritonTemplateKernel
-
-                if isinstance(V.kernel, TritonTemplateKernel):
-                    return ValueRanges.unknown()
-
-                fx_node = V.interpreter.current_node
-                if fx_node.target == name and self.node_to_bounds is not None:
-                    assert isinstance(self.node_to_bounds, dict)
-                    return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
-                elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
-                    # These create lots of inner strings. We would need to compute the bounds at the ops
-                    # We will also likely not get much from computing VRs on these nodes
-                    if any(
-                        s in fx_node.target
-                        for s in ("set_indirect", "reduction", "scan")
-                    ):
-                        return ValueRanges.unknown()
-
-                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
-                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
-
-                    # If there is no FX bound but we know how to compute one we do so
-                    assert not kwargs
-
-                    def arg_to_bound(x: Any) -> Any:
-                        if isinstance(x, CSEVariable):
-                            return x.bounds
-                        elif isinstance(x, sympy.Expr):
-                            return bound_sympy(x)
-                        else:
-                            return x
-
-                    arg_bounds = list(map(arg_to_bound, args))
-                    return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                return ValueRanges.unknown()
-
-            @staticmethod
-            def indirect_indexing(
-                var: CSEVariable,
-                size: Union[sympy.Expr, int],
-                check: bool = True,
-                wrap_neg: bool = True,
-            ) -> sympy.Symbol:
-                if isinstance(size, int):
-                    size = sympy.Integer(size)
-                assert isinstance(size, sympy.Expr), size
-                # Skip CSE since this doesn't return an expression
-
-                if var.bounds.lower < 0:  # type: ignore[operator]
-                    if wrap_neg:
-                        stm = ops.add(var, ops.index_expr(size, torch.long))
-                        # Mixed negative and non-negative
-                        if var.bounds.upper >= 0:  # type: ignore[operator]
-                            lt = ops.lt(var, 0)
-                            stm = ops.where(lt, stm, var)
-                    else:
-                        stm = var
-
-                    # Propagate bounds as we know how to compute them properly
-                    new_bounds = ValueRanges.unknown()
-                    if var.bounds != ValueRanges.unknown() and isinstance(
-                        size, sympy.Number
-                    ):
-                        # Take the negative part of the bound and add size to it
-                        # Then take union of that and the positive part
-                        # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
-                        new_bounds = ValueRanges(
-                            neg_bounds.lower + size, neg_bounds.upper + size
-                        )
-                        # We don't have a good way of representing the empty range
-                        if var.bounds.upper >= 0:  # type: ignore[operator]
-                            pos = var.bounds & ValueRanges(0, int_oo)
-                            new_bounds = new_bounds | pos
-
-                    var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-                sympy_var = parent_handler.indirect_indexing(var, size, check)
-                if generate_assert(check):
-                    assert_lower = not (var.bounds.lower >= 0)
-                    # value ranges cannot x < s when x and s are symbols
-                    assert_upper = not isinstance(size, sympy.Number) or not (
-                        var.bounds.upper < size
-                    )
-                    self.check_bounds(sympy_var, size, assert_lower, assert_upper)
-                return sympy_var
-
-            @staticmethod
-            def check_bounds(
-                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
-            ) -> None:
-                return self.check_bounds(expr, size, lower, upper)
-
-            @staticmethod
-            def load(name: str, index: sympy.Expr) -> CSEVariable:
-                if name in self.cse.invalidated_stores:
-                    # A load from an invalidated store requires us to
-                    # keep the actual buffer around
-                    V.kernel.must_keep_buffers.add(name)
-                if free_symbol_is_type(index, SymT.TMP):
-                    return self.indirect_load(name, index)
-                store_cache = self.cse.store_cache
-                if name in store_cache:
-                    return store_cache[name]
-                out = self.load(name, index)
-                # count load that is not in the store_cache, and also not in the
-                # cse cache.
-                if out.use_count == 1:
-                    self.num_load += 1
-                return out
-
-            @staticmethod
-            def _update_store_cache(name: str, value: CSEVariable) -> None:
-                value = cast(CSEVariableType, value)
-                self.cse.store_cache[name] = value
-                if self.current_node and name in V.graph.name_to_buffer:
-                    buf = self.current_node.get_output(name)
-                    for other_name in buf.get_mutations():
-                        self.cse.store_cache[other_name] = value
-
-            @staticmethod
-            def store(
-                name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
-            ) -> None:
-                self.store_buffer_names.add(name)
-                if mode is None:
-                    CSEProxy._update_store_cache(name, value)
-                if name not in V.graph.removed_buffers:
-                    return self.store(name, index, value, mode=mode)
-                return None  # type: ignore[return-value]
-
-            @staticmethod
-            def store_reduction(
-                name: str, index: sympy.Expr, value: CSEVariable
-            ) -> None:
-                self.store_buffer_names.add(name)
-                CSEProxy._update_store_cache(name, value)
-
-                if name not in V.graph.removed_buffers:
-                    return self.store_reduction(name, index, value)
-
-            @staticmethod
-            def reduction(
-                dtype: torch.dtype,
-                src_dtype: torch.dtype,
-                reduction_type: ReductionType,
-                value: Union[CSEVariable, tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-                self.num_reduction += 1
-                return self.reduction(dtype, src_dtype, reduction_type, value)
-
-            @staticmethod
-            def scan(
-                dtypes: tuple[torch.dtype, ...],
-                combine_fn: Callable[
-                    [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
-                    tuple[CSEVariable, ...],
-                ],
-                values: tuple[CSEVariable, ...],
-            ) -> tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values)
-
-            @staticmethod
-            def sort(
-                dtypes: tuple[torch.dtype, ...],
-                values: tuple[CSEVariable, ...],
-                stable: bool,
-                descending: bool,
-            ) -> tuple[CSEVariable, ...]:
-                return self.sort(dtypes, values, stable, descending)
-
-            @staticmethod
-            def bucketize(
-                values: CSEVariable,
-                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
-                boundary_indices: CSEVariable,
-                indexing_dtype: torch.dtype,
-                right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
-                sorter_indices: Optional[CSEVariable] = None,
-            ) -> CSEVariable:
-                """
-                [Note: Inductor bucketize op]
-
-                Inputs:
-                -------
-                values: the values to be bucketized.
-                boundaries: a tuple containing
-                  (a) the name of the boundaries tensor (which must be sorted, unless
-                  the sorting tensor is present),
-                  (b) the length of the tensor in the last dimension (i.e. the length of
-                  one set of boundaries),
-                  (c) the number of elements in the underlying storage (i.e. the length
-                  of the flattened tensor, ignoring striding), and
-                  (d) the stride of the tensor in the last dimension.
-                boundary_indices: indices into a flattened version of the boundaries
-                tensor, of the same size and shape as "values".  Each index points to
-                the first element in the set of boundaries to be used for the
-                corresponding value.
-                indexing_dtype: the dtype to use when indexing into the boundaries
-                tensor.  This must be int64 or int32.  This additionally specifies the
-                dtype of the return value.
-                right: see "Details" below.
-                sorter: an optional tuple containing
-                  (a) the name of an optional sorting tensor, used to access unsorted
-                  boundaries without reordering the boundaries tensor, and
-                  (b) the stride of the tensor in the last dimension.
-                The values in the sorting tensor are used as indices into the *last*
-                dimension of the boundaries tensor, with all other indices matching.
-                The size of the sorting and boundaries tensors must be equivalent.
-                sorter_indices: must be present if the sorting array is present; see
-                "boundary_indices" for the equivalent definition for the boundaries
-                tensor.
-
-                Output:
-                -------
-                The buckets each value belongs in, within a given set of boundaries.  0
-                indicates a position before the first boundary, and len(boundaries_set)
-                represents a position after the last boundary.
-
-                Details:
-                --------
-                Given a value and a set of boundaries, calculate the bucket that each
-                value belongs to.  This works differently in 1-D and N-D cases.
-
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [0, 4, 4, 8], right=True
-                return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
-
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [[0, 4], [4, 8]], right=True
-                return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
-
-                Note that in the N-D boundaries case, the shape of "values" and
-                "boundaries" must match in every dimension _except_ the last.
-
-                When right == False, bucket i refers to range (boundaries[i], boundaries[i+1]].
-                When right == True,  bucket i refers to range [boundaries[i], boundaries[i+1]).
-
-                Boundaries must be non-decreasing, or a sorter must be provided which
-                would re-index offsets in a non-decreasing order (e.g. the second output
-                of torch.sort(offsets)).  Otherwise, the result is undefined.
-                """
-                return self.bucketize(
-                    values,
-                    boundaries,
-                    boundary_indices,
-                    indexing_dtype,
-                    right,
-                    sorter,
-                    sorter_indices,
-                )
-
-        # Use mypy to check protocol implemented correctly
-        def _typecheck_CSEProxy(h: CSEProxy) -> OpsHandler[CSEVariable]:
-            return h
-
         super().__enter__()
         assert self.overrides
-        parent_handler = self.overrides(V.get_ops_handler())
-        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
+        self.exit_stack.enter_context(
+            V.set_ops_handler(CSEProxy(self, self.overrides()))
+        )
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
@@ -2442,6 +2255,12 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
@@ -2450,3 +2269,320 @@ class KernelTemplate:
         """
 
         raise NotImplementedError
+
+
+class CSEProxy(DefaultHandler):
+    name = "CSEProxy"
+
+    def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
+        super().__init__()
+        from ..bounds import ValueRangeAnalysis
+
+        self.vr_analysis = ValueRangeAnalysis()
+        self.kernel = kernel
+        self.parent_handler = parent_handler
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        bounds = self._bound_variable(name, *args, **kwargs)
+
+        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        dtype_handler = DtypePropagationOpsHandler()
+
+        output_idx = 0
+
+        def do_cse(v: str) -> CSEVariable:
+            # cpp backend doesnt set current device - TODO: fix
+            if V.graph.current_device is not None:
+                device_str = V.graph.get_current_device_or_throw().type
+                triton_backend = (
+                    config.cpu_backend == "triton"
+                    if device_str == "cpu"
+                    else config.cuda_backend == "triton"
+                    if device_str != "mps"
+                    else False
+                )
+            else:
+                triton_backend = False
+
+            # only triton backend tracks dtype currently
+            if triton_backend:
+                if name == "masked":
+                    output_dtype = value.dtype
+                else:
+                    output_dtype = getattr(
+                        dtype_handler,
+                        name,
+                    )(*args, **kwargs)
+            else:
+                # cpp backend doesnt track dtype yet
+                output_dtype = None
+
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute,
+                v,
+                bounds=bounds,
+                dtype=output_dtype,
+            )
+
+            nonlocal output_idx
+            if config.test_configs.runtime_triton_dtype_assert and triton_backend:
+                from torch._inductor.codegen.triton import triton_type
+
+                # we tree_map over the output, so we need to fetch corresponding dtype
+                if isinstance(output_dtype, (list, tuple)):
+                    output_dtype = output_dtype[output_idx]
+
+                V.kernel.compute.writeline(
+                    f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                )
+            output_idx += 1
+
+            csevar.update_on_args(name, args, kwargs)
+
+            return csevar
+
+        return pytree.tree_map(do_cse, value)
+
+    def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
+        """
+        If the variable comes from an FX node, we forward the bound we have already computed
+        Else, if the variable when codegen'ing another op, we try to compute its bounds
+        """
+        from ..bounds import ValueRangeAnalysis
+        from ..select_algorithm import TritonTemplateKernel
+
+        if isinstance(V.kernel, TritonTemplateKernel):
+            return ValueRanges.unknown()
+
+        fx_node = V.interpreter.current_node
+        if fx_node.target == name and self.kernel.node_to_bounds is not None:
+            assert isinstance(self.kernel.node_to_bounds, dict)
+            return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
+        elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
+            # These create lots of inner strings. We would need to compute the bounds at the ops
+            # We will also likely not get much from computing VRs on these nodes
+            if any(s in fx_node.target for s in ("set_indirect", "reduction", "scan")):
+                return ValueRanges.unknown()
+
+            # We assume that the inputs come from `ops.` and are not strings. If you want to generate
+            # intermediary strings, wrap them in CSE variables with properly initialised bounds.
+
+            # If there is no FX bound but we know how to compute one we do so
+            assert not kwargs
+
+            def arg_to_bound(x: Any) -> Any:
+                if isinstance(x, CSEVariable):
+                    return x.bounds
+                elif isinstance(x, sympy.Expr):
+                    return bound_sympy(x)
+                else:
+                    return x
+
+            arg_bounds = list(map(arg_to_bound, args))
+            return getattr(self.vr_analysis, name)(*arg_bounds)
+        return ValueRanges.unknown()
+
+    def indirect_indexing(
+        self,
+        var: CSEVariable,
+        size: Union[sympy.Expr, int],
+        check: bool = True,
+        wrap_neg: bool = True,
+    ) -> sympy.Symbol:
+        if isinstance(size, int):
+            size = sympy.Integer(size)
+        assert isinstance(size, sympy.Expr), size
+        # Skip CSE since this doesn't return an expression
+
+        if var.bounds.lower < 0:  # type: ignore[operator]
+            if wrap_neg:
+                stm = ops.add(var, ops.index_expr(size, torch.long))
+                # Mixed negative and non-negative
+                if var.bounds.upper >= 0:  # type: ignore[operator]
+                    lt = ops.lt(var, 0)
+                    stm = ops.where(lt, stm, var)
+            else:
+                stm = var
+
+            # Propagate bounds as we know how to compute them properly
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
+                new_bounds = ValueRanges(
+                    neg_bounds.lower + size, neg_bounds.upper + size
+                )
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:  # type: ignore[operator]
+                    pos = var.bounds & ValueRanges(0, int_oo)
+                    new_bounds = new_bounds | pos
+
+            var = self.kernel.cse.generate(self.kernel.compute, stm, bounds=new_bounds)
+
+        sympy_var = self.parent_handler.indirect_indexing(var, size, check)
+        if generate_assert(check):
+            assert_lower = not (var.bounds.lower >= 0)
+            # value ranges cannot x < s when x and s are symbols
+            assert_upper = not isinstance(size, sympy.Number) or not (
+                var.bounds.upper < size
+            )
+            self.kernel.check_bounds(sympy_var, size, assert_lower, assert_upper)
+        return sympy_var
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        return self.kernel.check_bounds(expr, size, lower, upper)
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        if name in self.kernel.cse.invalidated_stores:
+            # A load from an invalidated store requires us to
+            # keep the actual buffer around
+            V.kernel.must_keep_buffers.add(name)
+        if free_symbol_is_type(index, SymT.TMP):
+            return self.kernel.indirect_load(name, index)
+        store_cache = self.kernel.cse.store_cache
+        if name in store_cache:
+            return store_cache[name]
+        out = self.kernel.load(name, index)
+        # count load that is not in the store_cache, and also not in the
+        # cse cache.
+        if out.use_count == 1:
+            self.kernel.num_load += 1
+        return out
+
+    def _update_store_cache(self, name: str, value: CSEVariable) -> None:
+        self.kernel.cse.store_cache[name] = value
+        if self.kernel.current_node and name in V.graph.name_to_buffer:
+            buf = self.kernel.current_node.get_output(name)
+            for other_name in buf.get_mutations():
+                self.kernel.cse.store_cache[other_name] = value
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        self.kernel.store_buffer_names.add(name)
+        if mode is None:
+            self._update_store_cache(name, value)
+        if name not in V.graph.removed_buffers:
+            return self.kernel.store(name, index, value, mode=mode)
+        return None  # type: ignore[return-value]
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        self.kernel.store_buffer_names.add(name)
+        self._update_store_cache(name, value)
+
+        if name not in V.graph.removed_buffers:
+            return self.kernel.store_reduction(name, index, value)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        self.kernel.num_reduction += 1
+        return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
+            tuple[CSEVariable, ...],
+        ],
+        values: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
+        return self.kernel.scan(dtypes, combine_fn, values)
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[CSEVariable, ...]:
+        return self.kernel.sort(dtypes, values, stable, descending)
+
+    def bucketize(
+        self,
+        values: CSEVariable,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: CSEVariable,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
+    ) -> CSEVariable:
+        """
+        [Note: Inductor bucketize op]
+
+        Inputs:
+        -------
+        values: the values to be bucketized.
+        boundaries: a tuple containing
+          (a) the name of the boundaries tensor (which must be sorted, unless
+          the sorting tensor is present),
+          (b) the length of the tensor in the last dimension (i.e. the length of
+          one set of boundaries),
+          (c) the number of elements in the underlying storage (i.e. the length
+          of the flattened tensor, ignoring striding), and
+          (d) the stride of the tensor in the last dimension.
+        boundary_indices: indices into a flattened version of the boundaries
+        tensor, of the same size and shape as "values".  Each index points to
+        the first element in the set of boundaries to be used for the
+        corresponding value.
+        indexing_dtype: the dtype to use when indexing into the boundaries
+        tensor.  This must be int64 or int32.  This additionally specifies the
+        dtype of the return value.
+        right: see "Details" below.
+        sorter: an optional tuple containing
+          (a) the name of an optional sorting tensor, used to access unsorted
+          boundaries without reordering the boundaries tensor, and
+          (b) the stride of the tensor in the last dimension.
+        The values in the sorting tensor are used as indices into the *last*
+        dimension of the boundaries tensor, with all other indices matching.
+        The size of the sorting and boundaries tensors must be equivalent.
+        sorter_indices: must be present if the sorting array is present; see
+        "boundary_indices" for the equivalent definition for the boundaries
+        tensor.
+
+        Output:
+        -------
+        The buckets each value belongs in, within a given set of boundaries.  0
+        indicates a position before the first boundary, and len(boundaries_set)
+        represents a position after the last boundary.
+
+        Details:
+        --------
+        Given a value and a set of boundaries, calculate the bucket that each
+        value belongs to.  This works differently in 1-D and N-D cases.
+
+        for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [0, 4, 4, 8], right=True
+        return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
+
+        for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [[0, 4], [4, 8]], right=True
+        return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
+
+        Note that in the N-D boundaries case, the shape of "values" and
+        "boundaries" must match in every dimension _except_ the last.
+
+        When right == False, bucket i refers to range (boundaries[i], boundaries[i+1]].
+        When right == True,  bucket i refers to range [boundaries[i], boundaries[i+1]).
+
+        Boundaries must be non-decreasing, or a sorter must be provided which
+        would re-index offsets in a non-decreasing order (e.g. the second output
+        of torch.sort(offsets)).  Otherwise, the result is undefined.
+        """
+        return self.kernel.bucketize(
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
+        )

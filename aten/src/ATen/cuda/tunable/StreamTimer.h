@@ -31,4 +31,20 @@ class StreamTimer : public ITimer {
     cudaEvent_t end_{};
 };
 
+class StreamTimerNoSync : public ITimer {
+  public:
+    StreamTimerNoSync();
+    ~StreamTimerNoSync() override;
+
+    void Start() override;
+
+    void End() override;
+
+    float Duration() override;
+
+  private:
+    cudaEvent_t start_{};
+    cudaEvent_t end_{};
+};
+
 } // namespace at::cuda::tunable
