@@ -54,8 +54,6 @@ Tensor& addmm_out(
   TORCH_CHECK(
       !mat1.is_complex(), "Complex datatype matmul is not supported in oneDNN");
 
-  bool is_inplace = result.is_same(self);
-
   std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
   result.resize_(result_shape);
 
@@ -86,34 +84,36 @@ Tensor& addmm_out(
   Tensor bias = Tensor();
   onednn::Attr attr;
   float beta_ = beta.to<float>();
+  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
   if (beta_ == 0.f) {
-    if (alpha.to<float>() != 1.f) {
+    attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+  } else if (alpha_ == 1.f && beta_ == 1.f && !result.is_same(self)) {
+    // if result and self are the same tensor, we use post op sum.
+    bias = self;
+  } else {
+    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    bool inplace = binary.is_same(result);
+    if (inplace) {
       attr.append_post_eltwise(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-    }
-  } else {
-    // We use post_binary here for adding self matrix.
-    // To avoid wrong write, here we clone self for inplace case.
-    if (alpha.to<float>() == 1.f && beta_ == 1.f) {
-      bias = is_inplace ? self.clone() : self;
+      attr.append_post_sum(beta_);
     } else {
-      Tensor binary;
-      // unsqueeze(0) here is to handle mv cases.
-      if (is_inplace)
-        binary = self.dim() == 1 ? self.unsqueeze(0).clone() : self.clone();
-      else
-        binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+      if (at::native::onednn::is_broadcast(binary)) {
+        at::native::onednn::undo_broadcast(binary);
+      }
+      // in test_addmv_rowmajor_colmajor_incx_incy_lda, binary is a tensor with
+      // shape (5, 1) but stride(2, 2)
+      binary = at::native::onednn::is_onednn_matmul_strides(binary)
+          ? binary
+          : binary.contiguous();
       // Tensor binary = self.expand_as(result);
       // For post-binary-add, onednn needs binary scale=1.f
       // Thus we need the following transformation
       // alpha * matmul(mat1, mat2) + beta * binary
       // beta * (alpha/beta * matmul(src, wei) + binary)
-      float alpha_ = alpha.to<float>() / beta_;
-      if (alpha_ != 1.f)
-        attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
-      attr.append_post_binary(attr.kind_with_binary_add, binary);
-      if (beta_ != 1.f)
-        attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
+      attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
   onednn::matmul(result, mat1, mat2, bias, true, attr);
@@ -185,8 +185,6 @@ Tensor& baddbmm_out(
   TORCH_CHECK(batch1.dim() == 3, "expected 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
 
-  bool is_inplace = result.is_same(input);
-
   std::vector<int64_t> result_shape = {
       batch1.size(0), batch1.size(1), batch2.size(2)};
   result.resize_(result_shape);
@@ -216,27 +214,30 @@ Tensor& baddbmm_out(
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
+  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
   Tensor binary;
   if (beta_ == 0.f) {
-    if (alpha.to<float>() != 1.f) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-    }
+    attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    // We use post_binary here for adding self matrix.
-    // To avoid wrong write, here we clone input for inplace case.
-    if (is_inplace)
-      binary = input.dim() < 3 ? input.unsqueeze(0).clone() : input.clone();
-    else
-      binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
-    float alpha_ = alpha.to<float>() / beta_;
-    if (alpha_ != 1.f)
+    bool inplace = binary.is_same(result);
+    if (inplace) {
+      attr.append_post_eltwise(
+          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
+      attr.append_post_sum(beta_);
+    } else {
+      if (at::native::onednn::is_broadcast(binary)) {
+        at::native::onednn::undo_broadcast(binary);
+      }
+      binary = at::native::onednn::is_onednn_matmul_strides(binary)
+          ? binary
+          : binary.contiguous();
       attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
-    attr.append_post_binary(attr.kind_with_binary_add, binary);
-    if (beta_ != 1.f)
+      attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
+    }
   }
   onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
   return result;
