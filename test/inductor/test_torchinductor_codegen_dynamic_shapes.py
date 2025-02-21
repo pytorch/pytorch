@@ -4,8 +4,6 @@ import os
 import sys
 
 import torch
-from torch._inductor.codegen.common import get_scheduling_for_device
-from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
