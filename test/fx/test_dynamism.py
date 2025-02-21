@@ -4,6 +4,7 @@ import torch
 from torch.fx.experimental.dynamism import track_dynamism_across_examples
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 class TestDynamism(TestCase):
     def test_dynamic_tensor(self):
         ex1 = {"x": 1, "y": torch.ones(1, 1), "z": {0: torch.ones(1)}}
@@ -17,9 +18,12 @@ class TestDynamism(TestCase):
         expected = {
             "x": {"['x']": (True,)},
             "y": {"['y']": (True, False)},
-            "z": {"['z'][0]": (True,)}
+            "z": {"['z'][0]": (True,)},
         }
-        assert result == expected, f"test_dynamic_tensor failed. Expected {expected}, got {result}"
+        assert (
+            result == expected
+        ), f"test_dynamic_tensor failed. Expected {expected}, got {result}"
+
 
 if __name__ == "__main__":
     run_tests()

@@ -2585,8 +2585,8 @@ def compile(
         @functools.wraps(model)
         def wrapper(*args, **kwargs):
             from torch.fx.experimental.dynamism import (
+                clone_and_convert_to_meta,
                 track_dynamism_across_examples,
-                clone_and_convert_to_meta
             )
 
             nonlocal compiled_fn
@@ -2601,7 +2601,6 @@ def compile(
                 return model(*args, **kwargs)
             else:
                 if compiled_fn is None:
-
                     dynamism = track_dynamism_across_examples(example_inputs)
                     compiled_fn = torch._dynamo.optimize(
                         backend=backend,
