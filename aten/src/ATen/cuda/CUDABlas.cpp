@@ -1483,10 +1483,12 @@ void scaled_gemm(
     const void* mat1_scale_ptr,
     int64_t mat1_ld,
     ScalarType mat1_dtype,
+    c10::ScalarType mat1_scale_dtype,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    c10::ScalarType mat2_scale_dtype,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -1509,7 +1511,23 @@ void scaled_gemm(
     computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
     computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
   }
-  else
+  else if(mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
+    #if ROCM_VERSION >= 60500
+          if (IsGfx950Device()) {
+            // Validate matrix dimensions for MX format
+            TORCH_CHECK(ValidateMXFormatRequirements(params->m, params->n, params->k),
+                       "Matrix dimensions must be multiples of 32 for MX format. ",
+                       "Got m=", params->m, ", n=", params->n, ", k=", params->k);
+
+            // Set block sizes for MX format
+            constexpr int32_t block_size = 32;
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+          }
+#endif
+  }
 #else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
@@ -1539,6 +1557,8 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
+
+  
   size_t workspaceSize = _getWorkspaceSize();
   auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
 
