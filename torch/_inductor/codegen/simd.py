@@ -2059,19 +2059,27 @@ class SIMDScheduling(BaseScheduling):
         indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
         if len(node_schedule) == 1:
             for read in node_schedule[0].read_writes.reads:
-                if isinstance(read, MemoryDep) and hasattr(read, "indirect_broadcast") and read.indirect_broadcast:
+                if (
+                    isinstance(read, MemoryDep)
+                    and hasattr(read, "indirect_broadcast")
+                    and read.indirect_broadcast
+                ):
                     indirect_broadcast_pairs.append(read.indirect_broadcast)
 
             if indirect_broadcast_pairs:
-                tail = []
+                tail: list[int] = []
                 for pair in indirect_broadcast_pairs:
                     idx_first = node_schedule[0]._body.iter_vars.index(pair[0])
                     idx_second = node_schedule[0]._body.iter_vars.index(pair[1])
-                for idx in [idx_second, idx_first]:
-                    if idx in tail:
-                        tail.remove(idx)
-                    tail.append(idx)
-                remaining = [i for i in range(len(node_schedule[0]._body.iter_vars)) if i not in tail]
+                    for idx in [idx_second, idx_first]:
+                        if idx in tail:
+                            tail.remove(idx)
+                        tail.append(idx)
+                remaining = [
+                    i
+                    for i in range(len(node_schedule[0]._body.iter_vars))
+                    if i not in tail
+                ]
                 new_order = remaining + tail
                 if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
                     node_schedule[0].apply_new_loop_order(new_order)
