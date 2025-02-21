@@ -135,61 +135,6 @@ inline bool IsZero(c10::complex<float> v) {
   return v == 0.0f;
 }
 
-template <typename T>
-inline const char* TypeName(T v) {
-  return "unknown";
-}
-
-template <>
-inline const char* TypeName(float v) {
-  return "float";
-}
-
-template <>
-inline const char* TypeName(double v) {
-  return "double";
-}
-
-template <>
-inline const char* TypeName(BFloat16 v) {
-  return "BFloat16";
-}
-
-template <>
-inline const char* TypeName(Half v) {
-  return "Half";
-}
-
-template <>
-inline const char* TypeName(Float8_e4m3fn v) {
-  return "Float8_e4m3fn";
-}
-
-template <>
-inline const char* TypeName(Float8_e5m2 v) {
-  return "Float8_e5m2";
-}
-
-template <>
-inline const char* TypeName(Float8_e4m3fnuz v) {
-  return "Float8_e4m3fnuz";
-}
-
-template <>
-inline const char* TypeName(Float8_e5m2fnuz v) {
-  return "Float8_e5m2fnuz";
-}
-
-template <>
-inline const char* TypeName(c10::complex<double> v) {
-  return "c10::complex<double>";
-}
-
-template <>
-inline const char* TypeName(c10::complex<float> v) {
-  return "c10::complex<float>";
-}
-
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>> {
  public:
