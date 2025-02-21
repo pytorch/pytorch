@@ -10,19 +10,12 @@ echo "unknown package type"
 exit /b 1
 
 :wheel
-echo "install wheel package"
-
-echo Running pip install...
-pip install -q --pre numpy protobuf
-echo Error level after pip install: %ERRORLEVEL%
-if errorlevel 1 exit /b 1
-
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do pip install "%%i"
-if errorlevel 1 exit /b 1
+call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
 goto smoke_test
 
 :smoke_test
+Echo Checking that torch is installed...
 python -c "import torch"
 if ERRORLEVEL 1 exit /b 1
 
@@ -34,15 +27,28 @@ echo Checking that basic CNN works...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
+push %PYTORCH_ROOT%\test
+
+set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
+
+for /L %%i in (1,1,%1) do (
+    for %%t in (%CORE_TEST_LIST%) do (
+        echo Running test: %%t
+        python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
+    )
+)
+
 goto end
 
 :libtorch
 echo "install and test libtorch"
 
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do tar -xf "%%i" -C tmp
+if not exist tmp mkdir tmp
+
+for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do C:\Windows\System32\tar.exe -xf "%%i" -C tmp
 if ERRORLEVEL 1 exit /b 1
 
-pushd tmp\libtorch
+pushd tmp
 
 set VC_VERSION_LOWER=14
 set VC_VERSION_UPPER=36
@@ -61,5 +67,3 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 :end
-set "PATH=%ORIG_PATH%"
-popd
