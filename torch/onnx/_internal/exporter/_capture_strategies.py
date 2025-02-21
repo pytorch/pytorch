@@ -103,7 +103,7 @@ class CaptureStrategy(abc.ABC):
         self._timestamp = timestamp or datetime.datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S-%f"
         )
-        self._exception = None
+        self._exception: Exception | None = None
 
     def __call__(
         self,
