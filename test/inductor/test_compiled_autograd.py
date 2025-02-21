@@ -3337,7 +3337,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graph_code,
                 """\
 class CompiledAutograd0(torch.nn.Module):
-    def forward(self, inputs, sizes, scalars, hooks):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
         getitem = inputs[0]
         getitem_1 = inputs[1]
         getitem_2 = inputs[2]
@@ -3767,6 +3767,9 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_with_context_fn",  # unpack hook in skip files
     "test_save_on_cpu_and_checkpoint",  # unpack hook in skip files
     "test_saved_tensor_hooks_custom_error_propagation",  # CustomError
+    "test_access_saved_tensor_twice_without_recomputation_works",  # unpack hook in skip files
+    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",  # ctx in skip files
+    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",  # ctx in skip files
 }
 
 test_contexts = {
@@ -3848,7 +3851,7 @@ known_failing_tests = {
     # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_grad_nonleaf_register_hook",
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
-    # Category: Dynamo
+    # Category: Dynamo (pass when directly running CA graph)
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
     "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
     "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
@@ -3865,7 +3868,10 @@ known_failing_tests = {
     "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
     "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
     "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
-    # Category: Inductor
+    "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
+    "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
+    "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
+    # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     # Category: FakeTensor
