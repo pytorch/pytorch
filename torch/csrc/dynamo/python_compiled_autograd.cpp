@@ -727,7 +727,7 @@ static TraceState call_begin_capture(
       wrap_saved_varables_hooks(compiler_call.sv_to_hooks));
   std::vector<at::Tensor> dummies;
   dummies.reserve(compiler_call.sv_to_hooks.size());
-  for (auto _ : c10::irange(compiler_call.sv_to_hooks.size())) {
+  for (size_t i = 0; i < compiler_call.sv_to_hooks.size(); i++) {
     dummies.emplace_back(torch::zeros({0, 123456789}));
   }
 
@@ -864,7 +864,6 @@ static CacheNode* _compiled_autograd_impl(
         for (uint i = 0; i < n; i++) {
           auto meta = fn->input_metadata(i);
         }
-        std::cout << "collecting from " << fn->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
