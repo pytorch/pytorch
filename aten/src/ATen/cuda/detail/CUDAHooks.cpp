@@ -329,7 +329,7 @@ std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
   int runtimeVersion = 0;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  AT_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
   auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM
