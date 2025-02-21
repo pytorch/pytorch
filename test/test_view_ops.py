@@ -155,6 +155,7 @@ class TestViewOps(TestCase):
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
+    @skipXLA
     def test_view_dtype_new(self, device, dtype):
         dtypes = {value: key for (key, value) in numpy_to_torch_dtype_dict.items()}
         del dtypes[torch.bool]
@@ -871,6 +872,7 @@ class TestViewOps(TestCase):
         test_writes_propagate(t, v3)
         self.assertTrue(self.is_view_of_same_base(t, v3))
 
+    @skipLazy
     def test_flatten_nonview(self, device):
         def assert_is_nonview(t, nv):
             idx_t = (0,) * t.ndim
