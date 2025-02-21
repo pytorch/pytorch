@@ -1947,18 +1947,26 @@ class VariableBuilder:
                 is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
             )
 
+            from torch.fx.experimental.dynamism import normalize_source_name
+
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
+            normalized_source_name = normalize_source_name(self.source.name())
+            base_source = self.source
+            if isinstance(base_source, ChainedSource):
+                base_source = base_source.get_base()
+
             if (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
-                self.source.dynamism is not None
-                and dict(self.source.dynamism).get(self.source.name(), {0: False})[0]
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[0]
                 or not config.assume_static_by_default
             ):
                 dynamic_dim = DimDynamic.DYNAMIC
@@ -2812,17 +2820,20 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
+        from torch.fx.experimental.dynamism import normalize_source_name
+
+        normalized_source_name = normalize_source_name(source.name())
+        base_source = source
+        if isinstance(base_source, ChainedSource):
+            base_source = base_source.get_base()
+
         if (
             marked_dynamic
             or (
-                isinstance(source, LocalSource)
-                and source.dynamism
-                and dict(source.dynamism).get(source.name(), {i: False})[i]
-            )
-            or (
-                isinstance(source, ChainedSource)
-                and source.base.dynamism
-                and dict(source.base.dynamism).get(source.name(), {i: False})[i]
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+                or not config.assume_static_by_default
             )
         ):
             # TODO: This can be batched

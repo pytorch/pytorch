@@ -1,12 +1,39 @@
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
+import re
 from torch.utils._pytree import tree_flatten_with_path, tree_map
 
 
 KeyPath = Tuple[Any, ...]
 NonTensorShapeFn = Callable[[Union[int, float]], Tuple[Any, ...]]
 
+def normalize_source_name(name: str) -> str:
+    # Match attribute access like .x and replace with ['x']
+    return re.sub(r"\.([a-zA-Z_][a-zA-Z0-9_]*)", r"['\1']", name)
+
+def module_to_nested_dict(module):
+    """Recursively converts an nn.Module into a nested dictionary with explicit 'parameters' and 'modules' keys."""
+    self_dict = {}
+
+    self_dict["_parameters"] = {}
+    self_dict["_modules"] = {}
+
+    for attr_name in dir(module):
+        if not attr_name.startswith("_") and not callable(getattr(module, attr_name)):
+            attr_value = getattr(module, attr_name)
+            if not isinstance(attr_value, torch.nn.Module) and isinstance(attr_value, (int, float, torch.Tensor)) and type(attr_value) is not bool:  # Ensure it's not a submodule
+                self_dict[attr_name] = attr_value
+
+    for name, param in module.named_parameters(recurse=False):
+        self_dict["_parameters"][name] = param
+    for name, buffer in module.named_buffers(recurse=False):
+        self_dict["_parameters"][name] = buffer
+
+    for name, submodule in module.named_children():
+        self_dict["_modules"][name] = module_to_nested_dict(submodule)
+
+    return self_dict
 
 def track_dynamism_across_examples(
     example_inputs: List[Any],
@@ -22,6 +49,9 @@ def track_dynamism_across_examples(
     tracking: Dict[KeyPath, Tuple[List[Set[Any]], bool]] = {}
 
     for ex in example_inputs:
+        if 'self' in ex and isinstance(ex['self'], torch.nn.Module):
+            ex['self'] = module_to_nested_dict(ex['self'])
+            print(ex['self'])
         leaves_with_paths, _ = tree_flatten_with_path(ex)
         for key_path, value in leaves_with_paths:
             if not isinstance(value, (int, float, torch.Tensor)):
@@ -44,17 +74,12 @@ def track_dynamism_across_examples(
                 tracking[key_path][0][i].add(dim)
 
     output: Dict[Any, Any] = {}
-    for key_path, (dim_sets, is_tensor) in tracking.items():
-        dyn = tuple(len(s) > 1 for s in dim_sets)
-        if is_tensor:
-            final_dyn = dyn
-        else:
-            dyn_list = list(dyn)
-            while dyn_list and not dyn_list[-1]:
-                dyn_list.pop()
-            final_dyn = tuple(dyn_list) if dyn_list else dyn
+    for key_path, (dim_sets, _is_tensor) in tracking.items():
+        final_dyn = tuple(len(s) > 1 for s in dim_sets)
         key_str = "L" + "".join(f"{str(k)}" for k in key_path)
-        output[key_path[0].key] = {key_str: final_dyn}
+        if key_path[0].key not in output:
+            output[key_path[0].key] = {}
+        output[key_path[0].key][key_str] = final_dyn
     return output
 
 

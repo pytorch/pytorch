@@ -16,9 +16,9 @@ class TestDynamism(TestCase):
 
         result = track_dynamism_across_examples(examples)
         expected = {
-            "x": {"['x']": (True,)},
-            "y": {"['y']": (True, False)},
-            "z": {"['z'][0]": (True,)},
+            "x": {"L['x']": (True,)},
+            "y": {"L['y']": (True, False)},
+            "z": {"L['z'][0]": (True,)},
         }
         assert (
             result == expected
