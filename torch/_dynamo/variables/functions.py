@@ -363,6 +363,29 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `mark_traceable(fn)` call
+        if self.fn is torch._dynamo.mark_traceable:
+            raise_type_error = True
+            if len(args) == 1 and len(kwargs) == 0:
+                fn_var = args[0]
+                if isinstance(fn_var, BaseUserFunctionVariable):
+                    raise_type_error = False
+            if raise_type_error:
+                msg = ConstantVariable.create(
+                    "`mark_traceable` expects a single function"
+                )
+                raise_observed_exception(TypeError, tx, [msg])
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                unimplemented(
+                    """
+`mark_traceable` currently requires the target function to be defined outside `torch.compile` region.
+"""
+                )  # NOQA: B950
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -858,6 +881,21 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `mark_traceable`. Usually
+        # a `mark_traceable`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_mark_traceable_callable
+
+        if is_mark_traceable_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(self.fn, traceable=True)
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
