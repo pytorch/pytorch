@@ -141,7 +141,7 @@ def _get_user_allowed_globals():
             f, name = f
             rc[name] = f
         else:
-            module, name = f.__module__, f.__name__
+            module, name = f.__module__, f.__qualname__
             rc[f"{module}.{name}"] = f
     return rc
 
@@ -361,10 +361,21 @@ class Unpickler:
                         "``torch.distributed.tensor`` must be imported to load DTensors"
                     )
                 else:
+                    builtins_name = "builtins"
+                    if (
+                        builtins_name in full_path
+                        and builtins_name == full_path[: len(builtins_name)]
+                    ):
+                        full_path = full_path[len(builtins_name) :]
+                        full_path = (
+                            full_path[1:]
+                            if len(full_path) > 0 and full_path[0] == "."
+                            else builtins_name + full_path
+                        )
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        f"Please use `torch.serialization.add_safe_globals([{name}])` or the "
-                        f"`torch.serialization.safe_globals([{name}])` context manager to allowlist this global "
+                        f"Please use `torch.serialization.add_safe_globals([{full_path}])` or the "
+                        f"`torch.serialization.safe_globals([{full_path}])` context manager to allowlist this global "
                         "if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
