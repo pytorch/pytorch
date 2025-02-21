@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch._inductor.cpu_vec_isa
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
 from torch._inductor import test_operators
@@ -1498,6 +1499,46 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128, 256))
+    @parametrize("out_features", (64, 128))
+    @parametrize("group_size", (32, 64))
+    def test_int4_woq_mm_avx512(
+        self, dtype, batch_size, in_features, out_features, group_size
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, K, N, group_size):
+                super().__init__()
+                self.linear_weight = torch.randint(
+                    0, 15, (N, K // 2), dtype=torch.uint8
+                )
+                self.qscale_and_zeros = torch.rand(K // group_size, N, 2, dtype=dtype)
+                self.group_size = group_size
+
+            def forward(self, x):
+                x_shape = x.shape
+                x = x.reshape(-1, x_shape[-1])
+                y = torch._weight_int4pack_mm_for_cpu(
+                    x, self.linear_weight, self.group_size, self.qscale_and_zeros
+                )
+                return y.reshape(*x_shape[:-1], out_features)
+
+        counters.clear()
+        seq_len = 8
+        x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
+        mod = M(in_features, out_features, group_size).eval()
+        self.common(mod, (x,), reference_in_float=False)
+        available_isa = torch._inductor.cpu_vec_isa.pick_vec_isa()
+        avx512_available = "avx512" in str(available_isa)
+        autotune_count = 1 if avx512_available else 0
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_autotune"], autotune_count
+        )
 
     @inductor_config.patch({"freezing": True})
     @patches

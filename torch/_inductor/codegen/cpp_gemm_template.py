@@ -102,6 +102,9 @@ GEMM_TEMPLATE_INIT_BLOCKING = r"""
     constexpr int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
     constexpr int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- endif %}
+{%- if is_woq_int4 %}
+    int64_t group_size = *q_group_size;
+{%- endif %}
 
     // make sure all partitions are assigned
     {{kernel.assert_function}}(
@@ -170,6 +173,8 @@ GEMM_TEMPLATE_MICROKERNEL_DEF = r"""
 GEMM_TEMPLATE_STUB_DEF = r"""
 {%- if x_scale is not none %}
     {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
+{%- elif is_woq_int4 %}
+    {%- set kernel_args = {"X": X, "W": W, "q_group_size": q_group_size, "qscale_and_zeros": qscale_and_zeros} %}
 {%- else %}
     {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
 {%- endif %}
@@ -183,7 +188,7 @@ GEMM_TEMPLATE = r"""
 {
     {{ kernel.maybe_codegen_profile() }}
     {{ template.codegen_blocks(
-        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W, is_woq_int4
     ) }}
 
 {%- if maybe_k_slicing %}
@@ -226,12 +231,31 @@ GEMM_TEMPLATE = r"""
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
 {%- else %}
-{%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
+    {%- if is_woq_int4 %}
+        {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
+        {%- set tile_qparam = kernel.slice_nd(
+            qscale_and_zeros, [("k_start / group_size", "k_end / group_size"), ("n_start", "n_start + n_size"), ()]) %}
+    {%- else %}
+        {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
+        {%- set tile_qparam = None %}
+    {%- endif %}
 {%- endif %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=False,
+                                                       qscale_and_zeros=tile_qparam)|indent(28, false)
+                            }}
                         } else {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=True,
+                                                       qscale_and_zeros=tile_qparam)|indent(28, false)
+                            }}
                         }
                     }
                 }
@@ -503,6 +527,8 @@ class CppGemmTemplate(CppTemplate):
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         should_block_weights: bool = True,
         name="packed_gemm",
+        is_woq_int4=False,
+        q_group_size=None,
     ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
@@ -524,6 +550,10 @@ class CppGemmTemplate(CppTemplate):
         self.should_block_weights = should_block_weights
         self.thread_blocking = self.make_thread_blocking_cache()
         self.cache_blocking = self.make_cache_blocking_cache()
+        self.is_woq_int4 = is_woq_int4
+        if is_woq_int4:
+            assert not should_block_weights, "Weight is already packed for WOQ int4"
+        self.q_group_size = q_group_size
 
     def make_thread_blocking_cache(self):
         cache = lru_cache()(self._thread_blocking)
@@ -800,6 +830,8 @@ class CppGemmTemplate(CppTemplate):
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.IRNode]] = None,
+        is_woq_int4: bool = False,
+        q_group_size: Optional[int] = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -879,7 +911,12 @@ class CppGemmTemplate(CppTemplate):
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
         new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
+        m, n, k, *_ = mm_args(
+            new_inputs[0],
+            new_inputs[1],
+            mat2_transposed=is_woq_int4,
+            use_4x2_dim=is_woq_int4,
+        )
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
         )
@@ -894,6 +931,8 @@ class CppGemmTemplate(CppTemplate):
             compute_dtype=compute_dtype,
             alpha=alpha,
             num_threads=num_threads,
+            is_woq_int4=is_woq_int4,
+            q_group_size=q_group_size,
         )
         assert micro_gemm is not None
         block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
@@ -949,6 +988,9 @@ class CppGemmTemplate(CppTemplate):
             has_bias=has_bias,
             epilogue_creator=epilogue_creator,
             should_block_weights=block_weights,
+            name=micro_gemm.__class__.__name__,
+            is_woq_int4=is_woq_int4,
+            q_group_size=q_group_size,
         )
         template.maybe_append_choice(choices)
         return template
@@ -991,10 +1033,15 @@ class CppGemmTemplate(CppTemplate):
         """
         W = inputs[1]
         new_inputs = list(inputs)
-        if isinstance(W, ir.IRNode):
-            k, n = W.get_size()[-2:]
+        if micro_gemm.is_woq_int4:
+            assert (
+                len(W.get_size()) == 2
+                if isinstance(W, ir.IRNode)
+                else len(W.shape) == 2
+            )
+            n, k = W.get_size() if isinstance(W, ir.IRNode) else W.shape
         else:
-            k, n = W.shape[-2:]
+            k, n = W.get_size()[-2:] if isinstance(W, ir.IRNode) else W.shape[-2:]
         _, block_n, _ = micro_gemm.register_blocking
         new_size, padded_n = cls.get_padded_size(n, block_n, k, should_block_weight)
         padding = padded_n - n
@@ -1029,6 +1076,9 @@ class CppGemmTemplate(CppTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
+        if micro_gemm.is_woq_int4:
+            # For WOQ INT4, weight is already packed
+            return False
         return True
 
     @classmethod
@@ -1143,6 +1193,9 @@ class CppGemmTemplate(CppTemplate):
         x_zp = None
         w_scale = None
         w_zp = None
+        inp = None
+        q_group_size = None
+        qscale_and_zeros = None
         if int8_gemm:
             X, W = self.input_nodes[0], self.input_nodes[1]
             bias_idx = 2 if self.has_bias else 1
@@ -1152,6 +1205,11 @@ class CppGemmTemplate(CppTemplate):
             w_scale = self.input_nodes[bias_idx + 3]
             w_zp = self.input_nodes[bias_idx + 4]
             Y = self.output_node
+        elif self.is_woq_int4:
+            X, W = self.input_nodes[0], self.input_nodes[1]
+            Y = self.output_node
+            q_group_size = self.input_nodes[2]
+            qscale_and_zeros = self.input_nodes[3]
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
             Y = self.output_node
@@ -1314,6 +1372,8 @@ class CppGemmTemplate(CppTemplate):
             compute_dtype=compute_dtype,
             alpha=self.alpha,
             num_threads=self.num_threads,
+            is_woq_int4=self.is_woq_int4,
+            q_group_size=self.q_group_size,
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
@@ -1362,6 +1422,9 @@ class CppGemmTemplate(CppTemplate):
             L2_cache_size=L2_cache_size,
             config=config,
             fake_buffers=fake_buffers,
+            is_woq_int4=self.is_woq_int4,
+            q_group_size=q_group_size,
+            qscale_and_zeros=qscale_and_zeros,
         )
         return options
 
@@ -1402,6 +1465,7 @@ class CppGemmTemplate(CppTemplate):
         L2_cache_size,
         X,
         W,
+        is_woq_int4=False,
     ):
         options = dict(
             num_threads=num_threads,
@@ -1417,6 +1481,7 @@ class CppGemmTemplate(CppTemplate):
             template=self,
             X=X,
             W=W,
+            is_woq_int4=is_woq_int4,
         )
         return self._template_from_string(GEMM_TEMPLATE_INIT_BLOCKING).render(options)
 

@@ -81,6 +81,7 @@ inline void {{kernel_name}}(
         compute_dtype,
         register_blocking,
         alpha=1,
+        is_woq_int4=False,
     ) -> None:
         self.name = name
         self.input_dtype = input_dtype
@@ -90,6 +91,7 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
+        self.is_woq_int4 = is_woq_int4
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
@@ -113,6 +115,7 @@ inline void {{kernel_name}}(
             "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
             "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            "is_woq_int4": self.is_woq_int4,
         }
 
     def get_kernel_declaration(self):
@@ -122,8 +125,8 @@ inline void {{kernel_name}}(
     def get_kernel_extra_args_declare(self) -> str:
         return ""
 
-    def get_kernel_extra_args(self) -> str:
-        return ""
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        return []
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         raise NotImplementedError
@@ -135,6 +138,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        **kwargs_for_extra_args,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -152,9 +156,10 @@ inline void {{kernel_name}}(
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
-            extra_args = self.get_kernel_extra_args()
-            if extra_args:
-                res.writeline(extra_args)
+            kwargs_for_extra_args.update({"kernel": kernel})
+            extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
+            for arg in extra_args:
+                res.writeline(arg)
             res.writeline(f"{A_ptr},")
             res.writeline(f"{B_ptr},")
             res.writeline(f"{C_ptr},")
@@ -492,7 +497,7 @@ inline void {{kernel_name}}_kernel(
 
 
 # extra check for CppMicroGemmAMX
-def check_amx_extra(config, m, n, k, alpha, num_threads):
+def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
     return k % vnni_size == 0 and alpha == 1
 
@@ -803,8 +808,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     def get_kernel_extra_args_declare(self) -> str:
         return "AMXState& amx_state,"
 
-    def get_kernel_extra_args(self) -> str:
-        return "amx_state,"
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        return ["amx_state,"]
 
     def get_b_layout(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
@@ -814,7 +819,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 
 # extra check for CppMicroBrgemm
-def check_brgemm_extra(config, m, n, k, alpha, num_threads):
+def check_brgemm_extra(config, m, n, k, alpha, num_threads, **kwargs):
     assert config.input_dtype == torch.half and config.output_dtype == torch.float
     vnni_size = 2
     # use brgemm for Half when amx_fp16 is supported
@@ -876,6 +881,272 @@ class CppMicroBrgemm(CppMicroGemm):
         return LayoutType.VNNI2
 
 
+def woq_int4_extra_check(config, m, n, k, alpha, num_threads, **kwargs):
+    if alpha != 1:
+        return False
+    q_group_size = kwargs.get("q_group_size", None)
+    assert q_group_size is not None
+    if (
+        q_group_size < 32
+        or k % q_group_size != 0
+        or config.register_blocking.block_k > q_group_size
+    ):
+        return False
+    return k % config.register_blocking.block_k == 0 and n % 64 == 0
+
+
+@register_micro_gemm(
+    # TODO: support float/half input
+    *generate_gemm_config(
+        VecAVX512,
+        [(4, 64, 32), (4, 64, 64), (4, 64, 128)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.uint8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=woq_int4_extra_check,
+    ),
+)
+class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
+    """
+    This class generates the code for WoQ int4 micro gemm using AVX512 intrinsics.
+    It is based on the corresponding ATen kernel.
+    Shape of packed weight = [N // 64, K, 32], viewed as [N, K // 2]
+    Shape of packed ScalesAndZeros = [K // group_size, N, 2]
+    """
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    auto group_size = q_group_size;
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            if (block_m == {{block_m}}) {
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                    A + m * lda,
+                    reinterpret_cast<const uint8_t*>(B) + n * ldb,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    /* ldb */ {{block_n}} / 2,
+                    ldc,
+                    group_size,
+                    ScaleAndZeros + n * 2,
+                    lds,
+                    k_start
+                );
+            } else {
+                switch (block_m) {
+                {%- for b in range(block_m - 1, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                        A + m * lda,
+                        reinterpret_cast<const uint8_t*>(B) + n * ldb,
+                        C + m * ldc + n,
+                        K,
+                        lda,
+                        /* ldb */ {{block_n}} / 2,
+                        ldc,
+                        group_size,
+                        ScaleAndZeros + n * 2,
+                        lds,
+                        k_start
+                    );
+                    break;
+                {%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                }
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_size) {
+  return (k_start + index) % group_size == 0;
+}
+
+inline __m128i {{kernel_name}}_convert_int4_to_int8(const uint8_t* data) {
+  __m128i tmp = _mm_loadu_si64((const __m128i*)data);
+  __m128i bytes = _mm_cvtepu8_epi16(tmp);
+  const __m128i lowMask = _mm_set1_epi8(0xF);
+  __m128i high = _mm_andnot_si128(lowMask, bytes);
+  __m128i low = _mm_and_si128(lowMask, bytes);
+  high = _mm_slli_epi16(high, 4);
+  bytes = _mm_or_si128(low, high);
+  return bytes;
+}
+
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const {{input_t}}* {{restrict_keyword}} A,
+    const uint8_t* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    int64_t q_group_size,
+    const bfloat16* {{restrict_keyword}} ScaleAndZeros,
+    int64_t lds, // leading dimension of ScaleAndZeros
+    int64_t k_start) {
+  constexpr int BLOCK_K = {{block_k}};
+  constexpr int ROWS = BLOCK_M;
+  constexpr int COLS = BLOCK_N / 16;
+
+  const int PREFETCH_SIZE_K = 16 * 4;
+  const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
+
+  // number of blocks on K
+  const int KB = K / BLOCK_K;
+
+  __m512 va;
+  __m512 vb[COLS];
+  __m512 vc[ROWS * COLS];
+  __m512 scale[COLS];
+  __m512 zero[COLS];
+
+  // Lookup table to de-quantize int4 values to bf16.
+  // Values are dequantized as truly int4 [-8, 7] range;
+  //
+  // dequant = (bf16(int4_value) * bf16_scale) + bf16_zero
+  //
+  static const __m512 lut = _mm512_set_ps(
+      7.0f, 6.0f, 5.0f, 4.0f,
+      3.0f, 2.0f, 1.0f, 0.0f,
+      -1.0f, -2.0f, -3.0f, -4.0f,
+      -5.0f, -6.0f, -7.0f, -8.0f);
+
+  // index for transpose
+  static const __m512i idx1 = _mm512_set_epi32(
+      30, 28, 26, 24, 22, 20, 18, 16,
+      14, 12, 10, 8, 6, 4, 2, 0);
+  static const __m512i idx2 = _mm512_set_epi32(
+      31, 29, 27, 25, 23, 21, 19, 17,
+      15, 13, 11, 9, 7, 5, 3, 1);
+
+  // load scale and zero point
+  auto load_scale_and_zeros = [&](int i, int _kb) {
+    // load 2x bfloat16 vector
+    __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
+    if (_kb + PREFETCH_SIZE_KB < KB) {
+      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
+    }
+
+    // convert to 2x f32 vector
+    __m512 a, b;
+    at::vec::cvtbf16_fp32(t, a, b);
+
+    // transpose scale_and_zero from {16, 2} to {2, 16}
+    // inputs:
+    //   a: {s0, z0, s1, z1, ..., s7, z7}
+    //   b: {s8, z8, s9, z9, ..., s15, z15}
+    // output:
+    //   scale: {s0, s1, s2, ..., s15}
+    //   zero:  {z0, z1, z2, ..., z15}
+    scale[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx1, b);
+    zero[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b);
+  };
+
+  auto loadc = [&](auto i) {
+    if constexpr (accum) {
+       constexpr int row = i / COLS;
+       constexpr int col = i % COLS;
+       vc[i] = _mm512_loadu_ps(C + row * ldc + col * 16);
+    } else {
+      vc[i] = _mm512_setzero_ps();
+    }
+  };
+  c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+  auto compute = [&, COLS](auto i, int k) {
+    constexpr  int row = i / COLS;
+    constexpr  int col = i % COLS;
+
+    if constexpr (col == 0) {
+      float aa = static_cast<float>(A[row * lda + k]);
+      if (k + PREFETCH_SIZE_K < K) {
+        _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
+      }
+      va = _mm512_set1_ps(aa);
+    }
+
+    if constexpr (row == 0) {
+      if constexpr (COLS == 4) {
+        // when BLOCK_N = 64, handle each row at a time
+        // to reduce de-quantize overhead.
+        if constexpr (col == 0) {
+          __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
+          if (k + PREFETCH_SIZE_K < K) {
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
+          }
+
+          __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
+          vb[0] = _mm512_permutexvar_ps(b32, lut);
+          vb[0] = _mm512_fmadd_ps(vb[0], scale[0], zero[0]);
+          vb[2] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+          vb[2] = _mm512_fmadd_ps(vb[2], scale[2], zero[2]);
+
+          b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
+          vb[1] = _mm512_permutexvar_ps(b32, lut);
+          vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
+          vb[3] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+          vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
+        }
+      } else {
+        __m128i b8 = {{kernel_name}}_convert_int4_to_int8(B + k * ldb + col * 8);
+        __m512i b32 = _mm512_cvtepu8_epi32(b8);
+        vb[col] = _mm512_permutexvar_ps(b32, lut);
+        vb[col] = _mm512_fmadd_ps(vb[col], scale[col], zero[col]);
+      }
+    }
+
+    constexpr int idx = row * COLS + col;
+    vc[idx] = _mm512_fmadd_ps(va, vb[col], vc[idx]);
+  };
+
+  for (int k = 0, kb = 0; k < K; ++k) {
+    if ({{kernel_name}}_is_block_start(k, k_start, q_group_size)) {
+      c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
+    }
+    c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+  }
+
+  //store to C
+  auto storec = [&, COLS](auto i) {
+    constexpr int row = i / COLS;
+    constexpr int col = i % COLS;
+    _mm512_storeu_ps(C + row * ldc + col * 16, vc[i]);
+  };
+  c10::ForcedUnroll<ROWS * COLS>{}(storec);
+}
+"""
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return (
+            "const int64_t q_group_size,\n"
+            "    const bfloat16* __restrict__ ScaleAndZeros,\n"
+            "    const int64_t lds,\n"
+            "    int64_t k_start,"
+        )
+
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        assert "kernel" in kwargs
+        assert "qscale_and_zeros" in kwargs
+        kernel = kwargs["kernel"]
+        qscale_and_zeros = kwargs["qscale_and_zeros"]
+        return [
+            "group_size,",
+            f"&({kernel.index(qscale_and_zeros, [0, 0, 0])}),",
+            "N * 2,",  # lds
+            "k_start,",
+        ]
+
+
 def create_micro_gemm(
     name,
     m,
@@ -888,6 +1159,8 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=True,
+    is_woq_int4=False,
+    q_group_size=None,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
@@ -898,6 +1171,7 @@ def create_micro_gemm(
             config.compute_dtype,
             config.register_blocking,
             alpha,
+            is_woq_int4,
         )
 
     assert isinstance(n, int) or n.is_number, n
@@ -928,7 +1202,7 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads
+                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
@@ -975,7 +1249,7 @@ def create_micro_gemm(
                     )
                 )
     if len(matched_configs) == 0:
-        if use_ref:
+        if use_ref and not is_woq_int4:
             return CppMicroGemmRef(
                 name, input_dtype, input2_dtype, output_dtype, compute_dtype, alpha
             )

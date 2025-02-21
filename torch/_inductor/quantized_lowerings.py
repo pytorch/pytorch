@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 import torch
+from torch._inductor.ir import IRNode
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import config as inductor_config, lowering
@@ -13,7 +14,7 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import V
 
 
@@ -133,6 +134,21 @@ def register_woq_mm_ops() -> None:
             if use_aten_gemm_kernels()
             else []
         )
+        if use_max_autotune() and use_cpp_gemm_template(
+            aten_layout,
+            mat1,
+            mat2,
+            mat2_transposed=True,
+            is_woq_int4=True,
+            q_group_size=qGroupSize,
+        ):
+            CppGemmTemplate.add_choices(
+                choices,
+                aten_layout,
+                [mat1, mat2, group_size, qScaleAndZeros],
+                is_woq_int4=True,
+                q_group_size=qGroupSize,
+            )
 
         if (
             len(choices) == 0
@@ -144,11 +160,25 @@ def register_woq_mm_ops() -> None:
                 (mat1, mat2, group_size, qScaleAndZeros), aten_layout
             ).output_node()
 
+        # define functions to generate example inputs for weight and group size
+        # otherwise, autotuner generates example inputs of all zeros for them
+        def get_example_weight(x: IRNode) -> torch.Tensor:
+            shape = x.get_size()
+            device = x.get_device()
+            return torch.randint(0, 255, shape, dtype=torch.uint8, device=device)
+
+        def get_example_group_size(x: IRNode) -> torch.Tensor:
+            return torch.tensor(qGroupSize, dtype=torch.int64)
+
         return autotune_select_algorithm(
             "_weight_int4pack_mm_for_cpu",
             choices,
             [mat1, mat2, group_size, qScaleAndZeros],
             aten_layout,
+            input_gen_fns={
+                1: get_example_weight,
+                2: get_example_group_size,
+            },
         )
 
     lowering.make_fallback(aten._dyn_quant_matmul_4bit)
