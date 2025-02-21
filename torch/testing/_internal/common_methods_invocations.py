@@ -7221,7 +7221,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     reductions = ["max", "mean", "min", "sum", "prod"]
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
-        breakpoint()
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
         sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
         if mode == 'lengths':
