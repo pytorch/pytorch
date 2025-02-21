@@ -251,7 +251,7 @@ class DebugPrinterManager:
                 continue
             if V.graph.cpp_wrapper:
                 if arg_signatures is not None and isinstance(
-                    arg_signatures[i], (torch_dtype)
+                    arg_signatures[i], torch_dtype
                 ):
                     # infer from the arg data type (has torch.dtype) to see if it is a tensor type
                     V.graph.wrapper_code.writeline(

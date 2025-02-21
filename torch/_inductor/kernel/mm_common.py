@@ -8,7 +8,7 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -432,7 +432,8 @@ scaled_persistent_mm_configs = functools.partial(
 )
 
 
-def mm_grid(m, n, meta):
+@SymbolicGridFn
+def mm_grid(m, n, meta, *, cdiv):
     """
     The CUDA grid size for matmul triton templates.
     """
