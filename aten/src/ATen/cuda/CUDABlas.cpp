@@ -380,6 +380,14 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
   CuBlasLtMatrixLayout Adesc(abcType, m, k, lda, opa == CUBLAS_OP_T);
   CuBlasLtMatrixLayout Bdesc(abcType, k, n, ldb, opb == CUBLAS_OP_T);
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, ldc);
@@ -1309,6 +1317,14 @@ void gemm_and_bias(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
@@ -1522,6 +1538,14 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
 #ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
+#ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif
@@ -1680,7 +1704,14 @@ void int8_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
-
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);

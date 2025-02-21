@@ -2262,6 +2262,13 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().getROCmFAPreferredBackend();
   });
 
+  py_module.def("_set_sm_carveout_experimental", [](std::optional<int32_t> val) {
+    at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
+  });
+  py_module.def("_get_sm_carveout_experimental", []() {
+    return at::globalContext()._SMCarveout_EXPERIMENTAL();
+  });
+
   py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
