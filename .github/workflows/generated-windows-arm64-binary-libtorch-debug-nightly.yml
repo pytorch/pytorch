@@ -92,7 +92,7 @@ jobs:
         shell: cmd
         run: |
           rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch
+      - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
