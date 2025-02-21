@@ -15,6 +15,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
+    get_mesh_from_args,
     register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
@@ -186,13 +187,14 @@ class _MaskPartial(Partial):
 
 
 @register_op_strategy(aten.embedding.default)
-def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def embedding_strategy(op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
     """
     weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
+    mesh = get_mesh_from_args(op_schema)
 
     weight_shape = weight_strategy.shape
     indices_shape = indices_strategy.shape
@@ -234,15 +236,14 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(aten.embedding_dense_backward.default)
-def embedding_dense_backward_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
-) -> StrategyType:
+def embedding_dense_backward_strategy(op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
     """
     grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
+    mesh = get_mesh_from_args(op_schema)
 
     grad_out_shape = grad_out_strategy.shape
     indices_shape = indices_strategy.shape

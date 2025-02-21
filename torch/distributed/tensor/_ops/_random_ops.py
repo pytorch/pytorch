@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
@@ -22,7 +21,7 @@ aten = torch.ops.aten
         aten.bernoulli.default,
     ]
 )
-def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def random_op_strategy(op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]
     assert isinstance(self_strategy, OpStrategy)
 

@@ -177,6 +177,27 @@ def is_tensor_partial(spec: DTensorSpec) -> bool:
     return any(p.is_partial() for p in spec.placements)
 
 
+def get_mesh_from_args(op_schema: OpSchema, *, validate: bool = True) -> DeviceMesh:
+    """
+    This util can be used to get a mesh from the OpSchema that contains multiple
+    DTensors as arguments. When `validate` is True, it will try to validate that all the
+    arguments have the same mesh to avoid unexpected cross mesh errors.
+    """
+    first_arg = op_schema.args_schema[0]
+    assert isinstance(first_arg, (DTensorSpec, OpStrategy))
+    mesh = first_arg.mesh
+    if validate:
+        for arg in op_schema.args_schema[1:]:
+            if isinstance(arg, (DTensorSpec, OpStrategy)) and arg.mesh != mesh:
+                raise RuntimeError(
+                    f"DTensor does not support cross-mesh operation on {op_schema.op}! "
+                    f"Got meshes: {mesh} {arg.mesh}. "
+                    f"Please make sure all the arguments have the same DeviceMesh."
+                )
+
+    return mesh
+
+
 def infer_broadcast_dims_map(
     common_shape: torch.Size, input_shape: torch.Size
 ) -> list[int]:

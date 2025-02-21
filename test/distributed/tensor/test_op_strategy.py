@@ -197,7 +197,7 @@ class TestCostModel(DTensorOpTestBase):
             {},
         )
 
-        output_strategy = addmm_strategy(mesh, op_schema)
+        output_strategy = addmm_strategy(op_schema)
         strategy_costs = {}
         for strategy in output_strategy.strategies:
             redistribute_cost = sum(chain.from_iterable(strategy.redistribute_cost))
@@ -273,7 +273,7 @@ class TestCostModel(DTensorOpTestBase):
                 {},
             )
             # test the strategy
-            res_strategies = mm_strategy(mesh, op_schema)
+            res_strategies = mm_strategy(op_schema)
 
             for strtgy in res_strategies.strategies:
                 if strtgy.input_specs == (lhs_spec, rhs_spec):
@@ -320,7 +320,7 @@ class TestCostModel(DTensorOpTestBase):
                 {},
             )
             # test the strategy
-            res_strategies = bmm_strategy(mesh, op_schema)
+            res_strategies = bmm_strategy(op_schema)
 
             for strtgy in res_strategies.strategies:
                 if strtgy.input_specs == (lhs_spec, rhs_spec):

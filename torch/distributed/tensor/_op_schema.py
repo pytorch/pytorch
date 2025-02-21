@@ -102,6 +102,19 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
+    @cached_property
+    def mesh(self):
+        if isinstance(self.output_specs, DTensorSpec):
+            return self.output_specs.mesh
+        elif isinstance(self.output_specs, tuple):
+            out_spec = self.output_specs[0]
+            assert isinstance(out_spec, DTensorSpec)
+            return out_spec.mesh
+        else:
+            raise ValueError(
+                f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
+            )
+
     def input_spec(self, index: int = 0) -> DTensorSpec:
         assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
         assert len(self.input_specs) > index, (
@@ -147,16 +160,12 @@ class OpStrategy(StrategyType):
         return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
+    def mesh(self):
+        return self.strategies[0].mesh
+
+    @property
     def mesh_shape(self):
-        output_spec = self.strategies[0].output_specs
-        if isinstance(output_spec, DTensorSpec):
-            return output_spec.mesh.shape
-        else:
-            assert isinstance(
-                output_spec, tuple
-            ), "found no DTensorSpec in the OpStrategy!"
-            assert output_spec[0] is not None
-            return output_spec[0].mesh.shape
+        return self.strategies[0].mesh.shape
 
     @property
     def ndim(self):
@@ -182,6 +191,11 @@ class TupleStrategy(StrategyType):
     def __init__(self, childs: Sequence[StrategyType]) -> None:
         super().__init__()
         self.childs: Sequence[StrategyType] = childs
+
+    def child_mesh(self, index: int) -> DeviceMesh:
+        op_strategy = self.childs[index]
+        assert isinstance(op_strategy, OpStrategy)
+        return op_strategy.mesh
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
@@ -440,6 +454,19 @@ class OutputSharding:
     redistribute_schema: Optional[OpSchema] = None
     needs_redistribute: bool = False
 
+    @cached_property
+    def mesh(self):
+        if isinstance(self.output_spec, DTensorSpec):
+            return self.output_spec.mesh
+        elif isinstance(self.output_spec, tuple):
+            out_spec = self.output_spec[0]
+            if isinstance(out_spec, DTensorSpec):
+                return out_spec.mesh
+            else:
+                raise ValueError(f"Unknown output spec type: {type(out_spec)}")
+        else:
+            raise ValueError(f"Unknown output spec type: {type(self.output_spec)}")
+
 
 @dataclass
 class OpInfo:
@@ -447,7 +474,12 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
-    mesh: DeviceMesh
+    # The first compute device mesh recorded from args
+    # NOTE: one op could have multiple meshes from its args. We just record the first
+    # mesh here to check if current rank should participate in computation or not.
+    compute_mesh: DeviceMesh
+
+    # compete runtime operator infos
     schema: OpSchema
     flat_args_schema: list[object]
     local_args: Sequence[object]

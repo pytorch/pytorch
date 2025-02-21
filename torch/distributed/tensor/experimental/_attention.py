@@ -539,13 +539,13 @@ def _sdpa_handler(
 
     if op_call == aten._scaled_dot_product_flash_attention.default:
         local_results = _scaled_dot_product_ring_flash_attention(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     elif op_call == aten._scaled_dot_product_efficient_attention.default:
         local_results = _scaled_dot_product_ring_efficient_attention(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
@@ -578,13 +578,13 @@ def _sdpa_backward_handler(
 
     if op_call == aten._scaled_dot_product_flash_attention_backward.default:
         local_results = _scaled_dot_product_ring_flash_attention_backward(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
         local_results = _scaled_dot_product_ring_efficient_attention_backward(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
