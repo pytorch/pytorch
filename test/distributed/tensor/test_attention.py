@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import unittest
 
+from functools import lru_cache
 from typing import Any, Callable
 
 import torch
@@ -26,6 +27,7 @@ from torch.distributed.tensor.experimental._attention import (
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.placement_types import Replicate
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention.flex_attention import _mask_mod_signature, create_block_mask
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -433,7 +435,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+        from torch.nn.attention.flex_attention import flex_attention
 
         # Compile the flex_attention function
         flex_attention = torch.compile(flex_attention, dynamic=False)
@@ -519,17 +521,134 @@ def cp_flex_attention(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     print("Congrats! Flex attention is successfully dispatched!")
 
-    return flex_attention_hop(
-        query,
-        key,
-        value,
-        score_mod=score_mod,
-        block_mask=block_mask,
+    assert isinstance(query, DTensor)
+    assert isinstance(key, DTensor)
+    assert isinstance(value, DTensor)
+    q_local = query.to_local()
+    k_local = key.full_tensor()
+    v_local = value.full_tensor()
+    device_type = q_local.device.type
+
+    # extract context parallel mesh info
+    cp_mesh = query.device_mesh
+    assert cp_mesh.ndim == 1
+    cp_rank = cp_mesh.get_local_rank()
+    cp_group_size = cp_mesh.size()
+
+    assert len(block_mask) == 12
+    kv_num_blocks = block_mask[2]
+    q_num_blocks = block_mask[6]
+    mask_mod: _mask_mod_signature = block_mask[-1]
+    Q_BLOCK_SIZE: int = block_mask[-2]
+    KV_BLOCK_SIZE: int = block_mask[-3]
+    # TODO: assume Q_BLOCK_SIZE == KV_BLOCK_SIZE
+    assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
+
+    # TODO: assume no load-balancing for now, will add it later
+    sharding_plan = regular_sharding(
+        q_num_blocks, kv_num_blocks, cp_group_size, device_type
+    )
+
+    # rewrite block_mask
+    cp_mask_mod = rewrite_mask_mod_for_cp(
+        mask_mod, cp_rank, Q_BLOCK_SIZE, sharding_plan
+    )
+    Q_LEN = q_num_blocks * Q_BLOCK_SIZE
+    KV_LEN = kv_num_blocks * KV_BLOCK_SIZE
+    cp_block_mask = create_block_mask_cached(
+        cp_mask_mod,
+        B=1,
+        H=1,
+        M=Q_LEN // cp_group_size,
+        N=KV_LEN,
+        device=device_type,
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+    )
+
+    out = flex_attention_hop(
+        q_local,
+        k_local,
+        v_local,
+        score_mod=score_mod,  # TODO: rewrite score_mod for cp
+        block_mask=cp_block_mask.as_tuple(),
         scale=scale,
         kernel_options=kernel_options,
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
     )
+
+    return (
+        DTensor.from_local(out[0], cp_mesh, [Shard(2)]),
+        DTensor.from_local(out[1], cp_mesh, [Shard(2)]),
+    )
+
+
+@lru_cache
+def create_block_mask_cached(score_mod, B, H, M, N, device, BLOCK_SIZE):
+    block_mask = create_block_mask(
+        score_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
+    )
+    return block_mask
+
+
+def regular_sharding(
+    q_num_blocks: int, kv_num_blocks: int, cp_size: int, device_type: str
+) -> torch.Tensor:
+    assert q_num_blocks == kv_num_blocks
+    assert q_num_blocks % cp_size == 0
+    local_num_blk = q_num_blocks // cp_size
+    return torch.arange(q_num_blocks, device=device_type).view(cp_size, local_num_blk)
+
+
+def rewrite_mask_mod_for_cp(
+    mask_mod: _mask_mod_signature,
+    rank: int,
+    block_size: int,
+    load_balancer_output: torch.Tensor,
+) -> _mask_mod_signature:
+    def local_q_idx_to_q_idx(local_q_idx) -> int:
+        # calculate local block_idx and block_offset
+        local_blk_idx, local_blk_offset = (
+            local_q_idx // block_size,
+            local_q_idx % block_size,
+        )
+        current_rank_blk_list = load_balancer_output[rank]
+        blk_idx = current_rank_blk_list[local_blk_idx]
+        return blk_idx * block_size + local_blk_offset
+
+    return lambda b, h, q_idx, kv_idx: mask_mod(
+        b, h, local_q_idx_to_q_idx(q_idx), kv_idx
+    )
+
+
+def shuffle_tensor_for_load_balancing(
+    x: torch.Tensor, shuffle_tensor: torch.Tensor, dim: int
+) -> torch.Tensor:
+    # shuffle the tensor
+    num_chunks = shuffle_tensor.numel()
+    x_chunk_list = torch.chunk(x, num_chunks, dim=dim)
+    assert len(x_chunk_list) == num_chunks
+    new_x_chunk_list = [None] * num_chunks
+    for blk_idx in range(num_chunks):
+        new_blk_idx = shuffle_tensor[blk_idx].item()
+        assert isinstance(new_blk_idx, int)
+        new_x_chunk_list[blk_idx] = x_chunk_list[new_blk_idx]
+
+    return torch.cat(new_x_chunk_list, dim=dim)
+
+
+def interchange_index_value_2d(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Interchange the index and value in a PyTorch tensor. The input tensor has
+    structure: rank -> [block_idx, ...] and the output tensor will be:
+    block_idx -> block_idx_in_shuffled_tensor
+    """
+    flattened_tensor = tensor.view(-1)
+    indices = torch.arange(flattened_tensor.numel(), device=flattened_tensor.device)
+    revert_tensor = torch.empty_like(flattened_tensor)
+    revert_tensor[flattened_tensor] = indices
+
+    return revert_tensor
 
 
 if __name__ == "__main__":
