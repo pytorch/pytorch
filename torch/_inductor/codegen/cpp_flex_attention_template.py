@@ -23,8 +23,6 @@ log = logging.getLogger(__name__)
 
 from collections import namedtuple
 
-from torch._inductor.utils import IndentedBuffer
-
 
 # TODO: reuse cpp codegen to generate below pointwise/reduction kernels
 SOFTMAX_FUSIONS = r"""
@@ -435,7 +433,6 @@ extern "C"
       need_pack = gemm_size_per_thread / pack_size >= 4;
     }
   }
-  need_pack = false;
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
@@ -1102,22 +1099,15 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
 
     def micro_gemm_define(self, kernel_name: str):
-        import torch._inductor.codegen.cpp_template_kernel
-        import torch._inductor.lowering
         from torch._inductor.codegen.cpp_gemm_template import (
             CppTemplateKernel,
             parallel_num_threads,
         )
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
-        from torch._inductor.graph import GraphLowering
         from torch._inductor.virtualized import V
 
-        # TODO add tuning support for block_m and block_n
         GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
-        # TODO jianan Choose block_m/block_n for the best performance
-        # TODO jianan Choose sub_block_m/sub_block_n in cpp_micro_gemm.py
-        # for the best performance
         GemmBlocking.block_m = 4
         GemmBlocking.block_n = 16
         GemmBlocking.block_k = 1
@@ -1133,23 +1123,10 @@ class CppFlexAttentionTemplate(CppTemplate):
             True,
         )
 
-        class DummyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * 2
-
-        # TODO jianan Remove fake graph
-        gm = torch.fx.symbolic_trace(DummyModule())
-        fake_graph = GraphLowering(gm)
-
-        with V.set_graph_handler(fake_graph):
+        with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
             code = micro_gemm.codegen_define(kernel)
-        # TODO jianan Remove unnecessary header files
-        res = IndentedBuffer()
-        res.writeline(torch._inductor.codecache.cpp_prefix())
-        res.splice("""#include <c10/util/Unroll.h>""")
-        res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
-        return res.getvalue() + code
+        return code
 
     def codegen_micro_gemm(self, kernel_name: str):
         micro_gemm = self.micro_gemm_define(kernel_name)
