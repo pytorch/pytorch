@@ -14,18 +14,26 @@ def onnx_aten_decomp_table() -> dict[Any, Callable]:
     return _ONNX_DECOMP_TABLE
 
 
-def _register_op(func: _T) -> _T:
-    func_name = func.__name__
-    torch_op = torch.library.custom_op(f"onnx::{func_name}", mutates_args=())(func)
-    _ONNX_DECOMP_TABLE[getattr(torch.ops.onnx, func_name).default] = func
-    # Use the same implementation for the fake implementation
-    # This is possible because we use pure aten ops to implement ONNX ops
-    torch_op.register_fake(func)
-    return torch_op
+def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
+    """Decorator to register an ONNX operator with a custom implementation."""
+
+    def decorator(func: _T) -> _T:
+        torch_op = torch.library.custom_op(
+            f"onnx::{op_type}.opset{opset_version}", mutates_args=()
+        )(func)
+        _ONNX_DECOMP_TABLE[
+            getattr(getattr(torch.ops.onnx, op_type), f"opset{opset_version}")
+        ] = func
+        # Use the same implementation for the fake implementation
+        # This is possible because we use pure aten ops to implement ONNX ops
+        torch_op.register_fake(func)
+        return torch_op
+
+    return decorator
 
 
-@_register_op
-def rotary_embedding(
+@_onnx_op("RotaryEmbedding", 18)
+def rotary_embedding_18(
     input: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
@@ -103,14 +111,3 @@ def rotary_embedding(
     if len(input.shape) == 3:
         output = torch.reshape(output, input.shape)
     return output
-
-
-"""
-input_data = torch.rand(2, 3, 4, 8)
-position_ids_data = torch.randint(0, 50, (2, 3)).long()
-sin_cache_data = torch.rand(50, 4)
-cos_cache_data = torch.rand(50, 4)
-
-result = torch.ops.onnx.rotary_embedding(input_data, cos_cache_data, sin_cache_data, position_ids_data)
-
-"""
