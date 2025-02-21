@@ -316,8 +316,8 @@ class CompiledFxGraph(OutputCode):
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    partition_input_to_graph_input: Optional[List[List[Optional[int]]]]
-    partition_output_to_graph_output: Optional[List[List[Optional[int]]]]
+    partition_input_to_graph_input: Optional[list[list[Optional[int]]]]
+    partition_output_to_graph_output: Optional[list[list[Optional[int]]]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]

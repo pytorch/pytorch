@@ -3994,10 +3994,11 @@ class Scheduler:
 
     def compute_graph_partition_signature_mapping(
         self,
-        name_to_graph_input_index: Dict[str, int],
-        name_to_graph_output_index: Dict[str, int],
-        partition_input: PartitionInputMetadataType,
-        returned_output_names: OrderedSet[str],
+        name_to_graph_input_index: dict[str, int],
+        name_to_graph_output_index: dict[str, int],
+        signature: GraphPartitionSignature,
+        # partition_input: PartitionInputMetadataType,
+        # returned_output_names: OrderedSet[str],
     ) -> None:
         """
         computes a mapping from partition input/output indices to graph input/output
@@ -4007,17 +4008,17 @@ class Scheduler:
         if V.graph.partition_input_to_graph_input is None:
             V.graph.partition_input_to_graph_input = []
 
-        input_mapping = []
-        for name in partition_input:
-            input_mapping.append(name_to_graph_input_index.get(name))
-        V.graph.partition_input_to_graph_input.append(input_mapping)
-
         if V.graph.partition_output_to_graph_output is None:
             V.graph.partition_output_to_graph_output = []
 
+        input_mapping = []
+        for name in signature.input_nodes:
+            input_mapping.append(name_to_graph_input_index.get(name))
+        V.graph.partition_input_to_graph_input.append(input_mapping)
+
         output_mapping = []
-        for name in returned_output_names:
-            output_mapping.append(name_to_graph_output_index.get(name))
+        for node in signature.output_nodes:
+            output_mapping.append(name_to_graph_output_index.get(node.get_name()))
         V.graph.partition_output_to_graph_output.append(output_mapping)
 
     def get_graph_partition_signature(
@@ -4035,7 +4036,7 @@ class Scheduler:
             name: idx for idx, name in enumerate(V.graph.graph_inputs)
         }
         name_to_graph_output_index = {
-            name: idx for idx, name in enumerate(unmet_output_names)
+            name: idx for idx, name in enumerate(V.graph.get_output_names())
         }
 
         for partition in reversed(partitions):
@@ -4071,21 +4072,21 @@ class Scheduler:
                 if name in name_to_node
             }
             output_nodes = [name_to_node[name] for name in returned_output_names]
-            signatures.append(
-                GraphPartitionSignature(
-                    input_nodes,
-                    output_nodes,
-                    input_deallocation,
-                )
+
+            partition_signature = GraphPartitionSignature(
+                input_nodes,
+                output_nodes,
+                input_deallocation,
             )
+
+            signatures.append(partition_signature)
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
             self.compute_graph_partition_signature_mapping(
                 name_to_graph_input_index,
                 name_to_graph_output_index,
-                partition_input,
-                returned_output_names,
+                partition_signature,
             )
 
         return signatures[::-1]

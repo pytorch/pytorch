@@ -310,9 +310,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         # for each graph partition, map partition input/output indices
         #   to graph input/output indices
-        self.partition_input_to_graph_input: Optional[List[List[Optional[int]]]] = None
+        self.partition_input_to_graph_input: Optional[list[list[Optional[int]]]] = None
         self.partition_output_to_graph_output: Optional[
-            List[List[Optional[int]]]
+            list[list[Optional[int]]]
         ] = None
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
