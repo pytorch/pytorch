@@ -501,6 +501,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.stack,
             aten.sum.default,
             aten.sum.out,
+            aten.swiglu,
             aten.t,
             aten.t_copy,
             aten.take,
