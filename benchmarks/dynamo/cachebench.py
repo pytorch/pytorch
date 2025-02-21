@@ -118,10 +118,10 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
     records = []
     for result in results:
         for metric_name, value in [
-            ("cold_compile_time(s)", result.cold_compile_s),
-            ("warm_compile_time(s)", result.warm_compile_s),
-            ("speedup", result.speedup),
-            ("speedup_pct", result.speedup_pct),
+            ("Cold compile time (s)", result.cold_compile_s),
+            ("Warm compile time (s)", result.warm_compile_s),
+            ("Speedup", result.speedup),
+            ("Speedup (%)", result.speedup_pct),
         ]:
             records.append(
                 {
