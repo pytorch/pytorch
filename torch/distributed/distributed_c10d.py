@@ -16,7 +16,6 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import deprecated
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -48,6 +47,7 @@ from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
+from typing_extensions import deprecated
 
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
@@ -280,15 +280,6 @@ class Backend(str):  # noqa: SLOT000
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: dict[str, ProcessGroup.BackendType] = {
-        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO: ProcessGroup.BackendType.GLOO,
-        NCCL: ProcessGroup.BackendType.NCCL,
-        XCCL: ProcessGroup.BackendType.XCCL,
-        UCC: ProcessGroup.BackendType.UCC,
-        MPI: ProcessGroup.BackendType.MPI,
-    }
-
     def __new__(cls, name: str):
         """Create and return a new instance of the class."""
         if not isinstance(name, str):
@@ -347,7 +338,6 @@ class Backend(str):  # noqa: SLOT000
             for device in devices:
                 if device != "cpu" and device != "cuda":
                     Backend.default_device_backend_map[device] = name.lower()
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -1915,10 +1905,6 @@ def _new_process_group_helper(
         group_rank,
         group_size,
     )
-    # Set the default backend when only single backend is passed in.
-    if "," not in str(backend) and ":" not in str(backend):
-        assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
-        pg._set_default_backend(Backend.backend_type_map[backend])
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)

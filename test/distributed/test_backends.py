@@ -13,19 +13,6 @@ common backend API tests
 
 
 class TestMiscCollectiveUtils(TestCase):
-    def test_device_to_backend_mapping(self, device) -> None:
-        """
-        Test device to backend mapping
-        """
-        if "cuda" in device:
-            assert dist.get_default_backend_for_device(device) == "nccl"
-        elif "cpu" in device:
-            assert dist.get_default_backend_for_device(device) == "gloo"
-        elif "hpu" in device:
-            assert dist.get_default_backend_for_device(device) == "hccl"
-        else:
-            with self.assertRaises(ValueError):
-                dist.get_default_backend_for_device(device)
 
     def test_create_pg(self, device) -> None:
         """
