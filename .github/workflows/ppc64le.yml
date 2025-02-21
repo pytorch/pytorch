@@ -1,0 +1,37 @@
+name: ppc64le
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ppc64le-docker-image-build:
+    name: Build docker image for ppc64le
+    runs-on: linux.ppc64le 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build Docker image for ppc64le
+        run: |
+          docker build -f .ci/docker/manywheel/Dockerfile_ppc64le -t pytorch-ppc64le:ubi9.3 .
+
+  ppc64le-UBI-9-3-Build-and-Test:
+    name: ppc64le-UBI-9-3-Build-and-Test
+    uses: ./.github/workflows/_linux-build.yml
+    needs: linux-ppc64le-docker-image-build
+    with:
+      build-environment: linux-ppc64le-binary-manywheel-ubi9
+      docker-image-name: pytorch-ppc64le:ubi9.3
+      runner: linux.ppc64le 
+      
