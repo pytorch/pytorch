@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import OpsHandler, ReductionType, StoreMode
+    from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -365,12 +365,6 @@ class MetalOverrides(OpOverrides):
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class MetalKernel(SIMDKernel):

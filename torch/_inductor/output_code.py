@@ -437,7 +437,7 @@ class CompiledFxGraph(OutputCode):
                 assert len(output.args) == 1
                 stack_traces = [
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
+                    for arg in output.args[0]  # type: ignore[union-attr]
                 ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
@@ -564,10 +564,6 @@ class CompiledFxGraph(OutputCode):
         return artifact_path
 
 
-def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
-    return h
-
-
 @dataclasses.dataclass
 class CompiledAOTI(OutputCode):
     """
@@ -589,10 +585,6 @@ class CompiledAOTI(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
-
-
-def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass

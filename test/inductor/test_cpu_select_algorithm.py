@@ -1534,8 +1534,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(in_features, out_features, group_size).eval()
         self.common(mod, (x,), reference_in_float=False)
         available_isa = torch._inductor.cpu_vec_isa.pick_vec_isa()
-        vax512_available = "avx512" in str(available_isa)
-        autotune_count = 1 if vax512_available else 0
+        avx512_available = "avx512" in str(available_isa)
+        autotune_count = 1 if avx512_available else 0
         self.assertEqual(
             counters["inductor"]["select_algorithm_autotune"], autotune_count
         )
@@ -2065,6 +2065,55 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(torch.bfloat16) as (atol, rtol), torch.autocast(device_type="cpu"):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True, False))
+    def test_linear_to_lowp_fp(self, batch_size, in_features, out_features, bias):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x).to(torch.float16)
+
+        counters.clear()
+        dtype = torch.float32
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        B = (batch_size,)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_weight_prune(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 128, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(2, 32).to(torch.bfloat16)
+        mod = M().eval().to(torch.bfloat16)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_weight_prune"], 1)
 
     @patches
     @torch.no_grad

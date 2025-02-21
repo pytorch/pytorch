@@ -484,18 +484,6 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
   }
   throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
-
-// For WOQ INT4
-inline __m128i convert_int4_to_int8(const uint8_t* data) {
-  __m128i tmp = _mm_loadu_si64((const __m128i*)data);
-  __m128i bytes = _mm_cvtepu8_epi16(tmp);
-  const __m128i lowMask = _mm_set1_epi8(0xF);
-  __m128i high = _mm_andnot_si128(lowMask, bytes);
-  __m128i low = _mm_and_si128(lowMask, bytes);
-  high = _mm_slli_epi16(high, 4);
-  bytes = _mm_or_si128(low, high);
-  return bytes;
-}
 #endif
 
 template <typename scalar_t>
@@ -957,8 +945,3 @@ class AMXState {
     tile_release();
   }
 };
-
-// For group-wise quantization, e.g., WOQ INT4
-inline bool is_block_start(int index, int k_start, int group_size) {
-  return (k_start + index) % group_size == 0;
-}

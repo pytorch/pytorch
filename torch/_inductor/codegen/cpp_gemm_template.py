@@ -237,34 +237,25 @@ GEMM_TEMPLATE = r"""
             qscale_and_zeros, [("k_start / group_size", "k_end / group_size"), ("n_start", "n_start + n_size"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
+        {%- set tile_qparam = None %}
     {%- endif %}
 {%- endif %}
                         if (kc == k_block_start) {
-                            {%- if is_woq_int4 %}
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
                                                        tile_W,
                                                        acc_slice,
                                                        accum=False,
-                                                       is_woq_int4=True,
                                                        qscale_and_zeros=tile_qparam)|indent(28, false)
                             }}
-                            {%- else %}
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
-                            {%- endif %}
                         } else {
-                            {%- if is_woq_int4 %}
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
                                                        tile_W,
                                                        acc_slice,
                                                        accum=True,
-                                                       is_woq_int4=True,
                                                        qscale_and_zeros=tile_qparam)|indent(28, false)
                             }}
-                            {%- else %}
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
-                            {%- endif %}
                         }
                     }
                 }
@@ -416,9 +407,9 @@ def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]
             # Case may happen when the candidate tensor is used by more than 1 get_attr node
             # https://github.com/pytorch/pytorch/issues/134998
             if node.op == "get_attr" and hasattr(
-                V.graph.module, node.name
+                V.graph.module, node.target
             ):  # candidate tensor might already be deleted
-                comp_tensor = getattr(V.graph.module, node.name)
+                comp_tensor = getattr(V.graph.module, node.target)
                 if isinstance(comp_tensor, torch.Tensor) and share_storage(
                     candidate_tensor, comp_tensor
                 ):
@@ -428,13 +419,15 @@ def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]
             # The get_attr node has only 1 user fx node
             # The candidate tensor has been used by only 1 get_attr node
             if (
-                node.name == candidate_node.get_name()
+                node.op == "get_attr"
+                and node.target == candidate_node.get_name()
                 and len(node.users) == 1
                 and candidate_tensor_users == 1
             ):
-                del V.graph.constants[node.name]
-                delattr(V.graph.module, node.name)
-                delattr(V.graph.graph.owning_module, node.name)
+                del V.graph.constants[node.target]
+                delattr(V.graph.module, node.target)
+                delattr(V.graph.graph.owning_module, node.target)
+                counters["inductor"]["select_algorithm_weight_prune"] += 1
 
 
 def gen_2d_view_of_epilogue_buf(
@@ -1247,6 +1240,7 @@ class CppGemmTemplate(CppTemplate):
             or int8_gemm
             or self.padded_n != self.n
             or self.maybe_k_slicing()
+            or (epilogue_nodes and epilogue_nodes[-1].get_dtype() != self.layout.dtype)
         )
 
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,

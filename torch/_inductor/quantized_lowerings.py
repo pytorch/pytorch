@@ -14,7 +14,7 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import V
 
 
@@ -134,7 +134,7 @@ def register_woq_mm_ops() -> None:
             if use_aten_gemm_kernels()
             else []
         )
-        if use_cpp_gemm_template(
+        if use_max_autotune() and use_cpp_gemm_template(
             aten_layout,
             mat1,
             mat2,

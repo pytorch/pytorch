@@ -138,8 +138,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
-        is_woq_int4: bool = False,
-        qscale_and_zeros: Optional[ir.Buffer] = None,
+        **kwargs_for_extra_args,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -157,11 +156,7 @@ inline void {{kernel_name}}(
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
-            kwargs_for_extra_args = (
-                {"kernel": kernel, "qscale_and_zeros": qscale_and_zeros}
-                if is_woq_int4
-                else {}
-            )
+            kwargs_for_extra_args.update({"kernel": kernel})
             extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
             for arg in extra_args:
                 res.writeline(arg)
@@ -502,7 +497,7 @@ inline void {{kernel_name}}_kernel(
 
 
 # extra check for CppMicroGemmAMX
-def check_amx_extra(config, m, n, k, alpha, num_threads):
+def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
     return k % vnni_size == 0 and alpha == 1
 
@@ -824,7 +819,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 
 # extra check for CppMicroBrgemm
-def check_brgemm_extra(config, m, n, k, alpha, num_threads):
+def check_brgemm_extra(config, m, n, k, alpha, num_threads, **kwargs):
     assert config.input_dtype == torch.half and config.output_dtype == torch.float
     vnni_size = 2
     # use brgemm for Half when amx_fp16 is supported
@@ -886,6 +881,20 @@ class CppMicroBrgemm(CppMicroGemm):
         return LayoutType.VNNI2
 
 
+def woq_int4_extra_check(config, m, n, k, alpha, num_threads, **kwargs):
+    if alpha != 1:
+        return False
+    q_group_size = kwargs.get("q_group_size", None)
+    assert q_group_size is not None
+    if (
+        q_group_size < 32
+        or k % q_group_size != 0
+        or config.register_blocking.block_k > q_group_size
+    ):
+        return False
+    return k % config.register_blocking.block_k == 0 and n % 64 == 0
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
@@ -894,6 +903,7 @@ class CppMicroBrgemm(CppMicroGemm):
         input2_dtype=torch.uint8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=woq_int4_extra_check,
     ),
 )
 class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
@@ -955,6 +965,21 @@ class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
 """
 
     TEMPLATE_KERNEL = r"""
+inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_size) {
+  return (k_start + index) % group_size == 0;
+}
+
+inline __m128i {{kernel_name}}_convert_int4_to_int8(const uint8_t* data) {
+  __m128i tmp = _mm_loadu_si64((const __m128i*)data);
+  __m128i bytes = _mm_cvtepu8_epi16(tmp);
+  const __m128i lowMask = _mm_set1_epi8(0xF);
+  __m128i high = _mm_andnot_si128(lowMask, bytes);
+  __m128i low = _mm_and_si128(lowMask, bytes);
+  high = _mm_slli_epi16(high, 4);
+  bytes = _mm_or_si128(low, high);
+  return bytes;
+}
+
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
@@ -1072,7 +1097,7 @@ inline void {{kernel_name}}_kernel(
           vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
         }
       } else {
-        __m128i b8 = convert_int4_to_int8(B + k * ldb + col * 8);
+        __m128i b8 = {{kernel_name}}_convert_int4_to_int8(B + k * ldb + col * 8);
         __m512i b32 = _mm512_cvtepu8_epi32(b8);
         vb[col] = _mm512_permutexvar_ps(b32, lut);
         vb[col] = _mm512_fmadd_ps(vb[col], scale[col], zero[col]);
@@ -1084,7 +1109,7 @@ inline void {{kernel_name}}_kernel(
   };
 
   for (int k = 0, kb = 0; k < K; ++k) {
-    if (is_block_start(k, k_start, q_group_size)) {
+    if ({{kernel_name}}_is_block_start(k, k_start, q_group_size)) {
       c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
     }
     c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
@@ -1148,35 +1173,6 @@ def create_micro_gemm(
             is_woq_int4,
         )
 
-    def woq_extra_check(config, m, n, k, block_m, alpha, is_woq_int4, q_group_size):
-        if input_dtype != torch.bfloat16 or input2_dtype not in [
-            torch.uint8,
-            torch.int8,
-        ]:
-            # non-WOQ cases or WOQ with invalid input types
-            return True
-        if alpha != 1:
-            return False
-        if is_woq_int4:
-            assert q_group_size is not None
-            if (
-                q_group_size < 32
-                or k % q_group_size != 0
-                or config.register_blocking.block_k > q_group_size
-            ):
-                return False
-            return k % config.register_blocking.block_k == 0 and n % 64 == 0
-        else:  # WOQ INT8
-            if (
-                config.vec_isa_cls == VecAMX
-                and m < block_m
-                and input_dtype == torch.bfloat16
-                and input2_dtype == torch.int8
-            ):
-                # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
-                return False
-        return True
-
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
     m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
@@ -1205,13 +1201,17 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads
+                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
-                if not woq_extra_check(
-                    config, m, n, k, block_m, alpha, is_woq_int4, q_group_size
+                if (
+                    config.vec_isa_cls == VecAMX
+                    and m < block_m
+                    and input_dtype == torch.bfloat16
+                    and input2_dtype == torch.int8
                 ):
+                    # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC

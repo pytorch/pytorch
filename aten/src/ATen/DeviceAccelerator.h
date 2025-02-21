@@ -8,6 +8,7 @@
 
 namespace at::accelerator {
 
+// Note [Accelerator Concept]
 // This file defines the top level Accelerator concept for PyTorch.
 // A device is an accelerator per the definition here if:
 // - It is mutually exclusive with all other accelerators
