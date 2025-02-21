@@ -33,8 +33,8 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
     return decorator
 
 
-@_onnx_op("RotaryEmbedding", 18)
-def rotary_embedding_18(
+@_onnx_op("RotaryEmbedding", 23)
+def rotary_embedding(
     input: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
