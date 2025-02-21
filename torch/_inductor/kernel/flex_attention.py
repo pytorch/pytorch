@@ -1098,9 +1098,9 @@ def lower_cpu(
         raise NotImplementedError(
             "Unsupported for now if query, key, value are the same buffer."
         )
-    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+    if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
         raise NotImplementedError(
-            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
             f"Found input tensors are `{query.get_dtype()}`."
         )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)

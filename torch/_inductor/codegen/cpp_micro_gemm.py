@@ -834,7 +834,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         if self.trans_b:
             # TODO supports tuning of sub_block_m/sub_block_n
             # to get better performance for specific shapes
-            sub_block_m = min(1, self.register_blocking.block_m)
+            sub_block_m = min(4, self.register_blocking.block_m)
             sub_block_n = min(4, self.register_blocking.block_n)
             # update options to generate kernel with trans_b and sub-block size
             options.update(
