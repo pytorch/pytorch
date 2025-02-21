@@ -5,7 +5,6 @@ import functools
 import math
 import unittest  # noqa: F811
 from importlib import import_module
-from typing import Set
 
 import torch
 import torch._dynamo.config
@@ -86,7 +85,7 @@ def count_ops(
     return gm
 
 
-def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
+def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
         assert return_node.target == "output"
@@ -1252,7 +1251,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(4, 4).to(device)
         opt_fn = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "skip function graph_break in file"
+            torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
             opt_fn(x)
 

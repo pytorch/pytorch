@@ -2,7 +2,6 @@
 import time
 from collections import defaultdict
 from functools import partial
-from typing import DefaultDict
 
 import torch
 
@@ -115,7 +114,7 @@ def visualize_rec(graph, value_map, name_prefix, pb_graph, executors_it=None):
         for out, val in zip(subgraph.outputs(), node.outputs()):
             value_map[val.unique()] = rec_value_map[out.unique()]
 
-    op_id_counter: DefaultDict[str, int] = defaultdict(int)
+    op_id_counter: defaultdict[str, int] = defaultdict(int)
 
     def name_for(node):
         kind = node.kind()[node.kind().index("::") + 2 :]

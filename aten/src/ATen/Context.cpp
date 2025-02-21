@@ -137,6 +137,18 @@ std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
   return sdp_priority_order;
 }
 
+bool Context::allowTF32OneDNN() const {
+  return allow_tf32_onednn;
+}
+
+void Context::setAllowTF32OneDNN(bool b){
+#ifdef USE_XPU
+  allow_tf32_onednn = b;
+#else
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
@@ -394,7 +406,6 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -411,11 +422,19 @@ void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
 }
 
-std::optional<int> Context::_SMCarveout_EXPERIMENTAL() const {
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
+}
+
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
+}
+
+std::optional<int32_t> Context::_SMCarveout_EXPERIMENTAL() const {
   return sm_carveout;
 }
 
-void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int> c) {
+void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int32_t> c) {
   if (c.has_value()) {
     TORCH_WARN_ONCE(
       "Setting the SM carveout for matmuls is a temporary experimental mitigation for performance issues, "
@@ -423,7 +442,6 @@ void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int> c) {
   }
   sm_carveout = c;
 }
-
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()

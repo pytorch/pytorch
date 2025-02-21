@@ -320,9 +320,6 @@ void f8f8bf16_rowwise_impl_sm89(
   using LayoutInputB = cutlass::layout::ColumnMajor;
   constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
 
-  constexpr int AlignmentScale = 16 / sizeof(DtypeScale);
-  constexpr int AlignmentBias = 16 / sizeof(DtypeBias);
-
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
@@ -335,8 +332,8 @@ void f8f8bf16_rowwise_impl_sm89(
 
   // TODO: instead of fixing these values, implement logic alike to
   // what is used for SM90+.
-  using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
-  using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
+  using ThreadblockShape = cutlass::gemm::GemmShape<64, 128, 64>;
+  using WarpShape = cutlass::gemm::GemmShape<32, 64, 64>;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
   constexpr auto NumStages = 4;
 
@@ -346,20 +343,6 @@ void f8f8bf16_rowwise_impl_sm89(
       cutlass::arch::OpMultiplyAdd>;
   constexpr auto NumEVTEpilogueStages = 1;
 
-  using ScaleTileThreadMap =
-      cutlass::epilogue::threadblock::OutputTileThreadLayout<
-          ThreadblockShape,
-          WarpShape,
-          DtypeScale,
-          AlignmentScale,
-          NumEVTEpilogueStages>;
-  using BiasTileThreadMap =
-      cutlass::epilogue::threadblock::OutputTileThreadLayout<
-          ThreadblockShape,
-          WarpShape,
-          DtypeBias,
-          AlignmentBias,
-          NumEVTEpilogueStages>;
   using OutputTileThreadMap =
       cutlass::epilogue::threadblock::OutputTileThreadLayout<
           ThreadblockShape,
@@ -370,25 +353,19 @@ void f8f8bf16_rowwise_impl_sm89(
 
   using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
 
-  using XScale =
-      cutlass::epilogue::threadblock::VisitorColBroadcast<
-          ScaleTileThreadMap,
-          DtypeScale,
-          cute::Stride<cute::_1, cute::_0, int64_t>>;
+  using XScale = cutlass::epilogue::threadblock::VisitorColBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_1, cute::_0, int64_t>>;
   using XScaleArguments = typename XScale::Arguments;
 
-  using WScale =
-      cutlass::epilogue::threadblock::VisitorRowBroadcast<
-          ScaleTileThreadMap,
-          DtypeScale,
-          cute::Stride<cute::_0, cute::_1, int64_t>>;
+  using WScale = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
   using WScaleArguments = typename WScale::Arguments;
 
-  using Bias =
-      cutlass::epilogue::threadblock::VisitorRowBroadcast<
-          BiasTileThreadMap,
-          DtypeBias,
-          cute::Stride<cute::_0, cute::_1, int32_t>>;
+  using Bias = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeBias,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
   using BiasArguments = typename Bias::Arguments;
 
   using ApplyXScale = cutlass::epilogue::threadblock::VisitorCompute<
@@ -428,8 +405,7 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel =
-      typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
+  using EVTKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
       DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
       DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
       DtypeOutput, LayoutOutput, AlignmentOutput,
@@ -447,7 +423,7 @@ void f8f8bf16_rowwise_impl_sm89(
       NumEVTEpilogueStages
   >::GemmKernel;
 
-  using Gemm = cutlass::gemm::device::GemmUniversalBase<EVTKernel>;
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<EVTKernel>;
 
   cutlass::gemm::GemmCoord problem_size(M, N, K);
   constexpr auto SplitKFactor = 1;
@@ -480,7 +456,7 @@ void f8f8bf16_rowwise_impl_sm89(
           {}                  // ApplyXScale
         },                    // EVTApplyXScale
         w_scale_arguments,    // WScale
-        {},                   // ApplyWScale
+        {}                    // ApplyWScale
       },                      // EVTApplyWScale
       bias_arguments,         // Bias
       {}                      // ApplyBias
@@ -726,13 +702,13 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor out) {
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
-  const bool sm90OrLater = properties != nullptr && properties->major >= 9;
-  if (!(sm89 || sm90OrLater)) {
+  const bool sm9x = properties != nullptr && properties->major == 9;
+  if (!(sm89 || sm9x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm90OrLater) {
+  if (sm9x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
