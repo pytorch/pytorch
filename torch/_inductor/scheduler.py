@@ -14,21 +14,11 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    Sequence,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from types import ModuleType
 
 import sympy
@@ -686,7 +676,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
-            buf: Union[ir.Buffer, ir.TensorBox]
+            buf: Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -694,12 +684,17 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
+            def get_buf_bytes(
+                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]]
+            ) -> int:
                 if not buf:
                     return 0
-                # Kind of a lazy way to get the MultiOutput nodes corresponding to
-                # a MultiOutputLayout
-                if isinstance(buf.layout, MultiOutputLayout):
+
+                if isinstance(buf, ir.TorchBindObject):
+                    return buf.get_buf_bytes()
+                elif isinstance(buf.layout, MultiOutputLayout):
+                    # Kind of a lazy way to get the MultiOutput nodes corresponding to
+                    # a MultiOutputLayout
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
@@ -943,6 +938,7 @@ kernel_name_to_op = {
     "extern_kernels.mm": torch.ops.aten.mm,
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
+    "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
 }
 
 
@@ -1104,7 +1100,8 @@ class SchedulerNode(BaseSchedulerNode):
             if not isinstance(dep, WeakDep):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
-                lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
+                if not isinstance(buf, ir.TorchBindObject):
+                    lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
@@ -2788,7 +2785,7 @@ class Scheduler:
             )
 
             # Start compiling choices in parallel
-            future_choices: List[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
+            future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -2958,7 +2955,7 @@ class Scheduler:
 
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
-        pending_fusions: Dict[
+        pending_fusions: dict[
             BaseSchedulerNode,
             tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
         ] = {}
@@ -3331,9 +3328,12 @@ class Scheduler:
                 continue
 
             # Add more rules here
+            layout_str = ""
+            if not isinstance(buf, ir.TorchBindObject):
+                layout_str = f"Layout: {buf.layout}"
             reasons[
                 buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
 
         return str(reasons)
 
@@ -3861,9 +3861,15 @@ class Scheduler:
                 if buf.can_free():
                     V.graph.wrapper_code.codegen_free(buf.node)
             elif name in V.graph.graph_inputs:
-                storage = V.graph.graph_inputs[name].data
-                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
-                V.graph.wrapper_code.codegen_free(storage.data)
+                inp = V.graph.graph_inputs[name]
+                if isinstance(inp, ir.TorchBindObject):
+                    V.graph.wrapper_code.codegen_free(inp)
+                else:
+                    storage = inp.data
+                    assert (
+                        isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
+                    )
+                    V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
 
@@ -4053,7 +4059,7 @@ class Scheduler:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, List[Optional[str]]]:
+    ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -4293,7 +4299,7 @@ class BaseScheduling:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, List[Optional[str]]]:
+    ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark the list of nodes to combine and return the execution time
         and memory copy time in milliseconds on randomly generated inputs.

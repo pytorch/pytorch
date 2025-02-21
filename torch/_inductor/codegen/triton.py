@@ -3186,10 +3186,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             numel_args: list[sympy.Expr] = []
             self.add_numel_to_call_args("", numel_args, [])
             for arg in numel_args:
-                if isinstance(arg, (int, sympy.Integer)):
+                if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
                     args.append(str(V.graph.sizevars.size_hint(arg.inner_expr)))
+                elif isinstance(arg, sympy.Expr):
+                    args.append(str(V.graph.sizevars.size_hint(arg)))
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args

@@ -716,15 +716,16 @@ class ComboKernel(Kernel):
                     call_args.append(expr)
                     arg_types.append(type(expr))
 
-    def add_numel_to_call_args_benchmark(self, extra_args: list[Any]) -> None:
+    def kernel_benchmark_extra_args(self) -> list[str]:
+        extra_args = []
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
                 numel_name = f"{tree.prefix}numel_{num}"
                 if numel_name not in self.dynamic_shape_args:
                     continue
-                expr = V.graph.sizevars.size_hint(tree.numel)
                 if not tree.is_reduction or sub_kernel.inside_reduction:
-                    extra_args.append(expr)
+                    extra_args.append(str(V.graph.sizevars.size_hint(tree.numel)))
+        return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         # TODO: is it correct to use the first sub kernel's heuristics?
@@ -799,9 +800,6 @@ class ComboKernel(Kernel):
     def codegen_kernel_benchmark(self, num_gb: float) -> IndentedBuffer:
         result = IndentedBuffer()
         _argdefs, call_args, signature, _ = self.args.python_argdefs()
-        if self.dynamic_shape_args:
-            self.add_numel_to_call_args_benchmark(call_args)
-
         result.writelines(["", "", "def get_args():"])
         with result.indent():
             name_cnt = itertools.count()
@@ -840,6 +838,8 @@ class ComboKernel(Kernel):
                         f"Don't find the buffer or const tensor for {arg_name}"
                     )
                 var_names.append(var_name)
+            if self.dynamic_shape_args:
+                var_names.extend(self.kernel_benchmark_extra_args())
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
