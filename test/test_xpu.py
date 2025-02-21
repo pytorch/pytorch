@@ -31,6 +31,16 @@ from torch.testing._internal.common_utils import (
 from torch.utils.checkpoint import checkpoint_sequential
 
 
+class TestXpuConfig(TestCase):
+    def test_xpu_record(self):
+        config = torch.__config__.show()
+        assert f"USE_XPU={int(torch.xpu._is_compiled())}" in config
+
+    def test_xccl_record(self):
+        config = torch.__config__.show()
+        assert f"USE_XCCL={int(torch.distributed.is_xccl_available())}" in config
+
+
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
