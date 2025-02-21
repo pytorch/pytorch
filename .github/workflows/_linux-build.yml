@@ -42,7 +42,7 @@ on:
       runner:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: "linux.2xlarge.memory"
         description: |
           Label of the runner this job should run on.
       test-matrix:
@@ -76,6 +76,9 @@ on:
         required: false
         type: boolean
         default: false
+      max-jobs:
+        required: true
+        type: number
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -118,6 +121,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
+        # uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/build_test_more_procs
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
@@ -211,6 +215,7 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+          MAX_JOBS: ${{ inputs.max-jobs }}
         run: |
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
@@ -241,7 +246,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e MAX_JOBS="${MAX_JOBS}" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \
@@ -274,6 +279,16 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+          zip -r sccache_log.zip sccache_error.log
+
+      - name: store
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: ${{ inputs.build-environment }}-sccache-log
+          retention-days: 14
+          if-no-files-found: error
+          path: sccache_log.zip
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'

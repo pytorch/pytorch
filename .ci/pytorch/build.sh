@@ -27,6 +27,9 @@ cmake --version
 echo "Environment variables:"
 env
 
+mkdir -p /var/lib/jenkins/.config/sccache
+echo "" > /var/lib/jenkins/.config/sccache/config
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
@@ -154,9 +157,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # the build process, leaving undefined symbols in the shared lib,
   # causing undefined symbol errors when later running tests.
   # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
-  if [ -z "$MAX_JOBS" ]; then
-    export MAX_JOBS=$(($(nproc) - 1))
-  fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
       # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
@@ -177,11 +177,6 @@ fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
-if [ -z "$MAX_JOBS" ]; then
-  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
-    export MAX_JOBS=$(($(nproc) - 1))
-  fi
-fi
 
 # TORCH_CUDA_ARCH_LIST must be passed from an environment variable
 if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
@@ -193,8 +188,6 @@ fi
 # memory to build and will OOM
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
   echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -377,8 +370,6 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    MAX_JOBS=$(nproc --ignore=4)
-    export MAX_JOBS
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
