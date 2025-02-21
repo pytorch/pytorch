@@ -23,9 +23,10 @@ if "%MSVC_VERSION%" == "latest" (
         --add Microsoft.Component.MSBuild ^
         --add Microsoft.VisualStudio.Component.CoreBuildTools ^
         --add Microsoft.VisualStudio.Workload.MSBuildTools ^
-        --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
-        --add icrosoft.VisualStudio.Component.VC.Redist.14.Latest ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
+        --add Microsoft.VisualStudio.Workload.VCTools ^
+        --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
+        --add Microsoft.VisualStudio.Component.VC.Redist.14.Latest ^
         --add Microsoft.VisualStudio.Component.VC.ASAN ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
