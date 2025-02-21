@@ -13,7 +13,7 @@ namespace at::cuda {
 
 void external_stream_deleter(cudaStream_t* stream) {
   if (stream != nullptr) {
-    cudaStreamDestroy(*stream);
+    AT_CUDA_CHECK(cudaStreamDestroy(*stream));
     delete stream;
   }
 }

@@ -440,7 +440,6 @@ def _while_loop_tests():
             const_and_symint_output,
             (torch.randn(2, 3, requires_grad=True),),
         ),
-        # I need to add a test here that uses just a dictionary and see what happens.
     }
 
 
@@ -7788,7 +7787,6 @@ class DynamicCondModel(torch.nn.Module):
             x = self.fc1_1(x)
             return self.fc1_2(x)
 
-        # use PyTorch control flow API
         pred = torch.tensor(x.sum() > 0, device="cuda")
         x = cond(pred, true_fn, false_fn, [x])
 
