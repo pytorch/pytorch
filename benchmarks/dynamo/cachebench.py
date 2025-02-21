@@ -126,7 +126,7 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
             records.append(
                 {
                     "benchmark": {
-                        "name": "cache_benchmarks",
+                        "name": "TorchCache Benchmark",
                         "mode": result.mode,
                         "extra_info": {
                             "is_dynamic": result.dynamic,
@@ -136,7 +136,7 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
                     "model": {
                         "name": result.model,
                         "backend": "inductor",
-                        "origins": [result.benchmark]
+                        "origins": [result.benchmark],
                     },
                     "metric": {
                         "name": metric_name,
