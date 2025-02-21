@@ -179,6 +179,17 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "pytorch"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
