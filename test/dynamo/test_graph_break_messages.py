@@ -712,11 +712,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
   Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.foo(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
   Hint: If the op is a PyTorch op, please file an issue to PyTorch.
 
-  Developer debug context: Traceback (most recent call last):
-  File "test_graph_break_messages.py", line N, in _
-    raise NotImplementedError
-NotImplementedError
-
+  Developer debug context:
 
 
 from user code:

@@ -3261,7 +3261,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
             unimplemented_v2(
                 gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
-                context="".join(traceback.format_exception(e)),
+                context="",
                 explanation=make_error_message(e),
                 hints=hints,
                 from_exc=e,
