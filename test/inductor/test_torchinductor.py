@@ -10292,6 +10292,8 @@ class CommonTemplate:
             [x],
         )
 
+    @skip_if_halide  # log2 not yet implemented
+    @skip_if_triton_cpu  # log2 implemented only in Dec 2024
     def test_pow_by_natural_log2_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x):
