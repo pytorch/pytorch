@@ -70,9 +70,9 @@ class TestMemoryPlanning(TestCase):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
-        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
-            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_0)"
+        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
+            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_1);"
         ).run(
             code
         )
@@ -107,7 +107,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "int64_t int_array_5[] = {3L, 1L};"
         ).check_next(
-            "AtenTensorHandle tmp_tensor_handle_1;"
+            "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next(
             "aoti_torch__alloc_from_pool(pool1, 0"
         ).run(
