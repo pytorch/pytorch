@@ -866,9 +866,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 else:
                     base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
 
-            if self.is_tmp_raii_handle(base_handle):
-                base_handle = self.create_tmp_raii_handle_var(base_handle)
-
+            base_handle = self.create_tmp_raii_handle_var_if_needed(base_handle)
             var_name = f"var_{next(self.arg_var_id)}"
             self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
             return f"&{var_name}"
