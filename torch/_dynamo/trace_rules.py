@@ -19,7 +19,7 @@ import typing
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Dict, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -122,7 +122,7 @@ If you are removing an existing torch level API:
 
 
 """
-manual_torch_name_rule_map = {
+manual_torch_name_rule_map: Dict[str, Any] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -306,6 +306,7 @@ manual_torch_name_rule_map = {
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch._dynamo.mark_traceable": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -2997,6 +2998,12 @@ def _disallowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _mark_traceable_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
@@ -3099,6 +3106,11 @@ def _maybe_init_lazy_module(obj: object) -> None:
 def is_callable_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
+
+
+def is_mark_traceable_callable(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _mark_traceable_callable_ids
 
 
 def is_callable_disallowed(obj) -> bool:
