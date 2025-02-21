@@ -6,6 +6,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -89,8 +90,10 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
+    // TODO: We want the current CUDAGraph to hold a reference to this tensor memory so it is not deallocated.
   }
 
   void free_block(Block* block) override {
@@ -109,11 +112,14 @@ struct CUDACachingHostAllocatorImpl
       std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
-    event->record(stream);
+    cudaStreamCaptureStatus capture_status{cudaStreamCaptureStatusNone};
+    AT_CUDA_CHECK(cudaStreamIsCapturing(stream, &capture_status));
+    event->record(stream, capture_status == cudaStreamCaptureStatusNone ? cudaEventRecordDefault : cudaEventRecordExternal);
     events->push_back(std::move(event));
   }
 
   bool query_event(EventPool::Event& event) override {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     cudaError_t err = cudaEventQuery(*event);
     if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
@@ -164,8 +170,11 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void registerPages(const void* ptr, size_t size) {
-    AT_CUDA_CHECK(
-        cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
+    {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      AT_CUDA_CHECK(
+          cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
+    }
 
     // If host and device pointer don't match, give a warning and exit
     void* devptr = nullptr;
