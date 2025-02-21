@@ -9946,6 +9946,62 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_3d_input_fp16(self):
         self._test_sdpa_3d_input(torch.float16)
 
+    def _test_sdpa_no_mask_5d(
+        self,
+        dtype: torch.dtype,
+        B: int = 2,
+        extra: int = 3,
+        NH: int = 4,
+        L: int = 10,
+        HS: int = 16,
+        requires_grad: bool = False
+    ):
+        torch.manual_seed(1729)
+        q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps", requires_grad=requires_grad)
+        k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+        if requires_grad and torch.is_grad_enabled():
+            y.sum().backward()
+            y_ref.sum().backward()
+            self._compare_tensors(q.grad.cpu(), q.cpu().grad)
+
+    def test_sdpa_no_mask_5d_fp32(self):
+        self._test_sdpa_no_mask_5d(torch.float32)
+
+    def test_sdpa_no_mask_5d_fp16(self):
+        self._test_sdpa_no_mask_5d(torch.float16)
+
+    def _test_sdpa_mask_5d(
+        self,
+        dtype: torch.dtype,
+        B: int = 2,
+        extra: int = 3,
+        NH: int = 4,
+        L: int = 10,
+        HS: int = 16
+    ):
+        torch.manual_seed(1729)
+        q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device="mps")).unsqueeze(0).unsqueeze(0)
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+    def test_sdpa_mask_5d_fp32(self):
+        self._test_sdpa_mask_5d(torch.float32)
+
+    def test_sdpa_mask_5d_fp16(self):
+        self._test_sdpa_mask_5d(torch.float16)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
