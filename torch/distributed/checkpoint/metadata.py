@@ -131,6 +131,7 @@ class StorageMeta:
     checkpoint_id: Union[str, os.PathLike, None] = None
     save_id: Optional[str] = None
     load_id: Optional[str] = None
+    modules: list[str] = field(default_factory=list)
 
 
 @dataclass
