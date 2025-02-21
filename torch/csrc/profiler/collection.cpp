@@ -334,7 +334,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.isAsync(),
           fn.handle(),
           fn.debugHandle(),
-          fn.name()});
+          fn.name(),
+          fn.overload_name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
@@ -609,6 +610,12 @@ std::string Result::name() const {
       ATTRIBUTE(PyCall, toString(e)),
       ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
       [](const auto& e) -> std::string { return e.name_; }));
+}
+
+std::string Result::overload_name() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, std::string(e.overload_name_)),
+      [](const auto& e) -> std::string { return ""; }));
 }
 
 libkineto::ActivityType Result::kinetoType() const {

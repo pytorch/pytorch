@@ -302,17 +302,22 @@ class _KinetoProfile:
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
-        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
+        self,
+        group_by_input_shape: bool = False,
+        group_by_stack_n: int = 0,
+        group_by_overload_name: bool = False,
     ):
-        """Averages events, grouping them by operator name and (optionally) input shapes and
-        stack.
+        """Averages events, grouping them by operator name and (optionally) input shapes, stack
+        and overload name.
 
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
         assert self.profiler
-        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+        return self.profiler.key_averages(
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
+        )
 
     def events(self):
         """

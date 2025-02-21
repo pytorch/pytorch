@@ -497,11 +497,16 @@ class profile:
         """
         return _toggle_collection_dynamic(enabled, set(activities))
 
-    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
+    def key_averages(
+        self,
+        group_by_input_shape=False,
+        group_by_stack_n=0,
+        group_by_overload_name=False,
+    ):
         self._ensure_function_events()
         assert self._function_events is not None, "Expected profiling results"
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -585,6 +590,7 @@ class profile:
             fe = FunctionEvent(
                 id=kineto_event.correlation_id(),
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
+                overload_name=kineto_event.overload_name(),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -664,6 +670,7 @@ class profile:
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
+                overload_name="",
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
                 start_us=rel_start_ns / 1000,
