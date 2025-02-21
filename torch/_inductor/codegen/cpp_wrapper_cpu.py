@@ -923,9 +923,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # prevents situations where the temporary tensor would reinterpret another
         # output_ref which has already been released.
         output_refs = [
-            self.create_tmp_raii_handle_var(o, self.wrapper_call)
+            self.create_tmp_raii_handle_var_if_needed(o, self.wrapper_call)
             for o in output_refs
-            if self.is_tmp_raii_handle(o)
         ]
 
         for idx, output in enumerate(output_refs):
@@ -2061,9 +2060,9 @@ if (custom_op_wrapper.get() == NULL) {
                     return handle_scalar(raw_arg)
 
                 # Store AtenTensorHandle as void*
-                base_handle = raw_arg.codegen_reference()
-                if self.is_tmp_raii_handle(base_handle):
-                    base_handle = self.create_tmp_raii_handle_var(base_handle, lines)
+                base_handle = self.create_tmp_raii_handle_var_if_needed(
+                    raw_arg.codegen_reference(), lines
+                )
                 return f"PyCapsule_New(reinterpret_cast<void*>({base_handle}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.OptionalType):
                 return generate_py_arg_inner(lines, raw_arg, arg_type.getElementType())
@@ -2365,9 +2364,9 @@ if (custom_op_wrapper.get() == NULL) {
             else:
                 # type_ is Optional[Tensor]
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-                base_handle = self.val_to_arg_str(val, element_type)
-                if self.is_tmp_raii_handle(base_handle):
-                    base_handle = self.create_tmp_raii_handle_var(base_handle)
+                base_handle = self.create_tmp_raii_handle_var_if_needed(
+                    self.val_to_arg_str(val, element_type)
+                )
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
@@ -2391,9 +2390,7 @@ if (custom_op_wrapper.get() == NULL) {
                     # off first.  This increases memory usage in these cases (since the
                     # saved handle is currently permanent), but prevents segfaults.
                     result = [
-                        self.create_tmp_raii_handle_var(t)
-                        for t in result
-                        if self.is_tmp_raii_handle(t)
+                        self.create_tmp_raii_handle_var_if_needed(t) for t in result
                     ]
                 result = f"{{{', '.join(result)}}}"
                 self.writeline(
@@ -2409,26 +2406,25 @@ if (custom_op_wrapper.get() == NULL) {
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
-    @staticmethod
-    def is_tmp_raii_handle(handle: str) -> bool:
-        """Determines whether handle represents an un-saved temporary tensor."""
-        return handle.startswith(
+    def create_tmp_raii_handle_var_if_needed(
+        self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
+    ) -> str:
+        """If the input handle is an rvalue RAII tensor, creates an lvalue variable for
+        it in writer.  Returns a variable name that can be used to access handle."""
+        if not handle.startswith(
             (
                 "borrow_arrayref_tensor_as_tensor(",
                 "copy_arrayref_tensor_to_tensor(",
                 "wrap_with_raii_handle_if_needed(",
                 "RAIIAtenTensorHandle(",
             )
-        )
+        ):
+            return handle
 
-    def create_tmp_raii_handle_var(
-        self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
-    ) -> str:
-        """Assumes that handle passes is_tmp_raii_handle()."""
         tmp_var_name = f"var_{next(self.arg_var_id)}"
         call_str = f"auto {tmp_var_name} = {handle};"
 
-        writer = writer or self
+        writer = writer if writer is not None else self
         if isinstance(writer, list):
             writer.append(call_str)
         else:
