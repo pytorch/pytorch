@@ -117,6 +117,7 @@ class LoopBody:
             self._init_with_tracing(fn, args)
 
         self.indexing = None
+        self.replacement = {}
 
     def _init_with_tracing(self, fn, args):
         """Do an FX trace of an arbitrary callable to construct self"""
@@ -389,6 +390,7 @@ class LoopBody:
             v not in self.var_ranges for v in index
         ), f"{self.var_ranges=}, {indices=}"
         replacements = dict(zip(self.var_ranges.keys(), index))
+        self.replacement = replacements
         return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
