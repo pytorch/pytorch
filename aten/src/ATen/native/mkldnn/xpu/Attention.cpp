@@ -5,27 +5,6 @@
 #include <torch/library.h>
 
 namespace {
-
-// This function is used to produce an attn_mask
-// in a standard format that can be consumed by both
-// the math and memory efficient attn_mask implementation
-//  Args:
-//    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-at::Tensor convert_boolean_attn_mask(
-    const at::Tensor& attn_mask,
-    at::TensorOptions& opt) {
-  // Convert boolean mask to additive mask; need to invert mask to indicate what
-  // to mask *out*.
-  if (attn_mask.dtype() == at::kBool) {
-    return at::where(
-        attn_mask.logical_not(),
-        -std::numeric_limits<double>::infinity(),
-        at::scalar_tensor(0.0, opt));
-  }
-  // Otherwise, attn_mask represents an additive attention tensor
-  return attn_mask;
-}
-
 bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
@@ -212,30 +191,6 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   //     at::empty({batch_size, num_head, seq_len_q}, opts.dtype(at::kFloat));
   auto logsumexp = at::empty({}, opts.dtype(at::kFloat));
 
-  std::optional<at::Tensor> attn_mask_fallback;
-  bool is_implict_causal = is_causal;
-  if (attn_bias.has_value()) {
-    attn_mask_fallback = attn_bias;
-    TORCH_INTERNAL_ASSERT(
-        !is_causal,
-        "scaled_dot_product_fused_attention_overrideable_xpu: "
-        "attn_bias cannot present with is_causal");
-  } else {
-    // Currenetly implict mask only supports square fp16 cases
-    const bool support_implict_causal =
-        (query.dtype() == at::kHalf || query.dtype() == at::kBFloat16) &&
-        seq_len_q == seq_len_kv;
-    if (is_causal && !support_implict_causal) {
-      auto bool_tril =
-          at::ones_symint(
-              {query.sym_size(-2), key.sym_size(-2)}, opts.dtype(at::kBool))
-              .tril();
-      attn_mask_fallback = convert_boolean_attn_mask(bool_tril, opts);
-      is_implict_causal = false;
-    } else {
-      attn_mask_fallback = std::nullopt;
-    }
-  }
   at::native::onednn::gpu_float_sdpa(
       batch_size,
       seq_len_q,
@@ -247,8 +202,8 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       query,
       key,
       value,
-      attn_mask_fallback,
-      is_implict_causal,
+      attn_bias,
+      is_causal,
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim)),
       output);
 

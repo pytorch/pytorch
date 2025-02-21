@@ -2,7 +2,6 @@
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 
-#include <omp.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 using namespace at::native::onednn;
@@ -39,8 +38,15 @@ struct SDPALogicalParams {
       const at::Tensor& value_,
       const std::optional<at::Tensor>& attn_mask_,
       const at::Tensor& output_,
-      data_type dtype,
       bool is_causal) {
+    const data_type dtype = // to logical_tensor data type
+        query_.scalar_type() == c10::ScalarType::Float      ? data_type::f32
+        : query_.scalar_type() == c10::ScalarType::Half     ? data_type::f16
+        : query_.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
+                                                            : data_type::undef;
+    TORCH_INTERNAL_ASSERT(
+        (dtype != data_type::undef),
+        "Only FP16/BF16/FP32 datatypes are currently supported");
     const dims scalar_shape = {1};
     std::vector<logical_tensor> inputLogicalTensors;
     query = {
@@ -232,6 +238,55 @@ partition create_sdpa_graph_partition(
       "oneDNN doesn't support this fusion pattern. If you'd like its support, please submit a issue.");
   return partitions[0];
 }
+
+partition& find_or_create_graph_partition(
+    int batch_size,
+    int seq_len_q,
+    int seq_len_k,
+    int num_head,
+    int head_dim,
+    bool is_causal,
+    const SDPALogicalParams& params) {
+  thread_local static PartitionCache cache;
+  const data_type dtype = params.query.get_data_type();
+
+  // cache key creation
+  // patternID is determined on the basis of the arguments provided
+  std::bitset<32> patternID;
+  if (dtype == data_type::f32) {
+    // bit 3 corresponds to float32 dtype
+    patternID.set(3, 1);
+  }
+  if (dtype == data_type::bf16) {
+    // bit 2 corresponds to fp16/bf16 dtype
+    patternID.set(2, 1);
+  }
+  // sdp pattern
+  patternID.set(4, 1);
+
+  // Refer to comments in Utils.h. The first 8 bits are reserved
+  int pos = 8;
+  // attn_mask
+  patternID.set(pos++, params.attn_mask.has_value());
+  patternID.set(pos++, is_causal);
+
+  auto partition_ = cache.find_partition(patternID);
+  if (!partition_.has_value()) {
+    // partition cache no hit
+    // graph building and partitioning
+    partition sdp_partition = create_sdpa_graph_partition(
+        batch_size,
+        seq_len_q,
+        seq_len_k,
+        num_head,
+        head_dim,
+        is_causal,
+        dtype,
+        params);
+    partition_ = cache.insert_partition_cache(patternID, sdp_partition);
+  }
+  return *partition_;
+}
 } // namespace
 
 namespace at::native::onednn {
@@ -254,64 +309,76 @@ void gpu_float_sdpa(
       {c10::kXPU, c10::xpu::current_device()});
   auto strm = GpuStreamManager::Instance().get_stream();
 
-  Tensor softmax_scale1 = at::full({}, softmax_scale, query.options());
+  const auto get_tril_mask = [&]() {
+    auto opts = query.options();
+    auto bool_tril =
+        at::ones_symint(
+            {query.sym_size(-2), key.sym_size(-2)}, opts.dtype(at::kBool))
+            .tril();
+    return at::where(
+        bool_tril,
+        0.f,
+        at::scalar_tensor(-std::numeric_limits<float>::infinity(), opts));
+  };
 
-  std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full({}, -INFINITY, query.options());
+  static bool driver_support_implict_causal = true;
+  if (attn_mask.has_value()) {
+    TORCH_INTERNAL_ASSERT(
+        !is_causal,
+        "scaled_dot_product_fused_attention_overrideable_xpu: "
+        "attn_mask cannot present with is_causal");
+  } else {
+    // Currenetly implict mask only supports square fp16 cases
+    const bool support_implict_causal = driver_support_implict_causal &&
+        (query.dtype() == at::kHalf || query.dtype() == at::kBFloat16) &&
+        seq_len_q == seq_len_k;
+    if (is_causal && !support_implict_causal) {
+      attn_mask = get_tril_mask();
+      is_causal = false;
+    }
   }
-  const data_type logical_tensor_dtype =
-      query.scalar_type() == c10::ScalarType::Float      ? data_type::f32
-      : query.scalar_type() == c10::ScalarType::Half     ? data_type::f16
-      : query.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
-                                                         : data_type::undef;
-  TORCH_INTERNAL_ASSERT(
-      (logical_tensor_dtype != data_type::undef),
-      "Only FP16/BF16/FP32 datatypes are currently supported");
 
-  thread_local static PartitionCache cache;
+  std::vector<logical_tensor> l_inputs, l_outputs;
+  std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
-  // cache key creation
-  // patternID is determined on the basis of the arguments provided
-  std::bitset<32> patternID;
-  if (logical_tensor_dtype == data_type::f32) {
-    // bit 3 corresponds to float32 dtype
-    patternID.set(3, 1);
-  }
-  if (logical_tensor_dtype == data_type::bf16) {
-    // bit 2 corresponds to fp16/bf16 dtype
-    patternID.set(2, 1);
-  }
-  // sdp pattern
-  patternID.set(4, 1);
-
-  // Refer to comments in Graph.cpp. The first 8 bits are reserved
-  int pos = 8;
-  // attn_mask
-  patternID.set(pos++, attn_mask.has_value());
-  patternID.set(pos++, is_causal);
-
-  const SDPALogicalParams logical_params(
-      query, key, value, attn_mask, output, logical_tensor_dtype, is_causal);
-  auto partition_ = cache.find_partition(patternID);
-  if (!partition_.has_value()) {
-    // partition cache no hit
-    // graph building and partitioning
-    partition sdp_partition = create_sdpa_graph_partition(
+  auto get_compiled_partition = [&]() {
+    const SDPALogicalParams logical_params(
+        query, key, value, attn_mask, output, is_causal);
+    auto& partition_ = find_or_create_graph_partition(
         batch_size,
         seq_len_q,
         seq_len_k,
         num_head,
         head_dim,
         is_causal,
-        logical_tensor_dtype,
         logical_params);
-    partition_ = cache.insert_partition_cache(patternID, sdp_partition);
+    auto i = logical_params.get_input();
+    auto o = logical_params.get_output();
+    auto compiled_partition = partition_.compile(i, o, eng);
+    l_inputs = std::move(i);
+    l_outputs = std::move(o);
+    return compiled_partition;
+  };
+
+  // maybe retry without causal mask
+  try {
+    compiled_partition = get_compiled_partition();
+  } catch (std::exception& e) {
+    if (is_causal) {
+      attn_mask = get_tril_mask();
+      is_causal = false;
+      compiled_partition = get_compiled_partition();
+      driver_support_implict_causal = false;
+    } else {
+      throw e;
+    }
   }
-  const auto l_inputs = logical_params.get_input();
-  const auto l_outputs = logical_params.get_output();
-  // partition compilation
-  auto compiled_partition = partition_->get().compile(l_inputs, l_outputs, eng);
+
+  Tensor softmax_scale1 = at::full({}, softmax_scale, query.options());
+  std::optional<at::Tensor> neg_inf;
+  if (is_causal) {
+    neg_inf = at::full({}, -INFINITY, query.options());
+  }
 
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, output.data_ptr()},
@@ -329,6 +396,6 @@ void gpu_float_sdpa(
     inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
   }
   inputs.emplace_back(l_inputs[i++], eng, value.data_ptr());
-  compiled_partition.execute(strm, inputs, outputs);
+  compiled_partition->execute(strm, inputs, outputs);
 }
 } // namespace at::native::onednn
