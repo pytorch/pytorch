@@ -25,8 +25,10 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     get_origin as _get_origin,
+    List as _List,
     Optional as _Optional,
     overload as _overload,
+    Tuple as _Tuple,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
     Union as _Union,
@@ -271,38 +273,73 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
-    """Preloads cuda deps if they could not be found otherwise."""
-    # Should only be called on Linux if default path resolution have failed
-    assert platform.system() == "Linux", "Should only be called on Linux"
+def _preload_pypi_cuda_deps() -> None:
+    """Try to preloads cuda deps if possible."""
+    from torch.version import cuda as cuda_version
 
-    lib_path = None
-    for path in sys.path:
-        nvidia_path = os.path.join(path, "nvidia")
-        if not os.path.exists(nvidia_path):
-            continue
-        candidate_lib_paths = glob.glob(
-            os.path.join(nvidia_path, lib_folder, "lib", lib_name)
-        )
-        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
-        if not candidate_lib_paths:
+    if not cuda_version:
+        return
+
+    assert platform.system() == "Linux"
+
+    cuda_libs: _List[_Tuple[str, str]] = [
+        # Preloading nvrtc before cudnn: https://github.com/pytorch/pytorch/issues/138460
+        ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
+        ("cublas", "libcublas.so.*[0-9]"),
+        ("cudnn", "libcudnn.so.*[0-9]"),
+        ("cuda_runtime", "libcudart.so.*[0-9]"),
+        ("cuda_cupti", "libcupti.so.*[0-9]"),
+        ("cufft", "libcufft.so.*[0-9]"),
+        ("curand", "libcurand.so.*[0-9]"),
+        ("cusparse", "libcusparse.so.*[0-9]"),
+        ("cusparselt", "libcusparseLt.so.*[0-9]"),
+        ("cusolver", "libcusolver.so.*[0-9]"),
+        ("nccl", "libnccl.so.*[0-9]"),
+        ("nvtx", "libnvToolsExt.so.*[0-9]"),
+    ]
+
+    # Preload nvjitlink if CUDA version >= 12.4: https://github.com/pytorch/pytorch/issues/145580
+    if cuda_version >= "12.4":
+        cuda_libs.insert(0, ("nvjitlink", "libnvjitlink.so.*[0-9]"))
+
+    try:
+        current_lib = None
+        import nvidia  # type: ignore[import-not-found]
+
+        for lib, lib_name in cuda_libs:
+            current_lib = lib
+            try:
+                lib_pkg = importlib.import_module("." + lib, package="nvidia")
+            except ModuleNotFoundError:
+                lib_pkg = importlib.import_module(lib)
             candidate_lib_paths = glob.glob(
-                os.path.join(path, lib_folder, "lib", lib_name)
+                os.path.join(lib_pkg.__path__[0], "lib", lib_name)
             )
+            if candidate_lib_paths:
+                ctypes.CDLL(candidate_lib_paths[0])
+                current_lib = None
+            else:
+                break
+    except ModuleNotFoundError:
+        pass
+    finally:
+        # if importing failed during iteration
+        if current_lib is not None:  # type: ignore[possibly-undefined]
+            import warnings
 
-        if candidate_lib_paths and not lib_path:
-            lib_path = candidate_lib_paths[0]
-        if lib_path:
-            break
-    if not lib_path:
-        raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    ctypes.CDLL(lib_path)
+            warnings.warn(
+                f"Failed to load {lib_name} library,"  # type: ignore[possibly-undefined]
+                "please uninstall nvidia-* packages via python package manager and reinstall torch.",
+            )
 
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == "Windows":
         return
+    elif platform.system() == "Linux":
+        # Linux wheels may use CUDA runtime from pypi
+        _preload_pypi_cuda_deps()
 
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
@@ -310,53 +347,7 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
-    try:
-        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-        # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
-        # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
-        # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
-        # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
-        # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
-        # See https://github.com/pytorch/pytorch/issues/145580
-        try:
-            with open("/proc/self/maps") as f:
-                _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
-                return
-            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
-            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
-        except Exception:
-            pass
-
-    except OSError as err:
-        # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu12 is
-        cuda_libs: dict[str, str] = {
-            "cublas": "libcublas.so.*[0-9]",
-            "cudnn": "libcudnn.so.*[0-9]",
-            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
-            "cuda_cupti": "libcupti.so.*[0-9]",
-            "cufft": "libcufft.so.*[0-9]",
-            "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
-            "cusparse": "libcusparse.so.*[0-9]",
-            "cusparselt": "libcusparseLt.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
-            "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
-        }
-        is_cuda_lib_err = [
-            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
-        ]
-        if not is_cuda_lib_err:
-            raise err
-        for lib_folder, lib_name in cuda_libs.items():
-            _preload_cuda_deps(lib_folder, lib_name)
-        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
