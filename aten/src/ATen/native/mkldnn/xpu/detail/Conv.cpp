@@ -120,6 +120,8 @@ sycl::event convolution(
   }
 #endif
 
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -210,6 +212,8 @@ sycl::event convolution_backward_weights(
     pattr.set_deterministic(true);
   }
 #endif
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -319,6 +323,9 @@ sycl::event convolution_backward_data(
   dnnl::memory::dims _padding_back_bottom_right =
       padding_back_bottom_right.vec();
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   auto conv_forward_pd = dnnl::convolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,

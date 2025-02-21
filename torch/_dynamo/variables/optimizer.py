@@ -1,5 +1,27 @@
 # mypy: ignore-errors
 
+"""
+This module implements variable tracking for PyTorch optimizers during Dynamo tracing.
+
+The OptimizerVariable class provides specialized handling for optimizer instances by:
+- Optimizing the tracing of expensive optimizer initialization
+- Managing optimizer state and parameter group tracking
+- Handling tensor sources and guards for optimizer state tensors
+- Supporting CUDA graph execution through static tensor address management
+- Providing special handling for parameter gradients and optimizer state tensors
+
+Key features include:
+- Efficient initialization tracing via _init_group optimization
+- Automatic marking of optimizer state tensors as static for CUDA graphs
+- Proper source tracking for parameter groups, gradients, and state tensors
+- Guard installation for optimizer state structure
+- Support for both CPU and GPU tensor handling
+- Cleanup of static tensor references via finalizers
+
+The module integrates with Dynamo's broader tracing system while providing
+optimizer-specific optimizations and safety guarantees.
+"""
+
 import logging
 import weakref
 from typing import TYPE_CHECKING

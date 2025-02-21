@@ -52,7 +52,7 @@ class TestSelectCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, y: torch.Tensor):
         select = torch.ops.aten.select.int(x, 1, 0)
         select_1 = torch.ops.aten.select.int(x, 1, 1)
         select_2 = torch.ops.aten.select.int(x, 1, 2)
@@ -62,7 +62,19 @@ class TestSelectCat(torch.nn.Module):
         cat = torch.ops.aten.cat.default(
             [select, select_1, select_2, select_3, select_4, select_5], 1
         )
-        return cat
+        cat1 = torch.ops.aten.cat.default(
+            [select, select_1, select_2, select_3, select_4], 1
+        )
+        cat2 = torch.ops.aten.cat.default([select, select_2, select_4], 1)
+        select_6 = torch.ops.aten.select.int(y, 1, 0)
+        select_7 = torch.ops.aten.select.int(y, 1, 1)
+        select_8 = torch.ops.aten.select.int(y, 1, 2)
+        select_9 = torch.ops.aten.select.int(y, 1, 3)
+        select_10 = torch.ops.aten.select.int(y, 1, 4)
+        cat3 = torch.ops.aten.cat.default(
+            [select_6, select_7, select_8, select_9, select_10], 1
+        )
+        return cat, cat1, cat2, cat3
 
 
 class TestSplitCatAten(TestCase):
@@ -130,13 +142,14 @@ class TestSplitCatAten(TestCase):
         counters.clear()
         inputs = [
             torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
         ]
         module = TestSelectCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
         self.compare_pred(module, traced, inputs)
-        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
         self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)

@@ -479,7 +479,7 @@ print(torch.xpu.device_count())
     def test_device_memory_allocated(self):
         device_count = torch.xpu.device_count()
         current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
-        torch.ones(10, device="xpu:0")
+        a = torch.ones(10, device="xpu:0")
         self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(
@@ -487,6 +487,7 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+        del a
 
     @skipXPUIf(
         int(torch.version.xpu) < 20250000,

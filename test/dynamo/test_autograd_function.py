@@ -160,7 +160,7 @@ class CustomFuncStrideBwd(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.stride()
+        return grad_output * grad_output.stride()[-1]
 
 
 class CustomFuncStrideModule(torch.nn.Module):
@@ -271,24 +271,27 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         model = CustomFuncBwdPrintModule()
         opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: print"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace builtin operator `print`",
+        ):
             opt_model(x)
 
     def test_stride_in_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
         model = CustomFuncStrideModule()
-        opt_model = torch.compile(backend=cnt)(model)
-        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        ref = model(x)
-        res = opt_model(x)
+        opt_model = torch.compile(backend=cnt, fullgraph=True)(model)
+        x1 = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        ref = model(x1)
+        ref.backward(x1.clone().detach())
+        res = opt_model(x2)
+        res.backward(x2.clone().detach())
 
         self.assertEqual(ref, res)
+        self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(cnt.frame_count, 1)
-        # graph break: Illegal getattr invocation stride in strict mod.
-        self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
-        )
 
     def test_enum_arg(self):
         from enum import Enum
@@ -438,6 +441,62 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_data_in_bwd(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input_tensor):
+                ctx.save_for_backward(input_tensor)
+                return input_tensor * 3
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input_tensor,) = ctx.saved_tensors
+
+                # Modify gradient using .data (Dangerous: Breaks autograd tracking!)
+                modified_grad = grad_output.clone()
+                modified_grad.data[
+                    input_tensor.data < 0
+                ] = 0  # Zero-out gradients for negative inputs
+
+                return modified_grad * 3
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.tensor([-2.0, 1.0, 3.0], requires_grad=True)
+        res = fn(x)
+        self.assertEqual(res, Foo.apply(x))
+        res.sum().backward()
+        self.assertEqual(x.grad, torch.tensor([0.0, 3.0, 3.0]))
+
+    def test_requires_grad_in_bwd(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return torch.sin(x + 1)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                if grad_output.requires_grad:
+                    return grad_output * torch.sin(
+                        x + 1
+                    )  # Wrong gradient, we should never get here.
+                else:
+                    return grad_output * torch.cos(x + 1)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.tensor([1.0, 3.0], requires_grad=True)
+        res = fn(x)
+        self.assertEqual(res, Foo.apply(x))
+        res.sum().backward()
+        self.assertEqual(x.grad, torch.cos(x + 1))
 
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
@@ -973,6 +1032,125 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(y, y_ref)
         self.assertEqual(x.grad, x_ref.grad)
+
+    def test_assert_is_contiguous_after_matmul(self):
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                assert grad_x.is_contiguous()
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.sum().backward()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        y2 = opt_fn(x2, W2)
+        y2.sum().backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_assert_is_contiguous_on_grad_output_directly(self):
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                assert grad_output.is_contiguous()
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.backward(y1.clone().detach().requires_grad_(True))
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt)
+        y2 = opt_fn(x2, W2)
+        y2.backward(y2.clone().detach().requires_grad_(True))
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+
+        # Check the inserted .contiguous() call is there!
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[5, 3]", L_weight_: "f32[4, 3]"):
+        l_x_ = L_x_
+        l_weight_ = L_weight_
+
+        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
+        fwd_body_0 = self.fwd_body_0
+        bwd_body_0 = self.bwd_body_0
+        autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_weight_, args_tensor_mask = [True, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_weight_ = None
+        return (autograd_function_apply,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, ctx : torch.autograd.function.Function, x: "f32[5, 3]", weight: "f32[4, 3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            t: "f32[3, 4]" = weight.t()
+            y: "f32[5, 4]" = x.matmul(t);  t = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (y, [weight, x])
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, function_ctx : torch.autograd.function.Function, y: "f32[5, 4]", weight: "f32[4, 3]", x: "f32[5, 3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            contiguous: "f32[5, 4]" = y.contiguous();  y = None
+
+            grad_x: "f32[5, 3]" = contiguous.matmul(weight);  weight = None
+
+            transpose: "f32[4, 5]" = contiguous.transpose(0, 1);  contiguous = None
+            grad_weight: "f32[4, 3]" = transpose.matmul(x);  transpose = x = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (grad_x, grad_weight)
+""",
+        )
 
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function

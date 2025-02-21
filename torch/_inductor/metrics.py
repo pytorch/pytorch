@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, cast, Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -92,7 +92,7 @@ class CachedMetricsDeltas:
     num_matches_for_scatter_upon_const_tensor: int
 
 
-def get_metric_fields() -> List[str]:
+def get_metric_fields() -> list[str]:
     return [field.name for field in dataclasses.fields(CachedMetricsDeltas)]
 
 
@@ -132,7 +132,7 @@ class MetricTable:
     num_rows_added: int = 0
 
     def add_row(
-        self, row_fn: Callable[[], Dict[str, Optional[Union[str, float]]]]
+        self, row_fn: Callable[[], dict[str, Optional[Union[str, float]]]]
     ) -> None:
         if self.table_name not in enabled_metric_tables():
             return
@@ -145,11 +145,11 @@ class MetricTable:
             row_dict.keys()
         ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
 
-        row = [
-            get_benchmark_name(),
-        ]
-        row += [row_dict[column_name] for column_name in self.column_names]
-        self._write_row(row)
+        bn = get_benchmark_name()
+        # assert bn is not None
+        row = [bn] + [row_dict[column_name] for column_name in self.column_names]
+        assert all(isinstance(i, str) for i in row)
+        self._write_row(cast(list[str], row))
 
     def output_filename(self) -> str:
         return f"metric_table_{self.table_name}.csv"
@@ -160,7 +160,7 @@ class MetricTable:
             writer = csv.writer(fd, lineterminator="\n")
             writer.writerow(["model_name"] + self.column_names)
 
-    def _write_row(self, row: List[str]) -> None:
+    def _write_row(self, row: list[str]) -> None:
         filename = self.output_filename()
         if self.num_rows_added == 0 and not os.path.exists(filename):
             self.write_header()
@@ -181,7 +181,7 @@ class MetricTable:
             writer.writerow(row)
 
     @staticmethod
-    def register_table(name: str, column_names: List[str]) -> None:
+    def register_table(name: str, column_names: list[str]) -> None:
         table = MetricTable(name, column_names)
         REGISTERED_METRIC_TABLES[name] = table
 

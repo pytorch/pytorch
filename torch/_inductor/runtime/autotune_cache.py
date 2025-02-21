@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -154,7 +154,46 @@ class AutotuneCache:
         if not remote_cache:
             return
 
+        # Save the args passed to create_cache
+        # in case AutotuneCache needs to be pickled
+        self.remote_cache_full_key = key
+        self.is_fbcode = is_fbcode
         self.remote_cache = (remote_cache, cache_key)
+
+    # The AutotuneCache may be serialized/deserialized if we're using
+    # AsyncCompile worker processes to run triton compilation.
+    # This is because AutotuneCache instances are created on the worker
+    # process, but we need to run AutotuneCache.save on the parent process
+    # when actually doing autotuning.
+    def __getstate__(self) -> dict[str, Any]:
+        # The remote cache handles themselves may not be serializable
+        # So clear it and reconstruct it on setstate
+        remote_cache = getattr(self, "remote_cache", None)
+        return {
+            **self.__dict__,
+            # Save the cache_key portion
+            "remote_cache": remote_cache and remote_cache[1],
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Reconstruct the remote cache on the parent class
+        self.__dict__.update(state)
+        if self.remote_cache is not None:
+            assert isinstance(self.remote_cache, str)
+            assert hasattr(self, "remote_cache_full_key")
+            assert hasattr(self, "is_fbcode")
+            cache_key = self.remote_cache
+            remote_cache = create_cache(
+                self.remote_cache_full_key,
+                self.is_fbcode,
+                "FbRemoteAutotuneCache",
+                "RemoteAutotuneCache",
+            )
+            if remote_cache is not None:
+                self.remote_cache = (remote_cache, cache_key)
+            else:
+                log.warning("Warning, failed to recreate remote cache after pickling")
+                self.remote_cache = None
 
     # Save the config in the caches
     def save(

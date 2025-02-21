@@ -369,6 +369,12 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
+    elif device_hint(self) == "xpu":
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        out = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
@@ -2577,7 +2583,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2608,7 +2614,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2657,6 +2663,25 @@ if torch._C._has_mkldnn:
             device=input.device,
             memory_format=memory_format,
         )
+
+    @register_meta(torch.ops.quantized.int4mm_packed_weight_cpu)
+    def meta_int4mm_packed_weight_cpu(x, w, q_group_size, q_scale_and_zeros):
+        torch._check(x.dim() == 2, f"x must be a 2D tensor, got {x.dim()}D")
+        torch._check(w.dim() == 2, f"w must be a 2D tensor, got {w.dim()}D")
+        torch._check(
+            x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+            f"expected x to be f32/f16/bf16, got {x.dtype}",
+        )
+        torch._check(w.dtype == torch.uint8, f"expected w to be uint8, got {w.dtype}")
+        torch._check(
+            q_group_size.dtype == torch.int64,
+            f"q_group_size must be int64, got {q_group_size.dtype}",
+        )
+        torch._check(
+            q_scale_and_zeros.dtype == x.dtype,
+            f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
+        )
+        return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -4423,8 +4448,7 @@ def pool3d_shape_check(
     torch._check(
         dT > 0 and dW > 0 and dH > 0,
         lambda: (
-            f"stride should be greater than zero, but got "
-            f"dT: {dT}, dH: {dH}, dW: {dW}"
+            f"stride should be greater than zero, but got dT: {dT}, dH: {dH}, dW: {dW}"
         ),
     )
     torch._check(
@@ -5699,7 +5723,14 @@ def meta__scaled_dot_product_efficient_attention(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    if torch.version.hip and torch.cuda.is_available():
+        """Please see: https://github.com/pytorch/pytorch/issues/146848
+        longsumexp last dim should be seq length
+        """
+        logsumexp_dim = M if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -6488,7 +6519,8 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+    torch._check_is_size(k)
+    torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
     if len(topKSize) > 0:

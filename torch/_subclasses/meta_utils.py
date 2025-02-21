@@ -7,12 +7,12 @@ import typing
 import warnings
 import weakref
 from abc import abstractmethod
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
     ClassVar,
-    ContextManager,
     Generic,
     NewType,
     Optional,
@@ -1741,7 +1741,9 @@ class MetaConverter(Generic[_TensorT]):
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: ContextManager[None] = contextlib.nullcontext()
+                        maybe_fake_mgr: AbstractContextManager[
+                            None
+                        ] = contextlib.nullcontext()
                         from torch._subclasses.fake_tensor import (
                             in_kernel_invocation_manager,
                             maybe_get_fake_mode,

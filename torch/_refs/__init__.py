@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, Union
+from typing import Any, Callable, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims

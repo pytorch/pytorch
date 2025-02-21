@@ -744,7 +744,7 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
                 model, model.graph, "_zero_point", zero_point
             )
             q_node = model.graph.call_function(
-                torch.ops.quant.quantize_affine,
+                torch.ops.pt2e_quant.quantize_affine,
                 (
                     observer_node.args[0],
                     self.block_size,
@@ -758,7 +758,7 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
                 {},
             )
             dq_node = model.graph.call_function(
-                torch.ops.quant.dequantize_affine,
+                torch.ops.pt2e_quant.dequantize_affine,
                 (
                     q_node,
                     self.block_size,

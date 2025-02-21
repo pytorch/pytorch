@@ -1240,7 +1240,12 @@ class AOTInductorTestsTemplate:
             torch.randn((10, 20), device=self.device),
             torch.randn((10, 20), device=self.device),
         )
-        dim0_ab = Dim("s0", min=3, max=1024)
+        # TODO: the min value need to be 5 because in the body_fn, we're slicing over z1[2:],
+        # since the output size is [dim0_ab-3], when we extract tensor metadata out of the output
+        # we call guard_size_oblivious, which assumes the dim0_ab-3 != 0 or 1. So we have to set
+        # the minimum to 5 for now. We need to relax this restriction either by writing a less
+        # constrained shape checking in fake impl of cond.
+        dim0_ab = Dim("s0", min=5, max=1024)
         dynamic_shapes = {
             "p": {},
             "a": {0: dim0_ab, 1: None},
@@ -4520,6 +4525,9 @@ GPU_TEST_FAILURES = {
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
+    # No fft implementation for XPU yet.
+    "test_fft_c2c": fail_gpu(("xpu",), is_skip=True),
+    "test_stft": fail_gpu(("xpu",)),
 }
 
 

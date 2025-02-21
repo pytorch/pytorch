@@ -5,7 +5,7 @@ This package enables an interface for accessing MTIA backend in python
 
 import threading
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import device as _device, Tensor
@@ -354,6 +354,7 @@ __all__ = [
     "default_stream",
     "memory_stats",
     "max_memory_allocated",
+    "reset_peak_memory_stats",
     "get_device_capability",
     "record_memory_history",
     "snapshot",

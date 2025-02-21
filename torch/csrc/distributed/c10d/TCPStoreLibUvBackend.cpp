@@ -288,20 +288,18 @@ class UvTcpServer : public UvTcpSocket {
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
-      TORCH_CHECK(
-          uv_res == 0,
-          "The server socket has failed to listen on any local network address. ",
-          "port: ",
-          port,
-          ", useIpv6: ",
-          useIpv6,
-          ", code: ",
-          uv_res,
-          ", name: ",
-          uv_err_name(uv_res),
-          ", message: ",
-          uv_strerror(uv_res));
-
+      if (uv_res != 0) {
+        C10D_THROW_ERROR(
+            SocketError,
+            fmt::format(
+                "The server socket has failed to listen on any local network address. "
+                "port: {}, useIpv6: {}, code: {}, name: {}, message: {}",
+                port,
+                useIpv6,
+                uv_res,
+                uv_err_name(uv_res),
+                uv_strerror(uv_res)));
+      }
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();

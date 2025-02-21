@@ -190,6 +190,11 @@ def _get_allowed_globals():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t
+    for t in [getattr(torch, f"uint{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+    for t in [getattr(torch, f"int{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+
     # Tensor classes
     for tt in torch._tensor_classes:
         rc[f"{tt.__module__}.{tt.__name__}"] = tt

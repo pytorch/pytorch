@@ -36,11 +36,11 @@ if TYPE_CHECKING:
 # Mapping of builtins to their `typing` equivalent.
 # (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: typing.List,
-    dict: typing.Dict,
-    set: typing.Set,
-    frozenset: typing.FrozenSet,
-    tuple: typing.Tuple,
+    list: typing.List,  # noqa: UP006
+    dict: typing.Dict,  # noqa: UP006
+    set: typing.Set,  # noqa: UP006
+    frozenset: typing.FrozenSet,  # noqa: UP006
+    tuple: typing.Tuple,  # noqa: UP006
 }
 
 _legal_ops = dict.fromkeys(
@@ -455,9 +455,13 @@ class CodeGen:
 
             typename = _type_repr(o)
 
-            if hasattr(o, "__origin__"):
-                # This is a generic type, e.g. typing.List[torch.Tensor]
-                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+            if origin_type := getattr(o, "__origin__", None):
+                # list[...], typing.List[...], TensorType[...]
+
+                if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
+                    # This is a generic pre-PEP585 type, e.g. typing.List[torch.Tensor]
+                    origin_type = _origin_type_map.get(origin_type, origin_type)
+
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
                 if hasattr(o, "__args__"):

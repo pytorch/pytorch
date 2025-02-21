@@ -22,7 +22,12 @@ from torch._inductor.pattern_matcher import (
 )
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    skipIfXpu,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import requires_gpu
 
 
@@ -39,7 +44,7 @@ class TestInvokeQuant(TestCase):
 
         def fn(x, y):
             return invoke_quant_tracer(
-                gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
+                gn, x, y, scheme="nf4", quant_options=invoke_quant_tracer
             )[0]
 
         x = torch.randn(8, requires_grad=False)
@@ -56,7 +61,7 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return InvokeQuant(codegen_low_precision=False)(gn, (x, y), scheme="nf4")[0]
+            return InvokeQuant(codegen_low_precision=False)(gn, x, y, scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -72,7 +77,7 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return InvokeQuant()(gn, (x, y), scheme="nf4")[0]
+            return InvokeQuant()(gn, x, y, scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -90,8 +95,8 @@ class TestInvokeQuant(TestCase):
             return torch.mul(x, y) + y
 
         def fn(x, y, z):
-            o1 = invoke_quant_tracer(gn, (x, y), scheme="nf4")
-            o2 = invoke_quant_tracer(gn, (y, z), scheme="nf4")
+            o1 = invoke_quant_tracer(gn, x, y, scheme="nf4")
+            o2 = invoke_quant_tracer(gn, y, z, scheme="nf4")
             return o1 + o2
 
         x = torch.randn(8, requires_grad=False)
@@ -143,10 +148,10 @@ class TestInvokeQuantInductor(TestInvokeQuant):
             return torch.mul(x, y) + y
 
         def fn(x, y, z):
-            return invoke_quant_tracer(gn, (x, y), scheme="nf4") @ z
+            return invoke_quant_tracer(gn, x, y, scheme="nf4") @ z
 
         def fn_no_match(x, y, z):
-            return invoke_quant_tracer(gn, (x, y)) @ z
+            return invoke_quant_tracer(gn, x, y) @ z
 
         x = torch.randn(64, 64, requires_grad=False)
         y = torch.randn(64, 64, requires_grad=False)
@@ -179,6 +184,10 @@ class TestInvokeQuantInductor(TestInvokeQuant):
             torch.compile(fn_no_match)(x, y, z)
             self.assertTrue(counter == 1)
 
+    @skipIfXpu(
+        msg="MM Triton template fusion for XPU not work because the fusion"
+        " can not speedup, unskip untill #146568 fixed."
+    )
     @requires_gpu()
     @config.patch(prologue_fusion=True)
     def test_prologue(self):
@@ -191,7 +200,7 @@ class TestInvokeQuantInductor(TestInvokeQuant):
         def fn(x, y, z):
             return (
                 invoke_quant_tracer(
-                    gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
+                    gn, x, y, scheme="nf4", quant_options=invoke_quant_tracer
                 )
                 @ z
             )

@@ -25,6 +25,7 @@
 #include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
 #include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_weight_int4pack_mm_for_cpu.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -1179,6 +1180,17 @@ namespace at::native {
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
   }
 
+  Tensor _weight_int4pack_mm_cpu_tensor(
+      const Tensor& A,
+      const Tensor& B,
+      const Tensor& qGroupSize,
+      const Tensor& qScaleAndZeros) {
+    TORCH_CHECK(qGroupSize.numel() == 1, __func__, ": group size must be a scalar.");
+    TORCH_CHECK(qGroupSize.scalar_type() == c10::kLong, __func__, ": group size must be int64.");
+    int group_size = qGroupSize.item<int64_t>();
+    return at::_weight_int4pack_mm_for_cpu(A, B, group_size, qScaleAndZeros);
+  }
+
 
 namespace {
 
@@ -1346,6 +1358,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_relu_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::int4mm_packed_weight_cpu"), TORCH_FN(at::native::_weight_int4pack_mm_cpu_tensor));
 }
 
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {

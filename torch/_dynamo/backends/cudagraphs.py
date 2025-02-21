@@ -1,5 +1,28 @@
 # mypy: ignore-errors
 
+"""
+This module implements CUDA graphs support for TorchDynamo backends.
+
+CUDA graphs allow for capturing and replaying GPU operations, which can significantly
+reduce CPU overhead in GPU-accelerated PyTorch models. This module provides:
+
+- CUDA graph creation and management for both forward and backward passes
+- Input mutation detection and handling
+- Device compatibility checking
+- Stack trace management for debugging
+- Integration with TorchInductor's cudagraph trees
+
+The backend supports two main modes:
+1. cudagraphs: Full CUDA graph support with both forward and backward pass optimization
+2. cudagraphs_inner: Lower-level CUDA graph implementation used for benchmarking
+
+Key components:
+- CudagraphsBackend: Main backend class for CUDA graph integration
+- Mutation detection utilities to ensure graph safety
+- Device mapping and compatibility checks
+- Stack trace collection for debugging
+"""
+
 import functools
 from collections import defaultdict
 from typing import Optional

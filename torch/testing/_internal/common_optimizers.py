@@ -1321,12 +1321,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1556,12 +1550,6 @@ optim_db: list[OptimizerInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1659,12 +1647,6 @@ optim_db: list[OptimizerInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1700,12 +1682,6 @@ optim_db: list[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1795,12 +1771,6 @@ optim_db: list[OptimizerInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1830,12 +1800,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1923,12 +1887,6 @@ optim_db: list[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             # https://github.com/pytorch/pytorch/issues/131398
             DecorateInfo(
                 unittest.expectedFailure,
@@ -1952,12 +1910,6 @@ optim_db: list[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1996,12 +1948,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -2050,12 +1996,6 @@ optim_db: list[OptimizerInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -2099,12 +2039,6 @@ optim_db: list[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -2181,12 +2115,6 @@ optim_db: list[OptimizerInfo] = [
             "mps",
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"

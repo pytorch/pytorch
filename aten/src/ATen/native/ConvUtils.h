@@ -425,25 +425,16 @@ inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor
   if (!input.is_xpu() || !weight.is_xpu()) {
     return false;
   }
-
-  // disable NHWC for float64 input.
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
     return false;
   }
 
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-
-  bool can_use_xpu_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
-
-  bool can_use_xpu_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
-
-  return can_use_xpu_channels_last_2d || can_use_xpu_channels_last_3d;
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
 }
 
 } // namespace at::native

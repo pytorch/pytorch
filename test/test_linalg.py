@@ -82,6 +82,13 @@ def tunableop_matmul(device, dtype):
     C = torch.matmul(A, B)
     del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
 
+def get_tunableop_validators():
+    assert len(torch.cuda.tunable.get_validators()) > 0
+    validators = {}
+    for key, value in torch.cuda.tunable.get_validators():
+        validators[key] = value
+    return validators
+
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
@@ -4603,10 +4610,7 @@ class TestLinalg(TestCase):
             filename3 = "tunableop_results_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results{ordinal}.csv"
-            assert len(torch.cuda.tunable.get_validators()) > 0
-            validators = {}
-            for key, value in torch.cuda.tunable.get_validators():
-                validators[key] = value
+            validators = get_tunableop_validators()
             if torch.version.hip:
                 assert "HIPBLASLT_VERSION" in validators
                 assert re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"])
@@ -4947,6 +4951,11 @@ class TestLinalg(TestCase):
         B = torch.randn(K, M, device=device, dtype=dtype)
         C = torch.matmul(A, B)
         self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
+
+        validators = get_tunableop_validators()
+        self.assertTrue("ROCBLAS_VERSION" in validators)
+        # format: [major].[minor].[patch].[tweak].[commit id]
+        self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]))
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
@@ -6644,9 +6653,16 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             if self.device_type == 'cpu':
                 self.assertTrue(b_int4pack.dtype is torch.uint8)
                 self.assertTrue(b_int4pack.dim() == 2)
-                return torch._weight_int4pack_mm_for_cpu(
+                c = torch._weight_int4pack_mm_for_cpu(
                     a, b_int4pack, q_group, b_scales_and_zeros
                 )
+                # test wrapper
+                q_group_t = torch.tensor(q_group, dtype=torch.int64, device=device)
+                c_2 = torch.ops.quantized.int4mm_packed_weight_cpu(
+                    a, b_int4pack, q_group_t, b_scales_and_zeros
+                )
+                assert torch.equal(c, c_2)
+                return c
             else:
                 self.assertTrue(b_int4pack.dtype is torch.int32)
                 self.assertTrue(b_int4pack.dim() == 4)

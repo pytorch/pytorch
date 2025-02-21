@@ -102,6 +102,9 @@ test/test_type_promotion.py @mruberry
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# This is the file where people can add new argument types to torch.fx.
+torch/fx/proxy.py @zou3519
+
 # HOPs
 torch/_higher_order_ops/*.py @zou3519
 torch/_dynamo/variables/higher_order_ops.py @zou3519

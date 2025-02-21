@@ -603,12 +603,12 @@ class TestBypassFailures(TestCase):
             ].classification
             == "BROKEN_TRUNK"
         )
-        # self.assertTrue(
-        #     checks[
-        #         "trunk / win-vs2022-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
-        #     ].classification
-        #     == "FLAKY"
-        # )
+        self.assertTrue(
+            checks[
+                "trunk / win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
+            ].classification
+            == "FLAKY"
+        )
         self.assertTrue(
             checks[
                 "pull / linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)"

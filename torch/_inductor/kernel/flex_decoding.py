@@ -137,7 +137,7 @@ flex_decoding_template = TritonTemplate(
     offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
-    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
     sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
     stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
     sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h

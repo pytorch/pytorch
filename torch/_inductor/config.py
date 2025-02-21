@@ -39,6 +39,19 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
+def prologue_fusion_enabled() -> bool:
+    ENABLE_PROLOGUE_FUSION_VERSION = 0
+
+    if "TORCHINDUCTOR_PROLOGUE_FUSION" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_PROLOGUE_FUSION") == "1"
+    elif is_fbcode():
+        jk_name = "pytorch/inductor:prologue_fusion_version"
+        version = torch._utils_internal.justknobs_getval_int(jk_name)
+        return version <= ENABLE_PROLOGUE_FUSION_VERSION
+    else:
+        return True
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -126,11 +139,6 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
-# Controls automatic precompiling of common include files for codecache.CppCodeCache
-# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
-# controlled by a separate flag.
-cpp_cache_precompile_headers: bool = True
-
 # dead code elimination
 dce = False
 
@@ -172,7 +180,7 @@ benchmark_harness = True
 epilogue_fusion = True
 
 # fuse pointwise into template prologues
-prologue_fusion = False
+prologue_fusion = prologue_fusion_enabled()
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -1212,9 +1220,6 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
-    # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = False
-
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1257,7 +1262,7 @@ class cuda:
     cutlass_max_profiling_configs: Optional[int] = None
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
-    cutlass_max_profiling_swizzle_options: list[int] = [2]
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
 
     # Path to CUDA NVCC.
     # NVCC search order:

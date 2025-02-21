@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
 import inspect
@@ -48,10 +49,29 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
+def _manual_list_update(list_from, list_to):
+    list.clear(list_to)
+    list.extend(list_to, list_from)
+
+
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]
@@ -74,6 +94,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Used by MappingProxyVariable to graph break in case of any mutated
+        # dict
+        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
@@ -213,6 +236,7 @@ class SideEffects:
             dict.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
+            list.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -233,8 +257,16 @@ class SideEffects:
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
+
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            # Checks if the underlying dict or tuple vt has been modified
+            return item in self.store_attr_mutations or item.is_underlying_vt_modified(
+                self
+            )
+
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
+
         return item.mutation_type.is_modified
 
     def _track_obj(
@@ -268,7 +300,9 @@ class SideEffects:
         variable: VariableTracker,
     ):
         return self._track_obj(
-            item, variable, mutation_type_cls=AttributeMutationExisting
+            item,
+            variable,
+            mutation_type_cls=AttributeMutationExisting,
         )
 
     def track_object_new(
@@ -318,6 +352,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
+        elif issubclass(user_cls, list):
+            variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -503,6 +539,15 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if (
+            var.source
+            and isinstance(var, variables.ConstDictVariable)
+            and not isinstance(var, variables.SetVariable)
+        ):
+            self._has_existing_dict_mutation = True
+
+    def has_existing_dict_mutation(self):
+        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -771,7 +816,9 @@ class SideEffects:
                     suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
-                if isinstance(var, variables.UserDefinedDictVariable):
+                if isinstance(
+                    var, variables.UserDefinedDictVariable
+                ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -819,6 +866,43 @@ class SideEffects:
                     suffixes.append(
                         [
                             *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                elif isinstance(
+                    var, variables.UserDefinedListVariable
+                ) and self.is_modified(var._list_vt):
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
+
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_update, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *list_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )
