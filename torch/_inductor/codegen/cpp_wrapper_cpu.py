@@ -1206,10 +1206,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
-        # tensor prematurely deallocated, thus this std::vector().data() trick here.
-        indices_str = (
-            "std::vector<AtenTensorHandle>{" + (", ".join(indices)) + "}.data()"
-        )
+        # tensor prematurely deallocated, thus this std::array().data() trick here.
+        indices_str = f"std::array<AtenTensorHandle, {len(indices)}>{{{', '.join(indices)}}}.data()"
         args = [
             x,
             indices_str,
@@ -1599,7 +1597,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is solved by updating the proxy_executor invocation to
         # ```
         # aoti_torch_proxy_executor_call_function(...,
-        #     std::vector<AtenTensorHandle>{
+        #     std::array<AtenTensorHandle, 3>{
         #         RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6
         #     }.data()
         # );
@@ -2228,18 +2226,14 @@ if (custom_op_wrapper.get() == NULL) {
             raw_outputs,
         )
 
-        tensor_call_args_str = ", ".join(tensor_call_args)
-        int_call_args_str = ", ".join(int_call_args)
-
         extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
-
         self.writeline(
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
-            f"std::vector<int64_t>{{{int_call_args_str}}}.data(), "
+            f"std::array<int64_t, {len(int_call_args)}>{{{', '.join(int_call_args)}}}.data(), "
             f"{len(tensor_call_args)}, "
-            f"std::vector<AtenTensorHandle>{{{tensor_call_args_str}}}.data());"
+            f"std::array<AtenTensorHandle, {len(tensor_call_args)}>{{{', '.join(tensor_call_args)}}}.data());"
         )
 
     def generate_reset_kernel_saved_flags(self):
@@ -2380,12 +2374,12 @@ if (custom_op_wrapper.get() == NULL) {
             result = [self.val_to_arg_str(x, element_type) for x in val]
             if isinstance(element_type, torch.TensorType):
                 result = [f"{t}.get()" for t in result]
-            result = f"{{{', '.join(result)}}}"
+            result = ", ".join(result)
 
             c_type = self.c_type_for_prim_type(val[0], element_type)
-            # need to pass the array length, because we can't use the std::vector member
+            # need to pass the array length, because we can't use the std::array member
             # function
-            return f"std::vector<{c_type}>{{{result}}}.data(), {len(val)}"
+            return f"std::array<{c_type}, {len(val)}>{{{result}}}.data(), {len(val)}"
 
         val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
         if isinstance(type_, torch.TensorType) and val_is_scalar:
