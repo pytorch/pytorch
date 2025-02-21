@@ -170,7 +170,7 @@ Custom Input Types
 In addition, you can also define your own (custom) class and use it as an
 input type, but you will need to register such a class as a PyTree.
 
-Here's an example of using an utility to register a dataclass that is used as
+Here's an example of using a utility to register a dataclass that is used as
 an input type.
 
 .. code-block:: python
@@ -273,14 +273,14 @@ emitting a guard corresponding to the condition just evaluated.
 
 Otherwise the control flow is considered data-dependent. We cannot evaluate
 the condition to either ``True`` or ``False``, so cannot continue tracing and have to
-raise an error at export time. See next section.
+raise an error at export time. See the next section for information on data-dependent control flow.
 
 Dynamic Data-Dependent Control Flow
 """""""""""""""""""""""""""""""""""
 
 **Data-dependent control flow over dynamic values is supported, but you must
 use one of PyTorch's explicit operators** to continue tracing. Using Python
-control flow statements over dynamic values is not permitted, because the
+control flow statements over dynamic values are not permitted, because the
 compiler cannot evaluate the conditions necessary to continue tracing and
 thus an error must be raised at export time.
 
