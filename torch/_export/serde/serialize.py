@@ -633,12 +633,6 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
-        if unbacked_bindings := node.meta.get("unbacked_bindings"):
-            # serialize the symbol names of unbacked bindings;
-            # reconstruct the key paths to those symbols when deserializing
-            ret["unbacked_bindings"] = ",".join(
-                u.name for u in unbacked_bindings.keys()
-            )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -1667,6 +1661,11 @@ class GraphModuleDeserializer(metaclass=Final):
                     sym = self.symbol_name_to_symbol[expr_str]
                 else:
                     self.symbol_name_to_symbol[expr_str] = sym
+                    if (
+                        isinstance(sym, sympy.Symbol)
+                        and symbolic_shapes.symbol_is_type(sym, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+                    ):
+                        self.unbacked_symbols.add(sym)
                 # hints
                 if (
                     hint is not None
@@ -1879,6 +1878,18 @@ class GraphModuleDeserializer(metaclass=Final):
                 for arg in output_node.args[0]
             )
 
+        # recompute unbacked bindings
+        for node in self.graph.nodes:
+            if (
+                (val := node.meta.get("val")) is not None
+                and (
+                    unbacked_bindings := symbolic_shapes._free_unbacked_symbols_with_path(
+                        val, (), shape_env=self.shape_env, pending=self.unbacked_symbols, simplify=True
+                    )
+                )
+            ):
+                node.meta["unbacked_bindings"] = unbacked_bindings
+
         return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
@@ -1957,16 +1968,6 @@ class GraphModuleDeserializer(metaclass=Final):
             fx_node.kwargs,
             fx_node.meta.get("val"),
         )
-        if "unbacked_bindings" in serialized_node.metadata:
-            for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
-                u = self.symbol_name_to_symbol[u_name]
-                # these are pending fresh unbacked symbols, so update shape env
-                self.shape_env.pending_fresh_unbacked_symbols.append(u)
-            # consume pending fresh unbacked symbols and reconstruct key paths to them
-            unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
-                self.shape_env, fx_node.meta["val"]
-            )
-            fx_node.meta["unbacked_bindings"] = unbacked_bindings
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
@@ -2133,6 +2134,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             # we also need to bump unbacked sym[float,int] counters in the
             # shape env to accommodate unbacked symbols in the exported program
+            self.unbacked_symbols: set[sympy.Symbol] = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
             unbacked_symfloat_prefix, unbacked_symint_prefix = (
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]

@@ -786,6 +786,49 @@ class TestDeserialize(TestCase):
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
+    def test_unbacked_bindings(self):
+        from torch._guards import detect_fake_mode
+        from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                n = x.item()
+                n = n * 2 + y.item()
+                return n + 2
+
+        inps = (
+            torch.tensor(4),
+            torch.tensor(5),
+        )
+        ep = torch.export.export(M(), inps, strict=True).run_decompositions()
+
+        # check bindings after deserialization
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        bound = set()
+        for old_node, new_node in zip(ep.graph.nodes, loaded_ep.graph.nodes):
+            self.assertTrue(
+                not (
+                    ("unbacked_bindings" in old_node.meta)
+                    ^ ("unbacked_bindings" in new_node.meta)
+                )
+            )
+            bound.update(new_node.meta.get("unbacked_bindings", {}))
+
+        # check ShapeEnv counters
+        shape_env = detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        next_index = next(shape_env.unbacked_symint_counter)
+        for symbol in bound:
+            self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
+            self.assertTrue(
+                int(str(symbol)[len(prefix_str[SymT.UNBACKED_INT]):]) < next_index
+            )
+
     def test_sym_bool_dynamic_shapes(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
