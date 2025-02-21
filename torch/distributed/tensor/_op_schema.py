@@ -390,7 +390,10 @@ class OpSchema:
             to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema, is_leaf = lambda x: isinstance(x, DTensorSpec)
+            DTensorSpec,
+            _rebuild_tensor_from_dtensor_meta,
+            self.args_schema,
+            is_leaf=lambda x: isinstance(x, DTensorSpec),
         )
 
     def gen_fake_kwargs(self) -> KwargsType:
@@ -400,7 +403,10 @@ class OpSchema:
             to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema, is_leaf = lambda x: isinstance(x, DTensorSpec)
+            DTensorSpec,
+            _rebuild_tensor_from_dtensor_meta,
+            self.kwargs_schema,
+            is_leaf=lambda x: isinstance(x, DTensorSpec),
         )
 
     def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:

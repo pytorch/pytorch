@@ -126,7 +126,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         res = fn(x)
         res.to_local().sum().backward()
-    
+
     def test_dtensor_basic_export(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -137,25 +137,32 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.buffer = torch.nn.Buffer(param_x)
+
             def forward(self, x):
-                inter = self.buffer + DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+                inter = self.buffer + DTensor.from_local(
+                    x, mesh, [Shard(0)], run_check=False
+                )
                 return inter.to_local()
 
-        torch.utils._pytree.register_constant(torch.distributed.tensor._dtensor_spec.DTensorSpec)
+        torch.utils._pytree.register_constant(
+            torch.distributed.tensor._dtensor_spec.DTensorSpec
+        )
         torch.utils._pytree.register_constant(DeviceMesh)
 
         ep = torch.export.export_for_training(Foo(), (torch.randn(4, 4),), strict=False)
-        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
 def forward(self, b_buffer, x):
     to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float32, layout = torch.strided, device = device(type='cuda'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
-    __init__0 = self.__init__0
-    dtensor0 = self.DTensor0
-    flat_apply = torch.ops.higher_order.flat_apply(dtensor0, __init__0, view_as, False);  dtensor0 = __init__0 = view_as = None
+    dtensor___init__0 = self.dtensor___init__0
+    dtensor_const_func_spec0 = self.dtensor_const_func_spec0
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
     add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
     access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
     view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
-    return (view_as_1,)"""
+    return (view_as_1,)""",  # noqa: B950
         )
 
     def test_placement_compile(self):

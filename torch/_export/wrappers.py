@@ -128,50 +128,90 @@ def _mark_strict_experimental(cls):
     return cls
 
 
-def _mark_constructor_exportable_experimental(constructor_subclass):
+def _register_and_get_spec_proxy_in_tracer(tracer, name, spec):
+    fx_name = name + "0"
+    if hasattr(tracer.root, fx_name):
+        assert getattr(tracer.root, fx_name) == spec
+        return tracer.create_proxy("get_attr", fx_name, (), {})
+
+    qualname = tracer.get_fresh_qualname(name)
+    setattr(tracer.root, qualname, spec)
+    return tracer.create_proxy("get_attr", qualname, (), {})
+
+
+def _mark_subclass_constructor_exportable_experimental(constructor_subclass):
+    """
+    Experimental decorator that makes subclass to be traceable in export
+    with pre-dispatch IR. To make your subclass traceble in export, you need to:
+        1. Implement __init__ method for your subclass (Look at DTensor implementation)
+        2. Decorate your __init__ method with _mark_constructor_exportable_experimental
+
+    Example:
+
+    class FooTensor(torch.Tensor):
+        @staticmethod
+        def __new__(cls, elem, *, requires_grad=False):
+            # ...
+            return torch.Tensor._make_subclass(cls, elem, requires_grad=requires_grad)
+
+        @_mark_subclass_constructor_exportable_experimental
+        def __init__(self, elem, ...):
+            # ...
+    """
+
     def wrapper(*args, **kwargs):
-        # TODO container type input is not supported, will need to apply flat_apply
-        assert is_traceable_wrapper_subclass_type(type(args[0]))
+        assert is_traceable_wrapper_subclass_type(
+            type(args[0])
+        ), "Can only apply _mark_constructor_exportable_experimental on tensor subclass constructors."
+        assert callable(constructor_subclass) and (
+            constructor_subclass.__name__ == "__init__"
+        ), "_mark_constructor_exportable_experimental can only be applied on tensor subclass constructors."  # noqa: B950
         constructor_subclass(*args, **kwargs)
-        if torch._C._is_torch_function_mode_enabled():
-            torch_function_mode_stack = (
-                torch.overrides._get_current_function_mode_stack()
-            )
-            for mode in torch_function_mode_stack:
-                if isinstance(mode, PreDispatchTorchFunctionMode):
-                    tracer = mode.tracer
-                    flat_proxy_args = []
-                    subclass = args[0]
+        if not torch._C._is_torch_function_mode_enabled():
+            return
+        torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+        for mode in torch_function_mode_stack:
+            if isinstance(mode, PreDispatchTorchFunctionMode):
+                tracer = mode.tracer
+                subclass = args[0]
 
-                    flat_args, in_spec = to_graphable((tuple(args[1:]), kwargs))
+                flat_args, in_spec = to_graphable((tuple(args[1:]), kwargs))
 
-                    qualname = tracer.get_fresh_qualname(constructor_subclass.__name__)
-                    setattr(tracer.root, qualname, in_spec)
-                    spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
+                constructor_spec_name = "_".join(
+                    constructor_subclass.__qualname__.lower().split(".")
+                )
 
-                    for arg in flat_args:
-                        if isinstance(arg, torch.Tensor):
-                            proxy = get_proxy_slot(arg, tracer).proxy
-                            flat_proxy_args.append(proxy)
-                        else:
-                            flat_proxy_args.append(arg)
+                # We actually don't want to create a new spec for each instance
+                # In fx graph, it will look like dtensor___init__0
+                spec_proxy = _register_and_get_spec_proxy_in_tracer(
+                    tracer, constructor_spec_name, in_spec
+                )
+                flat_proxy_args = pytree.tree_map_only(
+                    torch.Tensor, lambda x: get_proxy_slot(x, tracer).proxy, flat_args
+                )
 
-                    _, func_spec = torch.utils._pytree.tree_flatten(
-                        ConstantFunction(type(subclass))
-                    )
-                    qualname = tracer.get_fresh_qualname(type(subclass).__name__)
-                    setattr(tracer.root, qualname, func_spec)
-                    func_spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
+                _, func_spec = torch.utils._pytree.tree_flatten(
+                    ConstantFunction(type(subclass))
+                )
 
-                    inner_proxy = tracer.create_proxy(
-                        "call_function",
-                        flat_apply,
-                        (func_spec_proxy, spec_proxy, *flat_proxy_args),
-                        {},
-                    )
-                    track_tensor_tree(
-                        args[0], inner_proxy, constant=None, tracer=tracer
-                    )
-        # return out
+                # We actually don't want to create a new spec for each instance
+                # In fx graph, it will look like dtensor_const_func_spec
+                # We can't directly shove DTensor.__init__ into fx as it is not
+                # allowed type.
+                fxable_constructor_call_spec_name = (
+                    type(subclass).__name__.lower() + "_const_func_spec"
+                )
+                func_spec_proxy = _register_and_get_spec_proxy_in_tracer(
+                    tracer, fxable_constructor_call_spec_name, func_spec
+                )
+
+                inner_proxy = tracer.create_proxy(
+                    "call_function",
+                    flat_apply,
+                    (func_spec_proxy, spec_proxy, *flat_proxy_args),
+                    {},
+                )
+                track_tensor_tree(subclass, inner_proxy, constant=None, tracer=tracer)
+                return
 
     return wrapper

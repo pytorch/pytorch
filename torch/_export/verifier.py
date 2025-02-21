@@ -18,7 +18,6 @@ from torch.export.graph_signature import (
     TokenArgument,
 )
 from torch.fx import GraphModule
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 if TYPE_CHECKING:
     from torch.export.exported_program import ExportedProgram
@@ -207,7 +206,7 @@ class Verifier(metaclass=_VerifierMeta):
             )
 
             if not isinstance(op, _allowed_op_types()):
-                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions and not is_traceable_wrapper_subclass_type(op):
+                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"
