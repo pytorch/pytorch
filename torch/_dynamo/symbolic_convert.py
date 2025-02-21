@@ -1700,7 +1700,11 @@ class InstructionTranslatorBase(
                 # RERAISE 0
                 self.push(val)
                 self._raise_exception_variable(val)
-        unimplemented("RERAISE")
+        else:
+            _exc = self.pop()
+            val = self.pop()
+            _tb = self.pop()
+            self._raise_exception_variable(val)
 
     def _isinstance_exception(self, val):
         return isinstance(
@@ -1770,15 +1774,13 @@ class InstructionTranslatorBase(
             if len(self.block_stack):
                 # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
 
-                assert len(self.exn_vt_stack)
-                exception_var = self.exn_vt_stack[-1]
-
                 block_stack_entry = self.block_stack.pop()
 
                 while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
                     # TODO(anijain2305) - This is not tested .. unable to create a testcase
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
+                    self.exn_vt_stack.pop()
                     if len(self.block_stack) == 0:
                         # No handler found in this frame. Bubble the exception to the parent
                         # instruction translater.
@@ -1794,6 +1796,9 @@ class InstructionTranslatorBase(
                         "is not exception handler (e.g. try .. with .. except). "
                         f"Current TOS is {block_stack_entry.inst}"
                     )
+
+                exception_var = self.exn_vt_stack.get_current_exception()
+                self.exn_vt_stack.move_current_exception_to_stack()
 
                 # 1) pop values from the stack until it matches the stack depth
                 # for the handler

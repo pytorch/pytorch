@@ -121,7 +121,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     @make_dynamo_test
-    def test_foo(self):
+    def test_propagate_exception_inside_ctx_manager(self):
         @contextlib.contextmanager
         def cm():
             try:

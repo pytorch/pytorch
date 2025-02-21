@@ -671,8 +671,9 @@ class BuiltinVariable(VariableTracker):
                     if left is right:
                         return ConstantVariable.create(op(left, right))
                     if (
-                        type(left) == type(right) == variables.ExceptionVariable
-                        and left.exc_type != right.exc_type
+                        istype(left, variables.ExceptionVariable)
+                        and istype(right, variables.ExceptionVariable)
+                        and left.exc_type is not right.exc_type
                     ):
                         return ConstantVariable.create(op(left, right))
 
