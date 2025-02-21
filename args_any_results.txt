@@ -1,0 +1,259 @@
+torch/_higher_order_ops/utils.py:    operator: OperatorBase, delayed_error: bool, *args: Any, **kwargs: Any
+torch/_higher_order_ops/auto_functionalize.py:        **kwargs: Any,
+torch/_higher_order_ops/auto_functionalize.py:        **kwargs: Any,
+torch/_higher_order_ops/auto_functionalize.py:    **kwargs: Any,
+torch/_higher_order_ops/auto_functionalize.py:    **kwargs: Any,
+torch/_higher_order_ops/auto_functionalize.py:    **kwargs: Any,
+torch/_higher_order_ops/auto_functionalize.py:    **kwargs: Any,
+torch/_functorch/compilers.py:        **kwargs: Any other overrides you want to make to the settings
+torch/nn/parallel/data_parallel.py:    def forward(self, *inputs: Any, **kwargs: Any) -> Any:
+torch/nn/parallel/data_parallel.py:        self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
+torch/nn/parallel/distributed.py:    def _root_copy_hook(self, *args: Any, **kwargs: Any) -> None:
+torch/nn/parallel/distributed.py:        *args: Any,
+torch/nn/parallel/distributed.py:        **kwargs: Any,
+torch/nn/utils/rnn.py:    def to(self, *args: Any, **kwargs: Any) -> Self:
+torch/nn/utils/rnn.py:    def cuda(self, *args: Any, **kwargs: Any) -> Self:
+torch/nn/utils/rnn.py:    def cpu(self, *args: Any, **kwargs: Any) -> Self:
+torch/nn/modules/linear.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/nn/modules/container.py:    def __init__(self, **kwargs: Any) -> None:
+torch/nn/modules/module.py:    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+torch/onnx/_internal/fx/_pass.py:    *args: Any,
+torch/onnx/_internal/fx/_pass.py:    **kwargs: Any,
+torch/onnx/_internal/fx/_pass.py:        self, fake_mode: fake_tensor.FakeTensorMode | None, *args: Any
+torch/onnx/_internal/diagnostics/infra/decorator.py:def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
+torch/distributed/checkpoint/filesystem.py:        *args: Any,
+torch/distributed/checkpoint/filesystem.py:        **kwargs: Any,
+torch/distributed/checkpoint/logger.py:    log_exceptions: bool = False, **wrapper_kwargs: Any
+torch/distributed/_serialization.py:    **pickle_load_args: Any,
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/distributed/elastic/rendezvous/_etcd_stub.py:        self, key: str, value: Any, ttl: Optional[int] = None, **kwargs: Any
+torch/distributed/elastic/rendezvous/utils.py:        *args: Any,
+torch/distributed/elastic/rendezvous/utils.py:        **kwargs: Any,
+torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py:        *args: Any,
+torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py:        *args: Any,
+torch/distributed/optim/zero_redundancy_optimizer.pyi:    def step(self, closure: None = ..., **kwargs: Any) -> None: ...
+torch/distributed/optim/zero_redundancy_optimizer.pyi:    def step(self, closure: Callable[[], float], **kwargs: Any) -> float: ...
+torch/distributed/optim/zero_redundancy_optimizer.pyi:        **kwargs: Any,
+torch/distributed/optim/zero_redundancy_optimizer.py:        **kwargs: Any,
+torch/distributed/optim/zero_redundancy_optimizer.py:        **kwargs: Any,
+torch/distributed/_composable/replicate.py:def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+torch/distributed/_tools/mem_tracker.py:    def _track_inputs_or_outputs(self, args: Any) -> int:
+torch/distributed/_tools/mem_tracker.py:    def _pre_bw_hook(self, module: nn.Module, args: Any) -> None:
+torch/distributed/_tools/mem_tracker.py:    def _post_bw_hook(self, module: nn.Module, args: Any) -> None:
+torch/distributed/_tools/mem_tracker.py:            optimizer: optim.Optimizer, args: Any, kwargs: Any
+torch/distributed/_tools/mem_tracker.py:            optimizer: optim.Optimizer, args: Any, kwargs: Any
+torch/distributed/_tools/mem_tracker.py:    def __exit__(self, *args: Any) -> None:
+torch/distributed/_tools/runtime_estimator.py:    def __exit__(self, *args: Any) -> None:
+torch/distributed/_tools/fsdp2_mem_tracker.py:                optimizer: optim.Optimizer, args: Any, kwargs: Any
+torch/distributed/_tools/fsdp2_mem_tracker.py:                optimizer: optim.Optimizer, args: Any, kwargs: Any
+torch/distributed/_tools/fsdp2_mem_tracker.py:    def __exit__(self, *args: Any) -> None:
+torch/distributed/_tools/sac_estimator.py:    def __exit__(self, *args: Any) -> None:  # type: ignore[no-untyped-def]
+torch/distributed/fsdp/_state_dict_utils.py:    *args: Any,
+torch/distributed/fsdp/_state_dict_utils.py:    *args: Any,
+torch/distributed/fsdp/_state_dict_utils.py:    *args: Any,
+torch/distributed/fsdp/_fully_shard/_fsdp_common.py:def _raise_assert_with_print(*args: Any, **kwargs: Any):
+torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py:        def to_sharded_hook(*args: Any, **kwargs: Any) -> None:
+torch/distributed/fsdp/_fully_shard/_fully_shard.py:def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+torch/distributed/fsdp/_fully_shard/_fully_shard.py:    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+torch/distributed/fsdp/_fully_shard/_fsdp_state.py:    def wrapped_pre_hook(*args: Any, **kwargs: Any):
+torch/distributed/fsdp/_fully_shard/_fsdp_state.py:        def wrapped_post_hook(*args: Any, **kwargs: Any):
+torch/distributed/fsdp/fully_sharded_data_parallel.py:    def forward(self, *args: Any, **kwargs: Any) -> Any:
+torch/distributed/fsdp/_common_utils.py:    module: nn.Module, **kwargs: Any
+torch/distributed/fsdp/wrap.py:    *, wrapper_cls: Any, **wrapper_kwargs: Any
+torch/distributed/fsdp/wrap.py:    **kwargs: Any,
+torch/distributed/fsdp/wrap.py:    def enable_autowrap_context(kwargs: Any) -> None:
+torch/distributed/utils.py:def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str, ...]]:
+torch/distributed/utils.py:    *args: Any,
+torch/distributed/utils.py:    **kwargs: Any,
+torch/distributed/tensor/experimental/_attention.py:    **kwargs: Any,
+torch/autograd/graph.py:    *args: Any,
+torch/autograd/graph.py:    **kwargs: Any,
+Binary file torch/autograd/__pycache__/function.cpython-311.pyc matches
+torch/autograd/function.py:    def forward(*args: Any, **kwargs: Any) -> Any:
+torch/autograd/function.py:            def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+torch/autograd/function.py:            def forward(*args: Any, **kwargs: Any) -> Any:
+torch/autograd/function.py:    def forward(self, *args: Any) -> Any:  # type: ignore[override]
+torch/autograd/function.py:    def save_for_backward(self, *args: Any) -> None:
+torch/autograd/function.py:    def mark_dirty(self, *args: Any, **kwargs: Any) -> None:
+torch/autograd/function.py:    def mark_non_differentiable(self, *args: Any, **kwargs: Any) -> None:
+torch/fx/experimental/symbolic_shapes.py:    def __init__(self, cond: sympy.Basic, *args: Any) -> None:
+torch/fx/experimental/symbolic_shapes.py:        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:
+torch/fx/experimental/symbolic_shapes.py:        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
+torch/fx/experimental/symbolic_shapes.py:    def __init__(self, *args: Any) -> None:
+torch/fx/experimental/symbolic_shapes.py:    def __init__(self, *args: Any) -> None:
+torch/fx/experimental/symbolic_shapes.py:        **kwargs: Any,
+torch/fx/experimental/symbolic_shapes.py:    def produce_guards(self, *args: Any, **kwargs: Any) -> list[str]:
+torch/fx/graph.py:    def process_inputs(self, *args: Any) -> Any:
+torch/cuda/__init__.py:                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
+torch/_inductor/cudagraph_trees.py:    *args: Any,
+torch/_inductor/cudagraph_trees.py:    **kwargs: Any,
+torch/_inductor/ops_handler.py:        def fallback(*args: Any, **kwargs: Any) -> Any:
+torch/_inductor/codecache.py:    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/codecache.py:    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/codecache.py:    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/codecache.py:def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
+torch/_inductor/codecache.py:    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+torch/_inductor/codecache.py:    def generate_halide(cls, *args: Any, **kwargs: Any) -> Callable[[], Any]:
+torch/_inductor/codecache.py:        def _wrapped_func(*args: Any) -> None:
+torch/_inductor/codecache.py:    def __exit__(self, *args: Any) -> None:
+torch/_inductor/cpp_builder.py:    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/cpp_builder.py:    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/cpp_builder.py:    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+torch/_inductor/pattern_matcher.py:    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+torch/_inductor/pattern_matcher.py:    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+torch/_inductor/pattern_matcher.py:        self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
+torch/_inductor/pattern_matcher.py:    def __init__(self, format_string: str, *args: Any, **kwargs: Any) -> None:
+torch/_inductor/pattern_matcher.py:        *args: Any,
+torch/_inductor/pattern_matcher.py:        **kwargs: Any,
+torch/_inductor/pattern_matcher.py:    def normalize_args(**kwargs: Any) -> list[Any]:
+torch/_inductor/pattern_matcher.py:def _not_implemented(*args: Any, **kwargs: Any) -> NoReturn:
+torch/_inductor/pattern_matcher.py:        joint_graph: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
+torch/_inductor/graph.py:    def log_module_code(*args: Any, **kwargs: Any) -> None:
+torch/_inductor/graph.py:    def run(self, *args: Any) -> Any:  # type: ignore[override]
+torch/_inductor/graph.py:    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
+torch/_inductor/graph.py:    def call_module(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+torch/_inductor/graph.py:    def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+torch/_inductor/graph.py:    def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
+torch/_inductor/runtime/triton_compat.py:    def _raise_error(*args: Any, **kwargs: Any) -> Any:
+torch/_inductor/runtime/triton_compat.py:        def jit(*args: Any, **kwargs: Any) -> Any:
+torch/_inductor/runtime/benchmarking.py:        **kwargs: Any,
+torch/_inductor/runtime/benchmarking.py:    def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
+torch/_inductor/runtime/benchmarking.py:    def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
+torch/_inductor/runtime/benchmarking.py:        **kwargs: Any,
+torch/_inductor/compile_fx.py:    def wrapper(*args: Any, **kwargs: Any) -> Any:
+torch/_inductor/compile_fx.py:    def wrapper(*args: Any) -> Any:
+torch/_inductor/ir.py:    def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
+torch/_inductor/ir.py:        **kwargs: Any,
+torch/_inductor/ir.py:        **kwargs: Any,
+torch/_inductor/analyze_preserves_zero_mask.py:    def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
+torch/_inductor/analyze_preserves_zero_mask.py:    def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
+torch/_inductor/codegen/mps.py:        **kwargs: Any,
+torch/_inductor/codegen/common.py:    *args: Any,
+torch/_inductor/codegen/common.py:    **kwargs: Any,
+torch/_inductor/codegen/common.py:        def unimplemented(self: OpOverrides, *args: Any, **kwargs: Any) -> OpVarT:
+torch/_inductor/codegen/common.py:    def update_on_args(self, name: str, args: Any, kwargs: Any) -> None:
+torch/_inductor/codegen/common.py:    def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
+torch/_inductor/codegen/common.py:        self, choices: list[Any], **kwargs: Any
+torch/_inductor/codegen/common.py:    def generate(self, **kwargs: Any) -> ChoiceCaller:
+torch/_inductor/codegen/common.py:    def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
+torch/_inductor/codegen/cuda_combined_scheduling.py:    def codegen_combo_kernel(self, *args: Any, **kwargs: Any) -> None:
+torch/_inductor/utils.py:def any_is_symbolic(*args: Any) -> bool:
+torch/_inductor/utils.py:    def __exit__(self, *args: Any) -> None:
+torch/_inductor/utils.py:    fn: Callable[..., Any], *args: Any, **kwargs: Any
+torch/_inductor/utils.py:def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
+torch/_inductor/utils.py:            def call(self, *args: Any, **kwargs: Any) -> None:
+torch/_inductor/utils.py:def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+torch/_inductor/utils.py:def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
+torch/_inductor/utils.py:    fn: Callable[..., Any], *args: Any, **kwargs: Any
+torch/_inductor/utils.py:    def fake_init(*args: Any, **kwargs: Any) -> None:
+torch/_inductor/utils.py:def maybe_profile(should_profile: bool, *args: Any, **kwargs: Any) -> Iterator[Any]:
+torch/_inductor/utils.py:def is_dynamic(*args: Any) -> bool:
+torch/_inductor/utils.py:    fn: Callable[..., Any], *args: Any, **kwargs: Any
+torch/_inductor/debug.py:        def func1(*args: Any) -> int:
+torch/_inductor/debug.py:        *args: Any,
+torch/_inductor/debug.py:        **kwargs: Any,
+torch/_inductor/debug.py:        *args: Any,
+torch/_inductor/debug.py:        **kwargs: Any,
+torch/_inductor/debug.py:            def ignored(*args: Any, **kwargs: Any) -> None:
+torch/_inductor/debug.py:def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/decomposition.py:    **kwargs: Any,
+torch/_inductor/fx_passes/pad_mm.py:def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
+torch/_inductor/scheduler.py:    def __call__(self, reason: str, *args: Any) -> None:
+torch/_inductor/bounds.py:    def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
+torch/_inductor/loop_body.py:    def _add_index(self, expr: sympy.Expr, mtype: MemoryUsageType, **kwargs: Any):
+torch/_inductor/subgraph_lowering.py:        args: Any,
+torch/utils/benchmark/utils/valgrind_wrapper/timer_interface.py:        def run(args: list[str], **kwargs: Any) -> tuple[CompletedProcessType, str]:
+torch/utils/benchmark/utils/_stubs.py:        **kwargs: Any,
+torch/utils/_cxx_pytree.py:    def wrapped(*args: Any, **kwargs: Any) -> Any:
+torch/utils/data/datapipes/datapipe.pyi.in:    def __reduce_ex__(self, *args: Any, **kwargs: Any): ...
+torch/utils/data/datapipes/datapipe.pyi.in:    def __reduce_ex__(self, *args: Any, **kwargs: Any): ...
+torch/utils/data/datapipes/datapipe.pyi:    def __reduce_ex__(self, *args: Any, **kwargs: Any): ...
+torch/utils/data/datapipes/datapipe.pyi:    def __reduce_ex__(self, *args: Any, **kwargs: Any): ...
+torch/utils/_strobelight/cli_function_profiler.py:    profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
+torch/_C/_profiler.pyi:    def __exit__(self, *args: Any) -> None: ...
+torch/_C/__init__.pyi.in:def fork(*args: Any, **kwargs: Any) -> Future: ...
+torch/_C/__init__.pyi.in:def _awaitable(*args: Any, **kwargs: Any) -> _Await: ...
+torch/_C/__init__.pyi.in:    args: Any,
+torch/_C/__init__.pyi.in:    kwargs: Any,
+torch/_C/__init__.pyi.in:    args: Any,
+torch/_C/__init__.pyi.in:    kwargs: Any,
+torch/_C/__init__.pyi.in:def _jit_onnx_log(*args: Any) -> None: ...
+torch/_C/__init__.pyi.in:    *args: Any,
+torch/_C/__init__.pyi.in:    def add_input(self, *args: Any, **kwargs: Any) -> None: ...
+torch/_C/__init__.pyi.in:    def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
+torch/_C/__init__.pyi.in:    def run_backward(self, *args: Any, **kwargs: Any) -> Tuple[Tensor, ...]: ...
+torch/_C/__init__.pyi:def fork(*args: Any, **kwargs: Any) -> Future: ...
+torch/_C/__init__.pyi:def _awaitable(*args: Any, **kwargs: Any) -> _Await: ...
+torch/_C/__init__.pyi:    args: Any,
+torch/_C/__init__.pyi:    kwargs: Any,
+torch/_C/__init__.pyi:    args: Any,
+torch/_C/__init__.pyi:    kwargs: Any,
+torch/_C/__init__.pyi:def _jit_onnx_log(*args: Any) -> None: ...
+torch/_C/__init__.pyi:    *args: Any,
+torch/_C/__init__.pyi:    def add_input(self, *args: Any, **kwargs: Any) -> None: ...
+torch/_C/__init__.pyi:    def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
+torch/_C/__init__.pyi:    def run_backward(self, *args: Any, **kwargs: Any) -> Tuple[Tensor, ...]: ...
+torch/_C/__init__.pyi:    def __init__(self, *args: Any, device: Optional[DeviceLikeType] = None) -> None: ...
+torch/_C/__init__.pyi:    def new(cls, *args: Any, device: Optional[DeviceLikeType] = None) -> Self: ...
+torch/_C/_distributed_rpc.pyi:    *args: Any,
+torch/_C/_distributed_rpc.pyi:    **kwargs: Any,
+torch/_C/_distributed_rpc.pyi:    *args: Any,
+torch/_C/_distributed_rpc.pyi:    **kwargs: Any,
+torch/_C/_distributed_rpc.pyi:    *args: Any,
+torch/_C/_distributed_rpc.pyi:    **kwargs: Any,
+torch/testing/_internal/common_fsdp.py:    def init(*args: Any, **kwargs: Any) -> nn.Module:
+torch/testing/_internal/common_fsdp.py:        *model_args: Any,
+torch/testing/_internal/common_fsdp.py:        **model_kwargs: Any,
+torch/testing/_internal/common_fsdp.py:    *args: Any,
+torch/testing/_internal/common_fsdp.py:    **kwargs: Any,
+torch/testing/_internal/common_distributed.py:    **test_kwargs: Any,
+torch/testing/_internal/common_methods_invocations.py:    ref_args: Any
+torch/functional.py:def einsum(*args: Any) -> Tensor:
+torch/amp/grad_scaler.py:        *args: Any,
+torch/amp/grad_scaler.py:        **kwargs: Any,
+torch/amp/grad_scaler.py:        self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
+torch/_dynamo/logging.py:    def log(level: int, msg: str, **kwargs: Any) -> None:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:def trace_wrapped(*args: Any, **kwargs: Any) -> Any:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:    *args: Any,
+torch/_dynamo/_trace_wrapped_higher_order_op.py:    **kwargs: Any,
+torch/_dynamo/_trace_wrapped_higher_order_op.py:    def self_invoke(*args: Any, **dyn_kwargs: Any) -> Any:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:def inner_fake(*args: Any, **kwargs: Any) -> None:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:def _trace_wrapped_op_dense(*args: Any, fn: Any, **kwargs: Any) -> Any:
+torch/_dynamo/_trace_wrapped_higher_order_op.py:def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+torch/_dynamo/mutation_guard.py:        def patched_init(self: Module, *args: Any, **kwargs: Any) -> None:
+torch/_dynamo/external_utils.py:    hook: Callable[..., Optional[torch.Tensor]], *args: Any, **kwargs: Any
+torch/_dynamo/external_utils.py:    *args: Any,
+torch/_dynamo/external_utils.py:    *args: Any, bw_state: Any, hook_name: str, **kwargs: Any
+torch/_dynamo/external_utils.py:    _: Any, result: Any, *args: Any, bw_state: Any, hooks_name: str, module_name: str
+torch/_dynamo/exc.py:    def __init__(self, *args: Any, restart_reason: Optional[str] = None) -> None:
+torch/_dynamo/exc.py:        self, *args: Any, first_useful_frame: Optional[types.FrameType], **kwargs: Any
+torch/_dynamo/exc.py:    def __init__(self, *args: Any, **kwargs: Any) -> None:
+torch/_dynamo/variables/lazy.py:    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
+torch/_dynamo/variables/lazy.py:    def clone(self, **kwargs: Any) -> VariableTracker:
+torch/_dynamo/variables/lazy.py:        self: LazyVariableTracker, *args: Any, **kwargs: Any
+torch/_dynamo/polyfills/operator.py:def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any]:
+torch/_dynamo/polyfills/pytree.py:    def _(*args: Any, **kwargs: Any) -> bool:
+torch/_dynamo/profiler.py:    def _wrapped(*args: Any) -> Any:
+torch/_dynamo/graph_deduplication.py:def _flatten_args_kwargs(args: Any) -> list[Node]:
+torch/_dynamo/graph_deduplication.py:    def flatten(args: Any) -> None:
+torch/ao/ns/fx/n_shadows_utils.py:        new_args: Any = None
+torch/ao/quantization/experimental/fake_quantize.py:    def __init__(self, observer: Callable = APoTObserver, **observer_kwargs: Any):
+torch/ao/quantization/fake_quantize.py:        **observer_kwargs: Any,
+torch/export/exported_program.py:    def _graph_module_flat_inputs(self, args: Any, kwargs: Any) -> Any:
+torch/export/exported_program.py:    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+torch/_strobelight/cli_function_profiler.py:    profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
+torch/_strobelight/compile_time_profiler.py:        cls, func: Any, phase_name: str, *args: Any, **kwargs: Any
+torch/serialization.py:    **pickle_load_args: Any,

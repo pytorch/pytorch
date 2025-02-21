@@ -3,7 +3,9 @@ import operator
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Generic, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
+
 
 import torch
 from torch._utils import (
@@ -17,6 +19,8 @@ from torch.nn.parallel.parallel_apply import parallel_apply
 from torch.nn.parallel.replicate import replicate
 from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 
+P = ParamSpec("P")
+R = TypeVar("R")
 
 __all__ = ["DataParallel", "data_parallel"]
 
@@ -168,7 +172,7 @@ class DataParallel(Module, Generic[T]):
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)
 
-    def forward(self, *inputs: Any, **kwargs: Any) -> Any:
+    def forward(self, *inputs: P.args, **kwargs: P.kwargs) -> R:
         with torch.autograd.profiler.record_function("DataParallel.forward"):
             if not self.device_ids:
                 return self.module(*inputs, **kwargs)
