@@ -136,6 +136,7 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
                     "model": {
                         "name": result.model,
                         "backend": "inductor",
+                        "origins": [result.benchmark]
                     },
                     "metric": {
                         "name": metric_name,
