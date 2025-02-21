@@ -274,9 +274,9 @@ def add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]) 
     (function/class, string) where string is the full path of the function/class.
 
     Within the serialized format, each function is identified with its full
-    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    path as ``{__module__}.{__qualname__}``. When calling this API, you can provide this
     full path that should match the one in the checkpoint otherwise the default
-    ``{fn.__module__}.{fn.__name__}`` will be used.
+    ``{fn.__module__}.{fn.__qualname__}`` will be used.
 
     Args:
         safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
