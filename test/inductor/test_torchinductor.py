@@ -10292,6 +10292,13 @@ class CommonTemplate:
             [x],
         )
 
+    def test_pow_by_natural_log2_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        self.common(fn, [torch.randn(5)])
+
     def test_setitem_with_int_parameter(self):
         x = torch.zeros(7, device=self.device)
 
