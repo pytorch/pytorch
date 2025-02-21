@@ -12095,6 +12095,48 @@ class GraphModule(torch.nn.Module):
             )
             FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
 
+    def test_default_decomposition_core_cia_ops(self):
+        """
+        Verify that core ATen ops with Composite Implicit Autograd dispatch are not
+        decomposed by default.
+        """
+
+        # TODO Add avg_pool1d, and adaptive_avg_pool1d when ready.
+        # See issue #116684.
+        core_cia_ops = {
+            "torch.ops.aten.upsample_bilinear2d.vec": (
+                torch.ops.aten.upsample_bilinear2d.vec,
+                {
+                    "align_corners": False,
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+            "torch.ops.aten.upsample_nearest2d.vec": (
+                torch.ops.aten.upsample_nearest2d.vec,
+                {
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+        }
+
+        for op_name, (op, kwargs) in core_cia_ops.items():
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return op(x, **kwargs)
+
+            ep = export(M(), (torch.randn(2, 3, 4, 5),))
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+            decomp_table = default_decompositions()
+
+            ep = ep.run_decompositions(
+                decomp_table=decomp_table,
+            )
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
