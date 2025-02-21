@@ -27,6 +27,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._inductor.utils import _registered_caches
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -1640,6 +1641,10 @@ class AlgorithmSelectorCache(PersistentCache):
             ]
         ] = []
 
+    def cache_clear(self) -> None:
+        self.precompile_cache.clear()
+        self.feedback_saver_fns.clear()
+
     def __call__(
         self,
         name,
@@ -2286,6 +2291,7 @@ def autotune_select_algorithm(*args, **kwargs):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+        _registered_caches.append(_ALGORITHM_SELECTOR_CACHE)
 
     if "return_multi_template" not in kwargs:
         kwargs[
@@ -2301,6 +2307,7 @@ def add_feedback_saver(
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+        _registered_caches.append(_ALGORITHM_SELECTOR_CACHE)
     _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
 
 
