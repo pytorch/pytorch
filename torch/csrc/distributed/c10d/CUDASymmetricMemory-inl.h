@@ -9,7 +9,9 @@
 #include <ATen/ATen.h>
 #if !defined(USE_ROCM)
 #include <cuda_bf16.h>
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
 #include <cuda/atomic>
+#endif
 #endif
 namespace c10d::symmetric_memory {
 
@@ -43,13 +45,13 @@ inline constexpr bool dependent_false = dependent_bool_value<false, Args...>;
 template <std::memory_order Sem>
 __device__ __forceinline__ uint32_t
 cas(uint32_t* addr, uint32_t compare, uint32_t val) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600))
+#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
+  ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
+  return compare;
+#else
   CUDA_KERNEL_ASSERT(false);
   return 0;
-#else
-  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
-  ref.compare_exchange_strong(compare, val, Sem);
-  return compare;
 #endif
 }
 
