@@ -1130,9 +1130,7 @@ class TestInductorOpInfo(TestCase):
                                 }
                             )
                         # C++ CPU backend
-                        elif isinstance(
-                            get_scheduling_for_device(device_type)(None), CppScheduling
-                        ):
+                        elif torch._inductor.config.cpu_backend == "cpp":
                             adjusted_kwargs.update(
                                 {
                                     "check_gradient": False,  # Skip checking gradient on CPU for now
