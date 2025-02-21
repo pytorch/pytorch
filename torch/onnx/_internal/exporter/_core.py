@@ -1262,7 +1262,7 @@ def export(
 
             if result.exception is not None:
                 failed_results.append(result)
-            else:
+            if result.success:
                 assert result.exported_program is not None
                 program = result.exported_program
                 break
