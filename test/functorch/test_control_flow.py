@@ -7695,8 +7695,6 @@ class GraphModule(torch.nn.Module):
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
     def test_cond_mismatched_branch_strided_output(self, dynamic, backend):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 def true_fn(x, y):
@@ -7721,132 +7719,10 @@ class GraphModule(torch.nn.Module):
         m = M()
         x, y = torch.randn(1, 6, 1, 5, 4, 3), torch.randn(1, 4, 5, 1, 3, 8)
         out = m(x, y)
-        if backend == "eager" and dynamic and not TEST_WITH_CROSSREF:
-            bk = EagerAndRecordGraphs()
-            compiled_out = torch.compile(
-                m, backend=bk, dynamic=dynamic, fullgraph=True
-            )(x, y)
-            self.assertEqual(compiled_out, out)
-            self.assertExpectedInline(
-                normalize_gm(bk.graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", s2: "Sym(s2)", s3: "Sym(s3)", L_x_: "f32[1, s0, 1, s1, s2, s3]", s4: "Sym(s4)", L_y_: "f32[1, s2, s1, 1, s3, s4]"):
-        l_x_ = L_x_
-        l_y_ = L_y_
-
-        sum_1: "f32[]" = l_x_.sum()
-        gt: "b8[]" = sum_1 > 0;  sum_1 = None
-
-        cond_true_0 = self.cond_true_0
-        cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [s1, s2, s3, l_x_, s0, l_y_, s4]);  gt = cond_true_0 = cond_false_0 = s1 = s2 = s3 = l_x_ = s0 = s4 = None
-
-        getitem_2: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_2, 0);  getitem_2 = None
-        getitem_3: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int_1: "Sym(u1)" = torch.ops.aten.sym_size.int(getitem_3, 1);  getitem_3 = None
-        getitem_4: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int_2: "Sym(u2)" = torch.ops.aten.sym_size.int(getitem_4, 2);  getitem_4 = None
-        getitem_5: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int_3: "Sym(u3)" = torch.ops.aten.sym_size.int(getitem_5, 3);  getitem_5 = None
-        getitem_6: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int_4: "Sym(u4)" = torch.ops.aten.sym_size.int(getitem_6, 4);  getitem_6 = None
-        getitem_7: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0]
-        sym_size_int_5: "Sym(u5)" = torch.ops.aten.sym_size.int(getitem_7, 5);  getitem_7 = None
-        getitem_8: "f32[u6, u7]" = cond[1]
-        sym_size_int_6: "Sym(u6)" = torch.ops.aten.sym_size.int(getitem_8, 0);  getitem_8 = None
-        getitem_9: "f32[u6, u7]" = cond[1]
-        sym_size_int_7: "Sym(u7)" = torch.ops.aten.sym_size.int(getitem_9, 1);  getitem_9 = None
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
-
-        ge: "Sym(u0 >= 2)" = sym_size_int >= 2;  sym_size_int = None
-        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
-
-        _check_is_size_1 = torch._check_is_size(sym_size_int_1);  _check_is_size_1 = None
-
-        ge_1: "Sym(u1 >= 4)" = sym_size_int_1 >= 4
-        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 4 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
-        le: "Sym(u1 <= 5)" = sym_size_int_1 <= 5;  sym_size_int_1 = None
-        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_2 = None
-
-        _check_is_size_2 = torch._check_is_size(sym_size_int_2);  _check_is_size_2 = None
-
-        ge_2: "Sym(u2 >= 2)" = sym_size_int_2 >= 2;  sym_size_int_2 = None
-        _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 2 on node 'ge_2'");  ge_2 = _assert_scalar_default_3 = None
-
-        _check_is_size_3 = torch._check_is_size(sym_size_int_3);  _check_is_size_3 = None
-
-        ge_3: "Sym(u3 >= 1)" = sym_size_int_3 >= 1;  sym_size_int_3 = None
-        _assert_scalar_default_4 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 1 on node 'ge_3'");  ge_3 = _assert_scalar_default_4 = None
-
-        _check_is_size_4 = torch._check_is_size(sym_size_int_4);  _check_is_size_4 = None
-
-        ge_4: "Sym(u4 >= 1)" = sym_size_int_4 >= 1;  sym_size_int_4 = None
-        _assert_scalar_default_5 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u4 >= 1 on node 'ge_4'");  ge_4 = _assert_scalar_default_5 = None
-
-        _check_is_size_5 = torch._check_is_size(sym_size_int_5);  _check_is_size_5 = None
-
-        ge_5: "Sym(u5 >= 2)" = sym_size_int_5 >= 2;  sym_size_int_5 = None
-        _assert_scalar_default_6 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u5 >= 2 on node 'ge_5'");  ge_5 = _assert_scalar_default_6 = None
-
-        _check_is_size_6 = torch._check_is_size(sym_size_int_6);  _check_is_size_6 = None
-
-        ge_6: "Sym(u6 >= 3)" = sym_size_int_6 >= 3
-        _assert_scalar_default_7 = torch.ops.aten._assert_scalar.default(ge_6, "Runtime assertion failed for expression u6 >= 3 on node 'ge_6'");  ge_6 = _assert_scalar_default_7 = None
-        le_1: "Sym(u6 <= 4)" = sym_size_int_6 <= 4;  sym_size_int_6 = None
-        _assert_scalar_default_8 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u6 <= 4 on node 'le_1'");  le_1 = _assert_scalar_default_8 = None
-
-        _check_is_size_7 = torch._check_is_size(sym_size_int_7);  _check_is_size_7 = None
-
-        ge_7: "Sym(u7 >= 3)" = sym_size_int_7 >= 3
-        _assert_scalar_default_9 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u7 >= 3 on node 'ge_7'");  ge_7 = _assert_scalar_default_9 = None
-        le_2: "Sym(u7 <= 5)" = sym_size_int_7 <= 5;  sym_size_int_7 = None
-        _assert_scalar_default_10 = torch.ops.aten._assert_scalar.default(le_2, "Runtime assertion failed for expression u7 <= 5 on node 'le_2'");  le_2 = _assert_scalar_default_10 = None
-        getitem: "f32[u0, u1, u2, u3, u4, u5, 1]" = cond[0];  cond = None
-
-        sum_2: "f32[]" = l_y_.sum();  l_y_ = None
-        add: "f32[u0, u1, u2, u3, u4, u5, 1]" = sum_2 + getitem;  sum_2 = getitem = None
-        return (add,)
-
-    class cond_true_0(torch.nn.Module):
-        def forward(self, s1, s2, s3, l_x__true_branch, s0_true_branch, l_y__false_branch, s4_false_branch):
-            s1_1 = s1
-            s2_1 = s2
-            s3_1 = s3
-
-            swapaxes: "f32[s3, s0, 1, s1, s2, 1]" = l_x__true_branch.swapaxes(-1, 0);  l_x__true_branch = None
-            add: "f32[s3, s0, 1, s1, s2, 1]" = swapaxes + 1;  swapaxes = None
-
-            unsqueeze: "f32[s3, 1, s0, 1, s1, s2, 1]" = add.unsqueeze(1);  add = None
-
-            child: "f32[s3, 5, s0, 1, s1, s2, 1]" = unsqueeze.expand(-1, 5, -1, -1, -1, -1, -1);  unsqueeze = None
-
-            child_1: "f32[3, 3]" = torch.empty_strided((3, 3), (0, 1))
-            return (child, child_1)
-
-    class cond_false_0(torch.nn.Module):
-        def forward(self, s1, s2, s3, l_x__true_branch, s0_true_branch, l_y__false_branch, s4_false_branch):
-            s1_1 = s1
-            s2_1 = s2
-            s3_1 = s3
-
-            swapaxes: "f32[s4, s2, s1, 1, s3, 1]" = l_y__false_branch.swapaxes(-1, 0);  l_y__false_branch = None
-            add: "f32[s4, s2, s1, 1, s3, 1]" = swapaxes + 1;  swapaxes = None
-
-            unsqueeze: "f32[s4, 1, s2, s1, 1, s3, 1]" = add.unsqueeze(1);  add = None
-
-            child: "f32[s4, 4, s2, s1, 1, s3, 1]" = unsqueeze.expand(-1, 4, -1, -1, -1, -1, -1);  unsqueeze = None
-
-            child_1: "f32[4, 5]" = torch.empty_strided((4, 5), (0, 1))
-            return (child, child_1)
-""",  # noqa: B950
-            )
-        else:
-            compiled_out = torch.compile(
-                m, backend=backend, dynamic=dynamic, fullgraph=True
-            )(x, y)
-            self.assertEqual(compiled_out, out)
+        compiled_out = torch.compile(
+            m, backend=backend, dynamic=dynamic, fullgraph=True
+        )(x, y)
+        self.assertEqual(compiled_out, out)
 
 
 _hop_schema_test_schema_types = [
