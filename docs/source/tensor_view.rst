@@ -6,7 +6,7 @@ Tensor Views
 =============
 
 PyTorch allows a tensor to be a ``View`` of an existing tensor. View tensor shares the same underlying data
-with its base tensor. Supporting ``View`` avoids explicit data copy, thus allows us to do fast and memory efficient
+with its base tensor. Supporting ``View`` avoids explicit data copy, thus allowing us to do fast and memory efficient
 reshaping, slicing and element-wise operations.
 
 For example, to get a view of an existing tensor ``t``, you can call ``t.view(...)``.
