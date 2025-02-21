@@ -1681,6 +1681,45 @@ def _backward_prologue_functional(
     return all_args
 
 
+def initialize_rng_states(
+    num_rng: int,
+    graphsafe_idx: int,
+    fwd_rng_states: list[torch.Generator],
+    bwd_rng_states: list[torch.Generator],
+):
+    """
+    Initialize the cudagraph safe rng states.
+
+    Initialization of rng states should have a few properties:
+    - the initialization for each rng state should be independent
+    - the initialization should be deterministic
+    - the initialization should be based off current rng state, so that independent graphs do not
+    have equal rng behavior
+
+    We defer initialization of rng states until runtime because compilation is wrapped
+    with preserve_rng_states. Seed initialization should advance the rng states so consecutive compilations
+    do not give equal randomness.
+    """
+    with torch.utils._python_dispatch._disable_current_modes():
+        seeds = torch.randint(0, torch.iinfo(torch.int64).max, (num_rng,), device="cpu")
+        fwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+        bwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+
+
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_epilogue_functional(
     metadata, maybe_subclass_metadata, out, *, make_subclass_override=None
@@ -1818,20 +1857,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
     ):
         num_rng = fw_metadata.num_graphsafe_rng_states
         graphsafe_idx = fw_metadata.graphsafe_rng_state_index
-        if num_rng:
-            assert graphsafe_idx is not None
-            fwd_rng_states = [
-                torch.cuda.default_generators[graphsafe_idx].clone_state()
-                for _ in range(num_rng)
-            ]
-            bwd_rng_states = [
-                torch.cuda.default_generators[graphsafe_idx].clone_state()
-                for _ in range(num_rng)
-            ]
-        else:
-            fwd_rng_states = []
-            bwd_rng_states = []
-
+        fwd_rng_states: list[torch.Generator] = []
+        bwd_rng_states: list[torch.Generator] = []
         curr_fwd_iter = itertools.count(0)
         backward_state_position = 0
         pending_forwards: set[int] = set()
@@ -1859,6 +1886,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ctx._compiled_autograd_backward_state = bw_state
 
                 if num_rng:
+                    if len(fwd_rng_states) == 0:
+                        assert graphsafe_idx is not None
+                        initialize_rng_states(
+                            num_rng, graphsafe_idx, fwd_rng_states, bwd_rng_states
+                        )
+
                     _curr_iter = next(curr_fwd_iter)
                     ctx._curr_iter = _curr_iter
 

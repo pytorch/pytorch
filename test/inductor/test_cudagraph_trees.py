@@ -53,7 +53,7 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 aten = torch.ops.aten
@@ -2547,29 +2547,38 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             obs = ObserverMode()
 
-            def gn(x, y):
-                return torch.sigmoid(torch.rand_like(x) * y) * x
-
-            def fn(x, y):
-                x = torch.sin(x)
-                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
-                x = torch.sin(x)
-                return x
-
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            aot_eager_decomp_partition = functools.partial(
-                aot_eager_decomp_partition_with_mode, mode=obs
-            )
+            for _ in range(2):
+                torch._dynamo.reset()
 
-            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
+                def gn(x, y):
+                    return torch.sigmoid(torch.rand_like(x) * y) * x
 
-            fn(x, y).sum().backward()
-            self.assertEqual(len(obs.op_outputs[aten.rand.default]), 2)
-            self.assertEqual(
+                def fn(x, y):
+                    x = torch.sin(x)
+                    x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                    x = torch.sin(x)
+                    return x
+
+                aot_eager_decomp_partition = functools.partial(
+                    aot_eager_decomp_partition_with_mode, mode=obs
+                )
+
+                fn = torch.compile(fn, backend=aot_eager_decomp_partition)
+
+                fn(x, y).sum().backward()
+
+            self.assertEqual(len(obs.op_outputs[aten.rand.default]), 4)
+            for i in range(2):
+                self.assertEqual(
+                    obs.op_outputs[aten.rand.default][0 + 2 * i],
+                    obs.op_outputs[aten.rand.default][1 + 2 * i],
+                )
+            self.assertNotEqual(
                 obs.op_outputs[aten.rand.default][0],
-                obs.op_outputs[aten.rand.default][1],
+                obs.op_outputs[aten.rand.default][2],
             )
 
         def test_cpu_and_cuda_rng(self):
@@ -2840,5 +2849,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CUDA:
         run_tests(needs="filelock")
