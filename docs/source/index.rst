@@ -57,7 +57,6 @@ Features described in this documentation are classified by release status:
 
    torch
    compile_tutorial_md
-   compile_tutorial_ipynb
    nn
    nn.functional
    tensors
