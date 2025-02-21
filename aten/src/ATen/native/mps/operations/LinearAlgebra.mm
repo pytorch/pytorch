@@ -46,10 +46,10 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto matmulPSO = lib.getPipelineStateForFunc("naive_matmul_" + mps::scalarToMetalTypeString(output));
+  auto matmulPSO = lib.getPipelineStateForFunc("matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self, other});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
       std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
@@ -57,8 +57,14 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
                                        static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
           self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+      uint TILE_DIM = 16; // fastest performance from tests on multiple macs
+      uint gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self, other, output, strides, sizes);
-      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });
