@@ -413,6 +413,8 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if (mps::binary_alpha_kernel("add", self, other, alpha, output))
+    return;
   if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
       !mps::supportsComplex()) {
     // Complex add with non-complex alpha is just add over views

@@ -4,6 +4,20 @@
 #include <metal_stdlib>
 using namespace metal;
 
+struct add_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(a + b);
+  }
+};
+
+struct sub_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(a - b);
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -182,6 +196,14 @@ REGISTER_BINARY_OP(hermite_polynomial_h, float, float);
 REGISTER_BINARY_OP(hermite_polynomial_h, half, half);
 REGISTER_BINARY_OP(hermite_polynomial_he, float, float);
 REGISTER_BINARY_OP(hermite_polynomial_he, half, half);
+REGISTER_BINARY_OP(add, long, long);
+REGISTER_BINARY_OP(add, int, int);
+REGISTER_BINARY_OP(add, float, float);
+REGISTER_BINARY_OP(add, half, half);
+REGISTER_BINARY_OP(add, short, short);
+REGISTER_BINARY_OP(add, uchar, uchar);
+REGISTER_BINARY_OP(add, char, char);
+REGISTER_BINARY_OP(add, bool, bool);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
@@ -196,6 +218,7 @@ REGISTER_BINARY_OP(chebyshev_polynomial_v, bfloat, bfloat);
 REGISTER_BINARY_OP(chebyshev_polynomial_w, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
+REGISTER_BINARY_OP(add, bfloat, bfloat);
 #endif
 
 // Complex binary functions
