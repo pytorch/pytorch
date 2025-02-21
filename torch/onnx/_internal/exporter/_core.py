@@ -23,6 +23,7 @@ from onnxscript.ir import convenience as ir_convenience
 import torch
 import torch.fx
 from torch.export import graph_signature
+from torch.onnx import _flags
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
@@ -1235,6 +1236,12 @@ def export(
         # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
+            if (
+                not _flags.ENABLE_DRAFT_EXPORT
+                and strategy_class is _capture_strategies.TorchExportDraftExportStrategy
+            ):
+                # Skip draft export if it is disabled
+                continue
             strategy = strategy_class(  # type: ignore[abstract]
                 verbose=verbose is not False,  # Treat None as verbose
                 dump=dump_exported_program,
@@ -1253,11 +1260,12 @@ def export(
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
-            if result.exported_program is not None:
+            if not result.success:
+                failed_results.append(result)
+            else:
+                assert result.exported_program is not None
                 program = result.exported_program
                 break
-            else:
-                failed_results.append(result)
 
         assert result is not None
         if result.exported_program is None:

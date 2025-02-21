@@ -48,3 +48,9 @@ USE_EXPERIMENTAL_LOGIC: bool = _load_boolean_flag(
     this_will="use ExportedProgram and the new torch.onnx export logic",
     default=True,
 )
+
+ENABLE_DRAFT_EXPORT: bool = _load_boolean_flag(
+    "TORCH_ONNX_ENABLE_DRAFT_EXPORT",
+    this_will="enable draft export as an graph capturing strategy",
+    default=False,
+)
