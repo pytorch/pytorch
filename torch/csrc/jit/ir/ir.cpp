@@ -100,7 +100,9 @@ void findAllNodes(
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
 template <typename T>
-std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<T>& nodes) {
   out << at::ArrayRef<T>{nodes};
   return out;
 }
@@ -1671,7 +1673,7 @@ size_t Node::blocksFromGraphBlock() {
   return dist;
 }
 
-inline const SourceRange& fakeRange() {
+static inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
   return range;
 }
@@ -2038,7 +2040,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-void inlineCallStackOfNode(
+static void inlineCallStackOfNode(
     Node* n,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
