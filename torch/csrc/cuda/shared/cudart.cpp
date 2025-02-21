@@ -120,6 +120,22 @@ void initCudartBindings(PyObject* module) {
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
       });
+
+  py::enum_<cudaStreamCaptureMode>(
+      cudart,
+      "cuda"
+      "StreamCaptureMode")
+      .value("Global", cudaStreamCaptureModeGlobal)
+      .value("ThreadLocal", cudaStreamCaptureModeThreadLocal)
+      .value("Relaxed", cudaStreamCaptureModeRelaxed);
+
+  cudart.def(
+      "cuda"
+      "ThreadExchangeStreamCaptureMode",
+      [](cudaStreamCaptureMode mode) -> cudaStreamCaptureMode {
+        C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+        return mode;
+      });
 }
 
 } // namespace torch::cuda::shared
