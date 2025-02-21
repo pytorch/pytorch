@@ -3574,7 +3574,8 @@ Tensor _weight_int8pack_mm_cpu(
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be row-major even if it's non-contiguous");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),
