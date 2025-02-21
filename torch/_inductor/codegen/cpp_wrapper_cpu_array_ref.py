@@ -857,19 +857,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             and isinstance(type_, torch.OptionalType)
             and isinstance(type_.getElementType(), torch.TensorType)
         ):
-            # type_ is Optional[Tensor]
-            # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+            # Handle optional tensors as a special case, as in the parent class.
             base_handle = self.val_to_arg_str(val, torch.TensorType)
             if config.aot_inductor.use_minimal_arrayref_interface:
                 if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
                     base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
                 else:
                     base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
-
-            base_handle = self.create_tmp_raii_handle_var_if_needed(base_handle)
-            var_name = f"var_{next(self.arg_var_id)}"
-            self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
-            return f"&{var_name}"
+            return f"&temporary_reference({base_handle}.get())"
 
         return super().val_to_arg_str(val, type_)
 

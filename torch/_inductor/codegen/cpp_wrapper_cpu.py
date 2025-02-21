@@ -56,9 +56,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.none_str = "nullptr"
         self.supports_intermediate_hooks = False
         self.kernel_callsite_id = count()
-        self.var_array_id = (
-            count()
-        )  # for different types of local array variable declarations
         self.int_array_id = count()  # for int array local variable declarations
         self.declared_int_array_vars = OrderedSet[str]()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
@@ -919,9 +916,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
-        # If any output ref represents a temporary tensor, save it off first.  This
-        # prevents situations where the temporary tensor would reinterpret another
-        # output_ref which has already been released.
+        # If any output ref represents an rvalue tensor, materialize it to an lvalue
+        # RAIIAtenTensorHandle first.  This prevents situations where the code for the
+        # rvalue tensor references tensor handles whose contents are modified below.
         output_refs = [
             self.create_tmp_raii_handle_var_if_needed(o, self.wrapper_call)
             for o in output_refs
@@ -2059,7 +2056,9 @@ if (custom_op_wrapper.get() == NULL) {
                 if not hasattr(raw_arg, "codegen_reference"):
                     return handle_scalar(raw_arg)
 
-                # Store AtenTensorHandle as void*
+                # Store AtenTensorHandle as void*.  All Python args are constructed in a
+                # nested scope, so this handle will self-destruct after the function
+                # call.
                 base_handle = self.create_tmp_raii_handle_var_if_needed(
                     raw_arg.codegen_reference(), lines
                 )
@@ -2251,7 +2250,7 @@ if (custom_op_wrapper.get() == NULL) {
 
     def c_type_for_prim_type(self, val, type_) -> str:
         if isinstance(type_, torch.OptionalType):
-            return f"{self.c_type_for_prim_type(val, type_.getElementType())}*"
+            return f"const {self.c_type_for_prim_type(val, type_.getElementType())}*"
         elif isinstance(type_, torch.TensorType):
             return "AtenTensorHandle"
         elif isinstance(type_, (torch.IntType, torch.SymIntType)):
@@ -2343,61 +2342,50 @@ if (custom_op_wrapper.get() == NULL) {
 
         if isinstance(type_, torch.OptionalType):
             element_type = type_.getElementType()
-            if not isinstance(element_type, torch.TensorType):
-                var_name = f"var_{next(self.arg_var_id)}"
-                if isinstance(
-                    element_type,
-                    (torch.ListType, torch.TupleType, torch.DeviceObjType),
-                ):
-                    # type_ is something like Optional[List] or Optional[Device]
-                    arg_str = self.val_to_arg_str(val, element_type)
-                    # For datatypes with auxiliary info, we need to hoist out the extra arguments.
-                    # NOTE: This only works if there is one additional argument, though it can easily be generalized.
-                    main_value, aux = arg_str.rsplit(", ")
-                    self.writeline(f"auto {var_name} = {main_value};")
-                    return f"&{var_name}, {aux}"
-                else:
-                    self.writeline(
-                        f"{self.c_type_for_prim_type(val, element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
-                    )
-                    return f"&{var_name}"
-            else:
-                # type_ is Optional[Tensor]
-                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-                base_handle = self.create_tmp_raii_handle_var_if_needed(
-                    self.val_to_arg_str(val, element_type)
-                )
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
-                return f"&{var_name}"
+            arg_str = self.val_to_arg_str(val, element_type)
+            # Handle optional iterables as a special case.  Utilize the
+            # temporary_reference function to avoid saving them off and increasing
+            # memory usage.
+            if isinstance(element_type, (torch.ListType, torch.TupleType)):
+                main_value, aux = arg_str.rsplit(", ", maxsplit=1)
+                return f"&temporary_reference({main_value}), {aux}"
 
-        if isinstance(type_, torch.ListType):
+            # Handle optional tensors as a special case, as above.
+            if isinstance(element_type, torch.TensorType):
+                base_handle = self.val_to_arg_str(val, element_type)
+                return f"&temporary_reference({base_handle}.get())"
+
+            var_name = f"var_{next(self.arg_var_id)}"
+            if isinstance(element_type, torch.DeviceObjType):
+                main_value, aux = arg_str.rsplit(", ", maxsplit=1)
+                self.writeline(f"auto {var_name} = {main_value};")
+                return f"&{var_name}, {aux}"
+
+            self.writeline(
+                f"{self.c_type_for_prim_type(val, element_type)} {var_name} = {arg_str};"
+            )
+            return f"&{var_name}"
+
+        if isinstance(type_, (torch.ListType, torch.TupleType)):
             assert isinstance(
                 val, (list, tuple)
             ), f"{val} does not match with arg type {type_}"
             element_type = type_.getElementType()
-            var_name = f"var_array_{next(self.var_array_id)}"
+
             if len(val) == 0:
-                # Zero-size array is not supported in the C or C++ standard, so
-                # we declare a null pointer for it.
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(None, element_type)}* {var_name} = nullptr;"
-                )
-            else:
-                result = [self.val_to_arg_str(x, element_type) for x in val]
-                if isinstance(element_type, torch.TensorType):
-                    # If any tensor in the list represents a temporary tensor, save it
-                    # off first.  This increases memory usage in these cases (since the
-                    # saved handle is currently permanent), but prevents segfaults.
-                    result = [
-                        self.create_tmp_raii_handle_var_if_needed(t) for t in result
-                    ]
-                result = f"{{{', '.join(result)}}}"
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
-                )
-            # Need to pass the array length because we can't use std::vector
-            return f"{var_name}, {len(val)}"
+                # Zero-size array is not supported in the C or C++ standard, so return a
+                # nullptr.
+                return "nullptr, 0"
+
+            result = [self.val_to_arg_str(x, element_type) for x in val]
+            if isinstance(element_type, torch.TensorType):
+                result = [f"{t}.get()" for t in result]
+            result = f"{{{', '.join(result)}}}"
+
+            c_type = self.c_type_for_prim_type(val[0], element_type)
+            # need to pass the array length, because we can't use the std::vector member
+            # function
+            return f"std::vector<{c_type}>{{{result}}}.data(), {len(val)}"
 
         val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
         if isinstance(type_, torch.TensorType) and val_is_scalar:
