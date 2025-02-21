@@ -56,3 +56,18 @@ TEST(irange, empty_reverse_range_one_input) {
   const std::vector<int> correct = {};
   ASSERT_EQ(test_vec, correct);
 }
+
+constexpr std::array<int, 3> toy_iota() {
+  std::array<int, 3> result;
+  for (const auto i: c10::irange(3)) {
+    result[i] = i;
+  }
+  return result;
+}
+
+TEST(irange, constexpr_ok) {
+  constexpr auto arr = toy_iota();
+  static_assert(arr[0] == 0);
+  static_assert(arr[1] == 1);
+  static_assert(arr[2] == 2);
+}
