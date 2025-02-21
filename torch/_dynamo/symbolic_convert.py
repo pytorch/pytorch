@@ -44,7 +44,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -152,6 +152,10 @@ from .variables.user_defined import (
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
+
+
+if TYPE_CHECKING:
+    from .sticky_cache import _StickyCache
 
 
 log = logging.getLogger(__name__)
@@ -897,6 +901,7 @@ class InstructionTranslatorBase(
     exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
+    sticky_cache: Optional["_StickyCache"]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -2796,6 +2801,7 @@ class InstructionTranslatorBase(
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
+        sticky_cache: Optional["_StickyCache"] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2849,6 +2855,8 @@ class InstructionTranslatorBase(
 
         self.strict_checks_fn = None
 
+        self.sticky_cache = sticky_cache
+
         if sys.version_info >= (3, 10):
             from .resume_execution import (
                 CO_ASYNC_GENERATOR,
@@ -2901,6 +2909,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
+        sticky_cache: Optional["_StickyCache"],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -2918,6 +2927,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                sticky_cache=sticky_cache,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -2934,6 +2944,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
+            sticky_cache=sticky_cache,
         )
 
         self._throw_if_in_functorch()

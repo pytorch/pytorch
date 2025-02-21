@@ -157,6 +157,7 @@ except ModuleNotFoundError:
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
     from .repro.after_dynamo import WrapBackendDebug
+    from .sticky_cache import _StickyCache
     from .types import BytecodeHook, CacheEntry, DynamoFrameType
     from .variables.builder import FrameStateSizeEntry
 
@@ -463,6 +464,7 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
+        sticky_cache: Optional[_StickyCache] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -470,6 +472,7 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
+        self._sticky_cache = sticky_cache
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -599,6 +602,7 @@ class ConvertFrameAssert:
                 frame_state=frame_state,
                 compile_id=compile_id,
                 skip=skip + 1,
+                sticky_cache=self._sticky_cache,
             )
 
 
@@ -607,9 +611,12 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
+    sticky_cache: Optional[_StickyCache] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph"""
-    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
+    return ConvertFrameAssert(
+        compiler_fn, one_graph, export, export_constraints, sticky_cache
+    )
 
 
 from collections import OrderedDict
@@ -652,6 +659,7 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
+    sticky_cache: Optional[_StickyCache] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -693,6 +701,7 @@ def _compile(
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
+            sticky_cache=sticky_cache,
         )
 
         try:
@@ -878,6 +887,9 @@ def _compile(
         if output.export and output.is_empty_graph():
             return ConvertFrameReturn()
 
+        if sticky_cache is not None:
+            sticky_cache.current_precompile.add_dynamo_code(out_code)
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
@@ -905,11 +917,16 @@ def _compile(
         return wrap_guarded_code(guarded_code)
 
     metrics_context = get_metrics_context()
+    precompile_context = (
+        sticky_cache.precompile_context()
+        if sticky_cache is not None
+        else contextlib.nullcontext()
+    )
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ), chromium_event_timed(
         "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
-    ), metrics_context:
+    ), metrics_context, precompile_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
         speculation_log = SpeculationLog()

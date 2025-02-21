@@ -417,6 +417,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        sticky_cache=None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -429,6 +430,7 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
+        self._sticky_cache = sticky_cache
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -505,6 +507,10 @@ class _TorchDynamoContext:
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
             new_mod.get_compiler_config = get_compiler_config
+            if self._sticky_cache is not None:
+                new_mod.save_sticky_cache = self._sticky_cache.save  # type: ignore[attr-defined]
+                new_mod.load_sticky_cache = self._sticky_cache.load  # type: ignore[attr-defined]
+                new_mod.reset_sticky_cache = self._sticky_cache.reset  # type: ignore[attr-defined]
 
             return new_mod
 
@@ -565,6 +571,13 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
+                if self._sticky_cache is not None:
+                    if compiled_wrapper := self._sticky_cache.lookup(args, kwargs):
+                        if inspect.ismethod(fn):
+                            return compiled_wrapper(fn.__self__, *args, **kwargs)
+                        else:
+                            return compiled_wrapper(*args, **kwargs)
+
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
@@ -611,6 +624,11 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(_fn, "get_compiler_config")
         _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
+        if self._sticky_cache is not None:
+            _fn.save_sticky_cache = self._sticky_cache.save  # type: ignore[attr-defined]
+            _fn.load_sticky_cache = self._sticky_cache.load  # type: ignore[attr-defined]
+            _fn.reset_sticky_cache = self._sticky_cache.reset  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -667,6 +685,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        sticky_cache=None,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -680,6 +699,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            sticky_cache=sticky_cache,
         )
 
         if config.compiled_autograd:
@@ -788,6 +808,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    sticky_cache=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -797,6 +818,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        sticky_cache=sticky_cache,
     )
 
 
@@ -879,6 +901,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    sticky_cache=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -933,7 +956,14 @@ def _optimize(
             dynamic=dynamic,
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
+            sticky_cache=sticky_cache,
         )
+
+    if sticky_cache is not None:
+        raise RuntimeError(
+            "sticky cache is only supported with torch.compile(fullgraph=True)"
+        )
+
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
@@ -1777,6 +1807,7 @@ def optimize_assert(
     export_constraints=None,
     dynamic=None,
     rebuild_ctx=None,
+    sticky_cache=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1788,13 +1819,17 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            sticky_cache=sticky_cache,
         ),
         hooks,
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        sticky_cache=sticky_cache,
     )
 
 

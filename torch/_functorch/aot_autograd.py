@@ -16,6 +16,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
+from torch._dynamo.sticky_cache import _StickyCache
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
@@ -737,6 +738,13 @@ def _create_aot_dispatcher_function(
                             static_input_indices=fw_metadata.static_input_indices,
                         )
 
+        if aot_config.sticky_cache is not None:
+            if any(
+                info.mutation_type != MutationType.NOT_MUTATED
+                for info in fw_metadata.input_info
+            ):
+                aot_config.sticky_cache.unimplemented("mutations on input tensors")
+
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs:
@@ -1066,6 +1074,7 @@ def aot_module_simplified(
     keep_inference_input_mutations=False,
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
+    sticky_cache: Optional[_StickyCache] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1133,6 +1142,7 @@ def aot_module_simplified(
         is_export=False,
         no_tangents=False,
         cache_info=None,
+        sticky_cache=sticky_cache,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)

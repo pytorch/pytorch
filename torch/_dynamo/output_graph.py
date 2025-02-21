@@ -288,6 +288,7 @@ class OutputGraph:
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        sticky_cache,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
@@ -457,6 +458,8 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: set[str] = set()
+
+        self.sticky_cache = sticky_cache
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -1135,6 +1138,8 @@ class OutputGraph:
                 ]
             )
         else:
+            if self.sticky_cache is not None:
+                self.sticky_cache.unimplemented("structured outputs")
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(
                 tx, root, graph_output_var, overridden_sources=overridden_sources
