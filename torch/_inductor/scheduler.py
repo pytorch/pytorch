@@ -57,6 +57,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    GraphPartitionInfo,
     IndentedBuffer,
     is_collective,
     is_gpu,
@@ -3992,34 +3993,49 @@ class Scheduler:
 
         return name_to_node
 
-    def compute_graph_partition_signature_mapping(
+    def compute_graph_partition_infos(
         self,
-        name_to_graph_input_index: dict[str, int],
-        name_to_graph_output_index: dict[str, int],
-        signature: GraphPartitionSignature,
-        # partition_input: PartitionInputMetadataType,
-        # returned_output_names: OrderedSet[str],
+        partitions: list[PartitionType],
+        signatures: list[GraphPartitionSignature],
     ) -> None:
         """
         computes a mapping from partition input/output indices to graph input/output
         indices for each partition.
         """
+        name_to_graph_input_index = {
+            name: idx for idx, name in enumerate(V.graph.graph_inputs)
+        }
+        name_to_graph_output_index = {
+            name: idx for idx, name in enumerate(V.graph.get_output_names())
+        }
 
-        if V.graph.partition_input_to_graph_input is None:
-            V.graph.partition_input_to_graph_input = []
+        V.graph.partition_infos = []
 
-        if V.graph.partition_output_to_graph_output is None:
-            V.graph.partition_output_to_graph_output = []
+        for partition_id, (partition, signature) in enumerate(
+            zip(partitions, signatures)
+        ):
+            if not self.should_generate_partition_wrapper(partition):
+                # number of partition info should be the same as the number of generated
+                # partition functions. This assumption will be used when cudagraphify
+                # each partition function.
+                continue
 
-        input_mapping = []
-        for name in signature.input_nodes:
-            input_mapping.append(name_to_graph_input_index.get(name))
-        V.graph.partition_input_to_graph_input.append(input_mapping)
+            input_mapping = []
+            for name in signature.input_nodes:
+                input_mapping.append(name_to_graph_input_index.get(name))
 
-        output_mapping = []
-        for node in signature.output_nodes:
-            output_mapping.append(name_to_graph_output_index.get(node.get_name()))
-        V.graph.partition_output_to_graph_output.append(output_mapping)
+            output_mapping = []
+            for node in signature.output_nodes:
+                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+
+            V.graph.partition_infos.append(
+                GraphPartitionInfo(
+                    partition_id,
+                    input_mapping,
+                    output_mapping,
+                    signature.constant_names,
+                )
+            )
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType]
@@ -4032,12 +4048,6 @@ class Scheduler:
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
-        name_to_graph_input_index = {
-            name: idx for idx, name in enumerate(V.graph.graph_inputs)
-        }
-        name_to_graph_output_index = {
-            name: idx for idx, name in enumerate(V.graph.get_output_names())
-        }
 
         for partition in reversed(partitions):
             output_names: OrderedSet[str] = OrderedSet()
@@ -4048,7 +4058,7 @@ class Scheduler:
             returned_output_names = output_names.intersection(unmet_output_names)
 
             # all reads/writes are partition inputs except those generated
-            # within the partition
+            # within the partition and tensor constants
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
@@ -4072,21 +4082,20 @@ class Scheduler:
                 if name in name_to_node
             }
             output_nodes = [name_to_node[name] for name in returned_output_names]
+            constant_names = [
+                name for name in partition_input_names if name not in name_to_node
+            ]
 
             partition_signature = GraphPartitionSignature(
                 input_nodes,
                 output_nodes,
                 input_deallocation,
+                constant_names,
             )
 
             signatures.append(partition_signature)
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
-            )
-            self.compute_graph_partition_signature_mapping(
-                name_to_graph_input_index,
-                name_to_graph_output_index,
-                partition_signature,
             )
 
         return signatures[::-1]
@@ -4113,7 +4122,10 @@ class Scheduler:
         if cur_partition:
             partitions.append(cur_partition)
 
-        return partitions, self.get_graph_partition_signature(partitions)
+        signatures = self.get_graph_partition_signature(partitions)
+        self.compute_graph_partition_infos(partitions, signatures)
+
+        return partitions, signatures
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -4151,6 +4163,13 @@ class Scheduler:
             [node.get_name() for node in signature.output_nodes]
         )
 
+    def should_generate_partition_wrapper(self, partition: PartitionType) -> bool:
+        if len(partition) > 1:
+            return True
+        else:
+            # Inline small partitions to avoid overheads from function calls.
+            return False
+
     def _codegen_partitions(self) -> None:
         partitions, signatures = self.graph_partition()
 
@@ -4159,10 +4178,9 @@ class Scheduler:
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
 
-            if len(partition) > 1:
+            if self.should_generate_partition_wrapper(partition):
                 self._codegen_partition_wrapper(partition, signature)
             else:
-                # Inline small partitions to avoid overheads from function calls.
                 self._codegen(partition)
 
         num_partitions = next(self._graph_partition_counter)

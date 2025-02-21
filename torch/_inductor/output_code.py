@@ -26,6 +26,7 @@ import dataclasses
 import logging
 import os
 import re
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
@@ -37,11 +38,13 @@ from torch._inductor.cudagraph_utils import (
     CudagraphCachedInfo,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
+    PlaceholderInfo,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
+    GraphPartitionInfo,
     InputType,
     output_node,
     set_tracing_context_output_strides,
@@ -132,6 +135,147 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
+def handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
+    assert compiled_graph.current_callable is not None
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+
+    # See [Backward Generation Handling]
+    # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+    # know we are we running the backward even if we will not run it in cudagraphs
+    if is_backward and config.triton.cudagraph_trees:
+        assert boxed_forward_device_index is not None
+        assert boxed_forward_device_index.value is not None
+        compiled_graph_callable = compiled_graph.current_callable
+
+        manager = torch._inductor.cudagraph_trees.get_manager(
+            boxed_forward_device_index.value, create_if_none_exists=False
+        )
+        # should already exist from forward
+        assert manager is not None
+
+        def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
+            manager.set_to_running_backward()  # type: ignore[union-attr]
+            return compiled_graph_callable(new_inputs)
+
+        compiled_graph.current_callable = compiled_artifact
+
+
+def get_cudagraph_partition_info(
+    compiled_graph: CompiledFxGraph,
+    partition_info: GraphPartitionInfo,
+    constants: dict[str, torch.Tensor],
+) -> tuple[
+    list[PlaceholderInfo],
+    list[int],
+    list[Optional[str]],
+    tuple[torch.Tensor, ...],
+]:
+    assert compiled_graph.cudagraph_info is not None
+    static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"])
+    cached_info = compiled_graph.cudagraph_info
+    placeholders = cached_info.placeholders
+    stack_traces = cached_info.stack_traces
+
+    partition_placeholders = []
+    partition_static_input_idxs = []
+    for partition_input_idx, graph_input_idx in enumerate(
+        partition_info.input_index_mapping
+    ):
+        if graph_input_idx in static_input_idxs:
+            partition_static_input_idxs.append(partition_input_idx)
+        if graph_input_idx:
+            placeholder = placeholders[graph_input_idx]
+        else:
+            # create a dummy placeholder info since this partition input is not a graph input
+            placeholder = PlaceholderInfo(
+                name=f"partition_{partition_info.id}_placeholder_{partition_input_idx}",
+                stack_trace=None,
+                users=[],
+                mutating_use_stack_trace=None,
+            )
+        partition_placeholders.append(placeholder)
+
+    partition_stack_traces = []
+    for graph_output_idx in partition_info.output_index_mapping:
+        if graph_output_idx:
+            partition_stack_traces.append(stack_traces[graph_output_idx])
+        else:
+            partition_stack_traces.append(None)
+
+    partition_constants = tuple(
+        constants[name] for name in partition_info.constant_names
+    )
+
+    return (
+        partition_placeholders,
+        partition_static_input_idxs,
+        partition_stack_traces,
+        partition_constants,
+    )
+
+
+def cudagraph_partition_post_compile(
+    example_inputs: Sequence[InputType],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+    constants: dict[str, torch.Tensor],
+) -> None:
+    if (
+        compiled_graph.partition_infos is None
+        or len(compiled_graph.partition_infos) == 0
+    ):
+        BoxedBool.disable(cudagraphs)
+        handle_backward_generation(compiled_graph)
+        return
+
+    from .compile_fx import cudagraphify
+
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.recursively_apply_fns
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+    device_index = next(iter(compiled_graph.device_idxs))
+
+    if not config.triton.cudagraph_trees:
+        # Force specialize all inputs so that CUDA graphs will work
+        for t in example_inputs:
+            if isinstance(t, torch.SymInt):
+                int(t)  # guard
+
+    if boxed_forward_device_index is not None and not is_inference and not is_backward:
+        boxed_forward_device_index.set(device_index)
+
+    cudagraphify_fns = []
+    for partition_info in compiled_graph.partition_infos:
+        # TODO: Compute metadata based on graph info
+
+        (
+            partition_placeholders,
+            partition_static_input_idxs,
+            partition_stack_traces,
+            partition_constants,
+        ) = get_cudagraph_partition_info(compiled_graph, partition_info, constants)
+
+        partition_mutated_input_idxs = ()  # TODO
+
+        cudagraphify_fn = partial(
+            cudagraphify,
+            static_input_idxs=partition_static_input_idxs,
+            device_index=device_index,
+            stack_traces=partition_stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=partition_constants,
+            placeholders=partition_placeholders,
+            mutated_input_idxs=partition_mutated_input_idxs,
+        )
+        cudagraphify_fns.append(cudagraphify_fn)
+
+    compiled_graph.recursively_apply_fns(cudagraphify_fns)
+
+
 def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -188,26 +332,7 @@ def cudagraph_post_compile(
 
     else:
         BoxedBool.disable(cudagraphs)
-
-        # See [Backward Generation Handling]
-        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-        # know we are we running the backward even if we will not run it in cudagraphs
-        if is_backward and config.triton.cudagraph_trees:
-            assert boxed_forward_device_index is not None
-            assert boxed_forward_device_index.value is not None
-            compiled_graph_callable = compiled_graph.current_callable
-
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                boxed_forward_device_index.value, create_if_none_exists=False
-            )
-            # should already exist from forward
-            assert manager is not None
-
-            def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
-                manager.set_to_running_backward()  # type: ignore[union-attr]
-                return compiled_graph_callable(new_inputs)
-
-            compiled_graph.current_callable = compiled_artifact
+        handle_backward_generation(compiled_graph)
 
         if "cuda" in compiled_graph.device_types:
             # prefer better disable_cudagraphs_reason bc stack trace
@@ -294,6 +419,7 @@ class CompiledFxGraph(OutputCode):
     """
 
     current_callable: Optional[Callable[..., Any]]
+    recursively_apply_fns: Optional[Callable[..., Any]]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[list[tuple[int, str]]]
@@ -316,8 +442,7 @@ class CompiledFxGraph(OutputCode):
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    partition_input_to_graph_input: Optional[list[list[Optional[int]]]]
-    partition_output_to_graph_output: Optional[list[list[Optional[int]]]]
+    partition_infos: Optional[list[GraphPartitionInfo]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
@@ -340,8 +465,10 @@ class CompiledFxGraph(OutputCode):
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         boxed_forward_device_index: Optional[BoxedDeviceIndex],
+        recursively_apply_fns: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.current_callable = current_callable
+        self.recursively_apply_fns = recursively_apply_fns
         self.cache_key = graph.cache_key
         if graph.cache_path:
             with open(graph.cache_path) as f:
@@ -379,8 +506,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.cudagraph_info = None
-        self.partition_input_to_graph_input = graph.partition_input_to_graph_input
-        self.partition_output_to_graph_output = graph.partition_output_to_graph_output
+        self.partition_infos = graph.partition_infos
         self.fx_kwargs = {}
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
@@ -520,6 +646,7 @@ class CompiledFxGraph(OutputCode):
         # TODO: This could be better if we're ever able to serialize compiled
         # models to disk.
         self.current_callable = None
+        self.recursively_apply_fns = None
 
     def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
         from torch._dynamo.utils import counters, dynamo_timed
@@ -555,12 +682,16 @@ class CompiledFxGraph(OutputCode):
                 "PyCodeCache.load_by_key_path",
                 log_pt2_compile_event=True,
             ):
-                self.current_callable = PyCodeCache.load_by_key_path(
+                code_cache = PyCodeCache.load_by_key_path(
                     self.cache_key,
                     artifact_path,
                     self.cache_linemap,
                     constants.unwrap(self),
-                ).call
+                )
+                self.current_callable = code_cache.call
+                self.recursively_apply_fns = getattr(
+                    code_cache, "recursively_apply_fns", None
+                )
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
             raise
