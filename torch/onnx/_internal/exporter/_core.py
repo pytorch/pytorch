@@ -1261,7 +1261,7 @@ def export(
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
-            if not result.success:
+            if result.exception is not None:
                 failed_results.append(result)
             else:
                 assert result.exported_program is not None
