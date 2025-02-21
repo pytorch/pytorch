@@ -66,22 +66,19 @@ sccache --zero-stats
 python setup.py bdist_wheel
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
+
 sccache --show-stats
+
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
-(
-  if "%BUILD_ENVIRONMENT%"=="" (
-    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
-  ) else (
-    copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
-    :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-    python tools/stats/export_test_times.py
-    robocopy /E ".additional_ci_files" "%PYTORCH_FINAL_PACKAGE_DIR%\.additional_ci_files"
+copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
-    :: Also save build/.ninja_log as an artifact
-    copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
-  )
-)
+:: export test times so that potential sharded tests that'll branch off this build will use consistent data
+python tools/stats/export_test_times.py
+robocopy /E ".additional_ci_files" "%PYTORCH_FINAL_PACKAGE_DIR%\.additional_ci_files"
+
+:: Also save build/.ninja_log as an artifact
+copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
 
 sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server
