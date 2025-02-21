@@ -722,15 +722,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
-        # tensor prematurely deallocated, thus this std::vector().data() trick here.
+        # tensor prematurely deallocated, thus this std::array().data() trick here.
+        indices_str = ", ".join(
+            f"borrow_arrayref_tensor_as_tensor({i})" for i in indices
+        )
         indices_str = (
-            "std::vector<AtenTensorHandle>{"
-            + (
-                ", ".join(
-                    [f"borrow_arrayref_tensor_as_tensor({ind})" for ind in indices]
-                )
-            )
-            + "}.data()"
+            f"std::array<AtenTensorHandle, {len(indices)}>{{{indices_str}}}.data()"
         )
         args = [
             f"borrow_arrayref_tensor_as_tensor({x})",
