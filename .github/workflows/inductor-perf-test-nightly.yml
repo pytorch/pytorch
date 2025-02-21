@@ -57,7 +57,7 @@ on:
         description: The list of configs used the benchmark
         required: false
         type: string
-        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf
+        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf,cachebench
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -105,6 +105,7 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
           { config: "inductor_torchbench_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
           { config: "inductor_torchbench_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "cachebench", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets: inherit
