@@ -37,8 +37,6 @@ if "%MSVC_VERSION%" == "latest" (
         --add Microsoft.VisualStudio.Workload.VCTools ^
         --add Microsoft.VisualStudio.Component.VC.Tools.ARM64EC ^
         --add Microsoft.VisualStudio.Component.VC.Tools.ARM64
-
-        
 ) else if "%MSVC_VERSION%" == "14.40" (
     "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
