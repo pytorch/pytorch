@@ -74,10 +74,6 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 PartitionType = list["BaseSchedulerNode"]
 
-# Mapping from partition input names to IRNode/Expr, and a boolean for whether
-# deallocating it after the partition
-# PartitionInputMetadataType = dict[str, tuple[Union[ir.IRNode, sympy.Expr], bool]]
-
 
 @dataclasses.dataclass
 class SchedulerBuffer:

@@ -878,15 +878,23 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
-        outputs = getattr(self, "subgraph_output_nodes", V.graph.graph_outputs)
-        return [x.codegen_reference(self.wrapper_call) for x in outputs]
+        return [
+            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+        ]
 
     def mark_output_type(self) -> None:
         return
 
+    def get_graph_inputs(
+        self,
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+        return V.graph.graph_inputs
+
+    def get_graph_outputs(self) -> list[IRNode]:
+        return V.graph.graph_outputs
+
     def codegen_input_size_asserts(self) -> None:
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
-        for name, buf in graph_inputs.items():
+        for name, buf in self.get_graph_inputs().items():
             # a graph partition may take an IRNode output from a previous partition
             if not isinstance(buf, ir.TensorBox):
                 continue
@@ -899,9 +907,8 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def codegen_input_nan_asserts(self) -> None:
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in graph_inputs.items():
+        for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
@@ -953,6 +960,9 @@ class PythonWrapperCodegen(CodeGen):
             prefix_indent = 1
         return prefix_indent
 
+    def get_graph_input_names(self) -> list[str]:
+        return V.graph.graph_input_names
+
     def write_prefix(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
@@ -967,13 +977,7 @@ class PythonWrapperCodegen(CodeGen):
                     f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
 
-            graph_input_names = (
-                list(self.subgraph_input_nodes.keys())
-                if hasattr(self, "subgraph_input_nodes")
-                else V.graph.graph_input_names
-            )
-
-            if graph_input_names:
+            if graph_input_names := self.get_graph_input_names():
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
@@ -1055,7 +1059,23 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        return
+        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+            result.splice(
+                """
+                runner = Runner()
+                """
+            )
+            if hasattr(self, "all_partition_names"):
+                all_partition_name_list = ", ".join(self.all_partition_names) + (
+                    "," if len(self.all_partition_names) == 1 else ""
+                )
+                result.splice(f"runner.partitions=[{all_partition_name_list}]")
+            result.splice(
+                """
+                call = runner.call
+                recursively_apply_fns = runner.recursively_apply_fns
+                """
+            )
 
     def generate_end(self, result: IndentedBuffer) -> None:
         return
@@ -1421,7 +1441,7 @@ class PythonWrapperCodegen(CodeGen):
         # we need to solve that expression to proper define a symbol in cpp. Thus we
         # are enforcing this iterating order here to make sure all plain size symbols
         # are defined first.
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
+        graph_inputs = self.get_graph_inputs()
         inputs = [
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
@@ -2751,23 +2771,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         return self.parent_wrapper.next_kernel_suffix()
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
-            result.splice(
-                """
-                runner = Runner()
-                """
-            )
-            if hasattr(self, "all_partition_names"):
-                all_partition_name_list = ", ".join(self.all_partition_names) + (
-                    "," if len(self.all_partition_names) == 1 else ""
-                )
-                result.splice(f"runner.partitions=[{all_partition_name_list}]")
-            result.splice(
-                """
-                call = runner.call
-                recursively_apply_fns = runner.recursively_apply_fns
-                """
-            )
+        return
 
     def write_launcher_fn_call_get_indent(self) -> int:
         self.prefix.splice(
@@ -2780,6 +2784,29 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_wrapper_call_indent(self) -> int:
         return 1
+
+    def get_graph_inputs(
+        self,
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+        if signature := getattr(self, "partition_signatures", None):
+            inputs = signature.input_nodes
+        else:
+            inputs = V.graph.graph_inputs
+        return inputs
+
+    def get_graph_input_names(self) -> list[str]:
+        if signature := getattr(self, "partition_signatures", None):
+            names = list(signature.input_nodes.keys())
+        else:
+            names = V.graph.graph_input_names
+        return names
+
+    def get_graph_outputs(self) -> list[IRNode]:
+        if signature := getattr(self, "partition_signatures", None):
+            outputs = signature.output_nodes
+        else:
+            outputs = V.graph.graph_outputs
+        return outputs
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
