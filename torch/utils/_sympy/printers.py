@@ -337,6 +337,10 @@ class CppPrinter(ExprPrinter):
     # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
     # use std::pow, that operates on floats
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        # Implement the special-case of 2**x for now
+        base, exp = expr.args
+        if base == 2:
+            return f"(1 << ({self._print(exp)}))"
         raise NotImplementedError(
             f"_print_PowByNatural not implemented for {type(self)}"
         )
@@ -450,6 +454,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_OpaqueUnaryFn_sqrt(self, expr: sympy.Expr) -> str:
         return f"std::sqrt({self._print(expr.args[0])})"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        return f"std::log2({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
