@@ -171,6 +171,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
           (key.size(2) == value.size(2)),
       "scaled_dot_product_fused_attention_overrideable_xpu: K/V should have the same batch / seq / num_head");
   TORCH_INTERNAL_ASSERT(
+      query.size(3) == key.size(3),
+      "scaled_dot_product_fused_attention_overrideable_xpu: Q/K should have the same head_dim");
+  TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
   TORCH_INTERNAL_ASSERT(
