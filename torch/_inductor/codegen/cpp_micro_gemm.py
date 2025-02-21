@@ -492,8 +492,11 @@ inline void {{kernel_name}}_kernel(
 
 
 # extra check for CppMicroGemmAMX
-def check_amx_extra(config, m, n, k, alpha, num_threads):
+def check_amx_extra(config, m, n, k, alpha, num_threads, vec_isa):
     vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
+    # amx_fp16 need to be checked separately since it is not always supported when amx is supported
+    if config.input_dtype == torch.half:
+        return vec_isa.support_amx_fp16() and k % vnni_size == 0 and alpha == 1
     return k % vnni_size == 0 and alpha == 1
 
 
@@ -520,6 +523,13 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
+        output_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.float16,
         output_dtype=torch.float,
         extra_check=check_amx_extra,
     ),
@@ -721,7 +731,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
             {%- endif %}
         {%- else %}
+            {%- if input_dtype == torch.float16 %}
+        _tile_dpfp16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- endif %}
     {%- endfor %}
 {%- endfor %}
@@ -814,7 +828,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 
 # extra check for CppMicroBrgemm
-def check_brgemm_extra(config, m, n, k, alpha, num_threads):
+def check_brgemm_extra(config, m, n, k, alpha, num_threads, vec_isa):
     assert config.input_dtype == torch.half and config.output_dtype == torch.float
     vnni_size = 2
     # use brgemm for Half when amx_fp16 is supported
@@ -928,7 +942,7 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads
+                    config, m, n, k, alpha, num_threads, vec_isa
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking

@@ -825,7 +825,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
         if dtype == torch.half:
-            self._check_brgemm_counter(vec_amx)
+            if vec_amx.support_amx_fp16():
+                self._check_amx_counter(vec_amx)
+            else:
+                self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
 
