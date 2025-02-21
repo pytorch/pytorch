@@ -1428,8 +1428,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("reshape_a", [True, False])
     @parametrize("expand_a_scale", [True, False])
     @parametrize("dynamic", [True, False])
+    @parametrize("M", [1, 32])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic, M
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
@@ -1444,7 +1445,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
-        M = 32
         in_feature = 48
         out_feature = 64
         q_min, q_max = -32, 31
