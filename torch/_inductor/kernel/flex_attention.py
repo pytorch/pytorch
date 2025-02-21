@@ -7,7 +7,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -1195,7 +1195,7 @@ def next_power_of_two(n):
 
 
 def set_head_dim_values(
-    kernel_options: Dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
+    kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
 ):
     """
     Mutates kernel options, adding head dimension calculations.
