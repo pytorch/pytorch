@@ -1,5 +1,4 @@
-@echo off
-setlocal
+@echo on
 
 echo Dependency MSVC Build Tools with C++ with ARM64/ARM64EC components installation started.
 
@@ -19,21 +18,21 @@ curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
 echo Installing Visual Studio Build Tools with C++ components...
 echo Installing MSVC %MSVC_VERSION%
 if "%MSVC_VERSION%" == "latest" (
-    start /wait "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
         --add Microsoft.VisualStudio.Component.VC.ASAN ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
         --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
 ) else if "%MSVC_VERSION%" == "14.40" (
-    start /wait "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
         --add Microsoft.VisualStudio.Component.VC.ASAN ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
         --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 ^
         --add Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64
 ) else if "%MSVC_VERSION%" == "14.36" (
-    start /wait "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
         --add Microsoft.VisualStudio.Component.VC.ASAN ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
