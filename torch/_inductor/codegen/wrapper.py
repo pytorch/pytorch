@@ -2822,6 +2822,18 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def finalize_prefix(self):
         return
 
+    def codegen_allocation(self, buffer: ir.Buffer):
+        name = buffer.get_name()
+        if (
+            signature := getattr(self, "partition_signatures", None)
+        ) and name in signature.input_nodes:
+            # skip allocation if buffer is a subgraph input.
+            # This allows reusing an input buffer in graph partition,
+            # although this is not allowed in general.
+            return
+
+        super().codegen_allocation(buffer)
+
     @cache_on_self
     def write_triton_header_once(self) -> None:
         # TODO: Uncomment in future. This will be needed to support subgraph

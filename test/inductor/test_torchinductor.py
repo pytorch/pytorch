@@ -14153,6 +14153,26 @@ if HAS_GPU and not TEST_WITH_ASAN:
             eager_out = f(x, y)
             self.assertEqual(compiled_out, eager_out)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_buffer_reuse(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x1 + y1 + x @ y
+                u = (y_cpu.cuda() + 2) @ y + 3
+                u_cpu = u.cpu() + 2
+                return z + u_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+
+            self.assertEqual(eager_out, compiled_out)
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
