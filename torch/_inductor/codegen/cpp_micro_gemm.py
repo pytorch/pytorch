@@ -896,6 +896,7 @@ def woq_int4_extra_check(config, m, n, k, alpha, num_threads, **kwargs):
 
 
 @register_micro_gemm(
+    # TODO: support float/half input
     *generate_gemm_config(
         VecAVX512,
         [(4, 64, 32), (4, 64, 64), (4, 64, 128)],
