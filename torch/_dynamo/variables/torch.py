@@ -991,9 +991,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 func_to_graphable,
                 is_graphable_type,
             )
+            from torch._subclasses.fake_tensor import fake_tensor_tls
             from torch.utils._pytree import tree_flatten
 
-            fn = self.value
             # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
             #
             # Rather than reconstructing `args, kwargs` into python objects and
@@ -1047,8 +1047,20 @@ This error is most likely due to a call to `mark_traceable`-ed function, where o
 """  # NOQA: B950
                 )
 
+            fn = self.value
+
+            def patched_fn(*args, **kwargs):
+                # This enables reads to global/captured tensors, and we'll just
+                # treat them as constants in the graph. Note that after
+                # AOTDispatcher, this logic would disappear.
+                old_val = fake_tensor_tls.allow_non_fake_inputs_override
+                fake_tensor_tls.allow_non_fake_inputs_override = True
+                res = fn(*args, **kwargs)
+                fake_tensor_tls.allow_non_fake_inputs_override = old_val
+                return res
+
             # `flat_appy` wants a TreeSpec for the function input.
-            _, f_spec = func_to_graphable(fn)
+            _, f_spec = func_to_graphable(patched_fn)
 
             # TreeSpec isn't graphable, so we register the function and input
             # specs as attributes on the graph module.
