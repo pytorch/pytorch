@@ -2440,7 +2440,9 @@
     "tqdm"
   ],
   "torch.utils.tensorboard": [
-    "RecordWriter"
+    "FileWriter",
+    "RecordWriter",
+    "SummaryWriter"
   ],
   "torch.ao.quantization.experimental.APoT_tensor": [
     "APoTQuantizer"
