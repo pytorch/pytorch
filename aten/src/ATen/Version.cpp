@@ -105,7 +105,7 @@ std::string get_cpu_capability() {
       return "DEFAULT";
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
-#elif defined(HAVE_SVE256_BF16_CPU_DEFINITION)
+#elif defined(__ARM_FEATURE_BF16) && defined(HAVE_SVE256_CPU_DEFINITION)
     case native::CPUCapability::DEFAULT:
       return "DEFAULT";
     case native::CPUCapability::SVE256_BF16:
