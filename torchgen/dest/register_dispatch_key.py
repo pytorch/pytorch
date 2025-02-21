@@ -274,11 +274,13 @@ class RegisterDispatchKey:
 
         device_check = "std::optional<Device> common_device = std::nullopt;\n"
         device_check += "(void)common_device; // Suppress unused variable warning\n"
+        device_check += "bool is_cpu_zero_dim = false;\n"
+        device_check += "(void) is_cpu_zero_dim;\n"
         for arg in args:
             # Only tensor like arguments are eligible
             if arg.type.is_tensor_like():
                 device_check += f"""
-  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");"""
+  c10::impl::check_and_update_common_device(common_device, is_cpu_zero_dim, {arg.name}, "{method_name}", "{arg.name}");"""
         return device_check
 
     @method_with_native_function
