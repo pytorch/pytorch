@@ -1,14 +1,8 @@
+import enum
 import types
-from typing import NewType
+from typing import Literal, overload
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
-
-# For typechecking
-SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
-CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
-# Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
-skip_code_recursive_flag: SkipCodeRecursiveFlag
-cache_limit_hit_flag: CacheLimitHitFlag
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
@@ -26,6 +20,22 @@ class _CacheEntry:
 
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
+
+class _FrameAction(enum.Enum):
+    DEFAULT: Literal[0]
+    SKIP: Literal[1]
+    RUN_ONLY: Literal[2]
+
+class _FrameExecStrategy:
+    cur_action: _FrameAction
+    recursive_action: _FrameAction
+
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(
+        self, cur_action: _FrameAction, recursive_action: _FrameAction
+    ) -> None: ...
 
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.

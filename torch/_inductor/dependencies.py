@@ -3,8 +3,9 @@ import dataclasses
 import itertools
 import logging
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
@@ -38,7 +39,7 @@ class Dep(abc.ABC):
     index: sympy.Expr
 
     @abc.abstractmethod
-    def rename(self, renames: dict[str, str]) -> "Dep":
+    def rename(self, renames: dict[str, str]) -> Self:
         pass
 
     @abc.abstractmethod
@@ -57,7 +58,7 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
-    def normalize_with_stride_order(self, prefix: str = "t") -> "Dep":
+    def normalize_with_stride_order(self, prefix: str = "t") -> Self:
         return self
 
 
@@ -79,7 +80,7 @@ class MemoryDep(Dep):
     def num_vars(self) -> int:
         return len(self.var_names)
 
-    def decide_loop_order_to_match(self, other: "MemoryDep") -> Optional[List[int]]:
+    def decide_loop_order_to_match(self, other: "MemoryDep") -> Optional[list[int]]:
         """
         Can return None if not able to decide loop orders.
         """
@@ -450,8 +451,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     @staticmethod
     def drop_unused_symbols(
         index: Union[int, sympy.Expr],
-        var_names: List[sympy.Expr],
-        sizes: List[sympy.Expr],
+        var_names: list[sympy.Expr],
+        sizes: list[sympy.Expr],
     ) -> None:
         """
         Reduction has last (reduced) dim in its sizes, but
@@ -570,7 +571,7 @@ def var_builder(prefix: str) -> tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str
-) -> Tuple[List[List[sympy.Symbol]], VarRanges]:
+) -> tuple[list[list[sympy.Symbol]], VarRanges]:
     var_ranges, add_var = var_builder(prefix)
     args: list[list[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
@@ -578,7 +579,7 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> Tuple[List[List[sympy.Expr]], VarRanges]:
+) -> tuple[list[list[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
@@ -596,7 +597,7 @@ def extract_read_writes(
     *argsizes: Sequence[sympy.Expr],
     normalize: bool = False,
     prefix: str = "d",
-    hidden_args: Sequence[List[sympy.Expr]] = (),
+    hidden_args: Sequence[list[sympy.Expr]] = (),
 ) -> ReadWrites:
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
 
@@ -629,7 +630,7 @@ def extract_read_writes(
 
 def extract_loop_body_with_args(
     fn: Any,
-    args: List[List[sympy.Expr]],
+    args: list[list[sympy.Expr]],
     var_ranges: VarRanges,
     normalize: bool = False,
 ) -> _RecordLoadStoreInner:
@@ -760,17 +761,17 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
-    def frexp(self, x: Any) -> Tuple[None, ...]:
+    def frexp(self, x: Any) -> tuple[None, ...]:
         return (None,) * 2
 
     def scan(
         self, dtypes: Any, combine_fn: Any, values: Sequence[Any]
-    ) -> Tuple[None, ...]:
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def sort(
         self, dtypes: Any, values: Sequence[Any], stable: Any, descending: Any
-    ) -> Tuple[None, ...]:
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def reduction(

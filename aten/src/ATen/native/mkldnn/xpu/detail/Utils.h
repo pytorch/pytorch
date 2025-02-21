@@ -39,6 +39,7 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
 
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);
+void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2);
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst = false);
 
@@ -47,6 +48,8 @@ bool is_broadcast_from_other_to_self(
     const at::Tensor& other);
 
 at::MemoryFormat get_cl_tag_by_ndim(const int64_t ndim);
+
+void apply_tf32_if_allowed(dnnl::primitive_attr& primitive_attr);
 
 bool binary_valid(
     const at::Tensor& self,
