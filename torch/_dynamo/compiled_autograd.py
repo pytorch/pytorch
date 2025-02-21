@@ -134,7 +134,7 @@ class Op:
 ops = OpNamespace()
 
 
-_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "packed_data"]
 _impure_targets = OrderedSet(
     [
         call_hook,
@@ -188,7 +188,6 @@ class AutogradCompilerInstance:
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
-        sv_hook_ids: list[int],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -207,7 +206,13 @@ class AutogradCompilerInstance:
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
         self.symnode_proxy_lookup = {}
-        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
+        (
+            args_proxy,
+            self.sizes_proxy,
+            self.scalars_proxy,
+            self.hooks_proxy,
+            self.packed_data_proxy,
+        ) = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -258,11 +263,6 @@ class AutogradCompilerInstance:
         for i, symval in enumerate(scalars):
             self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
-        unpacked_tensors = []
-        for hook_id in sv_hook_ids:
-            data_id = hook_id + 1
-            unpacked_tensors.append(self.unpack_hook(hook_id, data_id))
-
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
@@ -279,7 +279,6 @@ class AutogradCompilerInstance:
             inputs,
             sizes,
             scalars,
-            unpacked_tensors,
         )
 
     def log_compile_reasons(
@@ -583,15 +582,15 @@ class AutogradCompilerInstance:
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         # move this out of hooks
-        data = self.hooks_proxy[data_id]  # type: ignore[index]
+        data = self.packed_data_proxy[data_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
             data,
             hook_type="unpack_hook",
         )
-        unpacked_tensor = self.allocate_dummy()
-        self.bind_objects_to_proxies([unpacked_tensor], [proxy])
-        return unpacked_tensor
+        out = self.allocate_dummy()
+        self.bind_objects_to_proxies([out], [proxy])
+        return out
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
@@ -809,7 +808,7 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
-        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, packed_inputs):
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
@@ -817,7 +816,7 @@ class AutogradCompilerInstance:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    return compiled_fn(inputs, sizes, scalars, hooks)
+                    return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
             finally:
                 in_compiled_autograd_region = False
 

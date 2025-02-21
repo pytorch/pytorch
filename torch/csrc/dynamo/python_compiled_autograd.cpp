@@ -203,6 +203,16 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     auto output = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
     return toTensorList(output);
   }
+  at::Tensor call_unpack(
+      PyObject* py_compiler,
+      std::optional<size_t> hook_id,
+      size_t hook_input_id) override {
+    py::handle handle(py_compiler);
+    py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
+    auto tmp = py::cast<std::optional<at::Tensor>>(proxy);
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return tmp.value();
+  }
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
@@ -213,7 +223,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -645,17 +655,6 @@ static PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
-static PyObject* wrap_saved_varables_hooks(
-    std::unordered_map<const SavedVariable*, size_t> sv_to_hooks) {
-  PyObject* pytuple = PyTuple_New(static_cast<Py_ssize_t>(sv_to_hooks.size()));
-  size_t index = 0;
-  for (const auto& [sv, hook_idx] : sv_to_hooks) {
-    PyTuple_SET_ITEM(pytuple, index, PyLong_FromSize_t(hook_idx));
-    index++;
-  }
-  return pytuple;
-}
-
 static PyObject* wrap_string_list(const std::vector<std::string>& strs) {
   PyObject* pystrs = PyList_New(static_cast<Py_ssize_t>(strs.size()));
   for (const auto i : c10::irange(strs.size())) {
@@ -723,14 +722,6 @@ static TraceState call_begin_capture(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr py_node_origins(
       wrap_node_origins(compiler_call, PyTuple_GET_SIZE(py_size_input.get())));
-  THPObjectPtr sv_hook_ids(
-      wrap_saved_varables_hooks(compiler_call.sv_to_hooks));
-  std::vector<at::Tensor> dummies;
-  dummies.reserve(compiler_call.sv_to_hooks.size());
-  for (size_t i = 0; i < compiler_call.sv_to_hooks.size(); i++) {
-    dummies.emplace_back(torch::zeros({0, 123456789}));
-  }
-
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
@@ -738,19 +729,17 @@ static TraceState call_begin_capture(
       py_size_input.get(),
       py_ivalue_args_input.get(),
       py_node_origins.get(),
-      sv_hook_ids.get(),
       nullptr)));
 
   PyObject *compile_id_str{nullptr}, *fake_inputs{nullptr},
-      *fake_sizes{nullptr}, *fake_ivalue_args{nullptr}, *fake_svs{nullptr};
+      *fake_sizes{nullptr}, *fake_ivalue_args{nullptr};
   check(PyArg_ParseTuple(
       pyresult.get(),
-      "OOOOO",
+      "OOOO",
       &compile_id_str,
       &fake_inputs,
       &fake_sizes,
-      &fake_ivalue_args,
-      &fake_svs)); // contains proxies for each sv
+      &fake_ivalue_args));
 
   variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
   TORCH_INTERNAL_ASSERT(
@@ -759,16 +748,6 @@ static TraceState call_begin_capture(
     TensorArg& arg =
         compiler_call.tensor_args.lookup(compiler_call.tensor_args.inputs[i]);
     arg.proxy_tensor = proxy_inputs[i];
-  }
-
-  variable_list proxy_unpacked_svs = THPVariable_UnpackList(fake_svs);
-  TORCH_INTERNAL_ASSERT(proxy_unpacked_svs.size() == dummies.size());
-  size_t idx = 0;
-  // order is deterministic
-  for (const auto& [sv, _] : compiler_call.sv_to_hooks) {
-    compiler_call.tensor_args.register_sv_proxy(
-        *sv, dummies[idx], std::move(proxy_unpacked_svs[idx]));
-    idx++;
   }
 
   set_ivalue_proxies(fake_ivalue_args, compiler_call.lifted_ivalue_args.args);
@@ -827,7 +806,8 @@ static CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
-    THPObjectPtr* graph_arg_hooks) {
+    THPObjectPtr* graph_arg_hooks,
+    THPObjectPtr* graph_arg_packed_inputs) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
@@ -1087,7 +1067,8 @@ static CacheNode* _compiled_autograd_impl(
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
-  *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
+  *graph_arg_hooks = convert_pyobj_list(compiler_call.hooks);
+  *graph_arg_packed_inputs = convert_pyobj_list(compiler_call.packed_inputs);
   return cache;
 }
 
@@ -1128,6 +1109,7 @@ static variable_list compiled_autograd(
   THPObjectPtr sizes;
   THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
+  THPObjectPtr packed_inputs;
   CacheNode* cache = _compiled_autograd_impl(
       graph_root,
       graph_task,
@@ -1136,7 +1118,8 @@ static variable_list compiled_autograd(
       &inputs,
       &sizes,
       &ivalue_args,
-      &hooks);
+      &hooks,
+      &packed_inputs);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
@@ -1145,6 +1128,7 @@ static variable_list compiled_autograd(
       sizes.get(),
       ivalue_args.get(),
       hooks.get(),
+      packed_inputs.get(),
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());

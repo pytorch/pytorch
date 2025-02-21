@@ -915,7 +915,8 @@ main()
                 inputs=[param, activ],
                 sizes=(),
                 scalars=(),
-                hooks=(),
+                hooks=[],
+                packed_inputs=[],
             )
         finally:
             handle.remove()
@@ -3511,7 +3512,6 @@ class CompiledAutograd0(torch.nn.Module):
             fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
-    @unittest.expectedFailure
     def test_saved_tensor_unpack_hook_ordering(self):
         # not the correct behaviour, I'm just preventing this from changing silently
         def f(x, y):
@@ -3531,8 +3531,6 @@ class CompiledAutograd0(torch.nn.Module):
             return x
 
         def tensor_hook(_):
-            # in eager, tensor_hook is fired before unpack_hook
-            # but in compiled autograd, tensor_hook is lifted whereas unpack_hook is not
             self.assertEqual(unpack_count, 0)
 
         x = torch.ones(4, requires_grad=True)
@@ -3768,6 +3766,7 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_parameter_used_in_an_out",  # unpack hook in skip files
     "test_checkpointing_without_reentrant_with_context_fn",  # unpack hook in skip files
     "test_save_on_cpu_and_checkpoint",  # unpack hook in skip files
+    "test_saved_tensor_hooks_custom_error_propagation",  # CustomError
 }
 
 test_contexts = {

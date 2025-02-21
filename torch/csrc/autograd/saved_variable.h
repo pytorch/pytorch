@@ -54,6 +54,7 @@ class TORCH_API SavedVariable {
     return (bool)hooks_;
   }
 
+  // Used by compiled autograd
   std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
   retrieve_unpack_hook_data() const {
     if (!hooks_) {
