@@ -3513,7 +3513,6 @@ class CompiledAutograd0(torch.nn.Module):
         )
 
     def test_saved_tensor_unpack_hook_ordering(self):
-        # not the correct behaviour, I'm just preventing this from changing silently
         def f(x, y):
             return x * y
 
@@ -3871,6 +3870,7 @@ known_failing_tests = {
     "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
     "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
     "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
+    "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
     # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
