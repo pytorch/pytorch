@@ -3542,7 +3542,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
-            backend.graphs[0].score_mod_0.code.strip(),
+            backend.graphs[0].score_mod.code.strip(),
             """\
 def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.Tensor, child_3 : torch.Tensor, child_4 : torch.Tensor, getitem : torch.SymInt):
     add = child + getitem;  child = getitem = None
