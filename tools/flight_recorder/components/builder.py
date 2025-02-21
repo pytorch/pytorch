@@ -16,7 +16,6 @@ from tools.flight_recorder.components.types import (
     Database,
     EntryState,
     Group,
-    MatchInfo,
     MatchState,
     Membership,
     NCCLCall,
@@ -266,23 +265,21 @@ def build_collectives(
                         and e["process_group"][1] == desc
                         and e["collective_seq_id"] == entry_state.collective_seq_id
                     ):
-                        match_info = match_one_event(
+                        match_state = match_one_event(
                             entries[0], e, _memberships, pg_name
                         )
                         if (
-                            match_info.state
+                            match_state
                             in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
                             and mismatch[pg_name] == 0
                         ):
                             found_ranks.add(o)
                             found_idx[o] = i
-                            has_undecided_case = (
-                                match_info.state == MatchState.UNDECIDED
-                            )
+                            has_undecided_case = match_state == MatchState.UNDECIDED
                         else:
                             candidate_ranks.add(o)
                             candidate_idx[o] = i
-                            if match_info.state not in [
+                            if match_state not in [
                                 MatchState.FULLY_MATCHED,
                                 MatchState.UNDECIDED,
                             ]:
@@ -290,7 +287,7 @@ def build_collectives(
                                 # But it's possible that the current rank is the culprit, then users will
                                 # see lots of normal ranks reported as culprit.
                                 # TODO: we need to figure out a better way to handle the case mentioned above.
-                                errors.add((o, match_info))
+                                errors.add((o, match_state))
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
@@ -334,9 +331,7 @@ def build_collectives(
                         candidate_idx.update(found_idx)
                         found_idx.clear()
                         found_ranks.clear()
-                        errors.add(
-                            (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
-                        )
+                        errors.add((first_rank, MatchState.SIZE_OR_SYNTAX_MISMATCH))
                     else:
                         found_ranks.update(candidate_ranks)
                         found_idx.update(candidate_idx)

@@ -508,33 +508,6 @@ class DynamoExporterTest(common_utils.TestCase):
         ):
             self.assertEqual(input.shape[0].value, expected_axis_name)
 
-    def test_export_of_static_dim_constraints(self):
-        # NOTE: This test is to ensure that the static dim constraints are respected.
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.l = torch.nn.Linear(6, 4)
-
-            def forward(self, x, y, z):
-                x0 = self.l(x) + y[1:]
-                return x0, z * 2.0
-
-        inputs = (torch.randn(4, 6), torch.randn(5, 4), torch.randn(3, 3))
-        dx = torch.export.Dim("dx", min=3, max=6)
-        dy = dx + 1
-        dz = torch.export.Dim("dz", min=3, max=6)
-
-        # all of these should be fine
-        dynamic_shapes = (
-            {0: dx, 1: torch.export.Dim.AUTO},
-            {0: dy, 1: None},
-            {0: dz, 1: 3},
-        )
-        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
-        # make sre the naming is working
-        self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
-
 
 if __name__ == "__main__":
     common_utils.run_tests()

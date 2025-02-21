@@ -63,24 +63,14 @@ class MatchState(Enum):
     COLLECTIVE_DTYPE_MISMATCH = auto()
     UNDECIDED = auto()
 
-
-class MatchInfo:
-    """
-    Aside from the match state, we also store some dynamic info for the match such as the culprit rank
-    or collective state that caused the mismatch.
-    """
-
-    def __init__(self, state: MatchState, culprit: Optional[str] = None) -> None:
-        self._state = state
+    def __call__(self, culprit: Optional[str] = None) -> "MatchState":
+        # Make the enum instance callable to add culprit.
         self.culprit = culprit
+        return self
 
     def __str__(self) -> str:
         details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
-        return f"Error type: {self._state.name}{details}"
-
-    @property
-    def state(self) -> MatchState:
-        return self._state
+        return f"Error type: {self.name}{details}"
 
 
 """
@@ -140,7 +130,7 @@ class Collective(NamedTuple):
     output_numel: Optional[int] = None
     missing_ranks: Optional[set[int]] = None
     mismatch_collectives: Optional[dict[int, "Collective"]] = None
-    type_of_mismatch: Optional[MatchInfo] = None
+    type_of_mismatch: Optional[MatchState] = None
 
 
 class NCCLCall(NamedTuple):
@@ -229,7 +219,7 @@ class EntryState:
         self.missing_ranks: set[int]
         self.input_numel: int
         self.output_numel: int
-        self.errors: set[tuple[int, MatchInfo]]
+        self.errors: set[tuple[int, MatchState]]
 
     def log(
         self,
@@ -237,7 +227,7 @@ class EntryState:
         logger_msg: str,
         frame_formatter: Any,
         total_numel: Optional[tuple[int, int]] = None,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
+        errors: Optional[set[tuple[int, MatchState]]] = None,
         missing_ranks: Optional[set[int]] = None,
     ) -> None:
         logger.info(
@@ -273,7 +263,7 @@ class EntryState:
     def to_collective(
         self,
         id: int,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
+        errors: Optional[set[tuple[int, MatchState]]] = None,
         idx_map: Optional[dict[int, int]] = None,
         all_entries: Optional[dict[int, list[dict[str, Any]]]] = None,
     ) -> Collective:
@@ -456,7 +446,7 @@ class Op:
             f"{p2p_info}, " if p2p_info else ""
         )
 
-    def match(self, other: "Op") -> MatchInfo:
+    def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
         # e.g. if one PG was used for p2p ops between only some of the peers?
         # if self.seq_id != other.seq_id:
@@ -465,67 +455,61 @@ class Op:
         if self.type == "send":
             # TODO: We need more states for p2p ops.
             return (
-                MatchInfo(MatchState.FULLY_MATCHED)
+                MatchState.FULLY_MATCHED
                 if (
                     other.type == "recv"
                     and self.src == other.src
                     and self.dst == other.dst
                     and self.input_sizes == other.output_sizes
                 )
-                else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
             )
         elif self.type == "recv":
             return (
-                MatchInfo(MatchState.FULLY_MATCHED)
+                MatchState.FULLY_MATCHED
                 if (
                     other.type == "send"
                     and self.src == other.src
                     and self.dst == other.dst
                     and self.output_sizes == other.input_sizes
                 )
-                else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
             )
         elif self.type in COLLECTIVES:
             if self.type != other.type:
-                return MatchInfo(
-                    MatchState.COLLECTIVE_TYPE_MISMATCH,
-                    f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
+                return MatchState.COLLECTIVE_TYPE_MISMATCH(
+                    f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'"
                 )
             if self.state != other.state:
                 # MatchState()
-                return MatchInfo(
-                    MatchState.COLLECTIVE_STATE_MISMATCH,
-                    f"Expected state: '{self.state}' does not match found state: '{other.state}'",
+                return MatchState.COLLECTIVE_STATE_MISMATCH(
+                    f"Expected state: '{self.state}' does not match found state: '{other.state}'"
                 )
             if (
                 set(self.input_dtypes) != set(self.output_dtypes)
                 or set(self.input_dtypes) != set(other.input_dtypes)
                 or set(self.input_dtypes) != set(other.output_dtypes)
             ):
-                return MatchInfo(
-                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
+                return MatchState.COLLECTIVE_DTYPE_MISMATCH(
                     f"Expected dtypes: '{set(self.input_dtypes)}' does not "
                     f"match found dtype: '{set(self.output_dtypes)}/"
                     f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
                 )
             if self.type == "all_to_all":
-                return MatchInfo(MatchState.UNDECIDED)
+                return MatchState.UNDECIDED
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
-                return MatchInfo(
-                    MatchState.SIZE_OR_SYNTAX_MISMATCH,
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
                     f"Expected input sizes: '{self.input_sizes}' does not match found input sizes: "
                     f"'{other.input_sizes}'",
                 )
             if self.type != "gather" and self.output_sizes != other.output_sizes:
-                return MatchInfo(
-                    MatchState.SIZE_OR_SYNTAX_MISMATCH,
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
                     f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
-                    f"'{other.output_sizes}'",
+                    f"'{other.output_sizes}'"
                 )
             if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
-                return MatchInfo(
-                    MatchState.SIZE_OR_SYNTAX_MISMATCH,
-                    f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'"
                 )
             # TODO: need to consider uneven sharding for all-gather.
             # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
@@ -536,8 +520,7 @@ class Op:
                 math.prod(other.output_sizes[0])
                 == math.prod(self.input_sizes[0]) * self.pg_size
             ):
-                return MatchInfo(
-                    MatchState.SIZE_OR_SYNTAX_MISMATCH,
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
                     f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
                     f"does not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
@@ -548,15 +531,14 @@ class Op:
                 math.prod(other.input_sizes[0])
                 == math.prod(self.output_sizes[0]) * self.pg_size
             ):
-                return MatchInfo(
-                    MatchState.SIZE_OR_SYNTAX_MISMATCH,
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
                     f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
                 )
         elif self.type == "coalesced":
             return (
-                MatchInfo(MatchState.FULLY_MATCHED)
+                MatchState.FULLY_MATCHED
                 if (other.type == "coalesced")
-                else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
             )
-        return MatchInfo(MatchState.FULLY_MATCHED)
+        return MatchState.FULLY_MATCHED

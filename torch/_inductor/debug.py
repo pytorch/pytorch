@@ -3,7 +3,6 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import io
 import itertools
 import json
 import logging
@@ -43,8 +42,6 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-ir_pre_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_pre_fusion")
-ir_post_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -525,17 +522,21 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
-        ir_pre_fusion_log.debug("BEFORE FUSION\n%s", self._write_ir(nodes))
+        self._write_ir("ir_pre_fusion.txt", nodes)
 
     def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
-        ir_post_fusion_log.debug("AFTER FUSION\n%s", self._write_ir(nodes))
+        self._write_ir("ir_post_fusion.txt", nodes)
 
-    def _write_ir(self, nodes: SchedulerNodeList) -> str:
-        buf = io.StringIO()
-        for node in nodes:
-            buf.write(node.debug_str())
-            buf.write("\n\n\n")
-        return buf.getvalue()
+    def _write_ir(
+        self,
+        filename: str,
+        nodes: SchedulerNodeList,
+    ) -> None:
+        with self.fopen(filename) as fd:
+            log.info("Writing debug ir to  %s", fd.name)
+            for node in nodes:
+                fd.write(node.debug_str())
+                fd.write("\n\n\n")
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))

@@ -3,7 +3,7 @@ import gc
 import threading
 import unittest
 from datetime import timedelta
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch.distributed as dist
@@ -576,24 +576,24 @@ class ProcessGroupDummy(dist.ProcessGroup):
         self.waits = 0
         self.dels = 0
 
-    def broadcast(self, tensor_list: list[torch.Tensor], opts: object) -> dist.Work:
+    def broadcast(self, tensor_list: List[torch.Tensor], opts: object) -> dist.Work:
         return _DummyWork(self)
 
     def allgather_into_tensor_coalesced(
         self,
-        output_lists: list[torch.Tensor],
-        input_list: list[torch.Tensor],
+        output_lists: List[torch.Tensor],
+        input_list: List[torch.Tensor],
         opts: object,
     ) -> dist.Work:
         return _DummyWork(self)
 
-    def allreduce(self, tensors: list[torch.Tensor], opts: object) -> dist.Work:
+    def allreduce(self, tensors: List[torch.Tensor], opts: object) -> dist.Work:
         return _DummyWork(self)
 
     def reduce_scatter_tensor_coalesced(
         self,
-        outputTensors: list[torch.Tensor],
-        inputTensors: list[torch.Tensor],
+        outputTensors: List[torch.Tensor],
+        inputTensors: List[torch.Tensor],
         opts: object,
     ) -> dist.Work:
         return _DummyWork(self)

@@ -15,7 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Dict, Generic, IO, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -1898,7 +1898,7 @@ def _load(
     data_descripter_size64 = 24
     data_descripter_size32 = 16
     mz_uint32_max = 0xFFFFFFFF
-    offsets: dict[str, int] = dict()
+    offsets: Dict[str, int] = dict()
 
     def _get_offset(key, name, numel):
         """

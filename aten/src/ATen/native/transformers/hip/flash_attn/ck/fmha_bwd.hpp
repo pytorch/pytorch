@@ -15,19 +15,11 @@
 #include <utility>
 #include <variant>
 
-struct FmhaBwdFp16
-{
-};
-
-struct FmhaBwdBf16
-{
-};
-
 template <typename DataType>
 struct FmhaBwdTypeConfig;
 
 template <>
-struct FmhaBwdTypeConfig<FmhaBwdFp16>
+struct FmhaBwdTypeConfig<ck_tile::half_t>
 {
     using QDataType             = ck_tile::half_t;
     using KDataType             = ck_tile::half_t;
@@ -47,7 +39,7 @@ struct FmhaBwdTypeConfig<FmhaBwdFp16>
 };
 
 template <>
-struct FmhaBwdTypeConfig<FmhaBwdBf16>
+struct FmhaBwdTypeConfig<ck_tile::bf16_t>
 {
     using QDataType             = ck_tile::bf16_t;
     using KDataType             = ck_tile::bf16_t;

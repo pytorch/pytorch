@@ -24,7 +24,7 @@ import logging
 import os
 import socket
 import traceback
-from typing import Optional
+from typing import Dict, Optional
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
 

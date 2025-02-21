@@ -103,7 +103,7 @@ template <
     typename Integer2,
     std::enable_if_t<std::is_integral_v<Integer1>, bool> = true,
     std::enable_if_t<std::is_integral_v<Integer2>, bool> = true>
-integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
+constexpr integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {begin, end} as the loop terminator
   return {

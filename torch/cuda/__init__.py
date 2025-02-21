@@ -17,7 +17,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
@@ -85,7 +85,7 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
-                    self.paths: list[str] = paths
+                    self.paths: List[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any
@@ -1363,7 +1363,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns

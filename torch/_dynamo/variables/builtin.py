@@ -11,8 +11,8 @@ import sys
 import types
 import typing
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView, Sequence
-from typing import Callable, TYPE_CHECKING, Union
+from collections.abc import KeysView
+from typing import Callable, Sequence, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -24,7 +24,6 @@ from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
     unimplemented,
-    unimplemented_v2,
     Unsupported,
     UserError,
     UserErrorType,
@@ -903,24 +902,9 @@ class BuiltinVariable(VariableTracker):
 
             handlers.append(constant_fold_handler)
 
-        def call_unimplemented_v2(args):
-            real_arg_types = [arg.python_type_name() for arg in args]
-            unimplemented_v2(
-                gb_type="Failed to trace builtin operator",
-                context=f"builtin {fn.__name__} {arg_types} {has_kwargs}",
-                explanation=f"Dynamo does not know how to trace builtin operator `{fn.__name__}` "
-                f"with argument types {real_arg_types} (has_kwargs {has_kwargs})",
-                hints=[
-                    f"Avoid calling builtin `{fn.__name__}` with argument types {real_arg_types}. "
-                    f"Consider using an equivalent alternative function/method to `{fn.__name__}`.",
-                    "If you are attempting to call a logging function (e.g. `print`), "
-                    "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
-                    "Please report an issue to PyTorch.",
-                ],
-            )
-
+        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
         if len(handlers) == 0:
-            return lambda tx, args, kwargs: call_unimplemented_v2(args)
+            return lambda *args: unimplemented(error_msg)
         elif len(handlers) == 1:
             (handler,) = handlers
 
@@ -928,7 +912,7 @@ class BuiltinVariable(VariableTracker):
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
-                call_unimplemented_v2(args)
+                unimplemented(error_msg)
 
         else:
 
@@ -937,7 +921,7 @@ class BuiltinVariable(VariableTracker):
                     rv = fn(tx, args, kwargs)
                     if rv:
                         return rv
-                call_unimplemented_v2(args)
+                unimplemented(error_msg)
 
         return builtin_dispatch
 

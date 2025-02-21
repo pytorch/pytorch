@@ -456,17 +456,13 @@ class FileSystem(FileSystemBase):
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        if not isinstance(path, Path):
-            path = Path(path)
-        with path.open(mode) as stream:
+        with cast(Path, path).open(mode) as stream:
             yield cast(io.IOBase, stream)
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
     ) -> Union[str, os.PathLike]:
-        if not isinstance(path, Path):
-            path = Path(path)
-        return path / suffix
+        return cast(Path, path) / suffix
 
     def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         if not isinstance(path, Path):
@@ -476,15 +472,10 @@ class FileSystem(FileSystemBase):
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
     ) -> None:
-        if not isinstance(path, Path):
-            path = Path(path)
-
-        path.rename(cast(Path, new_path))
+        cast(Path, path).rename(cast(Path, new_path))
 
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
-        if not isinstance(path, Path):
-            path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
+        cast(Path, path).mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -501,14 +492,10 @@ class FileSystem(FileSystemBase):
         return False
 
     def exists(self, path: Union[str, os.PathLike]) -> bool:
-        if not isinstance(path, Path):
-            path = Path(path)
-        return path.exists()
+        return cast(Path, path).exists()
 
     def rm_file(self, path: Union[str, os.PathLike]) -> None:
-        if not isinstance(path, Path):
-            path = Path(path)
-        path.unlink()
+        cast(Path, path).unlink()
 
 
 class _FileSystemWriter(StorageWriter):
