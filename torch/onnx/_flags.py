@@ -51,6 +51,6 @@ USE_EXPERIMENTAL_LOGIC: bool = _load_boolean_flag(
 
 ENABLE_DRAFT_EXPORT: bool = _load_boolean_flag(
     "TORCH_ONNX_ENABLE_DRAFT_EXPORT",
-    this_will="enable draft export as an graph capturing strategy",
+    this_will="enable draft export as an graph capturing strategy as the second fallback when dynamo=True",
     default=False,
 )
