@@ -10,7 +10,7 @@ import operator
 import re
 from collections.abc import Iterable
 from contextlib import contextmanager
-from inspect import Parameter
+from inspect import ismethod, Parameter
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -1350,3 +1350,15 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_node(cls)
     _deregister_pytree_flatten_spec(cls)
+
+
+class _WrappedMethod(torch.nn.Module):
+    def __init__(self, method):
+        super().__init__()
+        self._buffers = method.__self__._buffers
+        self.forward = method
+
+
+def wrap_method(method):
+    assert ismethod(method)
+    return _WrappedMethod(method)
