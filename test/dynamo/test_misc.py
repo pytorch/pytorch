@@ -74,6 +74,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
@@ -82,8 +83,10 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     scoped_load_inline,
     set_default_dtype,
+    skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
+    TEST_HPU,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -2643,18 +2646,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_unique_consecutive(self):
-        x = torch.tensor([1, 1, 2, 2, 1, 3])
-
-        def fn(x):
-            return torch.unique_consecutive(x)
-
-        expected = fn(x)
-        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
-        result = opt_fn(x)
-        self.assertEqual(result, expected)
-
     def test_numpy_unique_f16(self):
         def fn():
             x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
@@ -3986,21 +3977,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         x += 1
         self.assertEqual(1, get_x())
 
-    def test_input_cell_mutation(self):
-        def fn(x):
-            x = x.cos()
-
-            def inner():
-                return x.sin()
-
-            return inner()
-
-        x = torch.ones(10)
-        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(res, ref)
-
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -4311,27 +4287,6 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_version_ci(self):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))
-
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_rand(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-        device = "cuda"
-
-        def fn():
-            return torch.randn(10, device=device)
-
-        torch.manual_seed(10)
-        ref_run1 = fn()
-
-        torch.manual_seed(10)
-        ref_run2 = fn()
-        self.assertTrue(same(ref_run1, ref_run2))
-
-        torch.manual_seed(10)
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn()
-
-        self.assertTrue(same(res, ref_run1))
 
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -4721,35 +4676,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn_has_breaks, backend=cnts)
         opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_id_guarded_class(self):
-        class MyClass1:
-            pass
-
-        class MyClass2:
-            pass
-
-        def fn(x, y):
-            return x + id(y) // 100000
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
-        x = torch.randn(3)
-        y = MyClass1
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # No recompile if still pass in the original class (MyClass1)
-        x = torch.randn(3)
-        y = MyClass1
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Have to recompile if pass in new class (MyClass2)
-        x = torch.randn(3)
-        y = MyClass2
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
         self.assertEqual(cnts.frame_count, 2)
 
     def test_id_guarded_object(self):
@@ -5929,32 +5855,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_out = opt_f(*args)
         self.assertTrue(same(ref_out, opt_out))
 
-    def test_enum_subclass(self):
-        # Copied from inspect.py
-
-        class _ParameterKind(enum.IntEnum):
-            POSITIONAL_ONLY = "positional-only"
-
-            def __new__(cls, description):
-                value = len(cls.__members__)
-                member = int.__new__(cls, value)
-                member._value_ = value
-                member.description = description
-                return member
-
-            def __str__(self):
-                return self.name
-
-        _POSITIONAL_ONLY = _ParameterKind.POSITIONAL_ONLY
-
-        def fn(x):
-            _ParameterKind(_POSITIONAL_ONLY)
-            return torch.cos(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
 
@@ -6014,57 +5914,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn(x, y)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
-
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Can't run fused SDPA on this platform",
-    )
-    def test_parsing_sdpa(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, query, key, value):
-                out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
-                out = F.scaled_dot_product_attention(
-                    query, key, value, None, 0, True, scale=8
-                )
-                out = F.scaled_dot_product_attention(
-                    query=query,
-                    key=key,
-                    value=value,
-                    attn_mask=None,
-                    dropout_p=0,
-                    is_causal=True,
-                )
-                out = F.scaled_dot_product_attention(
-                    query,
-                    key=key,
-                    value=value,
-                    attn_mask=None,
-                    dropout_p=0,
-                    is_causal=True,
-                )
-                out = F.scaled_dot_product_attention(
-                    query, key, value, None, dropout_p=0, is_causal=True
-                )
-                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
-                return out
-
-        device = "cuda"
-        dtype = torch.float16
-        seq_len_q = 1
-        seq_len_k = 1
-        head_dim = 8
-        query = torch.ones(
-            1, 8, seq_len_q, head_dim, device=device, dtype=dtype, requires_grad=True
-        )
-        key = torch.ones(
-            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
-        )
-        value = torch.ones(
-            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
-        )
-        module = MyModule()
-        opt_mod = torch.compile(module, backend="inductor")
-        opt_mod(query, key, value)
 
     def test_generate_tensor_from_list_of_numpy_primitive_type(self):
         # Test sth like torch.LongTensor(list(np.int64, np.int64, ...))
@@ -6522,19 +6371,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_torch_cuda_is_available(self):
-        def fn(x):
-            if torch.cuda.is_available():
-                return x + 1
-            else:
-                return x - 1
-
-        x = torch.rand(4)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
     def test_variable_tracker_recursively_contains(self):
         # VariableTracker.recursively_contains should be updated correctly when mutation happens
         def fn(x):
@@ -6550,61 +6386,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable(self):
-        def fn(x):
-            if torch.backends.cudnn.is_acceptable(tensor=x):
-                return x + 1
-            return x
-
-        x = torch.rand(4).cuda()
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable_bad_inputs(self):
-        def fn1(x):
-            if torch.backends.cudnn.is_acceptable("invalid"):
-                return x + 1
-            return x
-
-        def fn2(x):
-            if torch.backends.cudnn.is_acceptable(x, 3.14):
-                return x + 1
-            return x
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
-        ):
-            x1 = torch.rand(4).cuda()
-            opt_fn1 = torch.compile(fn1, backend="eager", fullgraph=True)
-            res1 = opt_fn1(x1)
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect 1 input to cudnn.is_acceptable"
-        ):
-            x2 = torch.rand(4).cuda()
-            opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
-            res = opt_fn2(x2)
-
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_get_device(self):
-        def fn(x, y):
-            x = x + 1
-            y = y + 1
-            return x.get_device(), y.get_device()
-
-        x = torch.rand(4, device="cuda")
-        y = torch.rand(4, device="cpu")
-        ref = fn(x, y)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
     def test_disable_flag(self):
@@ -6902,17 +6683,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_symint_as_device_kwarg(self):
-        def f(rank):
-            # -2 to make device id 0 for easier testing on CI
-            return torch.ones(10, device=rank.size(0) - 2)
-
-        x = torch.randn(2)
-        out = f(torch.randn(2))
-        opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
-        self.assertEqual(out, opt_out)
-
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
     def test_symint_as_device_kwarg_multi_gpu(self):
         def fn(rank):
@@ -6939,23 +6709,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertIn(
             """tensor 'L['rank']' size mismatch at index 0""", guard_failure[0]
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_symint_as_device_kwarg_non_strict_export(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                # -2 to make device id 0 for easier testing on CI
-                return torch.ones(10, device=x.size(0) - 2)
-
-        x = torch.randn(2)
-        m = Mod()
-        d1 = torch.export.Dim("d1", max=2048)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
-        ):
-            ep = torch.export.export(
-                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
-            )
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
@@ -7055,25 +6808,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Force recompilation
         inputs = [torch.randn(10, 10) for _ in range(4)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
-
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_argwhere_with_dynamic_shapes(self):
-        def fn(
-            tensor: torch.Tensor,
-            mapping: torch.Tensor,
-        ) -> torch.Tensor:
-            xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
-            indices = torch.argwhere(xx == yy)
-
-            mapped_values = torch.zeros_like(tensor)
-            mapped_values[indices[:, 1]] = indices[:, 0]
-
-            return mapped_values
-
-        tensor = torch.tensor([1, 2, 3, 5, 6, 7])
-        mapping = torch.tensor([0, 3, 4, 5, 7])
-        opt = torch.compile(fn, fullgraph=True)
-        self.assertEqual(fn(tensor, mapping), opt(tensor, mapping))
 
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
@@ -7667,19 +7401,6 @@ utils_device.CURRENT_DEVICE == None""".split(
 """,
         )
 
-    def test_float_speculation_log_divergence(self):
-        def fn(x, y, z):
-            a = F.interpolate(x, scale_factor=z, mode="bilinear", align_corners=False)
-            b = F.interpolate(y, scale_factor=z, mode="bilinear", align_corners=False)
-            return a * b
-
-        cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch.compile(fn, backend=cnt)
-        y = torch.randn(3, 3, 3, 4)
-
-        self.assertEqual(fn(y, y, 1.0), fn_opt(y, y, 1.0))
-        self.assertEqual(fn(y, y, 2.0), fn_opt(y, y, 2.0))
-
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -7974,9 +7695,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0])
+            torch.set_grad_enabled(state[0]),
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2])
+            torch._C._set_cublas_allow_tf32(state[2]),
 
         @torch.compile(backend=my_compiler)
         def fn(x):
@@ -8259,21 +7980,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         compile_out = torch.compile(func, backend="eager")(torch.ones(10, 10, 3))
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_cuda_set_device(self):
-        def fn():
-            a = torch.ones(2, device="cuda")
-            torch.cuda.set_device(1)
-            return a + 1
-
-        with torch.cuda.device(0):
-            counter = CompileCounter()
-            opt_fn = torch.compile(fn, backend=counter)
-            res = opt_fn()
-            self.assertEqual(res.device.type, "cuda")
-            self.assertEqual(res.device.index, 0)
-            self.assertEqual(counter.frame_count, 2)
 
     def test_nested_function_resuming_with_correct_globals(self):
         # https://github.com/pytorch/pytorch/issues/99665
@@ -9424,6 +9130,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
+    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
@@ -9513,36 +9220,6 @@ def ___make_guard_fn():
         res = opt_func()
         self.assertEqual(ref, res)
 
-    def test_torch_device_python_type(self):
-        for device, device_type, index in [
-            ("cpu", "cpu", None),
-            ("cuda:0", "cuda", 0),
-        ]:
-            if device == "cuda:0" and not TEST_CUDA:
-                continue
-
-            def fn(target):
-                target_device = target.device
-                a = torch.zeros(2, 3, device=target_device)
-                # Constant assert at trace time
-                assert isinstance(target_device, torch.device)
-                assert target_device.type == device_type
-                assert target_device.index == index
-                b = torch.zeros(2, 3, device=target_device)
-                c = torch.zeros(2, 3, device=target_device)
-                return a + b + c
-
-            from torch._dynamo.variables import ConstantVariable
-
-            device = torch.device(device)
-            expected_variable = ConstantVariable(device)
-            self.assertEqual(expected_variable.python_type(), type(device))
-
-            opt_func = torch.compile(fn, backend="eager", fullgraph=True)
-            a = torch.tensor([2, 3], device=device)
-            res = opt_func(a)
-            self.assertIsInstance(res, torch.Tensor)
-
     def test_torch_dtype_python_type(self):
         def fn(target):
             target_dtype = target.dtype
@@ -9571,6 +9248,21 @@ def ___make_guard_fn():
                     yield x
 
             return list(gen())
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "infinite generator"
+        ):
+            compiled_fn(x)
+
+        # FIXME(XuehaiPan): do not inline infinite generator if it does not raise errors in eager mode
+        def fn(x):
+            def gen():
+                while True:
+                    yield x
+
+            return list(zip(range(10), gen()))
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -11411,23 +11103,6 @@ fn
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    @torch._dynamo.config.patch(
-        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
-    )
-    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
-    def test_interpolate_propagate_real_tensors(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(mask, box):
-            # u0, u1 = mask.tolist()
-            mask = torch.randn(1, 1, 30, 30, device="cuda")
-            h, w = box.tolist()
-            return torch.nn.functional.interpolate(
-                mask, (h, w), mode="bilinear", align_corners=False
-            )
-
-        f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
-
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
         def fn(y):
@@ -11846,33 +11521,6 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
 
-    def test_ne_operator_with_custom_ne(self):
-        class Foo:
-            def __init__(self, x):
-                self.x = x
-                self.ne_called = False
-
-            def __ne__(self, other):
-                # ne_called attr is later checked to ensure that overrideen
-                # `__ne__` is traced
-                self.ne_called = True
-                return not self.__eq__(other)
-
-            def __eq__(self, other):
-                return self.x == other.x
-
-        f1 = Foo(0)
-        f2 = Foo(0)
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def run(x):
-            # `x + 1` prevents Dynamo from skipping this frame.
-            return x + 1, f1 != f2
-
-        _, ne = run(torch.ones(1))
-        self.assertFalse(ne)
-        self.assertTrue(f1.ne_called)
-
     def test_ne_operator_with_custom_graphbreak_eq(self):
         counters.clear()
 
@@ -12036,18 +11684,243 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
 
         torch.allclose(inp1_custom.grad, inp1_usual.grad)
 
-    def test_retain_grad(self):
+
+class MiscTestsDevice(torch._inductor.test_case.TestCase):
+    def test_rand(self, device):
+        cnts = torch._dynamo.testing.CompileCounter()
+        device = device
+
+        def fn():
+            return torch.randn(10, device=device)
+
+        torch.manual_seed(10)
+        ref_run1 = fn()
+
+        torch.manual_seed(10)
+        ref_run2 = fn()
+        self.assertTrue(same(ref_run1, ref_run2))
+
+        torch.manual_seed(10)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn()
+
+        self.assertTrue(same(res, ref_run1))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_parsing_sdpa(self, device):
+        class MyModule(torch.nn.Module):
+            def forward(self, query, key, value):
+                out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
+                out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
+                    query=query,
+                    key=key,
+                    value=value,
+                    attn_mask=None,
+                    dropout_p=0,
+                    is_causal=True,
+                )
+                out = F.scaled_dot_product_attention(
+                    query,
+                    key=key,
+                    value=value,
+                    attn_mask=None,
+                    dropout_p=0,
+                    is_causal=True,
+                )
+                out = F.scaled_dot_product_attention(
+                    query, key, value, None, dropout_p=0, is_causal=True
+                )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
+                return out
+
+        device = device
+        dtype = torch.float16
+        seq_len_q = 1
+        seq_len_k = 1
+        head_dim = 8
+        query = torch.ones(
+            1, 8, seq_len_q, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        key = torch.ones(
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        value = torch.ones(
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        module = MyModule()
+        opt_mod = torch.compile(module, backend="inductor")
+        opt_mod(query, key, value)
+
+    def test_torch_device_is_available(self, device):
+        def fn(x):
+            if (TEST_CUDA and torch.cuda.is_available()) or (
+                TEST_HPU and torch.hpu.is_available()
+            ):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable(self):
+        def fn(x):
+            if torch.backends.cudnn.is_acceptable(tensor=x):
+                return x + 1
+            return x
+
+        x = torch.rand(4).cuda()
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable_bad_inputs(self, device):
+        def fn1(x):
+            if torch.backends.cudnn.is_acceptable("invalid"):
+                return x + 1
+            return x
+
+        def fn2(x):
+            if torch.backends.cudnn.is_acceptable(x, 3.14):
+                return x + 1
+            return x
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
+        ):
+            x1 = torch.rand(4).to(device)
+            opt_fn1 = torch.compile(fn1, backend="eager", fullgraph=True)
+            res1 = opt_fn1(x1)
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect 1 input to cudnn.is_acceptable"
+        ):
+            x2 = torch.rand(4).to(device)
+            opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
+            res = opt_fn2(x2)
+
+    def test_get_device(self, device):
         def fn(x, y):
-            y.retain_grad()
-            return torch.sin(y) + x
+            x = x + 1
+            y = y + 1
+            return x.get_device(), y.get_device()
 
-        opt_fn = torch.compile(fn, backend="aot_eager")
-        x = torch.randn(4, requires_grad=True)
-        y = torch.cos(x)
-        opt_fn(x, y).sum().backward()
-        self.assertTrue(y.grad is not None)
+        x = torch.rand(4, device=device)
+        y = torch.rand(4, device="cpu")
+        ref = fn(x, y)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_symint_as_device_kwarg(self):
+        def f(rank):
+            # -2 to make device id 0 for easier testing on CI
+            return torch.ones(10, device=rank.size(0) - 2)
+
+        x = torch.randn(2)
+        out = f(torch.randn(2))
+        opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
+        self.assertEqual(out, opt_out)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_symint_as_device_kwarg_non_strict_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                # -2 to make device id 0 for easier testing on CI
+                return torch.ones(10, device=x.size(0) - 2)
+
+        x = torch.randn(2)
+        m = Mod()
+        d1 = torch.export.Dim("d1", max=2048)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
+        ):
+            ep = torch.export.export(
+                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
+            )
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_cuda_set_device(self, device):
+        def fn():
+            a = torch.ones(2, device=device)
+            torch.cuda.set_device(1)
+            return a + 1
+
+        with torch.cuda.device(0):
+            counter = CompileCounter()
+            opt_fn = torch.compile(fn, backend=counter)
+            res = opt_fn()
+            self.assertEqual(res.device.type, device)
+            self.assertEqual(res.device.index, 0)
+            self.assertEqual(counter.frame_count, 2)
+
+    def test_torch_device_python_type(self):
+        for device, device_type, index in [
+            ("cpu", "cpu", None),
+            ("cuda:0", "cuda", 0),
+            ("hpu:0", "hpu", 0),
+        ]:
+            if (device == "cuda:0" and not TEST_CUDA) or (
+                device == "hpu:0" and not TEST_HPU
+            ):
+                continue
+
+            def fn(target):
+                target_device = target.device
+                a = torch.zeros(2, 3, device=target_device)
+                # Constant assert at trace time
+                assert isinstance(target_device, torch.device)
+                assert target_device.type == device_type
+                assert target_device.index == index
+                b = torch.zeros(2, 3, device=target_device)
+                c = torch.zeros(2, 3, device=target_device)
+                return a + b + c
+
+            from torch._dynamo.variables import ConstantVariable
+
+            device = torch.device(device)
+            expected_variable = ConstantVariable(device)
+            self.assertEqual(expected_variable.python_type(), type(device))
+
+            opt_func = torch.compile(fn, backend="eager", fullgraph=True)
+            a = torch.tensor([2, 3], device=device)
+            res = opt_func(a)
+            self.assertIsInstance(res, torch.Tensor)
+
+    # @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_interpolate_propagate_real_tensors(self, device):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(mask, box):
+            # u0, u1 = mask.tolist()
+            mask = torch.randn(1, 1, 30, 30, device=device)
+            h, w = box.tolist()
+            return torch.nn.functional.interpolate(
+                mask, (h, w), mode="bilinear", align_corners=False
+            )
+
+        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
 
 
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
