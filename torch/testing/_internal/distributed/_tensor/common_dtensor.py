@@ -326,14 +326,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        if TEST_CUDA:
-            backend = "nccl"
-        elif TEST_HPU:
-            backend = "hccl"
-        elif TEST_XPU:
-            backend = "xccl"
-        else:
-            backend = "gloo"
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
