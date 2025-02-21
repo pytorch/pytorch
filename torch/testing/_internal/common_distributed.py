@@ -962,7 +962,7 @@ class DistributedTestBase(MultiProcessTestCase):
             store=store
         )
         if "nccl" or "xccl" in self.backend(device):
-            torch.accelerator.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -1355,7 +1355,7 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
-        torch.accelerator.set_device(rank)
+        torch.accelerator.set_device_index(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
