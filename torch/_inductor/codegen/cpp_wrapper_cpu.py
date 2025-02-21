@@ -172,7 +172,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                '''
+                r'''
                 """
             )
 
