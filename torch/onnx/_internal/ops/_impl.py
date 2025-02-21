@@ -56,22 +56,34 @@ def rotary_embedding(
 
     # Retrieve sin and cos caches using position ids
     if position_ids is not None:
-        cos = cos_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
-        sin = sin_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
+        cos = cos_cache[
+            position_ids
+        ]  # Shape: [batch_size, sequence_length, head_size/2]
+        sin = sin_cache[
+            position_ids
+        ]  # Shape: [batch_size, sequence_length, head_size/2]
     else:
         cos = cos_cache
         sin = sin_cache
-    cos = cos[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    sin = sin[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    cos = torch.unsqueeze(cos, 2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
-    sin = torch.unsqueeze(sin, 2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
+    cos = cos[
+        :, :, :rotary_embedding_dim_half
+    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+    sin = sin[
+        :, :, :rotary_embedding_dim_half
+    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+    cos = torch.unsqueeze(
+        cos, 2
+    )  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
+    sin = torch.unsqueeze(
+        sin, 2
+    )  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
 
     # Either divide the input in halves or interleave (based on interleaved attribute)
     if interleaved:
         x1 = x_rotate[:, :, :, 0::2]
         x2 = x_rotate[:, :, :, 1::2]
     else:
-        x1, x2 = torch.split(x_rotate, 2, dim=-1)
+        x1, x2 = torch.chunk(x_rotate, 2, dim=-1)
 
     # Calculate real and imaginary values
     real = cos * x1 - sin * x2
@@ -81,8 +93,8 @@ def rotary_embedding(
     if interleaved:
         # x_rotate[:, :, :, 0::2] = real
         # x_rotate[:, :, :, 1::2] = imag
-        real = torch.unsqueeze(real,-1)
-        imag = torch.unsqueeze(imag,-1)
+        real = torch.unsqueeze(real, -1)
+        imag = torch.unsqueeze(imag, -1)
         x_rotate_concat = torch.cat((real, imag), dim=-1)
         x_rotate = torch.reshape(x_rotate_concat, x_rotate.shape)
     else:
@@ -91,3 +103,14 @@ def rotary_embedding(
     if len(input.shape) == 3:
         output = torch.reshape(output, input.shape)
     return output
+
+
+"""
+input_data = torch.rand(2, 3, 4, 8)
+position_ids_data = torch.randint(0, 50, (2, 3)).long()
+sin_cache_data = torch.rand(50, 4)
+cos_cache_data = torch.rand(50, 4)
+
+result = torch.ops.onnx.rotary_embedding(input_data, cos_cache_data, sin_cache_data, position_ids_data)
+
+"""
