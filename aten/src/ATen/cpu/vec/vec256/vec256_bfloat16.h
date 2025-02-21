@@ -204,6 +204,12 @@ public:
       return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
 
     __at_align__ int16_t tmp_values[size()];
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+    for (const auto i : c10::irange(count, size())) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
   }
