@@ -528,10 +528,24 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
         instance_definition, instance_type = self.emit_ck_instance(op)
 
-        size_arg_strs = ["GroupCount", "NBatch", "NOutChannels", "NInChannels",
-                         "FilterSize_0", "FilterSize_1", "InputSize_0", "InputSize_1",
-                         "ConvolutionStrides_0", "ConvolutionStrides_1", "Dilations_0", "Dilations_1",
-                         "LeftPads_0", "LeftPads_1", "RightPads_0", "RightPads_1"]
+        size_arg_strs = [
+            "GroupCount",
+            "NBatch",
+            "NOutChannels",
+            "NInChannels",
+            "FilterSize_0",
+            "FilterSize_1",
+            "InputSize_0",
+            "InputSize_1",
+            "ConvolutionStrides_0",
+            "ConvolutionStrides_1",
+            "Dilations_0",
+            "Dilations_1",
+            "LeftPads_0",
+            "LeftPads_1",
+            "RightPads_0",
+            "RightPads_1",
+        ]
 
         return self._template_from_string(self.conv_template).render(
             headers=self.header().getvalue(),
@@ -554,12 +568,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
 
     def size_args(self):
-
         X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node, I 
+        Y = self.output_node
 
         GroupCount = self.groups
-        NBatch = X.shape[0] 
+        NBatch = X.shape[0]
         NOutChannels = Y.shape[1]
         NInChannels = X.shape[1]
 
@@ -570,8 +583,22 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         LeftPads_0, LeftPads_1 = self.padding
         RightPads_0, RightPads_1 = self.padding
 
-        return GroupCount, NBatch, NOutChannels, NInChannels, \
-               FilterSize_0, FilterSize_1, InputSize_0, InputSize_1, \
-               ConvolutionStrides_0, ConvolutionStrides_1, Dilations_0, Dilations_1, \
-               LeftPads_0, LeftPads_1, RightPads_0, RightPads_1
-    
+        return (
+            GroupCount,
+            NBatch,
+            NOutChannels,
+            NInChannels,
+            FilterSize_0,
+            FilterSize_1,
+            InputSize_0,
+            InputSize_1,
+            ConvolutionStrides_0,
+            ConvolutionStrides_1,
+            Dilations_0,
+            Dilations_1,
+            LeftPads_0,
+            LeftPads_1,
+            RightPads_0,
+            RightPads_1,
+        )
+
