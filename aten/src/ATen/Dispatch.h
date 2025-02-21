@@ -68,7 +68,8 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     return __VA_ARGS__();                                                     \
   }
 
-#define AT_DISPATCH_CASE(enum_type, ...) \
+#define AT_DISPATCH_CASE(enum_type, ...)        \
+  /* NOLINTNEXTLINE(clang-diagnostic-shadow) */ \
   AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
 
 #define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...)                  \
