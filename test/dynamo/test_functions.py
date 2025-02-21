@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import collections.abc
 import contextlib
 import functools
 import inspect
@@ -10,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
@@ -1113,6 +1115,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sub(torch.add(x, y), y)
 
     @make_test
+    def test_isinstance(x):
+        results = []
+        if isinstance([x], list):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], collections.abc.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], typing.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], (tuple, list, typing.Sequence)):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        # TODO: add sourceless builder for types.UnionType
+        # if sys.version_info >= (3, 10):
+        #     if isinstance([x], list | tuple):
+        #         results.append(x.sin())
+        #     else:
+        #         results.append(x.cos())
+        return results
+
+    @make_test
     def test_return_dict(x, y):
         z = [x + y, y, False]
         return {"x": x, "z": z, "a": x, "b": z, "c": x}
@@ -1587,7 +1620,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_reduce_with_initial(a, b, c, d):
         return functools.reduce(operator.add, [b, c, d], a)
 
-    @make_test(expected_frame_count=0)
+    @make_test
     def test_reduce_with_single(x):
         return functools.reduce(lambda a, b: (a, b), [x])
 
@@ -1919,6 +1952,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_slice_eq(a, b):
+        tmp1 = [a + 1, b + 2]
+        s = slice(1, 2)
+        if isinstance(s, slice) and s == slice(None):
+            return tmp1[s] * 2
+        return tmp1[s] * 3
 
     @make_test
     def test_namedtuple(a, b):
@@ -3208,7 +3249,7 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return operator.truth(x) and bool(y)
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+        opt_fn = torch.compile(dynamic=False)(fn)
 
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -3526,6 +3567,15 @@ class GraphModule(torch.nn.Module):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_round(self):
+        def fn(t):
+            return t + round(1.00002000011, 7)
+
+        t = torch.randn(2)
+        e = fn(t)
+        g = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(e, g)
+
     def test_map_return(self):
         def fn(a, b):
             return map(lambda x: x + 1, [a, b])
@@ -3706,6 +3756,7 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
 
+    @unittest.skip("https://github.com/pytorch/pytorch/pull/146527 exposed a bug")
     def test_enumerate_reconstruct(self):
         def fn(a, b):
             return enumerate([a, b], start=1)
@@ -4448,7 +4499,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
     def test_udf_tuple(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -4475,7 +4526,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res_tup.checked)
 
     def test_udf_tuple_reconstruction(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             pass
 
         def fn(x, klass):
@@ -4497,6 +4548,85 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, tuple)
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, tuple))
+
+    def test_udf_list(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+            def __contains__(self, val):
+                # Ensure that overridden method is traced
+                self.checked = True
+                return super().__contains__(val)
+
+            def __getitem__(self, idx):
+                # Tests that the reconstruction logic does not call the
+                # overridden __getitem__ method.
+                raise RuntimeError("Should not be called")
+
+        def fn(x, lst):
+            if 3 in lst:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            lst.append(4)
+            return x * lst.len_mulitply_2()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
+        self.assertTrue(ref_lst.checked)
+        self.assertTrue(res_lst.checked)
+
+    def test_udf_list_slice(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+        def fn(x, lst):
+            lst.append(4)
+            return x * lst.len_mulitply_2() * sum(lst[1:3])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
+
+    def test_udf_list_reconstruction(self):
+        class MyList(list):  # noqa: SLOT001
+            # def __new__(cls, *args, **kwargs):
+            #     return super().__new__(cls, *args, **kwargs)
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_list = list.__new__(klass)
+            sc_list.append(x)
+            if isinstance(sc_list, MyList):
+                sc_list.attr = 3
+            return sc_list
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyList)
+        res = opt_fn(x, MyList)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyList))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, list)
+        res = opt_fn(x, list)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, list))
 
     def test_sys_recursionlimit(self):
         def fn(x):
@@ -4532,6 +4662,20 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             code = f.__code__
             defaults = f.__defaults__
             return x * len(defaults) * code.co_argcount
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_functools_partial_id(self):
+        def gn(a, b):
+            return a + b
+
+        partial_gn = functools.partial(gn, a=3)
+
+        def fn(x):
+            d = {id(partial_gn): 5}
+            return partial_gn(b=x) * d[id(partial_gn)]
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)

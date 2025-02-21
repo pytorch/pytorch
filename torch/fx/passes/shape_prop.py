@@ -176,7 +176,7 @@ class ShapeProp(torch.fx.Interpreter):
         except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
-                f"ShapeProp error for: node={n.format_node()} with " f"meta={n.meta}"
+                f"ShapeProp error for: node={n.format_node()} with meta={n.meta}"
             ) from e
 
         found_tensor = False
