@@ -87,6 +87,7 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
+    ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
@@ -1946,16 +1947,28 @@ class VariableBuilder:
                 is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
             )
 
+            from torch.fx.experimental.dynamism import normalize_source_name
+
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
+            normalized_source_name = normalize_source_name(self.source.name())
+            base_source = self.source
+            if isinstance(base_source, ChainedSource):
+                base_source = base_source.get_base()
+
             if (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif (
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[0]
+                or not config.assume_static_by_default
+            ):
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2807,7 +2820,22 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic:
+        from torch.fx.experimental.dynamism import normalize_source_name
+
+        normalized_source_name = normalize_source_name(source.name())
+        base_source = source
+        if isinstance(base_source, ChainedSource):
+            base_source = base_source.get_base()
+
+        if (
+            marked_dynamic
+            or (
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+                or not config.assume_static_by_default
+            )
+        ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong

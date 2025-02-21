@@ -12,6 +12,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 
 import builtins
 import ctypes
+import functools
 import glob
 import importlib
 import inspect
@@ -2402,6 +2403,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay: builtins.int = 0,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2415,6 +2417,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay: builtins.int = 0,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2427,6 +2430,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    delay: builtins.int = 0,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2507,7 +2511,12 @@ def compile(
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
+
        disable (bool): Turn torch.compile() into a no-op for testing
+
+       delay (int): Run code {delay} iterations before compiling. This is currently primarily useful
+        when you have dynamic shapes and don't want to waste time first compiling a static graph just
+        to throw it away and generate a dynamic graph on the second invocation.
 
     Example::
 
@@ -2540,6 +2549,7 @@ def compile(
                 mode=mode,
                 options=options,
                 disable=disable,
+                delay=delay,
             )
 
         return fn
@@ -2561,12 +2571,47 @@ def compile(
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    return torch._dynamo.optimize(
-        backend=backend,
-        nopython=fullgraph,
-        dynamic=dynamic,
-        disable=disable,
-    )(model)  # type: ignore[return-value]
+    if delay <= 0:
+        return torch._dynamo.optimize(
+            backend=backend,
+            nopython=fullgraph,
+            dynamic=dynamic,
+            disable=disable,
+        )(model)
+    else:
+        example_inputs: list[_Any] = []
+        compiled_fn: _Optional[_Callable] = None
+
+        @functools.wraps(model)
+        def wrapper(*args, **kwargs):
+            from torch.fx.experimental.dynamism import (
+                clone_and_convert_to_meta,
+                track_dynamism_across_examples,
+            )
+
+            nonlocal compiled_fn
+
+            if len(example_inputs) <= delay:
+                sig = inspect.signature(model)
+                bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
+                example_inputs.append(clone_and_convert_to_meta(bound.arguments))
+
+            if len(example_inputs) <= delay:
+                return model(*args, **kwargs)
+            else:
+                if compiled_fn is None:
+                    dynamism = track_dynamism_across_examples(example_inputs)
+                    compiled_fn = torch._dynamo.optimize(
+                        backend=backend,
+                        nopython=fullgraph,
+                        dynamic=dynamic,
+                        disable=disable,
+                        dynamism=dynamism,
+                    )(model)
+                return compiled_fn(*args, **kwargs)
+
+        return wrapper
 
 
 def _register_device_module(device_type, module):

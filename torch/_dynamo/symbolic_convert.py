@@ -2883,6 +2883,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
+        dynamism,
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2939,7 +2940,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
                     var = LazyVariableTracker.create(
-                        value, LocalSource(name, is_input=True)
+                        value,
+                        LocalSource(
+                            name,
+                            is_input=True,
+                            dynamism=frozenset(dynamism.get(name, {}).items()),
+                        ),
                     )
                     self.symbolic_locals[name] = var
 
