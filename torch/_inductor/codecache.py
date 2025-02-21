@@ -1368,7 +1368,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: dict[str, dict[str, str]] = {}
+    cache: dict[str, dict[str, Any]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1386,7 +1386,7 @@ class CudaKernelParamCache:
         cls.cache[key] = params
 
     @classmethod
-    def get(cls, key: str) -> Optional[dict[str, str]]:
+    def get(cls, key: str) -> Optional[dict[str, Any]]:
         return cls.cache.get(key, None)
 
     @classmethod
