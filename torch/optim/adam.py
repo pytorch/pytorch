@@ -365,6 +365,14 @@ def _single_tensor_adam(
 ):
     assert grad_scale is None and found_inf is None
 
+    if isinstance(lr, Tensor):
+        if differentiable:
+            if lr.dim() > 1:
+                lr = lr.squeeze()
+        else:
+            if lr.dim() != 0:
+                lr = lr.squeeze()
+
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
@@ -556,10 +564,13 @@ def _multi_tensor_adam(
     if len(params) == 0:
         return
 
-    if isinstance(lr, Tensor) and not capturable:
-        raise RuntimeError(
-            "lr as a Tensor is not supported for capturable=False and foreach=True"
-        )
+    if isinstance(lr, Tensor):
+        if not capturable:
+            raise RuntimeError(
+                "lr as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if lr.device.type != "cpu" and lr.dim() != 0:
+            lr = lr.squeeze()
 
     if isinstance(beta1, Tensor):
         if not capturable:

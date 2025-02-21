@@ -224,6 +224,13 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
+def _to_scalar(x):
+    if isinstance(x, torch.Tensor) and x.dim() != 0:
+        return x.squeeze()
+    else:
+        return x
+
+
 # Common doc strings among optimizers
 _params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize
             or iterable of dicts defining parameter groups. When using named_parameters,

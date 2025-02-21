@@ -269,6 +269,10 @@ def _single_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
+    if isinstance(lr, Tensor):
+        if lr.dim() != 0:
+            lr = lr.squeeze()
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -383,6 +387,9 @@ def _multi_tensor_radam(
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    if isinstance(lr, Tensor) and lr.dim() != 0:
+        lr = lr.squeeze()
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, state_steps]  # type: ignore[list-item]
