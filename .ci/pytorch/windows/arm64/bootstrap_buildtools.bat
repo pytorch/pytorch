@@ -18,19 +18,27 @@ curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
 echo Installing Visual Studio Build Tools with C++ components...
 echo Installing MSVC %MSVC_VERSION%
 if "%MSVC_VERSION%" == "latest" (
-    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+    "%INSTALLER_FILE%" --norestart --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Roslyn.Compiler ^
         --add Microsoft.Component.MSBuild ^
         --add Microsoft.VisualStudio.Component.CoreBuildTools ^
         --add Microsoft.VisualStudio.Workload.MSBuildTools ^
-        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
-        --add Microsoft.VisualStudio.Workload.VCTools ^
+        --add Microsoft.VisualStudio.Component.Windows10SDK ^
         --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
+        --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ^
         --add Microsoft.VisualStudio.Component.VC.Redist.14.Latest ^
-        --add Microsoft.VisualStudio.Component.VC.ASAN ^
+        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
         --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
-        --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
-        --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+        --add Microsoft.VisualStudio.Component.TestTools.BuildTools ^
+        --add Microsoft.VisualStudio.Component.VC.ASAN ^
+        --add Microsoft.VisualStudio.Component.TextTemplating ^
+        --add Microsoft.VisualStudio.Component.VC.CoreIde ^
+        --add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core ^
+        --add Microsoft.VisualStudio.Workload.VCTools ^
+        --add Microsoft.VisualStudio.Component.VC.Tools.ARM64EC ^
+        --add Microsoft.VisualStudio.Component.VC.Tools.ARM64
+
+        
 ) else if "%MSVC_VERSION%" == "14.40" (
     "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --fix --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
         --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
