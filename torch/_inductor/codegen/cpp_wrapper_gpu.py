@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, Hashable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -12,7 +12,7 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import IRNode, PartitionInputType, PartitionOutputType, TensorBox
+from ..ir import GraphPartitionSignature, IRNode, TensorBox
 from ..utils import cache_on_self, DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -24,6 +24,8 @@ from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
     from ..graph import GraphLowering
 
 
@@ -194,8 +196,7 @@ class CppWrapperGpu(CppWrapperCpu):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[PartitionInputType] = None,
-        output_nodes: Optional[PartitionOutputType] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

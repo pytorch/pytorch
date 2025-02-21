@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -733,14 +733,13 @@ class PythonWrapperCodegen(CodeGen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[ir.PartitionInputType] = None,
-        output_nodes: Optional[ir.PartitionOutputType] = None,
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
             return SubgraphPythonWrapperCodegen(
-                subgraph_name, parent_wrapper, input_nodes, output_nodes
+                subgraph_name, parent_wrapper, partition_signatures
             )
         return PythonWrapperCodegen()
 
@@ -879,15 +878,23 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
-        outputs = getattr(self, "subgraph_output_nodes", V.graph.graph_outputs)
-        return [x.codegen_reference(self.wrapper_call) for x in outputs]
+        return [
+            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+        ]
 
     def mark_output_type(self) -> None:
         return
 
+    def get_graph_inputs(
+        self,
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+        return V.graph.graph_inputs
+
+    def get_graph_outputs(self) -> list[IRNode]:
+        return V.graph.graph_outputs
+
     def codegen_input_size_asserts(self) -> None:
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
-        for name, buf in graph_inputs.items():
+        for name, buf in self.get_graph_inputs().items():
             # a graph partition may take an IRNode output from a previous partition
             if not isinstance(buf, ir.TensorBox):
                 continue
@@ -900,10 +907,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def codegen_input_nan_asserts(self) -> None:
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+        for name, buf in self.get_graph_inputs().items():
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             line = f"assert not {name}.isnan().any().item()"
@@ -912,6 +918,11 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
+        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+            # async_compile.wait will be written when finalize_prefix to make sure
+            # it is added before `class Runner`` definition.
+            return
+
         self.prefix.splice(
             """
 
@@ -920,46 +931,42 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    def write_args(self, input_names: List[str]):
+    def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
         if len(input_names) == 1:
             lhs += ","
         self.prefix.writeline(f"{lhs} = args")
         self.prefix.writeline("args.clear()")
 
-    def write_prefix(self) -> None:
-        assert self.launcher_fn_name is not None
-        self.write_async_compile_wait()
-        if (
-            not config.cpp_wrapper
-            and torch._inductor.config.graph_partition
-            and not hasattr(self, "subgraph_name")
-        ):
+    def write_launcher_fn_call(self) -> None:
+        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
             self.prefix.splice(
                 """
-                class Runner:
-                    def __init__(self):
-                        self.partitions = []
+                def recursively_apply_fns(self, fns):
+                    new_callables = []
+                    for fn, c in zip(fns, self.partitions):
+                        new_callables.append(fn(c))
+                    self.partitions = new_callables
 
-                    def recursively_apply_fns(self, fns):
-                        new_callables = []
-                        for fn, c in zip(fns, self.partitions):
-                            new_callables.append(fn(c))
-                        self.partitions = new_callables
-
-                    def call(self, args):
+                def call(self, args):
                 """
             )
-            prefix_indent = 2
         else:
             self.prefix.splice(
                 f"""
                 def {self.launcher_fn_name}(args):
                 """
             )
-            prefix_indent = 1
 
-        with self.prefix.indent(prefix_indent):
+    def get_graph_input_names(self) -> list[str]:
+        return V.graph.graph_input_names
+
+    def write_prefix(self) -> None:
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        self.write_launcher_fn_call()
+
+        with self.prefix.indent(1):
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
             phase = V.graph.get_training_phase()
@@ -968,13 +975,7 @@ class PythonWrapperCodegen(CodeGen):
                     f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
 
-            graph_input_names = (
-                list(self.subgraph_input_nodes.keys())
-                if hasattr(self, "subgraph_input_nodes")
-                else V.graph.graph_input_names
-            )
-
-            if graph_input_names:
+            if graph_input_names := self.get_graph_input_names():
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
@@ -1054,6 +1055,16 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_before_suffix(self, result: IndentedBuffer) -> None:
         return
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
+        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+            result.splice(
+                """
+                runner = Runner()
+                call = runner.call
+                recursively_apply_fns = runner.recursively_apply_fns
+                """
+            )
 
     def generate_end(self, result: IndentedBuffer) -> None:
         return
@@ -1210,6 +1221,12 @@ class PythonWrapperCodegen(CodeGen):
         with dynamo_timed("PythonWrapperCodegen.generate"):
             return self._generate(is_inference)
 
+    def get_wrapper_call_indent(self) -> int:
+        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+            return 2
+        else:
+            return 1
+
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
@@ -1271,40 +1288,14 @@ class PythonWrapperCodegen(CodeGen):
         self.finalize_prefix()
         result.splice(self.prefix)
 
-        wrapper_call_indent = (
-            2
-            if torch._inductor.config.graph_partition
-            and not hasattr(self, "subgraph_name")
-            else 1
-        )
+        wrapper_call_indent = self.get_wrapper_call_indent()
 
         with result.indent(wrapper_call_indent):
             result.splice(self.wrapper_call)
 
         self.generate_before_suffix(result)
         result.splice(self.suffix)
-
-        if (
-            not config.cpp_wrapper
-            and torch._inductor.config.graph_partition
-            and not hasattr(self, "subgraph_name")
-        ):
-            result.splice(
-                """
-                runner = Runner()
-                """
-            )
-            if hasattr(self, "all_partition_names"):
-                all_partition_name_list = ", ".join(self.all_partition_names) + (
-                    "," if len(self.all_partition_names) == 1 else ""
-                )
-                result.splice(f"runner.partitions=[{all_partition_name_list}]")
-            result.splice(
-                """
-                call = runner.call
-                recursively_apply_fns = runner.recursively_apply_fns
-                """
-            )
+        self.generate_after_suffix(result)
 
         self.generate_end(result)
 
@@ -1417,6 +1408,8 @@ class PythonWrapperCodegen(CodeGen):
                 if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
+        elif isinstance(value, ir.TorchBindObject):
+            pass
         else:
             if torch._inductor.config.graph_partition:
                 # a graph partition may take an IRNode output from a previous partition
@@ -1437,7 +1430,7 @@ class PythonWrapperCodegen(CodeGen):
         # we need to solve that expression to proper define a symbol in cpp. Thus we
         # are enforcing this iterating order here to make sure all plain size symbols
         # are defined first.
-        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
+        graph_inputs = self.get_graph_inputs()
         inputs = [
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
@@ -1453,7 +1446,31 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
-        pass
+        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+            runner_buffer = IndentedBuffer()
+
+            if hasattr(self, "all_partition_names"):
+                all_partition_name_list = ", ".join(self.all_partition_names) + (
+                    "," if len(self.all_partition_names) == 1 else ""
+                )
+            else:
+                all_partition_name_list = ""
+
+            runner_buffer.splice(
+                f"""
+                async_compile.wait(globals())
+                del async_compile
+
+                class Runner:
+                    def __init__(self):
+                        self.partitions = [{all_partition_name_list}]
+
+                """
+            )
+
+            with runner_buffer.indent(1):
+                runner_buffer.splice(self.prefix)
+                self.prefix = runner_buffer
 
     def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         raise RuntimeError("codegen_cpp_sizevar is only implemented for cpp_wrapper!")
@@ -1562,6 +1579,8 @@ class PythonWrapperCodegen(CodeGen):
         def add_torchbind_input(name, value):
             import pickle
 
+            assert isinstance(value, torch.ScriptObject)
+
             output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
 
         output.writelines(
@@ -1600,7 +1619,13 @@ class PythonWrapperCodegen(CodeGen):
                     # SingletonInts belong to metadata that should only live on
                     # the subclass.
                     continue
-                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                if isinstance(value, ir.TorchBindObject):
+                    if len(V.graph.torchbind_constants) == 0:
+                        # otherwise we have already imported the pickle package
+                        output.writeline("import pickle")
+                    output.writeline(f"global {name}")
+                    add_torchbind_input(name, value.get_real_obj())
+                elif isinstance(value, sympy.Expr):  # Don't need to add symbolic
                     # TODO: this fallback and those below actually will generate possibly
                     # invalid benchmark code, because it's not guaranteed 42
                     # is actually a valid value for the kernel in question.
@@ -2325,7 +2350,7 @@ class PythonWrapperCodegen(CodeGen):
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
-    def make_buffer_free(self, buffer: BufferLike):
+    def make_buffer_free(self, buffer: Union[BufferLike, ir.TorchBindObject]):
         return f"del {buffer.get_name()}"
 
     def make_free_by_names(self, names_to_del: list[str]):
@@ -2408,7 +2433,7 @@ class PythonWrapperCodegen(CodeGen):
         name = buffer.get_name()
 
         # can be freed but not reused
-        if isinstance(buffer, ir.InputBuffer):
+        if isinstance(buffer, (ir.InputBuffer, ir.TorchBindObject)):
             self.writeline(self.make_buffer_free(buffer))
             return
 
@@ -2524,12 +2549,14 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_partition_call(
         self,
         partition_id: int,
-        input_names_to_free: Dict[str, bool],
-        output_nodes: ir.PartitionOutputType,
+        partition_signatures: ir.GraphPartitionSignature,
     ):
-        # input_names_to_free maps the input names to whether they should be freed during the partition call
-        inputs = ", ".join(input_names_to_free.keys()) + (
-            "," if len(input_names_to_free) == 1 else ""
+        """Generate code to call a graph partition"""
+        input_deallocation = partition_signatures.input_deallocation
+        output_nodes = partition_signatures.output_nodes
+
+        inputs = ", ".join(input_deallocation.keys()) + (
+            "," if len(input_deallocation) == 1 else ""
         )
 
         output_names = [node.get_name() for node in output_nodes]
@@ -2537,8 +2564,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"partition{partition_id}_args = [{inputs}]")
-        for name in input_names_to_free:
-            if input_names_to_free[name]:
+        for name in input_deallocation:
+            if input_deallocation[name]:
                 self.writeline(f"del {name}")
 
         # Call the subgraph launcher function
@@ -2723,18 +2750,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
         subgraph_name: str,
         parent_wrapper: PythonWrapperCodegen,
-        input_nodes: Optional[ir.PartitionInputType] = None,
-        output_nodes: Optional[ir.PartitionOutputType] = None,
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
 
-        if input_nodes is not None:
-            assert output_nodes is not None
-            self.subgraph_input_nodes = input_nodes
-            self.subgraph_output_nodes = output_nodes
+        if partition_signatures is not None:
+            self.partition_signatures = partition_signatures
 
         super().__init__()
 
@@ -2758,6 +2782,57 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def next_kernel_suffix(self) -> str:
         # Ensures that subgraphs kernels do not clash with each other
         return self.parent_wrapper.next_kernel_suffix()
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
+        return
+
+    def write_launcher_fn_call(self) -> None:
+        self.prefix.splice(
+            f"""
+            def {self.launcher_fn_name}(args):
+            """
+        )
+
+    def get_wrapper_call_indent(self) -> int:
+        return 1
+
+    def get_graph_inputs(
+        self,
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+        if signature := getattr(self, "partition_signatures", None):
+            inputs = signature.input_nodes
+        else:
+            inputs = V.graph.graph_inputs
+        return inputs
+
+    def get_graph_input_names(self) -> list[str]:
+        if signature := getattr(self, "partition_signatures", None):
+            names = list(signature.input_nodes.keys())
+        else:
+            names = V.graph.graph_input_names
+        return names
+
+    def get_graph_outputs(self) -> list[IRNode]:
+        if signature := getattr(self, "partition_signatures", None):
+            outputs = signature.output_nodes
+        else:
+            outputs = V.graph.graph_outputs
+        return outputs
+
+    def finalize_prefix(self):
+        return
+
+    def codegen_allocation(self, buffer: ir.Buffer):
+        name = buffer.get_name()
+        if (
+            signature := getattr(self, "partition_signatures", None)
+        ) and name in signature.input_nodes:
+            # skip allocation if buffer is a subgraph input.
+            # This allows reusing an input buffer in graph partition,
+            # although this is not allowed in general.
+            return
+
+        super().codegen_allocation(buffer)
 
     @cache_on_self
     def write_triton_header_once(self) -> None:

@@ -78,8 +78,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_nodes: Optional[ir.PartitionInputType] = None,
-        output_nodes: Optional[ir.PartitionOutputType] = None,
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

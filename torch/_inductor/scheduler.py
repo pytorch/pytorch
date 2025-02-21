@@ -14,22 +14,11 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from types import ModuleType
 
 import sympy
@@ -53,9 +42,9 @@ from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import (
     ComputedBuffer,
     get_device_type,
+    GraphPartitionSignature,
     MultiOutput,
     MultiOutputLayout,
-    PartitionOutputType,
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -83,11 +72,7 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType = List["BaseSchedulerNode"]
-
-# Mapping from partition input names to IRNode/Expr, and a boolean for whether
-# deallocating it after the partition
-PartitionInputMetadataType = Dict[str, Tuple[Union[ir.IRNode, sympy.Expr], bool]]
+PartitionType = list["BaseSchedulerNode"]
 
 
 @dataclasses.dataclass
@@ -699,7 +684,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
-            buf: Union[ir.Buffer, ir.TensorBox]
+            buf: Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -707,12 +692,17 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
+            def get_buf_bytes(
+                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]]
+            ) -> int:
                 if not buf:
                     return 0
-                # Kind of a lazy way to get the MultiOutput nodes corresponding to
-                # a MultiOutputLayout
-                if isinstance(buf.layout, MultiOutputLayout):
+
+                if isinstance(buf, ir.TorchBindObject):
+                    return buf.get_buf_bytes()
+                elif isinstance(buf.layout, MultiOutputLayout):
+                    # Kind of a lazy way to get the MultiOutput nodes corresponding to
+                    # a MultiOutputLayout
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
@@ -956,6 +946,7 @@ kernel_name_to_op = {
     "extern_kernels.mm": torch.ops.aten.mm,
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
+    "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
 }
 
 
@@ -1117,7 +1108,8 @@ class SchedulerNode(BaseSchedulerNode):
             if not isinstance(dep, WeakDep):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
-                lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
+                if not isinstance(buf, ir.TorchBindObject):
+                    lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
@@ -2802,7 +2794,7 @@ class Scheduler:
             )
 
             # Start compiling choices in parallel
-            future_choices: List[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
+            future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -2972,7 +2964,7 @@ class Scheduler:
 
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
-        pending_fusions: Dict[
+        pending_fusions: dict[
             BaseSchedulerNode,
             tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
         ] = {}
@@ -3345,9 +3337,12 @@ class Scheduler:
                 continue
 
             # Add more rules here
+            layout_str = ""
+            if not isinstance(buf, ir.TorchBindObject):
+                layout_str = f"Layout: {buf.layout}"
             reasons[
                 buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
 
         return str(reasons)
 
@@ -3875,9 +3870,15 @@ class Scheduler:
                 if buf.can_free():
                     V.graph.wrapper_code.codegen_free(buf.node)
             elif name in V.graph.graph_inputs:
-                storage = V.graph.graph_inputs[name].data
-                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
-                V.graph.wrapper_code.codegen_free(storage.data)
+                inp = V.graph.graph_inputs[name]
+                if isinstance(inp, ir.TorchBindObject):
+                    V.graph.wrapper_code.codegen_free(inp)
+                else:
+                    storage = inp.data
+                    assert (
+                        isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
+                    )
+                    V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
 
@@ -3960,6 +3961,7 @@ class Scheduler:
         )
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
+        """Return True if we should partition the inductor graph on this node"""
         if not node.is_gpu():
             return True
 
@@ -3974,8 +3976,14 @@ class Scheduler:
 
         return False
 
-    def get_name_to_nodes(self) -> ir.PartitionInputType:
-        name_to_node: ir.PartitionInputType = {}
+    def get_name_to_nodes(
+        self,
+    ) -> dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]]:
+        """
+        Return a mapping from name strings to the corresponding graph inputs or
+        base scheduler node outputs.
+        """
+        name_to_node: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]] = {}
         name_to_node.update(V.graph.graph_inputs)
 
         for node in self.nodes:
@@ -4013,10 +4021,13 @@ class Scheduler:
         V.graph.partition_output_to_graph_output.append(output_mapping)
 
     def get_graph_partition_signature(
-        self, partitions: List[PartitionType]
-    ) -> Tuple[List[PartitionInputMetadataType], List[ir.PartitionOutputType],]:
-        inputs: List[PartitionInputMetadataType] = []
-        outputs: List[ir.PartitionOutputType] = []
+        self, partitions: list[PartitionType]
+    ) -> list[GraphPartitionSignature]:
+        """
+        Gets signature for each graph partition, including input nodes, output nodes, and
+        whether deallocating an input within graph partition.
+        """
+        signatures = []
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
@@ -4035,6 +4046,8 @@ class Scheduler:
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
+            # all reads/writes are partition inputs except those generated
+            # within the partition
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
@@ -4047,18 +4060,24 @@ class Scheduler:
             for node in partition:
                 buffer_names_to_free.update(node.last_usage)
 
-            partition_input = {
-                name: (
-                    name_to_node[name],
-                    True if name in buffer_names_to_free else False,
-                )
+            input_nodes = {
+                name: name_to_node[name]
                 for name in partition_input_names
                 if name in name_to_node
             }
-            partition_output = [name_to_node[name] for name in returned_output_names]
-
-            inputs.append(partition_input)
-            outputs.append(partition_output)
+            input_deallocation = {
+                name: True if name in buffer_names_to_free else False
+                for name in partition_input_names
+                if name in name_to_node
+            }
+            output_nodes = [name_to_node[name] for name in returned_output_names]
+            signatures.append(
+                GraphPartitionSignature(
+                    input_nodes,
+                    output_nodes,
+                    input_deallocation,
+                )
+            )
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
@@ -4069,16 +4088,16 @@ class Scheduler:
                 returned_output_names,
             )
 
-        return inputs[::-1], outputs[::-1]
+        return signatures[::-1]
 
     def graph_partition(
         self,
-    ) -> Tuple[
-        List[PartitionType],
-        List[PartitionInputMetadataType],
-        List[PartitionOutputType],
-    ]:
-        partitions: List[PartitionType] = []
+    ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
+        """
+        Given a list of BaseSchedulerNodes, split into a list of
+        graph partitions and compute partition input/output signatures.
+        """
+        partitions: list[PartitionType] = []
 
         cur_partition: PartitionType = []
         for node in self.nodes:
@@ -4093,24 +4112,24 @@ class Scheduler:
         if cur_partition:
             partitions.append(cur_partition)
 
-        inputs, outputs = self.get_graph_partition_signature(partitions)
-
-        return partitions, inputs, outputs
+        return partitions, self.get_graph_partition_signature(partitions)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition and not V.graph.aot_mode
+                if torch._inductor.config.graph_partition
+                and not V.graph.cpp_wrapper
+                and not V.graph.aot_mode
                 else self._codegen(self.nodes)
             )
 
     def _codegen_partition_wrapper(
         self,
         partition: PartitionType,
-        input_nodes: PartitionInputMetadataType,
-        output_nodes: PartitionOutputType,
+        signature: GraphPartitionSignature,
     ) -> None:
+        """Codegen a partition given its inputs/outputs"""
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
 
@@ -4119,41 +4138,36 @@ class Scheduler:
                 is_subgraph=True,
                 subgraph_name=f"partition_{graph_partition_id}",
                 parent_wrapper_code=parent_wrapper_code,
-                input_nodes={name: input_nodes[name][0] for name in input_nodes},
-                output_nodes=output_nodes,
+                partition_signatures=signature,
             )
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
 
-        input_names_to_free = {name: input_nodes[name][1] for name in input_nodes}
-        V.graph.wrapper_code.codegen_partition_call(
-            graph_partition_id, input_names_to_free, output_nodes
-        )
+        V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(
-            [node.get_name() for node in output_nodes]
+            [node.get_name() for node in signature.output_nodes]
         )
 
     def _codegen_partitions(self) -> None:
-        partitions, input_nodes, output_nodes = self.graph_partition()
+        partitions, signatures = self.graph_partition()
 
-        for partition, input_node, output_node in zip(
-            partitions, input_nodes, output_nodes
-        ):
+        for partition, signature in zip(partitions, signatures):
             assert (
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
 
             if len(partition) > 1:
-                self._codegen_partition_wrapper(partition, input_node, output_node)
+                self._codegen_partition_wrapper(partition, signature)
             else:
+                # Inline small partitions to avoid overheads from function calls.
                 self._codegen(partition)
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
 
-    def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
+    def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 
@@ -4257,7 +4271,7 @@ class Scheduler:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, List[Optional[str]]]:
+    ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -4497,7 +4511,7 @@ class BaseScheduling:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, List[Optional[str]]]:
+    ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark the list of nodes to combine and return the execution time
         and memory copy time in milliseconds on randomly generated inputs.
