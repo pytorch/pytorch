@@ -41,7 +41,7 @@ IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
         gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
-        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx942"})
     return False
 
 def evaluate_gfx_arch_exact(matching_arch):

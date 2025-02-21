@@ -191,7 +191,7 @@ static bool isSupportedHipLtROCmArch(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
-        "gfx90a", "gfx940", "gfx941", "gfx942",
+        "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
         "gfx1100", "gfx1101", "gfx1200", "gfx1201"
 #endif
@@ -866,7 +866,7 @@ static bool _scaled_mm_allowed_device() {
 #ifdef USE_ROCM
     std::string device_arch = dprops->gcnArchName;
     static const std::vector<std::string> archs = {
-        "gfx940", "gfx941", "gfx942",
+        "gfx942",
 #if ROCM_VERSION >= 60300
         "gfx1200", "gfx1201"
 #endif
@@ -890,7 +890,7 @@ static bool _scaled_mm_allowed_device() {
 static bool _scaled_mm_is_fnuz() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
