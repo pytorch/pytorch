@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -264,6 +265,8 @@ class TritonBundler:
 
                 if _IS_WINDOWS:
                     with FileLock(directory + ".lock"):
+                        if os.path.exists(directory):
+                            shutil.rmtree(directory)
                         os.replace(tmp_dir, directory)
                 else:
                     # Atomic on POSIX systems
