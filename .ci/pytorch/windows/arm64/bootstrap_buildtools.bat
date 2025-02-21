@@ -7,7 +7,7 @@ if not exist "%DOWNLOADS_DIR%" mkdir "%DOWNLOADS_DIR%"
 if not exist "%DEPENDENCIES_DIR%" mkdir "%DEPENDENCIES_DIR%"
 
 :: Set download URL for the Visual Studio Installer
-set DOWNLOAD_URL=https://aka.ms/vs/17/release/vs_BuildTools.exe
+set DOWNLOAD_URL=https://aka.ms/vs/17/release.ltsc.17.12/vs_buildtools.exe
 set INSTALLER_FILE=%DOWNLOADS_DIR%\vs_BuildTools.exe
 
 :: Download installer
