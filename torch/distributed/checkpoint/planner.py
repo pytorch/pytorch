@@ -97,6 +97,7 @@ class SavePlan:
     items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
+    usable: bool = True
 
 
 @dataclass
