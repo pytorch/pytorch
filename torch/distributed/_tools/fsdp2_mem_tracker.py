@@ -5,7 +5,9 @@ from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
+import torch.distributed._tools.fake_collectives
 from torch import nn, optim
+from torch._guards import active_fake_mode
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
@@ -23,6 +25,7 @@ _R = TypeVar("_R")
 _Ts = TypeVarTuple("_Ts")
 
 c10d = torch.ops.c10d
+
 
 class _FSDPRefType(_RefType):
     """
@@ -100,6 +103,7 @@ class _FSDPModMemStats:
         self.snapshots: dict[
             _FSDPModState, list[dict[torch.device, dict[str, int]]]
         ] = {}
+
 
 class _FSDPState(Enum):
     PRE_FW = auto()
@@ -470,7 +474,7 @@ class FSDPMemTracker(MemTracker):
         self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
-    
+
     def __enter__(self) -> "FSDPMemTracker":
         if self._depth == 0:
             self._register_module_and_optimizer_hooks()
@@ -478,7 +482,8 @@ class FSDPMemTracker(MemTracker):
             self._track_dtensor_dispatch()
             self._peak_mem_snap = self.get_tracker_snapshot()
             self._peak_mem = {
-                dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
+                dev: dev_snap[_TOTAL_KEY]
+                for dev, dev_snap in self._peak_mem_snap.items()
             }
             self._mod_tracker.__enter__()
         TorchDispatchMode.__enter__(self)
@@ -495,7 +500,15 @@ class FSDPMemTracker(MemTracker):
         TorchDispatchMode.__exit__(self, *args)
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
-        res = func(*args, **kwargs or {})
+        if (
+            func == torch.ops._c10d_functional.wait_tensor.default
+            and active_fake_mode()
+        ):
+            # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
+            # a new tensor which does not happen in eager mode, when a wait_tensor is called.
+            res = args[0]
+        else:
+            res = func(*args, **kwargs or {})
         # If we are tracking an optimizer state, we use the optimizer reference type.
         # If we are in backward region and not in AC region, we use the backward reference type.
         # Else we use the forward reference type.
@@ -505,14 +518,20 @@ class FSDPMemTracker(MemTracker):
             reftype = _FSDPRefType.TEMP
         else:
             reftype = _FSDPRefType.ACT
-        if func == c10d._allgather_base_.default and self._fsdp_state in [_FSDPState.PRE_FW, _FSDPState.PRE_BW]:
+        if func == c10d._allgather_base_.default and self._fsdp_state in [
+            _FSDPState.PRE_FW,
+            _FSDPState.PRE_BW,
+        ]:
             output_tensor = args[0]
             self._update_and_maybe_create_winfos(
-                    output_tensor,
-                    _FSDPRefType.ALL_GATHER,
-                    update_existing=True,
-                )
-        if func == c10d._reduce_scatter_base_.default and self._fsdp_state == _FSDPState.POST_BW:
+                output_tensor,
+                _FSDPRefType.ALL_GATHER,
+                update_existing=True,
+            )
+        if (
+            func == c10d._reduce_scatter_base_.default
+            and self._fsdp_state == _FSDPState.POST_BW
+        ):
             input_tensor = args[1]
             self._update_and_maybe_create_winfos(
                 input_tensor,
@@ -525,13 +544,4 @@ class FSDPMemTracker(MemTracker):
             _FSDPModState.PEAK_BW if self._mod_tracker.is_bw else _FSDPModState.PEAK_FW
         )
         self._update_peak_stats(peak_state)
-        mib = 2**20
-        mib = 2**20
-        mem_stats = torch.cuda.memory_stats()
-        cuda_mem = mem_stats["active_bytes.all.peak"]
-        peak_mem = self._peak_mem[torch.device(torch.cuda.current_device())]
-        # if cuda_mem > (peak_mem * 1.02):
-        #     print(f"Func: {func} CUDA: {cuda_mem/mib:.3f} TRACKER {peak_mem/mib:.3f}")
-        # if cuda_mem > (peak_mem * 1.10):
-        #     exit()
         return res
