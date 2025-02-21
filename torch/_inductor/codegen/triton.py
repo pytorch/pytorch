@@ -74,6 +74,7 @@ from .common import (
     DeferredLine,
     IndentedBuffer,
     InplacedBuffer,
+    is_buffer_removed,
     OpOverrides,
     PythonPrinter,
     RemovedArg,
@@ -1576,6 +1577,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
+        self.block_ptr_to_buffer = dict[str, str]()
         self.helper_functions = HelperFunctions()
         self.pointer_advancements: dict[
             SymT, dict[str, list[sympy.Expr]]
@@ -2035,6 +2037,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     name, f"{block_ptr} = {indexing.format(var, roffset=False)}"
                 )
             )
+            # Store for later use. If the buffer is removed the below advancements
+            # are no longer necessary
+            self.block_ptr_to_buffer[block_ptr] = name
 
             # Generate block pointer advancements, for later use.
             for symt in TritonSymbols.reduction_types:
@@ -3137,6 +3142,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for block_ptr, advancement in self.pointer_advancements[
                         tree.symt
                     ].items():
+                        if is_buffer_removed(self.block_ptr_to_buffer[block_ptr]):
+                            continue
                         # Subtract any advancements made in the previous loop level.
                         if level < len(loop_trees) - 1:
                             prev_tree = loop_trees[level + 1]
