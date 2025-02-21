@@ -1,11 +1,17 @@
-from typing import Optional, runtime_checkable
+from dataclasses import dataclass
+from typing import Optional, runtime_checkable, Tuple, Union
 from typing_extensions import Protocol
 
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
-__all__ = ["AsyncStager", "BlockingAsyncStager"]
+__all__ = ["AsyncStager", "BlockingAsyncStager", "StagingSyncState"]
+
+
+@dataclass
+class StagingSyncState:
+    pass
 
 
 @runtime_checkable
@@ -47,7 +53,9 @@ class AsyncStager(Protocol):
 
         return self._synchronize_after_execute
 
-    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    def stage(
+        self, state_dict: STATE_DICT_TYPE
+    ) -> Union[STATE_DICT_TYPE, Tuple[STATE_DICT_TYPE, StagingSyncState]]:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
         innoculated from any updates incurred after the stage call is complete.
@@ -56,7 +64,9 @@ class AsyncStager(Protocol):
             f"{self.__class__.__name__} must implement stage method"
         )
 
-    def synchronize_staging(self) -> None:
+    def synchronize_staging(
+        self, staging_sync_state: Optional[StagingSyncState] = None
+    ) -> None:
         """
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
@@ -109,7 +119,9 @@ class BlockingAsyncStager(AsyncStager):
             self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
         return _copy_state_dict(state_dict, self.state_dict_cache)
 
-    def synchronize_staging(self) -> None:
+    def synchronize_staging(
+        self, staging_sync_state: Optional[StagingSyncState] = None
+    ) -> None:
         """
         No-op function, since staging is blocking.
         """

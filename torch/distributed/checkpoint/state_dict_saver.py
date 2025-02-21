@@ -3,19 +3,25 @@
 import inspect
 import os
 import warnings
-from concurrent.futures import Future, ThreadPoolExecutor
-from typing import cast, Optional, Union
+from concurrent.futures import Future
+from enum import Enum
+from typing import cast, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed.checkpoint._async_executor import (
+    _AsyncCheckpointExecutor,
+    _ProcessBasedAsyncCheckpointExecutor,
+    _ThreadBasedAsyncCheckpointExecutor,
+)
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
-from torch.distributed.checkpoint.staging import AsyncStager
+from torch.distributed.checkpoint.staging import AsyncStager, StagingSyncState
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
@@ -23,7 +29,14 @@ from torch.distributed.distributed_c10d import _get_default_group
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
-__all__ = ["save_state_dict", "save", "async_save"]
+__all__ = ["save_state_dict", "save", "async_save", "AsyncCheckpointerType"]
+
+
+class AsyncCheckpointerType(Enum):
+    """Enum for async checkpointer type."""
+
+    THREAD = "thread"
+    PROCESS = "process"
 
 
 @deprecated(
@@ -171,6 +184,7 @@ def async_save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.PROCESS,
 ) -> Future:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
@@ -230,29 +244,48 @@ def async_save(
     )
 
     state_dict = _stateful_to_state_dict(state_dict)
+
+    staging_sync_state: Optional[StagingSyncState] = None
     if isinstance(storage_writer, AsyncStager):
-        staged_state_dict = storage_writer.stage(state_dict)
+        staging_result = storage_writer.stage(state_dict)
+        if isinstance(staging_result, Tuple):  # type: ignore[arg-type]
+            staged_state_dict, staging_sync_state = staging_result  # type: ignore[assignment]
+        else:
+            staged_state_dict = staging_result  # type: ignore[assignment]
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _create_cpu_state_dict(state_dict)
+        staged_state_dict = _create_cpu_state_dict(state_dict)  # type: ignore[arg-type]
         _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
-    executor = ThreadPoolExecutor(max_workers=1)
-    f: Future = executor.submit(
-        save,
-        staged_state_dict,
+    executor: _AsyncCheckpointExecutor = (
+        _ProcessBasedAsyncCheckpointExecutor()
+        if async_checkpointer_type == AsyncCheckpointerType.PROCESS
+        else _ThreadBasedAsyncCheckpointExecutor()
+    )
+
+    f: Future = executor.execute_save(
+        staged_state_dict,  # type: ignore[arg-type]
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
-    f.add_done_callback(lambda f: executor.shutdown(wait=False))
 
     if (
         isinstance(storage_writer, AsyncStager)
         and storage_writer.should_synchronize_after_execute
     ):
-        storage_writer.synchronize_staging()
-
+        if (
+            "staging_sync_state"
+            not in inspect.signature(storage_writer.synchronize_staging).parameters
+        ):
+            warnings.warn(
+                "The function definition for StorageWriter.synchronize_staging has been updated"
+                " to include the staging_sync_state argument. Please update your implementation"
+                " to include this parameter."
+            )
+            storage_writer.synchronize_staging()  # type: ignore[call-arg]
+        else:
+            storage_writer.synchronize_staging(staging_sync_state)
     return f
 
 

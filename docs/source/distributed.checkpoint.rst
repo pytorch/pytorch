@@ -27,6 +27,9 @@ Additional resources:
 
 .. currentmodule:: torch.distributed.checkpoint.state_dict_saver
 
+.. autoclass:: torch.distributed.checkpoint.state_dict_saver.AsyncCheckpointerType
+  :members:
+
 .. autofunction::  save
 .. autofunction::  async_save
 .. autofunction::  save_state_dict
@@ -39,6 +42,9 @@ Additional resources:
 The following module is also useful for additional customization of the staging mechanisms used for asynchronous checkpointing (`torch.distributed.checkpoint.async_save`):
 
 .. automodule:: torch.distributed.checkpoint.staging
+
+.. autoclass:: torch.distributed.checkpoint.staging.StagingSyncState
+  :members:
 
 .. autoclass:: torch.distributed.checkpoint.staging.AsyncStager
   :members:
