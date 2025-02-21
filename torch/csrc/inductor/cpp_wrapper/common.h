@@ -3,6 +3,7 @@
 #include <Python.h>
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
 #include <pybind11/gil.h>
