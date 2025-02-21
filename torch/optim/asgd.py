@@ -15,6 +15,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -101,7 +102,9 @@ class ASGD(Optimizer):
                     )
                     state["eta"] = (
                         torch.as_tensor(
-                            group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                            _to_scalar(group["lr"]),
+                            device=p.device,
+                            dtype=_get_scalar_dtype(),
                         )
                         .clone()
                         .detach()
@@ -212,7 +215,6 @@ def _single_tensor_asgd(
     if isinstance(lr, Tensor):
         if lr.dim() != 0:
             lr = lr.squeeze()
-            etas = [eta.squeeze() for eta in etas]
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -308,7 +310,6 @@ def _multi_tensor_asgd(
 
     if isinstance(lr, Tensor) and lr.dim() != 0:
         lr = lr.squeeze()
-        etas = [eta.squeeze() for eta in etas]
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]
