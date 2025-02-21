@@ -649,7 +649,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
             try:
-                self._setup_exception(tx, args[0])
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
             except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
                 raise
