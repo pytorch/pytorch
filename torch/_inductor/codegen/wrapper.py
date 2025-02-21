@@ -20,12 +20,19 @@ from sympy import Expr
 
 import torch
 import torch._ops
+import torch.utils._pytree as pytree
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    CallMethodKey,
+    ConvertIntKey,
+    DivideByKey,
+    resolve_unbacked_bindings,
+    SymTypes,
+)
 from torch.fx.node import _get_qualified_name
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -2390,6 +2397,66 @@ class PythonWrapperCodegen(CodeGen):
             # When in CppWrapperCpu, we should only generate the declaration once
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
+
+    def codegen_unbacked_symbol_defs_for_outputs(
+        self,
+        output_name: str,
+        outputs: Any,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ) -> None:
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, unbacked_bindings
+        )
+
+        if not unbacked_bindings:
+            return
+
+        for s, keypath in unbacked_bindings.items():
+
+            def go(expr, keypath):  # type: ignore[no-untyped-def]
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    # TODO: this is invalid C++ codegen
+                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
+            def go_outer():  # type: ignore[no-untyped-def]
+                if V.graph.cpp_wrapper:
+                    # Special handling for the top level buffer access,
+                    # because self.get_name() is actually never bound; the
+                    # individual output arguments are bound by
+                    # generate_c_shim_fallback_kernel
+                    if len(outputs) == 1:
+                        return go(outputs[0].get_name(), keypath)
+                    else:
+                        assert isinstance(keypath[0], pytree.SequenceKey)
+                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                else:
+                    return go(output_name, keypath)
+
+            self.writeline(
+                f"{self.codegen_unbacked_symbol_decl(s)} = {go_outer()}{self.ending}"
+            )
 
     def codegen_subgraph_by_inlining(self, subgraph, outer_inputs, outer_outputs):
         # TODO (desertfire) - This function is the old way of supporting

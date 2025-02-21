@@ -48,9 +48,7 @@ from torch._prims_common import (
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
-    CallMethodKey,
     compute_unbacked_bindings,
-    DivideByKey,
     free_unbacked_symbols,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -123,7 +121,7 @@ aten = torch.ops.aten
 
 """ [Note: Inductor IR]
 
-Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+Inductor's IR is produced by executing 'lowering' code (see.py).  Each
 lowering is registered to a particular aten operator, and expects inputs that
 correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
 expect Inductor TensorBox inputs.
@@ -5280,7 +5278,6 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order, allow_padding=False):  # type: ignore[no-untyped-def]
-        breakpoint()
         return cls.require_strides(x, order=order, allow_padding=allow_padding)
 
     @classmethod
@@ -5492,64 +5489,6 @@ class ExternKernel(InputsKernel):
         for arg in self.kwargs.values():
             r |= maybe_free_unbacked_symbols(arg)
         return r
-
-    def codegen_unbacked_symbol_defs(self, outputs, wrapper) -> None:  # type: ignore[no-untyped-def]
-        if not hasattr(self, "unbacked_bindings"):
-            return
-
-        unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env, self.unbacked_bindings
-        )
-
-        if not unbacked_bindings:
-            return
-
-        for s, keypath in unbacked_bindings.items():
-
-            def go(expr, keypath):  # type: ignore[no-untyped-def]
-                if keypath == ():
-                    return expr
-
-                if (
-                    len(keypath) >= 2
-                    and isinstance(keypath[0], CallMethodKey)
-                    and isinstance(keypath[1], pytree.SequenceKey)
-                ):
-                    return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-                    )
-                elif isinstance(keypath[0], CallMethodKey):
-                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
-                elif isinstance(keypath[0], pytree.SequenceKey):
-                    return (
-                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
-                        if V.graph.cpp_wrapper
-                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
-                    )
-                elif isinstance(keypath[0], DivideByKey):
-                    # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
-                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
-                else:
-                    raise AssertionError(f"unrecognized keypath {keypath}")
-
-            def go_outer():  # type: ignore[no-untyped-def]
-                if V.graph.cpp_wrapper:
-                    # Special handling for the top level buffer access,
-                    # because self.get_name() is actually never bound; the
-                    # individual output arguments are bound by
-                    # generate_c_shim_fallback_kernel
-                    if len(outputs) == 1:
-                        return go(outputs[0].get_name(), keypath)
-                    else:
-                        assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
-                else:
-                    return go(self.get_name(), keypath)
-
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
-            )
 
     def __str__(self) -> str:
         kernel_name = getattr(self, "python_kernel_name", None)
@@ -6476,6 +6415,11 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
+    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        return wrapper.codegen_unbacked_symbol_defs_for_outputs(
+            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
+        )
+
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             resolved = resolve_unbacked_bindings(
@@ -6692,7 +6636,7 @@ class FallbackKernel(ExternKernelAlloc):
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
 
-        self.codegen_unbacked_symbol_defs(self.outputs, wrapper)
+        self.codegen_unbacked_symbol_defs(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):  # type: ignore[no-untyped-def]
@@ -7346,7 +7290,9 @@ class Conditional(ExternKernel):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_conditional(self)
-        self.codegen_unbacked_symbol_defs(self.outputs, wrapper)
+        wrapper.codegen_unbacked_symbol_defs_for_outputs(
+            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
+        )
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):

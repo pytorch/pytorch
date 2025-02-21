@@ -7515,6 +7515,9 @@ class GraphModule(torch.nn.Module):
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
 
+    @skipIfTorchDynamo(
+        "Skip because _merge_tensors is not intended for dynamo to compile"
+    )
     def test_merge_tensors(self):
         from torch._higher_order_ops.cond import _merge_tensors
         from torch._subclasses.fake_tensor import FakeTensorMode

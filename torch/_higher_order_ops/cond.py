@@ -415,13 +415,12 @@ def _merge_tensors(
     a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
 ):
     from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
-    from torch.utils._sympy.value_ranges import ValueRanges
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
         return None
 
-    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, b)
+    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
 
     # Note: we don't check size, stride because
     # they'll be merged with unbacked symints if they differ.
@@ -479,9 +478,7 @@ def _merge_tensors(
 
             assert mode.shape_env is not None
             new_size = mode.shape_env.create_unbacked_symint()
-            mode.shape_env._update_var_to_range(
-                new_size.node.expr, ValueRanges(*min_max(s0, s1))
-            )
+            mode.shape_env.constrain_symbol_range(new_size.node.expr, *min_max(s0, s1))
             merged_size.append(new_size)
 
     """
