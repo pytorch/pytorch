@@ -30,6 +30,9 @@ from torch._export.non_strict_utils import (
     produce_guards_and_solve_constraints,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
+from torch._export.passes.enforce_placeholder_order_pass import (
+    enforce_placeholder_order_pass,
+)
 from torch._export.passes.lift_constants_pass import (
     _materialize_and_lift_constants,
     ConstantAttrMap,
@@ -1441,6 +1444,8 @@ def _strict_export_lower_to_aten_ir(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
+    enforce_placeholder_order_pass(gm, export_graph_signature)
+
     return ExportArtifact(
         aten=aten_export_artifact,
         in_spec=orig_in_spec,
@@ -1896,6 +1901,8 @@ def _non_strict_export(
     _move_non_persistent_buffers_to_tensor_constants(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
+
+    enforce_placeholder_order_pass(aten_export_artifact.gm, aten_export_artifact.sig)
 
     assert out_spec is not None
     assert in_spec is not None

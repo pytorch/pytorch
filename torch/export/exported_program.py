@@ -353,6 +353,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
     decompose_custom_triton_ops,
 ):
+    from torch._export.passes.enforce_placeholder_order_pass import (
+        enforce_placeholder_order_pass,
+    )
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
@@ -572,6 +575,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     ep.state_dict.pop(name)
 
+        enforce_placeholder_order_pass(gm, new_graph_signature)
+
         return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
@@ -776,6 +781,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
+
+    enforce_placeholder_order_pass(gm, new_graph_signature)
+
     return gm, new_graph_signature, ep.state_dict
 
 

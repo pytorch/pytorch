@@ -420,6 +420,35 @@ def _verify_exported_program_signature(exported_program) -> None:
                 f"Unknown InputKind {input_spec.kind}."
             )
 
+    # Check the order of input spec kinds
+    expected_order = [
+        InputKind.TOKEN,
+        InputKind.PARAMETER,
+        InputKind.BUFFER,
+        InputKind.CONSTANT_TENSOR,
+        InputKind.CUSTOM_OBJ,
+        InputKind.USER_INPUT,
+    ]
+    current_order_index = 0
+    seen_non_persistent_buffer = False
+    for input_spec in gs.input_specs:
+        kind_index = expected_order.index(input_spec.kind)
+        if kind_index < current_order_index:
+            raise SpecViolationError(
+                f"InputSpec kind {input_spec.kind} is out of order. Expected order is {expected_order}."
+            )
+        current_order_index = kind_index
+
+        # Additional check: persistent buffers should come before non-persistent ones
+        if input_spec.kind == InputKind.BUFFER:
+            if input_spec.persistent is False:
+                seen_non_persistent_buffer = True
+            elif input_spec.persistent is True and seen_non_persistent_buffer:
+                raise SpecViolationError(
+                    "Persistent buffer found after a non-persistent buffer. "
+                    "Persistent buffers must come before non-persistent buffers."
+                )
+
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
     assert output_node.op == "output"
