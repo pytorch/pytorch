@@ -333,6 +333,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     int ldb = {{kernel.get_layout_args()[4]}};
     int ldc = {{kernel.get_layout_args()[5]}};
     int ldd = {{kernel.get_layout_args()[6]}};
+    uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
 
     using ElementA = {{kernel.cutlass_dtype(X)}};
     using ElementB = {{kernel.cutlass_dtype(W)}};
@@ -1057,7 +1058,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
