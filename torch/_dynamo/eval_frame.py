@@ -416,6 +416,7 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
     ) -> None:
         super().__init__()
@@ -426,6 +427,7 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self._dynamic = dynamic
+        self.dynamism = dynamism
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -663,6 +665,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
@@ -679,6 +682,7 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
+            dynamism=dynamism,
             compiler_config=compiler_config,
         )
 
@@ -786,6 +790,7 @@ def _optimize_catch_errors(
     backend_ctx_ctor=null_context,
     export=False,
     dynamic=None,
+    dynamism=None,
     compiler_config=None,
     rebuild_ctx=None,
 ):
@@ -795,6 +800,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        dynamism=None,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
     )
@@ -879,6 +885,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    dynamism=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -938,10 +945,11 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, dynamism=dynamism),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        dynamism=dynamism,
         compiler_config=(
             backend.get_compiler_config()
             if hasattr(backend, "get_compiler_config")
@@ -1776,6 +1784,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    example_inputs=None,
     rebuild_ctx=None,
 ):
     """
