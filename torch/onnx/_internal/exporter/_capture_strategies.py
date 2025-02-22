@@ -238,9 +238,10 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        ep, report = _draft_export.draft_export(
+        ep = _draft_export.draft_export(
             model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
         )
+        report = getattr(ep, "_report")
         if not report.successful():
             self._exception = RuntimeError(str(report))
         # The report is logged and displayed by draft_export already, so we don't need to print it again.
