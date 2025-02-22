@@ -4,17 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import (
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
