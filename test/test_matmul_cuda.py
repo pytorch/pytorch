@@ -78,7 +78,11 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+        if size > 1000:
+            make_arg = partial(make_tensor, dtype=dtype, device="cpu", low=-1.0, high=1.0)
+        else:
+            make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+
         m_beta = make_arg(1)
         m_input = make_arg((n, p))
         m_1 = make_arg((n, m))
@@ -137,7 +141,7 @@ class TestMatmulCuda(TestCase):
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
-                        torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
+                        torch.bfloat16: xtol(atol=7e-1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
