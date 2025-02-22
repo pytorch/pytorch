@@ -1969,8 +1969,7 @@ class VariableBuilder:
                 and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
                     0
                 ]
-                or not config.assume_static_by_default
-            ):
+            ) or not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2833,7 +2832,6 @@ def _automatic_dynamic(
             isinstance(base_source, LocalSource)
             and base_source.dynamism is not None
             and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
-            or not config.assume_static_by_default
         ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this

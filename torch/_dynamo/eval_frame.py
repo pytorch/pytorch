@@ -1784,7 +1784,6 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
-    example_inputs=None,
     rebuild_ctx=None,
 ):
     """
