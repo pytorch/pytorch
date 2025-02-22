@@ -2392,6 +2392,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
+    def test_is(x, y):
+        exc = ValueError("abcd")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is exc
+            return x + y
+
+    @make_test
+    def test_is_not(x, y):
+        exc = ValueError("abcd")
+        exc1 = TypeError("abc")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is not exc1
+            return x + y
+
+    @make_test
     def test_are_functorch_transforms_active(x):
         if torch._C._are_functorch_transforms_active():
             return x + 1
