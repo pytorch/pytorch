@@ -14,13 +14,14 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Layout
+from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
     ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
+    use_aten_gemm_kernels,
 )
 
 
@@ -425,6 +426,17 @@ scaled_persistent_mm_configs = functools.partial(
     filtered_configs,
     configs=scaled_persistent_mm_platform_configs,
 )
+
+
+def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
+    fallback_to_aten: bool = (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    )
+    if fallback_to_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+    return fallback_to_aten
 
 
 def mm_grid(m, n, meta):
