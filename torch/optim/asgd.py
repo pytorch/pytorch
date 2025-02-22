@@ -212,9 +212,8 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
-    if isinstance(lr, Tensor):
-        if lr.dim() != 0:
-            lr = lr.squeeze()
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -308,8 +307,7 @@ def _multi_tensor_asgd(
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
         ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
 
-    if isinstance(lr, Tensor) and lr.dim() != 0:
-        lr = lr.squeeze()
+    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]
