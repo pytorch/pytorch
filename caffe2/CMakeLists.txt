@@ -1823,7 +1823,7 @@ if(BUILD_TEST)
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} torch_library gtest_main)
-      if(USE_CUDNN AND ${test_name} MATCHES "cudnn")
+      if(USE_CUDNN AND ${test_name} MATCHES "cudnn") # Test cudnn
         target_link_libraries(${test_name} torch::cudnn)
       endif()
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
