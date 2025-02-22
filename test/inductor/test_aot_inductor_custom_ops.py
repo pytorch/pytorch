@@ -88,10 +88,23 @@ def fn_ret_list_of_single_tensor(x: torch.Tensor) -> list[torch.Tensor]:
 
 
 @fn_ret_list_of_single_tensor.register_fake
-def fake_impl(x):
+def _(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.new_dynamic_size()
     return [torch.randn(i0)]
+
+
+@torch.library.custom_op("aoti_custom_ops::fn_ret_single_tensor", mutates_args={})
+def fn_ret_single_tensor(x: torch.Tensor) -> torch.Tensor:
+    s = x.sum().to(torch.int64)
+    return torch.randn(s.item())
+
+
+@fn_ret_single_tensor.register_fake
+def _(x):
+    ctx = torch._custom_op.impl.get_ctx()
+    i0 = ctx.new_dynamic_size()
+    return torch.randn(i0)
 
 
 class AOTInductorTestsTemplate:
@@ -271,6 +284,15 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def forward(self, x):
                 return torch.ops.aoti_custom_ops.fn_ret_list_of_single_tensor(x)[0] + 1
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(3, 4),)
+        self.check_model(m, args)
+
+    def test_custom_op_return_single_tensor(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_ret_single_tensor(x) + 1
 
         m = Model().to(device=self.device)
         args = (torch.randn(3, 4),)
