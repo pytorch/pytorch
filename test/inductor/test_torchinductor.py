@@ -6373,7 +6373,6 @@ class CommonTemplate:
                     c_op(x, kernel_size=2, stride=2)
 
     def test_replication_pad_errors_with_bool(self):
-        # https://github.com/pytorch/pytorch/issues/143779
         for dim in (1, 2, 3):
             def fn(x):
                 x = torch.signbit(x)
