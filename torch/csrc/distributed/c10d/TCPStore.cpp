@@ -264,10 +264,26 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   Socket::initialize();
 
+  addr_.port = opts.port;
+
   if (opts.isServer) {
-    server_ = detail::TCPServer::start(opts);
-    // server successfully started
-    C10D_DEBUG("The server has started on port = {}.", server_->port());
+    try {
+      server_ = detail::TCPServer::start(opts);
+      // server successfully started
+      C10D_DEBUG("The server has started on port = {}.", server_->port());
+      addr_.port = server_->port();
+    } catch (const SocketError& e) {
+      bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
+      int masterPort = getCvarInt({"MASTER_PORT"}, 0);
+      if (useAgentStore && masterPort == opts.port) {
+        C10D_ERROR(
+            "The server socket on {} has failed to bind. "
+            "TORCHELASTIC_USE_AGENT_STORE is enabled so ignoring the error.",
+            opts.port);
+      } else {
+        throw;
+      }
+    }
 
     std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
     if (maxconnFile.good() && numWorkers_.has_value()) {
@@ -287,10 +303,6 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
       }
     }
-
-    addr_.port = server_->port();
-  } else {
-    addr_.port = opts.port;
   }
 
   // Try connecting several times -- if the server listen backlog is full it may
