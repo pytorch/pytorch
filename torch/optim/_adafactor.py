@@ -10,6 +10,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     Optimizer,
     ParamsT,
     TensorListList,
@@ -355,10 +356,8 @@ def _single_tensor_adafactor(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
-
-    if isinstance(lr, Tensor):
-        if lr.dim() != 0:
-            lr = lr.squeeze()
+    else:
+        lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -477,8 +476,7 @@ def _multi_tensor_adafactor(
         grad_scale is None and found_inf is None
     ), "Grad scaling should occur outside of optimizer.step()"
 
-    if isinstance(lr, Tensor) and lr.dim() != 0:
-        lr = lr.squeeze()
+    lr = _to_scalar(lr)
 
     grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
         [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]
