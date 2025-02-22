@@ -390,7 +390,8 @@ def to_blocked(input_matrix) -> torch.Tensor:
     n_col_blocks = ceil_div(cols, 4)
 
     # Pad out and view as tiles of (128, 4)
-    padded = torch.nn.functional.pad(input_matrix, (0, -cols % 4, 0, -rows % 128))
+    padded = torch.nn.functional.pad(input_matrix.view(torch.uint8), (0, -cols % 4, 0, -rows % 128))
+    padded = padded.view(torch.float8_e8m0fnu)
     blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
 
     # rearrange all tiles
@@ -849,7 +850,30 @@ class TestFP8MatmulCuda(TestCase):
         "data_random_scales_from_data",
     ])
     @parametrize("fast_accum", [False, True])
-    @parametrize("mkn", [(128, 128, 128), (256, 256, 256), (128, 256, 512), (256, 512, 128), (512, 128, 256)])
+    @parametrize("mkn", [
+        # Nice shapes
+        (128, 128, 128),
+        (256, 256, 256),
+        (128, 256, 512),
+        (256, 512, 128),
+        (512, 128, 256),
+
+        # Non block multiples
+        (65, 96, 112),
+        (197, 224, 272),
+        # K not multiple of 32
+        (197, 240, 272),
+
+        # Very unbalanced
+        (1023, 64, 48),
+        (31, 1024, 64),
+        (45, 96, 1024),
+
+        # Mixed large and small
+        (2, 1024, 128),
+        (127, 96, 1024),
+        (1025, 128, 96)
+    ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     def test_blockwise_mxfp8_numerics(self, test_case_name, fast_accum, mkn) -> None:
         # inspiration: https://github.com/pytorch/ao/pull/1625
 
@@ -857,6 +881,9 @@ class TestFP8MatmulCuda(TestCase):
         M, K, N = mkn
         BLOCK_SIZE = 32
         require_exact_match = True
+
+        def ceil_div(a, b):
+            return (a + b - 1) // b
 
         if test_case_name == "a_eye_b_eye":
             if not ((M == K) and (M == N)):
@@ -867,8 +894,8 @@ class TestFP8MatmulCuda(TestCase):
             A = A_ref.to(torch.float8_e4m3fn)
             B = B_ref.to(torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -880,8 +907,8 @@ class TestFP8MatmulCuda(TestCase):
             A = A_ref.to(torch.float8_e4m3fn)
             B = B_ref.to(torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -896,8 +923,8 @@ class TestFP8MatmulCuda(TestCase):
             A_ref[1][0:BLOCK_SIZE] = 2
             A[1][0:BLOCK_SIZE] = 2
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -912,8 +939,8 @@ class TestFP8MatmulCuda(TestCase):
             B_ref[1][0:BLOCK_SIZE] = 2
             B[1][0:BLOCK_SIZE] = 2
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -925,8 +952,8 @@ class TestFP8MatmulCuda(TestCase):
             A = A_ref.to(torch.float8_e4m3fn)
             B = B_ref.to(torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
             A_ref[1][0:BLOCK_SIZE] = 4
             A[1][0:BLOCK_SIZE] = 2
@@ -943,8 +970,8 @@ class TestFP8MatmulCuda(TestCase):
             A = A_ref.to(torch.float8_e4m3fn)
             B = B_ref.to(torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
             B_ref[1][0:BLOCK_SIZE] = 4
             B[1][0:BLOCK_SIZE] = 2
@@ -968,14 +995,16 @@ class TestFP8MatmulCuda(TestCase):
             A = A_ref.to(torch.float8_e4m3fn)
             B = B_ref.to(torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
         elif test_case_name == "data_random_scales_from_data":
+            if not K % BLOCK_SIZE == 0:
+                return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
             # random data, scales from data
             A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
@@ -988,9 +1017,9 @@ class TestFP8MatmulCuda(TestCase):
             max_val = F8E4M3_MAX_VAL
             min_val = -1 * max_val
 
-            A = (A_ref.reshape(-1, BLOCK_SIZE) / A_scale.reshape(M * K // BLOCK_SIZE, 1).float()).reshape(M, K)
+            A = (A_ref.reshape(-1, BLOCK_SIZE) / A_scale.reshape(M * ceil_div(K, BLOCK_SIZE), 1).float()).reshape(M, K)
             A = A.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
-            B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * K // BLOCK_SIZE, 1).float()).reshape(N, K)
+            B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * ceil_div(K, BLOCK_SIZE), 1).float()).reshape(N, K)
             B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
 
             # convert to swizzled format

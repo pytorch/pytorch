@@ -936,10 +936,13 @@ enum class ScalingType : std::uint8_t {
  * ---------------------------
  * Conditions and corresponding Scaling Types:
  *
+ * - If scale tensors are Float8_e8m0fnu:
+ *   - Returns BlockWise (with additional size checks).
+ *
  * - If scale_a.numel() == 1 && scale_b.numel() == 1:
  *   - Returns TensorWise.
  *
- * - Else if scale_a.dim() == 1 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
+ * - Else if scale_a.dim() == 2 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
  *   - Returns RowWise.
  *
  * - Otherwise:
@@ -952,8 +955,38 @@ ScalingType get_scaling_type(
     const at::Tensor& scale_a,
     const at::Tensor& scale_b,
     int64_t dim_m,
+    int64_t dim_k,
     int64_t dim_n) {
-  if (scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
+  // Check for BlockWise scaling (FP8_E8M0 types)
+  if (scale_a.scalar_type() == scale_b.scalar_type() &&
+      scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
+    constexpr int64_t BLOCK_SIZE_K = 32;
+    constexpr int64_t BLOCK_SIZE_MN = 128;
+
+    auto ceil_div = [](auto a, auto b) { return (a + b - 1) / b; };
+    auto num_k_blocks = ceil_div(dim_k, BLOCK_SIZE_K);
+    auto padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4;
+
+    // TODO: We might want to enforce some structure on the shapes of the scale
+    // tensors
+
+    // Check expected sizes for block-wise scaling
+    auto expected_a_size =
+        BLOCK_SIZE_MN * ceil_div(dim_m, BLOCK_SIZE_MN) * padded_num_k_blocks;
+    auto expected_b_size =
+        BLOCK_SIZE_MN * ceil_div(dim_n, BLOCK_SIZE_MN) * padded_num_k_blocks;
+
+    TORCH_CHECK(scale_a.numel() == expected_a_size,
+                "For BlockWise scaling: Expected scale_a size to be ",
+                expected_a_size, " but got ", scale_a.numel());
+    TORCH_CHECK(scale_b.numel() == expected_b_size,
+                "For BlockWise scaling: Expected scale_b size to be ",
+                expected_b_size, " but got ", scale_b.numel());
+
+    TORCH_CHECK(
+        scale_a.is_contiguous() && scale_b.is_contiguous(),
+        "For BlockWise scaling: Both scale_a and scale_b must be contiguous");
+
     return ScalingType::BlockWise;
   }
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
@@ -1053,7 +1086,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   // Check what type of scaling we are doing based on inputs
-  ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat2.size(1));
+  ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat1.size(1), mat2.size(1));
   TORCH_INTERNAL_ASSERT(scaling_choice != ScalingType::Error, "Scaling type not supported");
 
   // TODO(future PR): enumerate what boundary conditions (scale shapes, etc)

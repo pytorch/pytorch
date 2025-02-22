@@ -13,7 +13,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 
 #ifdef USE_ROCM
