@@ -950,12 +950,6 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
-  py::object config_module = py::module_::import("torch._dynamo.config");
-
-  bool is_tensor_immutable =
-      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
-          .cast<bool>();
-
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -969,8 +963,7 @@ bool is_immutable_object(py::handle example_value) {
 
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
-      PyUnicode_Check(example_value.ptr()) ||
-      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
+      PyUnicode_Check(example_value.ptr());
 }
 
 bool is_parameter(py::handle tensor) {
@@ -2294,6 +2287,10 @@ class GuardManager {
         _is_dict(py::isinstance<py::dict>(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+      py::object config_module = py::module_::import("torch._dynamo.config");
+      _skip_tensor_guard_with_matching_tags =
+          config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+              .cast<bool>();
     }
   }
 
@@ -2311,6 +2308,13 @@ class GuardManager {
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  void mark_tensor_match() {
+    _is_tensor_match_node = true;
+  }
+  void set_parent_dict_tag_match(bool flag) {
+    _parent_dict_tag_match = flag;
   }
 
  public:
@@ -2395,8 +2399,11 @@ class GuardManager {
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
 
-    if (!this->check_leaf_guards_nopybind(value)) {
-      return false;
+    if (!(_skip_tensor_guard_with_matching_tags && _is_tensor_match_node &&
+          _parent_dict_tag_match)) {
+      if (!this->check_leaf_guards_nopybind(value)) {
+        return false;
+      }
     }
 
     return this->check_accessors_nopybind(value);
@@ -2624,6 +2631,9 @@ class GuardManager {
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   bool _is_dict;
+  bool _parent_dict_tag_match{false};
+  bool _is_tensor_match_node{false};
+  bool _skip_tensor_guard_with_matching_tags;
   uint64_t _dict_tag{0};
 };
 
@@ -3790,6 +3800,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
+    _guard_manager->set_parent_dict_tag_match(matches_dict_tag);
     bool result = _guard_manager->check_nopybind(x);
     return result;
   }
@@ -5627,6 +5638,7 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object tensor_name,
              py::object verbose_code_parts) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
+            self.mark_tensor_match();
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
                 std::move(value),
