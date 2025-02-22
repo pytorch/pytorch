@@ -4595,7 +4595,8 @@ class TestLinalg(TestCase):
         try:
             set_tunableop_defaults()
             torch.cuda.tunable.set_rotating_buffer_size(0)
-            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            if dtype is torch.half:
+                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             ordinal = torch.cuda.current_device()
             torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
