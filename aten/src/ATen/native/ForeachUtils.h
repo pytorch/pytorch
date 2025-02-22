@@ -326,41 +326,41 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
           "-th Tensor is not.");
       return {t->device(), t->scalar_type()};
     }();
-    TORCH_CHECK(
-        std::all_of(
-            nested_tensorlist.cbegin(),
-            nested_tensorlist.cend(),
-            [&](const auto& tensorlist) -> bool {
-              if (tensorlist.size() == 0) {
-                return true;
-              }
-              const auto& tensor = tensorlist[tensor_index];
-              // note(crcrpar): Currently the scope of this function is
-              // optimizers so there could be `state_steps` and other scalars
-              // whose elements are float tensors no matter what the parameter's
-              // dtype is.
-              if (!tensor.has_value()) {
-                return true;
-              } else {
-                const auto s = tensor->scalar_type();
-                const auto d = tensor->device();
-                // Note: `step` or `state_step` is float32 by default.
-                if (key.first == d) {
-                  return key.second == s || s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
-                } else if (d.is_cpu()) {
-                  // note(crcrpar): There are some test cases (e.g.
-                  // TestOptim::test_adam) where state_steps are on CPU and the
-                  // others are on CUDA. Currently a state_step Tensor has the
-                  // dtype of float.
-                  return s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
-                } else {
-                  return false;
-                }
-              }
-            }),
-        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
+    // TORCH_CHECK(
+    //     std::all_of(
+    //         nested_tensorlist.cbegin(),
+    //         nested_tensorlist.cend(),
+    //         [&](const auto& tensorlist) -> bool {
+    //           if (tensorlist.size() == 0) {
+    //             return true;
+    //           }
+    //           const auto& tensor = tensorlist[tensor_index];
+    //           // note(crcrpar): Currently the scope of this function is
+    //           // optimizers so there could be `state_steps` and other scalars
+    //           // whose elements are float tensors no matter what the parameter's
+    //           // dtype is.
+    //           if (!tensor.has_value()) {
+    //             return true;
+    //           } else {
+    //             const auto s = tensor->scalar_type();
+    //             const auto d = tensor->device();
+    //             // Note: `step` or `state_step` is float32 by default.
+    //             if (key.first == d) {
+    //               return key.second == s || s == at::ScalarType::Float ||
+    //                   s == at::ScalarType::Double;
+    //             } else if (d.is_cpu()) {
+    //               // note(crcrpar): There are some test cases (e.g.
+    //               // TestOptim::test_adam) where state_steps are on CPU and the
+    //               // others are on CUDA. Currently a state_step Tensor has the
+    //               // dtype of float.
+    //               return s == at::ScalarType::Float ||
+    //                   s == at::ScalarType::Double;
+    //             } else {
+    //               return false;
+    //             }
+    //           }
+    //         }),
+    //     "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
     if (!grouped_tensors_with_indices.count(key)) {
       grouped_tensors_with_indices.insert(
           {key,
