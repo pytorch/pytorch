@@ -1089,9 +1089,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat1.size(1), mat2.size(1));
   TORCH_INTERNAL_ASSERT(scaling_choice != ScalingType::Error, "Scaling type not supported");
 
-  // TODO(future PR): enumerate what boundary conditions (scale shapes, etc)
-  // are supported / not supported for blockwise scaling
-
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
