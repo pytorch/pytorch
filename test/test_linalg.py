@@ -50,7 +50,13 @@ if TEST_SCIPY:
 def blaslt_supported_device():
     if torch.cuda.is_available():
         if torch.version.hip:
-            for arch in ['gfx90a', 'gfx94']:
+            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+            archs = ['gfx90a', 'gfx94']
+            if ROCM_VERSION >= (6, 3):
+                archs.extend(['gfx110', 'gfx120'])
+            if ROCM_VERSION >= (6, 5):
+                archs.append('gfx95')
+            for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
         else:
@@ -81,6 +87,13 @@ def tunableop_matmul(device, dtype):
     B = torch.randn((17, 17), device=device, dtype=dtype)
     C = torch.matmul(A, B)
     del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
+
+def get_tunableop_validators():
+    assert len(torch.cuda.tunable.get_validators()) > 0
+    validators = {}
+    for key, value in torch.cuda.tunable.get_validators():
+        validators[key] = value
+    return validators
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -4603,10 +4616,7 @@ class TestLinalg(TestCase):
             filename3 = "tunableop_results_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results{ordinal}.csv"
-            assert len(torch.cuda.tunable.get_validators()) > 0
-            validators = {}
-            for key, value in torch.cuda.tunable.get_validators():
-                validators[key] = value
+            validators = get_tunableop_validators()
             if torch.version.hip:
                 assert "HIPBLASLT_VERSION" in validators
                 assert re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"])
@@ -4947,6 +4957,11 @@ class TestLinalg(TestCase):
         B = torch.randn(K, M, device=device, dtype=dtype)
         C = torch.matmul(A, B)
         self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
+
+        validators = get_tunableop_validators()
+        self.assertTrue("ROCBLAS_VERSION" in validators)
+        # format: [major].[minor].[patch].[tweak].[commit id]
+        self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]))
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
