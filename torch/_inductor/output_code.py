@@ -168,22 +168,29 @@ def get_cudagraph_partition_info(
 ) -> tuple[
     list[PlaceholderInfo],
     list[int],
+    list[int],
     list[Optional[str]],
     tuple[torch.Tensor, ...],
 ]:
     assert compiled_graph.cudagraph_info is not None
-    static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"])
+    static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
+    mutated_input_idxs = compiled_graph.mutated_input_idxs
     cached_info = compiled_graph.cudagraph_info
     placeholders = cached_info.placeholders
     stack_traces = cached_info.stack_traces
 
     partition_placeholders = []
     partition_static_input_idxs = []
+    partition_mutated_input_idxs = []
     for partition_input_idx, graph_input_idx in enumerate(
         partition_info.input_index_mapping
     ):
         if graph_input_idx in static_input_idxs:
             partition_static_input_idxs.append(partition_input_idx)
+
+        if graph_input_idx in mutated_input_idxs:
+            partition_mutated_input_idxs.append(partition_input_idx)
+
         if graph_input_idx:
             placeholder = placeholders[graph_input_idx]
         else:
@@ -210,6 +217,7 @@ def get_cudagraph_partition_info(
     return (
         partition_placeholders,
         partition_static_input_idxs,
+        partition_mutated_input_idxs,
         partition_stack_traces,
         partition_constants,
     )
@@ -249,16 +257,13 @@ def cudagraph_partition_post_compile(
 
     cudagraphify_fns = []
     for partition_info in compiled_graph.partition_infos:
-        # TODO: Compute metadata based on graph info
-
         (
             partition_placeholders,
             partition_static_input_idxs,
+            partition_mutated_input_idxs,
             partition_stack_traces,
             partition_constants,
         ) = get_cudagraph_partition_info(compiled_graph, partition_info, constants)
-
-        partition_mutated_input_idxs = ()  # TODO
 
         cudagraphify_fn = partial(
             cudagraphify,
@@ -269,7 +274,7 @@ def cudagraph_partition_post_compile(
             is_inference=is_inference,
             constants=partition_constants,
             placeholders=partition_placeholders,
-            mutated_input_idxs=partition_mutated_input_idxs,
+            mutated_input_idxs=tuple(partition_mutated_input_idxs),
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
