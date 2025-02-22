@@ -1694,7 +1694,9 @@ class GuardBuilder(GuardBuilderBase):
             exc.unimplemented_v2(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
-                explanation=f"Attempted to setup NN_MODULE guard on unitialized class {type(val)}.",
+                explanation="Attempted to setup an NN_MODULE guard on unitialized "
+                f"nn.Module subclass `{type(val)}`. Please ensure the `nn.Module` "
+                "subclass instance has called `super().__init__()`.",
                 hints=[],
             )
 

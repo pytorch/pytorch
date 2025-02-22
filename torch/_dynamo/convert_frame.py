@@ -538,8 +538,11 @@ class ConvertFrameAssert:
             unimplemented_v2(
                 gb_type="Attempt to trace generator",
                 context="",
-                explanation="Dynamo cannot trace generators as a top-level function.",
-                hints=[],
+                explanation="Generators cannot be compiled directly with `torch.compile`.",
+                hints=[
+                    "Wrap the generator in a non-generator function and compile the latter. "
+                    "Dynamo supports tracing functions that call a generator."
+                ],
             )
 
         if not has_tensor_in_frame(frame):
@@ -801,7 +804,9 @@ def _compile(
                     unimplemented_v2(
                         gb_type="Excessive RestartAnalysis() calls",
                         context="",
-                        explanation="Dynamo attempted to restart analysis 100+ times.",
+                        explanation="Dynamo attempted to trace the same frame 100+ times. "
+                        "Giving up on compiling as the compile time tradeoff is likely not "
+                        "worth the performance gain.",
                         hints=[],
                     )
             except exc.SkipFrame as e:
@@ -975,7 +980,10 @@ def _compile(
                 unimplemented_v2(
                     gb_type="Dynamo cache limit exceeded",
                     context=f"Limit type: {limit_type}",
-                    explanation=f"Dynamo attempted to recompile too many times, exceeding the {limit_type} cache size limit.",
+                    explanation="Dynamo attempted to recompile the code object too many times, "
+                    f"exceeding the {limit_type} cache size limit."
+                    "Giving up on compiling as the compile time tradeoff is likely not "
+                    "worth the performance gain.",
                     hints=[],
                 )
 

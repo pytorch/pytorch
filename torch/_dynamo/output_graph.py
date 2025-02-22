@@ -489,8 +489,7 @@ class OutputGraph:
                 unimplemented_v2(
                     gb_type="backward_state does not support export",
                     context="",
-                    explanation="backward_state (data passed to backward hooks for compiled autograd) "
-                    "cannot be used when exporting.",
+                    explanation="Compiled autograd doesn't work with `torch.export`.",
                     hints=[],
                 )
             example_value = BackwardState()
@@ -1001,9 +1000,9 @@ class OutputGraph:
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented_v2(
-                gb_type="Attempt to compile with unrestorable blocks",
+                gb_type="Attempt to compile graph in a try block",
                 context="",
-                explanation="Dynamo cannot compile with active Python blocks (i.e. with/try blocks) that cannot be restored.",
+                explanation="Dynamo cannot compile traced graphs while in a try block.",
                 hints=[],
             )
 
@@ -1954,6 +1953,7 @@ class SubgraphTracer(fx.Tracer):
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
+        self.source_target = source_target
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
@@ -2137,8 +2137,8 @@ class SubgraphTracer(fx.Tracer):
         elif kind == "call_module":
             if self.parent is not None:
                 unimplemented_v2(
-                    gb_type="Invoking an nn.Module inside a HigherOrderOperator",
-                    context="",
+                    gb_type="Invoking an nn.Module inside a higher order operator",
+                    context=f"Higher order op name: {self.source_target}",
                     explanation="This is not supported.",
                     hints=[],
                 )

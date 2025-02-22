@@ -595,7 +595,7 @@ class SideEffects:
                     unimplemented_v2(
                         gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
                         context="",
-                        explanation="This is not supported.",
+                        explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                         hints=[],
                     )
 
@@ -750,7 +750,9 @@ class SideEffects:
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
                         explanation="This is not supported.",
-                        hints=[],
+                        hints=[
+                            "Don't use a deque with `maxlen` specified.",
+                        ],
                     )
 
                 # old.extend(new), this runs last
