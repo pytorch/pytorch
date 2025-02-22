@@ -704,7 +704,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
-  auto fillPSO = lib.getPipelineStateForFunc("masked_fill_scalar_" + scalarToMetalTypeString(self));
+  auto fillPSO = lib.getPipelineStateForFunc("masked_fill_scalar_strided_" + scalarToMetalTypeString(self));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();

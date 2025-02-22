@@ -319,7 +319,18 @@ index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
     uint thread_index [[thread_position_in_grid]]);
 
 template <typename T>
-kernel void masked_fill_scalar(
+kernel void masked_fill_scalar_dense(
+    device T* input,
+    constant bool* mask,
+    constant T& val,
+    uint thread_index [[thread_position_in_grid]]) {
+  if (mask[thread_index]) {
+    input[thread_index] = val;
+  }
+}
+
+template <typename T>
+kernel void masked_fill_scalar_strided(
     device T* input,
     constant bool* mask,
     constant T& val,
@@ -335,17 +346,20 @@ kernel void masked_fill_scalar(
   }
 }
 
-#define REGISTER_MASKED_FILL_SCALAR(DTYPE)                         \
-  template [[host_name("masked_fill_scalar_" #DTYPE)]] kernel void \
-  masked_fill_scalar<DTYPE>(                                       \
-      device DTYPE*,                                               \
-      constant bool*,                                              \
-      constant DTYPE&,                                             \
-      constant long*,                                              \
-      constant long*,                                              \
-      constant long*,                                              \
-      device uint&,                                                \
-      uint)
+#define REGISTER_MASKED_FILL_SCALAR(DTYPE)                                 \
+  template [[host_name("masked_fill_scalar_strided_" #DTYPE)]] kernel void \
+  masked_fill_scalar_strided<DTYPE>(                                       \
+      device DTYPE*,                                                       \
+      constant bool*,                                                      \
+      constant DTYPE&,                                                     \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      device uint&,                                                        \
+      uint);                                                               \
+  template [[host_name("masked_fill_scalar_dense_" #DTYPE)]] kernel void   \
+  masked_fill_scalar_dense<DTYPE>(                                         \
+      device DTYPE*, constant bool*, constant DTYPE&, uint);
 
 REGISTER_MASKED_FILL_SCALAR(float2);
 REGISTER_MASKED_FILL_SCALAR(half2);
