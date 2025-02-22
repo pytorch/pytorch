@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+Utility functions and classes used throughout the TorchDynamo system.
+
+This module contains a collection of helper utilities used by various parts of Dynamo for:
+- Performance metrics collection and reporting
+- Compilation timing and debugging
+- Graph manipulation and tensor operations
+- Runtime guards and checks
+- Common data structure operations
+- Testing and development tools
+
+This is an internal module that provides shared functionality used across the Dynamo codebase.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -44,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -380,7 +394,7 @@ class CompileEventLogger:
             chromium_log.add_event_data(event_name, **metadata)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
 
             if event_name != top_event:
                 raise RuntimeError(
@@ -402,7 +416,7 @@ class CompileEventLogger:
         """
         Syntactic sugar for logging to the toplevel event
         """
-        top_event = get_chromium_event_logger().get_top()
+        top_event = get_chromium_event_logger().get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
@@ -424,7 +438,7 @@ class CompileEventLogger:
             chromium_log.increment(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -450,7 +464,7 @@ class CompileEventLogger:
         Increments a value on the toplevel metric. By default, logs to metric.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -472,7 +486,7 @@ class CompileEventLogger:
             chromium_log.add_to_set(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -499,7 +513,7 @@ class CompileEventLogger:
         Defaults to COMPILATION_METRIC log level.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -1008,6 +1022,16 @@ def is_function(value):
     )
 
 
+cmp_name_to_op_mapping = {
+    "__eq__": operator.eq,
+    "__ne__": operator.ne,
+    "__lt__": operator.lt,
+    "__le__": operator.le,
+    "__gt__": operator.gt,
+    "__ge__": operator.ge,
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1284,7 +1308,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
     """
     event_logger = get_chromium_event_logger()
-    event_name = event_logger.get_top()
+    event_name = event_logger.get_outermost_event()
     if not event_name:
         return
     event_logger.add_event_data(
@@ -1320,6 +1344,40 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
+def _get_dynamo_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+            "log_file_name",
+            "verbose",
+            "repro_after",
+            "repro_level",
+            "repro_forward_only",
+            "repro_tolerance",
+            "repro_ignore_non_fp",
+            "same_two_models_use_fp64",
+            "base_dir",
+            "debug_dir_root",
+            "_save_config_ignore",
+            "log_compilation_metrics",
+            "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+            "_autograd_backward_strict_mode_banned_ops",
+            "reorderable_logging_functions",
+            "ignore_logger_methods",
+            "traceable_tensor_subclasses",
+            "_custom_ops_profile",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    config_dict = clean_for_json(config.get_config_copy())
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1334,7 +1392,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -1399,6 +1457,7 @@ def record_compilation_metrics(
         "structured_logging_overhead_us": to_int_us(
             torch._logging.get_structured_logging_overhead()
         ),
+        "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -1480,12 +1539,13 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> Optional[str]:
+    def get_outermost_event(self) -> Optional[str]:
         """
-        Get the top event name or None if the stack is empty.
+        Get the outermost event name (i.e. the longest running event)
+        or None if the stack is empty.
         """
         stack = self.get_stack()
-        return stack[-1] if stack else None
+        return stack[0] if stack else None
 
     def get_pt2_compile_substack(self):
         """
@@ -2310,6 +2370,10 @@ dict_methods = {
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
+list_methods = {method for method in list.__dict__.values() if callable(method)}
+list_getitem = list.__getitem__
+
+str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 
 def builtin_dict_keys(d):
@@ -2361,8 +2425,15 @@ def to_subclass(t, cls):
     return t.as_subclass(cls)
 
 
+dict_getitem = dict.__getitem__
+
+
 def dict_keys_getitem(d, n):
-    return next(itertools.islice(iter(d), n, n + 1))
+    # Call dict(d) to prevent calling overridden __iter__/keys
+    dict_class = dict
+    if isinstance(d, OrderedDict):
+        dict_class = OrderedDict
+    return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -2904,6 +2975,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)
@@ -2926,6 +3003,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     from .exc import (
         TorchRuntimeError,
         unimplemented,
+        unimplemented_v2,
         Unsupported,
         UserError,
         UserErrorType,
@@ -2985,23 +3063,50 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(
-                f"data dependent operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            # capture_scalar_outputs only works for these ops right now
+            # see torch/_subclasses/fake_impls.py
+            if cause.func in (
+                torch.ops.aten.item.default,
+                torch.ops.aten._local_scalar_dense.default,
+            ):
+                # does this actually get triggered?
+                hints = [
+                    "Enable tracing of data-dependent output operators with "
+                    "`torch._dynamo.config.capture_scalar_outputs = True`",
+                ]
+            else:
+                hints = [
+                    "Consider wrapping the operator into a PyTorch-understood custom operator "
+                    "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
+                ]
+            unimplemented_v2(
+                gb_type="Data dependent operator",
+                context=str(cause.func),
+                explanation=f"Operator `{cause.func}` has a non-Tensor output "
+                "whose value is dependent on the data of Tensor inputs.",
+                hints=hints,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
+                    hints=[
+                        "Enable tracing of dynamic shape operators with "
+                        "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
+                    ],
                 )
             else:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "Operator does not have a meta kernel that supports dynamic output shapes, "
-                    "please report an issue to PyTorch"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator (no meta kernel)",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
+                    hints=[
+                        "Please report an issue to PyTorch",
+                    ],
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -4240,3 +4345,27 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    return mode

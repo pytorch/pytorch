@@ -9,14 +9,13 @@ import textwrap
 import traceback
 import typing
 from collections.abc import Generator, Iterable, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
     Any,
     Callable,
     ClassVar,
-    ContextManager,
     Literal,
     Optional,
     overload,
@@ -75,7 +74,7 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE, OpCountResult
+from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
@@ -916,9 +915,9 @@ class Pointwise(Loops):
         output_name: Optional[str],
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
-    ) -> OpsValue:
+    ) -> None:
         loader = self.make_loader()
-        return ops.store(output_name, indexer(vars), loader(vars))
+        return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -932,7 +931,7 @@ class Pointwise(Loops):
 @ir_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[Sequence[Expr]], Expr]
-    scatter_mode: Optional[str] = None
+    scatter_mode: StoreMode = None
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -952,8 +951,10 @@ class Scatter(Pointwise):
         output_name: Optional[str],
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
-    ) -> OpsValue:
+    ) -> None:
         loader = self.make_loader()
+        if output_name is None:
+            output_name = "unnamed"
         return ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
@@ -1038,7 +1039,7 @@ def get_reduction_combine_fn(
 @ir_dataclass
 class Reduction(Loops):
     reduction_ranges: Sequence[_IntLike]
-    reduction_type: str
+    reduction_type: ReductionType
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
@@ -1065,14 +1066,14 @@ class Reduction(Loops):
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Symbol],
-    ) -> OpsValue:
+    ) -> None:
         value = ops.reduction(
             self.dtype,
             self.src_dtype,
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        return ops.store_reduction(output_name, indexer(vars), value)
+        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
@@ -1110,7 +1111,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., OpsValue],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
-        reduction_type: str,
+        reduction_type: Union[ReductionType, Literal["scan"]],
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
@@ -1196,7 +1197,7 @@ class Reduction(Loops):
             inner_fn=inner_fn,
             ranges=ranges,
             reduction_ranges=reduction_ranges,
-            reduction_type=reduction_type,
+            reduction_type=reduction_type if reduction_type != "scan" else "sum",
             src_dtype=src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
         )
@@ -1323,7 +1324,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., Any],
         ranges: Sequence[Expr],
         reduction_ranges: Sequence[Expr],
-        reduction_type: str,
+        reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
     ) -> TensorBox:
@@ -1470,24 +1471,26 @@ class Reduction(Loops):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
-                return 0
+                return False
             else:
                 return torch.iinfo(dtype).min
         if reduction_type in ("min", "argmin"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
-                return 1
+                return True
             else:
                 return torch.iinfo(dtype).max
 
+        zero = False if is_boolean_dtype(dtype) else 0
+        one = True if is_boolean_dtype(dtype) else 1
         return {
-            "sum": 0,
-            "prod": 1,
-            "xor_sum": 0,
-            "any": 0,
-            "welford_reduce": (0, 0, 0),
-            "welford_combine": (0, 0, 0),
+            "sum": zero,
+            "prod": one,
+            "xor_sum": zero,
+            "any": zero,
+            "welford_reduce": (zero, zero, zero),
+            "welford_combine": (zero, zero, zero),
         }[reduction_type]
 
     @staticmethod
@@ -1591,7 +1594,7 @@ class Reduction(Loops):
         original_reduction_ranges: Sequence[Expr],
         new_ranges: list[Expr],
         new_reduction_ranges: list[Integer],
-        reduction_type: str,
+        reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
@@ -1653,7 +1656,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., Any],
         ranges: Sequence[Expr],
         reduction_ranges: Sequence[Expr],
-        reduction_type: str,
+        reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
@@ -1694,7 +1697,7 @@ class Reduction(Loops):
         original_reduction_ranges: Sequence[Expr],
         new_ranges: list[Integer],
         new_reduction_ranges: list[Integer],
-        reduction_type: str,
+        reduction_type: ReductionType,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
         """
@@ -1733,7 +1736,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]],
         ranges: Sequence[Integer],
         reduction_ranges: Sequence[Integer],
-        reduction_type: str,
+        reduction_type: ReductionType,
         reduction_hint: ReductionHint,
         output_index: int,
     ) -> None:
@@ -1765,7 +1768,7 @@ class WelfordReduction(Reduction):
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Symbol],
-    ) -> OpsValue:
+    ) -> None:
         values = ops.reduction(
             self.dtype,
             self.src_dtype,
@@ -1773,7 +1776,7 @@ class WelfordReduction(Reduction):
             self.inner_fn(vars, reduction_vars),
         )
         value = values[self.output_index]
-        return ops.store_reduction(output_name, indexer(vars), value)
+        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
     @classmethod
     def create(  # type: ignore[override]
@@ -1783,7 +1786,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[..., Any]],
         ranges: list[Integer],
         reduction_ranges: list[Integer],
-        reduction_type: str,
+        reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Sequence[TensorBox]:
         assert reduction_type in ("welford_reduce", "welford_combine")
@@ -1909,7 +1912,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[..., Any]],
         ranges: list[Integer],
         reduction_ranges: list[Integer],
-        reduction_type: str,
+        reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> Sequence[TensorBox]:
@@ -2029,11 +2032,13 @@ class Scan(Loops):
         indexer: Callable[[Sequence[_IntLike]], Never],
         vars: Sequence[Expr],
         scan_vars: Sequence[Symbol],
-    ) -> OpsValue:
+    ) -> None:
         idx = self.reindex(vars, scan_vars)
-        values = [inner_fn(idx) for inner_fn in self.inner_fns]
+        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.scan(self.dtypes, self.combine_fn, values)
-        return ops.store(output_name, indexer(idx), result[self.output_index])
+        return ops.store(
+            output_name or "unnamed", indexer(idx), result[self.output_index]
+        )
 
     def get_reduction_type(self) -> Optional[str]:
         # return self.scan_op
@@ -2227,11 +2232,13 @@ class Sort(Loops):
         indexer: Callable[[Sequence[Expr]], Expr],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Expr],
-    ) -> OpsValue:
+    ) -> None:
         idx = self.reindex(vars, reduction_vars)
-        values = [inner_fn(idx) for inner_fn in self.inner_fns]
+        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
-        return ops.store(output_name, indexer(idx), result[self.output_index])
+        return ops.store(
+            output_name or "unnamed", indexer(idx), result[self.output_index]
+        )
 
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
@@ -2383,22 +2390,32 @@ def as_storage_and_layout(
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-    if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
+    if isinstance(x, StorageBox):
+        _, layout = as_storage_and_layout(
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
+            allow_padding=allow_padding,
+            exact_strides=exact_strides,
+        )
+        return x, x.data.get_layout()
+    if isinstance(x, Buffer):
         if freeze:
             if want_contiguous:
-                x.data.freeze_layout()
-                assert x.data.get_layout().is_contiguous()
+                x.freeze_layout()
+                assert x.get_layout().is_contiguous()
             elif stride_order is not None:
-                x.data.freeze_layout_with_stride_order(
+                x.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
                 )
             elif exact_strides is not None:
-                x.data.freeze_layout_with_exact_strides(
+                x.freeze_layout_with_exact_strides(
                     exact_strides, allow_padding=allow_padding
                 )
             else:
-                x.data.decide_layout()
-        return x, x.data.get_layout()
+                x.decide_layout()
+        return StorageBox(x), x.get_layout()
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
@@ -2769,7 +2786,9 @@ class View(GenericView):
                 # TODO: unbacked should not diverge from backed in determining striding
                 # Need to require contiguous here instead of realize, see:
                 # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_contiguous(x)
+                x = ExternKernel.require_exact_strides(
+                    x, FlexibleLayout.contiguous_strides(x.get_size())
+                )
 
             storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
@@ -3788,7 +3807,7 @@ class Buffer(IRNode):
 
         def loader(index):  # type: ignore[no-untyped-def]
             indexer = self.make_indexer()
-            return ops.load(self.name, indexer(index))
+            return ops.load(self.name or "unnamed", indexer(index))
 
         return loader
 
@@ -3981,7 +4000,7 @@ class ComputedBuffer(OperationBuffer):
             return self.data.make_loader()
         return super().make_loader()
 
-    def get_store_function(self) -> Callable[..., OpsValue]:
+    def get_store_function(self) -> Callable[..., None]:
         indexer = self.get_layout().as_fixed().make_indexer()
         if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
@@ -4907,8 +4926,9 @@ class ExternKernel(InputsKernel):
             )
 
     def get_kernel_name(self):  # type: ignore[no-untyped-def]
+        device = d.type if (d := self.get_device()) else V.graph.device_type
         return (
-            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name, device)  # type: ignore[attr-defined]
             if V.graph.cpp_wrapper
             else self.python_kernel_name
         )
@@ -4941,6 +4961,7 @@ class ExternKernel(InputsKernel):
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
+        # tensor_args can be either tensor or torchbind objects
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
@@ -4990,6 +5011,8 @@ class ExternKernel(InputsKernel):
                 and x.get_name() in V.graph.torchbind_constants
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
+            elif isinstance(x, TorchBindObject):
+                example_args.append(x.get_real_obj())
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -5143,7 +5166,8 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() in (0, 1):  # Layout doesn't matter
+        # Layout generally doesn't matter, but some consuming external ops might have requirements
+        if x.get_numel() in (0, 1) and not exact_strides:
             return x
 
         # require x to have the layout
@@ -5511,11 +5535,13 @@ class ExternKernelOut(ExternKernel):
             kernel_name = "aoti_torch__mm_plus_mm_out"
         else:
             kernel_name = self.get_kernel_name()
+        device = d.type if (d := self.get_device()) else V.graph.device_type
         wrapper.generate_extern_kernel_out(
             kernel_name,
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
+            device,
         )
 
     def __init__(  # type: ignore[no-untyped-def]
@@ -5761,14 +5787,6 @@ class UserDefinedTritonKernel(ExternKernel):
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
 
-        # NOTE: raw_args doesn't include autotuned args.
-        # But, kernel.constexprs includes indices of autotuned args.
-        # So, let's recalculate constexpr indices wrt to raw_args.
-        constexpr_indices = []
-        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-            if kernel.arg_names.index(kwarg) in kernel.constexprs:
-                constexpr_indices.append(idx)
-
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -5779,6 +5797,14 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
+            # NOTE: raw_args doesn't include autotuned args.
+            # But, kernel.constexprs includes indices of autotuned args.
+            # So, let's recalculate constexpr indices wrt to raw_args.
+            constexpr_indices = []
+            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                    constexpr_indices.append(idx)
+
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
             raw_args = [
@@ -5817,6 +5843,11 @@ class UserDefinedTritonKernel(ExternKernel):
                         equal_to_1.append(idx - index_shift)
 
                 triton_meta["configs"][0].equal_to_1 = equal_to_1
+        else:
+            constexpr_indices = []
+            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                if triton_meta["signature"][kwarg] == "constexpr":
+                    constexpr_indices.append(idx)
 
         # Call to kernel
         self.codegen_comment(wrapper)
@@ -6549,12 +6580,14 @@ class FallbackKernel(ExternKernelAlloc):
             self.get_kwargs_value(key, **kwargs)
             for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        target = self.op_overload
+
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(target, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):  # type: ignore[no-untyped-def]
@@ -6580,7 +6613,6 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
@@ -6634,7 +6666,6 @@ class FallbackKernel(ExternKernelAlloc):
             self.use_runtime_dispatch = True
 
         def do_runtime_dispatch() -> None:
-            exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
 
@@ -6693,7 +6724,7 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel, *args, **kwargs):  # type: ignore[no-untyped-def]
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        context: ContextManager[None] = (
+        context: AbstractContextManager[None] = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()  # type: ignore[assignment]
         )
         with context:
@@ -6831,6 +6862,7 @@ class MultiOutput(ExternKernel):
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout: OutputSpec, input, indices: list[tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
         super().__init__(None, layout, [input], ())
@@ -7404,8 +7436,10 @@ class WhileLoop(ExternKernel):
 
         # make sure cond_fn returns a boolean scalar Tensor
         assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+        p = cond_outputs[0]
+        if not isinstance(p, ShapeAsConstantBuffer):
+            assert p.get_dtype() == torch.bool, p
+            assert len(p.get_size()) == 0, p
 
         assert (
             len(all_inputs) > 0
@@ -7496,7 +7530,10 @@ class EffectfulKernel(FallbackKernel):
 
         from torch._higher_order_ops.effects import get_effect_key
 
-        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        uncovered_args = [
+            a.value if isinstance(a, TorchBindObject) else a for a in tensor_args
+        ]
+        effect_type = get_effect_key(kernel, (*nontensor_args, *uncovered_args), kwargs)
         assert effect_type is not None
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
@@ -7518,14 +7555,37 @@ class EffectfulKernel(FallbackKernel):
 
 @ir_dataclass
 class TorchBindObject(IRNode):
+    from torch._library.fake_class_registry import FakeScriptObject
+
     name: str
-    value: torch._C.ScriptObject
+    value: Union[FakeScriptObject, torch.ScriptObject]
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
+
+    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
+        return self.value
+
+    def get_real_obj(self) -> torch.ScriptObject:
+        if isinstance(self.value, torch.ScriptObject):
+            return self.value
+        else:
+            return self.value.real_obj
+
+    def get_buf_bytes(self) -> int:
+        # Returns the sum of all tensors in the flattened object
+        real_script_obj = self.get_real_obj()
+        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+        flat_elems = pytree.tree_flatten(flat_dict)[0]
+        flat_sizes = [
+            x.element_size() * x.numel()
+            for x in flat_elems
+            if isinstance(x, torch.Tensor)
+        ]
+        return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
 
 
 class _CollectiveKernel(FallbackKernel):

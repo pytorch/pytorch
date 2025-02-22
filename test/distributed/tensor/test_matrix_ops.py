@@ -489,7 +489,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         placements = [Replicate(), Shard(0), Shard(1)]
         placements_tuples = itertools.product(placements, repeat=2)
-        
+
         for placement1, placement2 in placements_tuples:
             dist_a = distribute_tensor(local_a, device_mesh, [placement1])
             dist_b = distribute_tensor(local_b, device_mesh, [placement2])

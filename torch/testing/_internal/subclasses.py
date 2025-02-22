@@ -17,13 +17,13 @@ class WrapperSubclass(torch.Tensor):
             outer_stride = a.stride()
 
         kwargs = {}
-        kwargs["strides"] = a.stride()
+        kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
-        out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
 
         return out
 

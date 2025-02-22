@@ -672,6 +672,13 @@ class TestCuda(TestCase):
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
+
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=False
@@ -3511,7 +3518,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -3519,7 +3525,7 @@ print(f"{{r1}}, {{r2}}")
             error_msg = "cuFileHandleRegister failed"
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+                torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
 
     def test_is_pinned_no_context(self):
         test_script = """\
@@ -5279,20 +5285,20 @@ class TestGDS(TestCase):
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
         with TemporaryFileName() as f:
-            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src1.untyped_storage(), offset=0)
             file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
             file.load_storage(dest1.untyped_storage(), offset=0)
             file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
         self.assertEqual(src1, dest1)
         self.assertEqual(src2, dest2)
-        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
