@@ -4616,10 +4616,6 @@ class TestLinalg(TestCase):
             filename3 = "tunableop_results_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results{ordinal}.csv"
-            validators = get_tunableop_validators()
-            if torch.version.hip:
-                assert "HIPBLASLT_VERSION" in validators
-                assert re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"])
             assert len(torch.cuda.tunable.get_results()) > 0
 
             assert torch.cuda.tunable.write_file()  # use default filename
@@ -4959,9 +4955,12 @@ class TestLinalg(TestCase):
         self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
 
         validators = get_tunableop_validators()
+        # Check for rocBLAS and hipBLASLt
         self.assertTrue("ROCBLAS_VERSION" in validators)
         # format: [major].[minor].[patch].[tweak].[commit id]
         self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]))
+        self.assertTrue("HIPBLASLT_VERSION" in validators)
+        self.assertTrue(re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"]))
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
