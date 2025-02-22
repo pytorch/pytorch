@@ -166,7 +166,11 @@ class Adam(Optimizer):
                     state["step"] = (
                         torch.zeros(
                             (),
-                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                            dtype=(
+                                _get_scalar_dtype(is_fused=group["fused"])
+                                if "step" not in self._dtype_policy
+                                else self._dtype_policy["step"](p)
+                            ),
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
@@ -174,16 +178,34 @@ class Adam(Optimizer):
                     )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p,
+                        dtype=(
+                            p.dtype
+                            if "exp_avg" not in self._dtype_policy
+                            else self._dtype_policy["exp_avg"](p)
+                        ),
+                        memory_format=torch.preserve_format,
                     )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p,
+                        dtype=(
+                            p.dtype
+                            if "exp_avg_sq" not in self._dtype_policy
+                            else self._dtype_policy["exp_avg_sq"](p)
+                        ),
+                        memory_format=torch.preserve_format,
                     )
                     if group["amsgrad"]:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
+                            p,
+                            dtype=(
+                                p.dtype
+                                if "max_exp_avg_sq" not in self._dtype_policy
+                                else self._dtype_policy["max_exp_avg_sq"](p)
+                            ),
+                            memory_format=torch.preserve_format,
                         )
 
                 exp_avgs.append(state["exp_avg"])
@@ -384,8 +406,16 @@ def _single_tensor_adam(
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
+        exp_avg = (
+            exp_avgs[i]
+            if exp_avgs[i].dtype == grad.dtype
+            else exp_avgs[i].to(grad.dtype)
+        )
+        exp_avg_sq = (
+            exp_avg_sqs[i]
+            if exp_avg_sqs[i].dtype == grad.dtype
+            else exp_avg_sqs[i].to(grad.dtype)
+        )
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
@@ -529,6 +559,11 @@ def _single_tensor_adam(
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
             max_exp_avg_sqs[i] = torch.view_as_complex(max_exp_avg_sqs[i])
+
+        if exp_avgs[i].dtype != exp_avg.dtype:
+            exp_avgs[i].copy_(exp_avg)
+        if exp_avg_sqs[i].dtype != exp_avg_sq.dtype:
+            exp_avg_sqs[i].copy_(exp_avg_sq)
 
 
 def _multi_tensor_adam(
