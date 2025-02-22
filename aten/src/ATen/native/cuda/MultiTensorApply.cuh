@@ -46,7 +46,7 @@ __device__ __forceinline__ void load_store(
     int64_t src_offset) {
   using dLT = at::native::memory::aligned_vector<dT, kILP>;
   using sLT = at::native::memory::aligned_vector<sT, kILP>;
-  ((dLT*)dst)[dst_offset] = static_cast<dT>(((sLT*)src)[src_offset]);
+  ((dLT*)dst)[dst_offset] = static_cast<dLT>(((sLT*)src)[src_offset]);
 }
 
 template <int n>
