@@ -52,7 +52,7 @@ jobs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/checkout_more_procs
         with:
           fetch-depth: 1
           submodules: true
