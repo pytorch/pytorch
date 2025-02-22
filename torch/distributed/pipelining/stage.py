@@ -136,14 +136,13 @@ class _PipelineStageBase(ABC):
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
-            dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_runner is a builder function
+            dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder is a builder function
                 that will build a new dw_runner function that will run parts of module backward that were intentionally
                 skipped during the module's actual backward pass. The builder must be invoked by stage after stage runs
-                model backwards, and stage should save the latest dw_runner to run during weight pass.
+                model backwards, and stage should save the latest dw_runner to run during weight pas (W).
                 If not provided, a dw_runner will be generated automatically by traversing the autograd graph.
                 When used with schedules that only have F and B steps, the fresh dw_runner function will be called as
-                part of B.
-                When used with F,B,W schedules, the dw_runner function implements 'W'.
+                part of I (input backwards). When used with F,I,W schedules, the dw_runner function implements 'W'.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -325,7 +324,7 @@ class _PipelineStageBase(ABC):
                 peer_rank
                 if self.group is None
                 else dist.get_global_rank(self.group, peer_rank)
-            )  # TODO
+            )
             ops.append(
                 dist.P2POp(dist.irecv, info.buffer, peer_global_rank, self.group)
             )
@@ -457,7 +456,7 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, out, peer_global_rank, self.group))
 
         return ops
@@ -494,7 +493,7 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, grad, peer_global_rank, self.group))
             else:
                 if not (grad is None and grad_recv_stage is None):
@@ -658,7 +657,7 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_is_last_backward(True)
                     fsdp_module.set_reshard_after_backward(True)
                     fsdp_module.set_requires_gradient_sync(True)
-                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[arg-type]
+                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
                     for state in fsdp_state._state_ctx.all_states:
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
@@ -1255,7 +1254,8 @@ class PipelineStage(_PipelineStageBase):
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
-        dw_builder: TODO clean up comments
+        dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder will build a new dw_runner function
+            that will the W action (input weights) for F, I, W (Fwd, Input, Weight) zero bubble schedules.
     """
 
     def __init__(
@@ -1309,16 +1309,6 @@ class PipelineStage(_PipelineStageBase):
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: list[torch.Tensor] = []
-
-        def stage_global_rank(peer_rank):
-            return (
-                peer_rank
-                if self.group is None
-                else dist.get_global_rank(self.group, peer_rank)
-            )
-
-        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
-        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
 
         dbg_str = (
             f"Finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
@@ -1517,27 +1507,3 @@ class PipelineStage(_PipelineStageBase):
                 ]
             )
         return grad_recv_info
-
-    def _init_p2p_neighbors(self):
-        """
-        Set up p2p communitors between previous and next stages
-        by sending a dummy tensor.
-
-        If this is used, must be called for all pipeline stages.
-        """
-        ops = []
-        recv_tensor = torch.zeros(1, device="cuda")
-        send_tensor = torch.ones(1, device="cuda")
-        # forward
-        if not self.is_first:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_rank, self.group))
-        if not self.is_last:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_rank, self.group))
-
-        # backward
-        if not self.is_first:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_rank, self.group))
-        if not self.is_last:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_rank, self.group))
-
-        return True
