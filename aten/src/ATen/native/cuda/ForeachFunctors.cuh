@@ -91,16 +91,16 @@ __device__ bool init_args_mixed_prec(
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
-  aram_args = (
-      aram_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *param_args =
+      (param_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
   *grad_args = (grad_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
-  *exp_avg_args = (
-      xp_avg_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
-  *exp_avg_sq_args = (
-      xp_avg_sq_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *exp_avg_args =
+      (exp_avg_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *exp_avg_sq_args =
+      (exp_avg_sq_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
 
-  bool all_aligned = is_aligned(*param_args) && is_aligned(*grad_args) && i
-      _aligned(*exp_avg_args) && is_aligned(*exp_avg_sq_args);
+  bool all_aligned = is_aligned(*param_args) && is_aligned(*grad_args) &&
+      is_aligned(*exp_avg_args) && is_aligned(*exp_avg_sq_args);
   return all_aligned;
 }
 
@@ -123,12 +123,12 @@ __device__ void load_args(
   }
 }
 
-template <ty
-    pename T, t
-    pename param_type, t
-    pename grad_type, t
-    pename exp_avg_type, t
-    pename exp_avg_sq_type>
+template <
+    typename T,
+    typename param_type,
+    typename grad_type,
+    typename exp_avg_type,
+    typename exp_avg_sq_type>
 __device__ void load_args(
     T r_args[][kILP],
     const param_type* param_args,
@@ -816,4 +816,3 @@ struct reverse_power_functor {
 
 } // namespace
 } // namespace at::native
-  
