@@ -5194,7 +5194,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_pdist_empty_col(self):
         for device in device_():
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
-            self.assertTrue(gradcheck(F.pdist, (inp,)))
+            self.assertRaises(RuntimeError, gradcheck, F.pdist, (inp,))
 
     @unittest.expectedFailure
     def test_pdist_cpu_gradgrad_unimplemented(self):

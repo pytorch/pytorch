@@ -2416,15 +2416,15 @@ else:
     def test_pdist_empty(self, device):
         shape = (0, 2)
         x = torch.randn(shape, device=device)
-        self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+        self.assertRaises(RuntimeError, torch.pdist, x)
 
-        shape = (1, 2)
+        shape = (0, 0)
         x = torch.randn(shape, device=device)
-        self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+        self.assertRaises(RuntimeError, torch.pdist, x)
 
         shape = (3, 0)
         x = torch.randn(shape, device=device)
-        self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
+        self.assertRaises(RuntimeError, torch.pdist, x)
 
     def test_cdist_empty(self, device):
         x = torch.randn((0, 5), device=device)
