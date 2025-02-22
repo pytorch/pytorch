@@ -5,12 +5,6 @@
 
 namespace torch::autograd {
 
-// struct SavedVariableUnpackHookData {
-//   c10::SafePyObject hook;
-//   c10::SafePyObject data;
-//   at::Tensor input;
-// };
-
 struct TORCH_API SavedVariableHooks {
   virtual void call_pack_hook(const at::Tensor& tensor) = 0;
   virtual at::Tensor call_unpack_hook() = 0;
@@ -19,7 +13,7 @@ struct TORCH_API SavedVariableHooks {
   retrieve_unpack_hook_data() const {
     throw std::runtime_error(
         "Compiled Autograd only supports python saved tensor hooks ");
-  };
+  }
 };
 
 } // namespace torch::autograd
