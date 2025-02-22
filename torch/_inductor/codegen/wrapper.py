@@ -2447,7 +2447,16 @@ class PythonWrapperCodegen(CodeGen):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(outputs) == 1:
-                        return go(outputs[0].get_name(), keypath[1:])
+                        out = outputs[0]
+                        # When fallback kernel returns a list consisting of a single tensor,
+                        # the output is represented as a MultiOutput with non empty indices.
+                        # In this case, we strip the first key path away.
+                        return go(
+                            outputs[0].get_name(),
+                            keypath[1:]
+                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
+                            else keypath,
+                        )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(outputs[keypath[0].idx].get_name(), keypath[1:])
