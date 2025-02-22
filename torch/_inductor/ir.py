@@ -6464,7 +6464,16 @@ class FallbackKernel(ExternKernelAlloc):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath[1:])
+                        out = self.outputs[0]
+                        # When fallback kernel returns a list consisting of a single tensor,
+                        # the output is represented as a MultiOutput with non empty indices.
+                        # In this case, we strip the first key path away.
+                        return go(
+                            self.outputs[0].get_name(),
+                            keypath[1:]
+                            if isinstance(out, MultiOutput) and len(out.indices) != 0
+                            else keypath,
+                        )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
