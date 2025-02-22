@@ -74,7 +74,13 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    unimplemented,
+    unimplemented_v2,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
@@ -490,7 +496,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"  # noqa: UP031
+        "Graph break in user code at %s:%s\nGraph Break Reason: %s\nUser code traceback:\n%s"  # noqa: UP031
         % (
             frame_loc[0],
             frame_loc[1],
@@ -525,7 +531,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         # exercised by
         #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
         graph_break_log.debug(
-            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
             frame_loc[0],
             frame_loc[1],
             reason,
@@ -764,7 +770,7 @@ def break_graph_if_unsupported(*, push):
                 log_graph_break(
                     self.code_options,
                     exc_info=True,
-                    reason=f"Unsupported: {excp}",
+                    reason=str(excp),
                     user_stack=excp.real_stack,
                 )
 
@@ -1638,12 +1644,13 @@ class InstructionTranslatorBase(
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
 
         # Handle https://peps.python.org/pep-0479/
-        # if (
-        #     is_generator(self.f_code)
-        #     and isinstance(val, variables.ExceptionVariable)
-        #     and val.exc_type is StopIteration
-        # ):
-        #     val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+        # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)
@@ -1734,7 +1741,7 @@ class InstructionTranslatorBase(
         else:
             assert len(self.stack) >= 7
             fn = self.stack[-7]
-            val = self.stack[-4]
+            val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
             tb = ConstantVariable(None)
@@ -1790,12 +1797,12 @@ class InstructionTranslatorBase(
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
-                if block_stack_entry.inst.opname != "SETUP_FINALLY":
-                    unimplemented(
-                        "exception is raised when top of the block stack "
-                        "is not exception handler (e.g. try .. with .. except). "
-                        f"Current TOS is {block_stack_entry.inst}"
-                    )
+                # if block_stack_entry.inst.opname != "SETUP_FINALLY":
+                #     unimplemented(
+                #         "exception is raised when top of the block stack "
+                #         "is not exception handler (e.g. try .. with .. except). "
+                #         f"Current TOS is {block_stack_entry.inst}"
+                #     )
 
                 exception_var = self.exn_vt_stack.get_current_exception()
                 self.exn_vt_stack.move_current_exception_to_stack()
@@ -2704,7 +2711,16 @@ class InstructionTranslatorBase(
         if not isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
         ):
-            unimplemented(f"{inst.opname} {ctx}")
+            unimplemented_v2(
+                gb_type="Unsupported context manager",
+                context=f"Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
+                explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+                hints=[
+                    "Avoid using the unsupported context manager.",
+                    "File an issue to PyTorch. Simple context managers can potentially be supported, "
+                    "but note that context managers can't be supported in general",
+                ],
+            )
 
         if (
             isinstance(ctx, GenericContextWrappingVariable)
@@ -2737,6 +2753,8 @@ class InstructionTranslatorBase(
         else:
             target = inst.target
 
+        self.push(exit)
+
         if target:
             if isinstance(self, InstructionTranslator):
                 self.block_stack.append(
@@ -2745,7 +2763,6 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        self.push(exit)
         self.push(ctx.enter(self))
 
     def append_prefix_inst(self, inst):
@@ -3450,15 +3467,36 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     False, "allowlist in dynamo known function"
                 )
             fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
-            unimplemented(
-                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+            hints = [
+                f"Avoid calling the function `{fn_qualname}`.",
+            ]
+            if "_dynamo" not in func.get_filename():
+                hints += [
+                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
+                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
+                    "attempting to trace into the function.",
+                    "Please file an issue to PyTorch.",
+                    # TODO suggest mark_force_inline when implemented
+                ]
+            unimplemented_v2(
+                gb_type="Attempted to inline function marked as skipped",
+                context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
+                f"filename: `{func.get_filename()}`, skip reason: {result.reason}",
+                explanation=f"Dynamo developers have intentionally marked that the function `{fn_qualname}` "
+                "should not be traced.",
+                hints=hints,
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
-            unimplemented(
-                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
             )
         else:
             return result
