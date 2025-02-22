@@ -76,6 +76,34 @@ __device__ bool init_args(
   return all_aligned;
 }
 
+template <
+    int depth,
+    typename param_type,
+    typename grad_type,
+    typename exp_avg_type,
+    typename exp_avg_sq_type>
+__device__ bool init_args_mixed_prec(
+    param_type** param_args,
+    grad_type** grad_args,
+    exp_avg_type** exp_avg_args,
+    exp_avg_sq_type** exp_avg_sq_args,
+    FusedOptimizerTensorListMetadata<depth>& tl,
+    const int64_t chunk_idx,
+    const int64_t chunk_size,
+    const int64_t tensor_loc) {
+  aram_args = (
+      aram_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *grad_args = (grad_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *exp_avg_args = (
+      xp_avg_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *exp_avg_sq_args = (
+      xp_avg_sq_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+
+  bool all_aligned = is_aligned(*param_args) && is_aligned(*grad_args) && i
+      _aligned(*exp_avg_args) && is_aligned(*exp_avg_sq_args);
+  return all_aligned;
+}
+
 template <int depth, typename T>
 __device__ void load_args(
     T r_args[][kILP],
@@ -95,6 +123,43 @@ __device__ void load_args(
   }
 }
 
+template <ty
+    pename T, t
+    pename param_type, t
+    pename grad_type, t
+    pename exp_avg_type, t
+    pename exp_avg_sq_type>
+__device__ void load_args(
+    T r_args[][kILP],
+    const param_type* param_args,
+    const grad_type* grad_args,
+    const exp_avg_type* exp_avg_args,
+    const exp_avg_sq_type* exp_avg_sq_args,
+    const int64_t i_start,
+    const int64_t chunk_size,
+    const int64_t n) {
+#pragma unroll
+  for (int ii = 0; ii < kILP; ii++) {
+    const auto i = i_start + threadIdx.x + ii * blockDim.x;
+    r_args[0][ii] = 0;
+    if (i < n && i < chunk_size) {
+      r_args[0][ii] = static_cast<T>(param_args[i]);
+    }
+    r_args[1][ii] = 0;
+    if (i < n && i < chunk_size) {
+      r_args[1][ii] = static_cast<T>(grad_args[i]);
+    }
+    r_args[2][ii] = 0;
+    if (i < n && i < chunk_size) {
+      r_args[2][ii] = static_cast<T>(exp_avg_args[i]);
+    }
+    r_args[3][ii] = 0;
+    if (i < n && i < chunk_size) {
+      r_args[3][ii] = static_cast<T>(exp_avg_sq_args[i]);
+    }
+  }
+}
+
 template <typename T>
 __device__ void store_args(
     T* dst,
@@ -107,6 +172,21 @@ __device__ void store_args(
     const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
     if (i < n && i < chunk_size)
       dst[i] = src[ii];
+  }
+}
+
+template <typename dT, typename sT>
+__device__ void store_args(
+    dT* dst,
+    sT* src,
+    const int64_t i_start,
+    const int64_t chunk_size,
+    const int64_t n) {
+#pragma unroll
+  for (int ii = 0; ii < kILP; ii++) {
+    const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
+    if (i < n && i < chunk_size)
+      dst[i] = static_cast<dT>(src[ii]);
   }
 }
 
@@ -736,3 +816,4 @@ struct reverse_power_functor {
 
 } // namespace
 } // namespace at::native
+  
