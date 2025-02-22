@@ -1694,8 +1694,12 @@ class GuardBuilder(GuardBuilderBase):
             exc.unimplemented_v2(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
-                explanation=f"Attempted to setup NN_MODULE guard on unitialized class {type(val)}.",
-                hints=[*graph_break_hints.FUNDAMENTAL],
+                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
+                f"nn.Module subclass `{type(val)}`.",
+                hints=[
+                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
 
     def FUNCTION_MATCH(self, guard: Guard):
