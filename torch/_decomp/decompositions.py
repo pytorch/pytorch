@@ -5129,7 +5129,7 @@ def isin_default(elements, test_elements, *, invert=False):
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
     res = (x == test_elements).any(dim=dim)
-    return torch.where(res, not invert, invert)
+    return ~res if invert else res
 
 
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
