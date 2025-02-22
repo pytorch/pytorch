@@ -8,6 +8,13 @@ from torch.utils._pytree import tree_flatten_with_path, tree_map
 KeyPath = Tuple[Any, ...]
 NonTensorShapeFn = Callable[[Union[int, float]], Tuple[Any, ...]]
 
+__all__ = [
+    "normalize_source_name",
+    "module_to_nested_dict",
+    "track_dynamism_across_examples",
+    "clone_and_convert_to_meta",
+]
+
 
 def normalize_source_name(name: str) -> str:
     # Match attribute access like .x and replace with ['x']
