@@ -15,7 +15,7 @@ import itertools
 from typing import Any, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta

@@ -11,7 +11,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor

@@ -2,7 +2,7 @@ import collections
 from typing import Any, Callable, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._inductor.freezing_utils import maybe_set_is_frozen_param
 from torch.utils._ordered_set import OrderedSet
 

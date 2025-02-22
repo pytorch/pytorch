@@ -16,7 +16,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._cxx_pytree import tree_map
 
 from .virtualized import V
 

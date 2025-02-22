@@ -42,7 +42,7 @@ import torch._guards
 import torch._logging
 import torch.distributed as dist
 import torch.nn
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import fx
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (

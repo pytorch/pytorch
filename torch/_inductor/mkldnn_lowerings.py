@@ -3,7 +3,7 @@ import functools
 from typing import Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir

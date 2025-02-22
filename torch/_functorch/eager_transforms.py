@@ -35,7 +35,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils import _pytree as pytree
-from torch.utils._pytree import (
+from torch.utils._cxx_pytree import (
     tree_flatten,
     tree_map,
     tree_map_,

@@ -2,7 +2,7 @@
 from typing import NamedTuple
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._C._functorch import (
     _unwrap_for_grad,
     _wrap_for_grad,
@@ -277,7 +277,7 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
     if any(
         isinstance(val, torch.Tensor)
-        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
+        for val in torch.utils._cxx_pytree.tree_flatten(kwargs)[0]
     ):
         raise NotImplementedError(
             f"Run vmap on autograd.Function with kwarg-only Tensor args. "

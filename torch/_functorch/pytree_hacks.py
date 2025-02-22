@@ -7,7 +7,7 @@
 import warnings
 
 # TODO: remove this file when the migration of the pytree utility is done
-from torch.utils._pytree import tree_map_, treespec_pprint
+from torch.utils._cxx_pytree import tree_map_, treespec_pprint
 
 
 __all__ = ["tree_map_", "treespec_pprint"]
@@ -17,7 +17,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("always")
     warnings.warn(
         "`torch._functorch.pytree_hacks` is deprecated and will be removed in a future release. "
-        "Please `use torch.utils._pytree` instead.",
+        "Please `use torch.utils._cxx_pytree` instead.",
         DeprecationWarning,
         stacklevel=2,
     )

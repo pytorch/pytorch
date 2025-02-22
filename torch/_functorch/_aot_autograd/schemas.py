@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Any, Callable, NewType, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor

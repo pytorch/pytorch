@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 import torch._logging
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._pytree import tree_flatten
+from torch.utils._cxx_pytree import tree_flatten
 
 
 T = TypeVar("T")

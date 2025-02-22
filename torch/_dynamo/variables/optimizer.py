@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
-from torch.utils._pytree import tree_map_only
+from torch.utils._cxx_pytree import tree_map_only
 
 from ..guards import GuardBuilder, install_guard
 from ..source import (

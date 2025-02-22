@@ -67,7 +67,7 @@ from typing_extensions import Literal, TypeIs
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import fx
 from torch._C import (
     _instruction_counter,

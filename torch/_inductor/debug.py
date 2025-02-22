@@ -28,7 +28,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._cxx_pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (

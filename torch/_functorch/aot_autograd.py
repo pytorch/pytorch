@@ -10,7 +10,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.logging
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions

@@ -460,7 +460,7 @@ def cast_dtype_args_to_fp64(model):
 
 
 def cast_to(dtype, model, inputs):
-    from torch.utils._pytree import tree_map
+    from torch.utils._cxx_pytree import tree_map
 
     model = model.to(dtype)
     if dtype == torch.float64:

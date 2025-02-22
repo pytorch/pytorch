@@ -22,7 +22,7 @@ from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher

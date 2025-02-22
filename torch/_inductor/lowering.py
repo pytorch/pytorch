@@ -21,7 +21,7 @@ import sympy
 import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation

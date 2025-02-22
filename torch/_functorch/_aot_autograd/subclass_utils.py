@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from typing import Any, Callable, Optional, TypeVar, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass

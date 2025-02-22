@@ -30,7 +30,7 @@ from typing import Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction

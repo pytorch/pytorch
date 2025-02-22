@@ -49,7 +49,7 @@ import sympy
 
 import torch
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 
@@ -1229,7 +1229,7 @@ def rewrite_signature(
                     f"following supported types: {supported_types}. \n"
                     "If you are using a custom class object, "
                     "please register a pytree_flatten/unflatten function "
-                    "using `torch.utils._pytree.register_pytree_node` or "
+                    "using `torch.utils._cxx_pytree.register_pytree_node` or "
                     "`torch.export.register_dataclass`.",
                 )
 

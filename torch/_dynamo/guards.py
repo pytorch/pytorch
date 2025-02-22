@@ -1823,10 +1823,10 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
 
-        if value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
-            self.DICT_VERSION(guard)
-            return
+        # if value is torch.utils._cxx_pytree.SUPPORTED_NODES:
+        #     # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+        #     self.DICT_VERSION(guard)
+        #     return
 
         self.SEQUENCE_LENGTH(guard)
 

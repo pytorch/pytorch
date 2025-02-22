@@ -58,7 +58,7 @@ from typing_extensions import Self, TypeIs
 import torch
 import torch._guards
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype

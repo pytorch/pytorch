@@ -4,7 +4,7 @@ from collections import deque
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._cxx_pytree import tree_map
 
 from ..._dynamo.utils import counters
 from ..ir import (

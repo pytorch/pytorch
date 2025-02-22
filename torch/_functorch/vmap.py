@@ -23,7 +23,7 @@ from torch._C._functorch import (
     _vmap_increment_nesting,
     is_batchedtensor,
 )
-from torch.utils._pytree import (
+from torch.utils._cxx_pytree import (
     _broadcast_to_and_flatten,
     tree_flatten,
     tree_map_,

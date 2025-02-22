@@ -8,7 +8,7 @@ import dataclasses
 from typing import Any, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher

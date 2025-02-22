@@ -14,7 +14,7 @@ import sympy
 import torch
 import torch.fx as fx
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import SymInt
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import bind_symbols

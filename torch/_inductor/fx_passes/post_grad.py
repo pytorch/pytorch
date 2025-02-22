@@ -10,7 +10,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log

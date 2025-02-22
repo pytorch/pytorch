@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._C._functorch import (
     CFunctionalizeInterpreterPtr,
     CGradInterpreterPtr,

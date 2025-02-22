@@ -19,7 +19,7 @@ from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype

@@ -14,7 +14,7 @@ from typing import Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.inductor_prims
 import torch.fx as fx
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )

@@ -3,7 +3,7 @@ import logging
 from typing import cast
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._inductor.utils import is_symbolic
 from torch.utils._ordered_set import OrderedSet
 

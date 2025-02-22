@@ -12,7 +12,7 @@ from typing_extensions import Self
 
 import torch
 import torch._inductor
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
