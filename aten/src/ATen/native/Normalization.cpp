@@ -365,9 +365,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   for (const auto i : c10::irange(2, ndim)) {
     reduce_dims[i - 1] = i;
   }
-
-  auto sum = at::sum(grad_out_, /*dim=*/reduce_dims);
-  auto sum_a = sum.accessor<scalar_t, 1>();
+  // Using float data type for Half sum to avoid overflow
+  // since the representation range of Half is small.
+  auto sum = grad_out_.scalar_type() == kHalf
+      ? at::sum(grad_out_.to(ScalarType::Float), /*dim=*/reduce_dims)
+      : at::sum(grad_out_, /*dim=*/reduce_dims);
+  using sum_t = std::conditional_t<std::is_same_v<scalar_t, at::Half>, float, scalar_t>;
+  auto sum_a = sum.accessor<sum_t, 1>();
 
   auto reduce_iter = TensorIteratorConfig()
       .add_const_input(input)
