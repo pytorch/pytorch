@@ -420,6 +420,7 @@ test_inductor_cpp_wrapper_shard() {
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
     --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -517,6 +518,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *h100* ]]; then
+    device=cuda_h100
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
