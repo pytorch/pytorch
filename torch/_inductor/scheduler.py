@@ -54,6 +54,7 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
+    enable_graph_partition,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -4131,9 +4132,7 @@ class Scheduler:
         with dynamo_timed("Scheduler.codegen"):
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition
-                and not V.graph.cpp_wrapper
-                and not V.graph.aot_mode
+                if enable_graph_partition(V.graph)
                 else self._codegen(self.nodes)
             )
 

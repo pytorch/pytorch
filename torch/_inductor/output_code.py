@@ -44,6 +44,7 @@ from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
+    enable_graph_partition,
     GraphPartitionInfo,
     InputType,
     output_node,
@@ -506,7 +507,7 @@ class CompiledFxGraph(OutputCode):
 
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
-        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason  # TODO: mismatch self.cudagraph_info.cudagraph_fail_reasons
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None
@@ -614,25 +615,34 @@ class CompiledFxGraph(OutputCode):
         """
         set_tracing_context_output_strides(example_inputs, self)
 
-        if cudagraphs:
-            # It's possible that cudagraphs is enabled, but was disabled
-            # during a previous compilation we're loading from the cache.
-            # If so, we need to disable it on this new process too.
-            if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                    )
+        if enable_graph_partition():
+            cudagraph_partition_post_compile(
+                example_inputs,
+                self,
+                cudagraphs,
+                constants.unwrap(self),
+            )
+        else:
+            if cudagraphs:
+                # It's possible that cudagraphs is enabled, but was disabled
+                # during a previous compilation we're loading from the cache.
+                # If so, we need to disable it on this new process too.
+                if self.disabled_cudagraphs_reason:
+                    if "cuda" in self.device_types:
+                        log_cudagraph_skip_and_bump_counter(
+                            f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
+                        )
+                    else:
+                        counters["inductor"]["cudagraph_skips"] += 1
+                    BoxedBool.disable(cudagraphs)
                 else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                cudagraph_post_compile(
-                    example_inputs,
-                    self,
-                    cudagraphs,
-                    constants.unwrap(self),
-                )
+                    cudagraph_post_compile(
+                        example_inputs,
+                        self,
+                        cudagraphs,
+                        constants.unwrap(self),
+                    )
+
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens

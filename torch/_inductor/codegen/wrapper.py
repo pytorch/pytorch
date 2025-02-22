@@ -38,6 +38,7 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
+    enable_graph_partition,
     get_benchmark_name,
     LineContext,
     sympy_product,
@@ -918,7 +919,7 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if enable_graph_partition(V.graph):
             # async_compile.wait will be written when finalize_prefix to make sure
             # it is added before `class Runner`` definition.
             return
@@ -939,7 +940,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call(self) -> None:
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if enable_graph_partition(V.graph):
             self.prefix.splice(
                 """
                 def recursively_apply_fns(self, fns):
@@ -1057,7 +1058,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+        if enable_graph_partition(V.graph):
             result.splice(
                 """
                 runner = Runner()
@@ -1222,7 +1223,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+        if enable_graph_partition(V.graph):
             return 2
         else:
             return 1
@@ -1411,7 +1412,7 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(value, ir.TorchBindObject):
             pass
         else:
-            if torch._inductor.config.graph_partition:
+            if enable_graph_partition(V.graph):
                 # a graph partition may take an IRNode output from a previous partition
                 log.warning(
                     "Skip size and stride assertion for an unknown value type %s",
@@ -1446,7 +1447,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if enable_graph_partition(V.graph):
             runner_buffer = IndentedBuffer()
 
             if hasattr(self, "all_partition_names"):
