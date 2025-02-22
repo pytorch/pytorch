@@ -1,5 +1,26 @@
 # mypy: ignore-errors
 
+"""
+This module contains variable classes for handling user-defined objects in Dynamo's tracing system.
+
+The key classes are:
+- UserDefinedVariable: Base class for representing custom Python objects
+- UserDefinedClassVariable: Handles Python class objects/types
+- UserDefinedObjectVariable: Fallback class for instance objects, with support for method calls,
+  attribute access, and other Python object behaviors.
+- Specialized subclasses for common patterns:
+  - UserDefinedDictVariable: For dict subclasses
+  - UserDefinedTupleVariable: For tuple subclasses
+  - FrozenDataClassVariable: Special handling of frozen dataclasses
+  - MutableMappingVariable: For collections.abc.MutableMapping subclasses
+
+Dynamo specializes to VariableTracker subclasses like FrozenDataClassVariable if available; if no
+subclass qualifies, it falls back to UserDefinedObjectVariable.
+
+These classes help Dynamo track and handle arbitrary Python objects during tracing,
+maintaining proper semantics while enabling optimizations where possible.
+"""
+
 import collections
 import contextlib
 import dataclasses
