@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import collections.abc
 import contextlib
 import functools
 import inspect
@@ -10,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
@@ -1113,6 +1115,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sub(torch.add(x, y), y)
 
     @make_test
+    def test_isinstance(x):
+        results = []
+        if isinstance([x], list):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], collections.abc.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], typing.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], (tuple, list, typing.Sequence)):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        # TODO: add sourceless builder for types.UnionType
+        # if sys.version_info >= (3, 10):
+        #     if isinstance([x], list | tuple):
+        #         results.append(x.sin())
+        #     else:
+        #         results.append(x.cos())
+        return results
+
+    @make_test
     def test_return_dict(x, y):
         z = [x + y, y, False]
         return {"x": x, "z": z, "a": x, "b": z, "c": x}
@@ -1919,6 +1952,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_slice_eq(a, b):
+        tmp1 = [a + 1, b + 2]
+        s = slice(1, 2)
+        if isinstance(s, slice) and s == slice(None):
+            return tmp1[s] * 2
+        return tmp1[s] * 3
 
     @make_test
     def test_namedtuple(a, b):
