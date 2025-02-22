@@ -1346,15 +1346,6 @@ class FxGraphCache:
             pass
 
 
-def run_command_and_check(cmd_: str) -> None:
-    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
-        cmd = shlex.split(cmd_)
-        try:
-            subprocess.check_call(cmd)
-        except subprocess.CalledProcessError as e:
-            raise exc.CppCompileError(cmd, e.output) from e
-
-
 @functools.lru_cache(None)
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
@@ -1529,7 +1520,6 @@ class AotCodeCompiler:
                 output_dir=str(consts_s.parent),
                 BuildOption=object_build_options,
             )
-            compile_cmd = object_builder.get_command_line()
             consts_o = object_builder.get_target_file_path()
             if fbcode_aot_cpu_re:
                 # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
@@ -1537,7 +1527,7 @@ class AotCodeCompiler:
                 object_builder.build_fbcode(str(consts_s), consts_o)
                 os.chmod(consts_o, 0o644)
             else:
-                run_command_and_check(compile_cmd)
+                object_builder.build()
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1681,7 +1671,7 @@ class AotCodeCompiler:
                     object_builder.build_fbcode(cpp_path, output_o)
                     os.chmod(output_o, 0o644)
                 else:
-                    run_command_and_check(compile_cmd)
+                    object_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1769,7 +1759,7 @@ class AotCodeCompiler:
                     so_builder.build_fbcode([output_o, consts_o], output_so)
                     os.chmod(output_so, 0o755)
                 else:
-                    run_command_and_check(link_cmd)
+                    so_builder.build()
 
                 for o_file in [
                     output_o,
