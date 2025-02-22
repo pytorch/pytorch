@@ -19,6 +19,8 @@ from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
 from torch._C._dynamo.eval_frame import (
     _CacheEntry as CacheEntry,
     _ExtraState as ExtraState,
+    _FrameAction as FrameAction,
+    _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
 )
 from torch._guards import CompileId
@@ -58,13 +60,34 @@ class GuardedCode:
     trace_annotation: str = "Unknown"
 
 
+@dataclasses.dataclass
+class ConvertFrameReturn:
+    # default return is no compiled code (i.e. `return None`):
+    # strategy is to skip non-recursively, for all future intercepted frames too
+
+    # eval fram execution strategy for this frame
+    frame_exec_strategy: FrameExecStrategy = dataclasses.field(
+        default_factory=lambda: FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+    )
+    # also apply frame_exec strategy to future frames with same code
+    apply_to_code: bool = True
+    guarded_code: Optional[GuardedCode] = None
+
+
+def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
+    return ConvertFrameReturn(
+        frame_exec_strategy=FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT),
+        guarded_code=guarded_code,
+    )
+
+
 class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         frame_state: FrameState,
-    ) -> Optional[GuardedCode]:
+    ) -> ConvertFrameReturn:
         ...
 
 
