@@ -155,6 +155,7 @@ select = [
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "S324",
 ]
 
 [tool.ruff.lint.per-file-ignores]
