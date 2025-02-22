@@ -1048,6 +1048,82 @@ class TestFP8MatmulCuda(TestCase):
             sqnr = compute_error(C_ref, C)
             assert sqnr.item() > 22.0
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipIfRocm()
+    def test_blockwise_mxfloat8_error_messages(self, device) -> None:
+        M, K, N = (1024, 512, 2048)
+        BLOCK_SIZE_K = 32
+        BLOCK_SIZE_MN = 128
+        fill_value = 0.5
+
+        x = torch.full((M, K), fill_value, device=device)
+        y = torch.full((N, K), fill_value, device=device)
+
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
+
+        def ceil_div(a, b):
+            return (a + b - 1) // b
+
+        num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
+        padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+        expected_a_size = BLOCK_SIZE_MN * ceil_div(M, BLOCK_SIZE_MN) * padded_num_k_blocks
+        expected_b_size = BLOCK_SIZE_MN * ceil_div(N, BLOCK_SIZE_MN) * padded_num_k_blocks
+
+
+        # Test wrong scale tensor size for scale_a with correct dtype
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape(
+                f"For BlockWise scaling: Expected scale_a size to be {expected_a_size} "
+                f"but got {expected_a_size - 1}"
+            ),
+        ):
+            incorrect_size_a = torch.ones(expected_a_size - 1, device=device, dtype=torch.float8_e8m0fnu)
+            correct_size_b = torch.ones(expected_b_size, device=device, dtype=torch.float8_e8m0fnu)
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=incorrect_size_a,
+                scale_b=correct_size_b,
+                out_dtype=torch.bfloat16,
+            )
+
+        # Test wrong scale tensor size for scale_b with correct dtype
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape(
+                f"For BlockWise scaling: Expected scale_b size to be {expected_b_size} "
+                f"but got {expected_b_size + 1}"
+            ),
+        ):
+            correct_size_a = torch.ones(expected_a_size, device=device, dtype=torch.float8_e8m0fnu)
+            incorrect_size_b = torch.ones(expected_b_size + 1, device=device, dtype=torch.float8_e8m0fnu)
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=correct_size_a,
+                scale_b=incorrect_size_b,
+                out_dtype=torch.bfloat16,
+            )
+
+        # Test non-contiguous scale tensors with correct dtype
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape(
+                "For BlockWise scaling: Both scale_a and scale_b must be contiguous"
+            ),
+        ):
+            non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=torch.float8_e8m0fnu)[::2]
+            contiguous_b = torch.ones(expected_b_size, device=device, dtype=torch.float8_e8m0fnu)
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=non_contiguous_a,
+                scale_b=contiguous_b,
+                out_dtype=torch.bfloat16,
+            )
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
