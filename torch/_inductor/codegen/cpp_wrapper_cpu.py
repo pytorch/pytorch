@@ -86,6 +86,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    @staticmethod
+    def _generate_temporary_array_pointer(c_type: str, elements: Sequence[str]) -> str:
+        """Get a const T* to an array that only exists for the duration of the C++
+        statement it's used in."""
+        # cbegin() returns const c_type*.
+        return (
+            f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.cbegin()"
+        )
+
     def generate_kernel_call(
         self,
         kernel_name: str,
@@ -175,7 +184,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                '''
+                r'''
                 """
             )
 
@@ -1206,8 +1215,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
-        # tensor prematurely deallocated, thus this std::array().data() trick here.
-        indices_str = f"std::array<AtenTensorHandle, {len(indices)}>{{{', '.join(indices)}}}.data()"
+        # tensor prematurely deallocated, thus the temporary array trick here.
+        indices_str = self._generate_temporary_array_pointer(
+            "AtenTensorHandle", indices
+        )
         args = [
             x,
             indices_str,
@@ -1599,7 +1610,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # aoti_torch_proxy_executor_call_function(...,
         #     std::array<AtenTensorHandle, 3>{
         #         RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6
-        #     }.data()
+        #     }.cbegin()
         # );
         # ```
         return final_tensor_str
@@ -2231,9 +2242,9 @@ if (custom_op_wrapper.get() == NULL) {
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
-            f"std::array<int64_t, {len(int_call_args)}>{{{', '.join(int_call_args)}}}.data(), "
+            f"{self._generate_temporary_array_pointer('int64_t', int_call_args)}, "
             f"{len(tensor_call_args)}, "
-            f"std::array<AtenTensorHandle, {len(tensor_call_args)}>{{{', '.join(tensor_call_args)}}}.data());"
+            f"{self._generate_temporary_array_pointer('AtenTensorHandle', tensor_call_args)});"
         )
 
     def generate_reset_kernel_saved_flags(self):
@@ -2314,15 +2325,15 @@ if (custom_op_wrapper.get() == NULL) {
                 if type_ is not None and isinstance(
                     type_.getElementType(),
                     (
+                        torch.DeviceObjType,
                         torch.ListType,
                         torch.TupleType,
-                        torch.DeviceObjType,
                     ),
                 ):
-                    return "0, 0"
-                else:
-                    return "0"  # nullptr is not available in C
-            elif isinstance(type_, torch.TensorType):
+                    return "nullptr, 0"
+                return "nullptr"
+
+            if isinstance(type_, torch.TensorType):
                 # create an empty tensor, the equivalent of at::Tensor()
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"AtenTensorHandle {var_name}_handle;")
@@ -2331,8 +2342,8 @@ if (custom_op_wrapper.get() == NULL) {
                 )
                 self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
                 return var_name
-            else:
-                raise AssertionError("Can not map None to a known data type")
+
+            raise AssertionError("Can not map None to a known data type")
 
         if isinstance(type_, torch.OptionalType):
             element_type = type_.getElementType()
@@ -2374,12 +2385,13 @@ if (custom_op_wrapper.get() == NULL) {
             result = [self.val_to_arg_str(x, element_type) for x in val]
             if isinstance(element_type, torch.TensorType):
                 result = [f"{t}.get()" for t in result]
-            result = ", ".join(result)
 
             c_type = self.c_type_for_prim_type(val[0], element_type)
             # need to pass the array length, because we can't use the std::array member
             # function
-            return f"std::array<{c_type}, {len(val)}>{{{result}}}.data(), {len(val)}"
+            return (
+                f"{self._generate_temporary_array_pointer(c_type, result)}, {len(val)}"
+            )
 
         val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
         if isinstance(type_, torch.TensorType) and val_is_scalar:
