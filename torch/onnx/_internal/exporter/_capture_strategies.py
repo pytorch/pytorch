@@ -1,3 +1,4 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 """Strategies for capturing ExportedPrograms."""
 
 # mypy: allow-untyped-defs
@@ -241,7 +242,7 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
         ep = _draft_export.draft_export(
             model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
         )
-        report = getattr(ep, "_report")
+        report = ep._report  # type: ignore[attr-defined]
         if not report.successful():
             self._exception = RuntimeError(str(report))
         # The report is logged and displayed by draft_export already, so we don't need to print it again.
