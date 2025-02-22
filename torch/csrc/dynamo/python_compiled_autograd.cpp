@@ -840,10 +840,6 @@ static CacheNode* _compiled_autograd_impl(
       }
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
-        auto n = fn->num_inputs();
-        for (uint i = 0; i < n; i++) {
-          auto meta = fn->input_metadata(i);
-        }
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }

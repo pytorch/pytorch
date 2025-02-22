@@ -3541,21 +3541,63 @@ class CompiledAutograd0(torch.nn.Module):
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 0)
             loss = out_test.sum()
-            loss.register_hook(tensor_hook)
+            loss.register_hook(
+                tensor_hook
+            )  # schedueld to fire before any saved activations
             loss.backward()
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
 
-    def test_checkpointing_reentrant(self):
-        def fn(x):
-            y = x.sin()
-            z = y.cos()
-            return (y * z).sum()
+    @parametrize("reentrant", (True, False))
+    def test_checkpointing_simple(self, reentrant):
+        def fn():
+            def _fn(x):
+                y = x.sin()
+                z = y.cos()
+                return (y * z).sum()
 
-        inp = torch.rand(10, 10, requires_grad=True)
-        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
-        with torch._dynamo.compiled_autograd._enable(torch.compile):
+            inp = torch.rand(10, 10, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(_fn, inp, use_reentrant=reentrant)
             out.backward()
+            yield inp.grad
+
+        if reentrant:
+            self.check_output_and_recompiles(
+                fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
+        else:
+            # dynamo issues, just run the CA graph directly for now
+            self.check_output_and_recompiles(
+                fn, count=[1, 0], compiler_fn=lambda gm: gm
+            )
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_offloading(self):
+        def fn():
+            def pack(x):
+                return x.cpu()
+
+            def unpack(x):
+                return x.cuda()
+
+            class MyMatMul(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.matmul(x, x)
+
+                @staticmethod
+                def backward(ctx, grad_out):
+                    (x,) = ctx.saved_tensors
+                    return grad_out * x
+
+            x = torch.randn(5, requires_grad=True).cuda()
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                MyMatMul.apply(x).sum().backward()
+
+            yield x.grad
+
+        self.check_output_and_recompiles(fn)
 
     @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering_partial(self):

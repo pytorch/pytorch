@@ -241,24 +241,11 @@ struct TensorArgs {
   }
 
   TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
-    // TODO(jansel): Here we unpack the SavedVariable exactly once.  This might
-    // fire SavedTensor hooks.  In the future we should try to put saved tensor
-    // hooks into the graph.
-    //
+    // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
-    //
     _saved_variables.emplace(&sv, &arg);
     return arg;
-  }
-
-  void register_sv_proxy(
-      const SavedVariable& sv,
-      const at::Tensor& dummy, // could also take by rvalue ref
-      at::Tensor&& proxy) {
-    TensorArg& arg = add(dummy);
-    arg.proxy_tensor = std::move(proxy);
-    _saved_variables_proxies.emplace(&sv, &arg);
   }
 
   // the concrete tensors that will get passed into the graph as inputs
@@ -384,14 +371,14 @@ class CompiledNodeArgs {
   void collect(const SavedVariable& sv, bool is_output) {
     if (auto hook_data = sv.retrieve_unpack_hook_data();
         hook_data.has_value()) {
-      // hooks, unpack deferred
+      // hooks, unpack in graph
       auto& [hook, packed_input] = hook_data.value();
       size_t hook_id = _compiler.emplace_hook(std::move(hook));
       // rely on dynamo to dedup packed tensors from unpacked tensors
       size_t input_id = _compiler.emplace_packed_input(std::move(packed_input));
       _compiler.sv_to_hooks.emplace(&sv, std::make_pair(hook_id, input_id));
     } else {
-      // no hooks, unpack directly
+      // no hooks, unpack now
       collect(
           _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
     }
@@ -765,7 +752,6 @@ class SwapSavedVariables {
   void before(SavedVariable& t) {
     if (auto it = compiler.sv_to_hooks.find(&t);
         it != compiler.sv_to_hooks.end()) {
-      // did not unpack yet
       const auto& pyinterface =
           torch::dynamo::autograd::getPyCompilerInterface();
       auto proxy_tensor = pyinterface->call_unpack(
@@ -775,7 +761,7 @@ class SwapSavedVariables {
       t = SavedVariable(proxy_tensor, false);
       at::SavedTensorDefaultHooks::set_tracing(prior);
     } else {
-      // already unpacked
+      // no hooks, was already unpacked
       TensorArg& arg = compiler.tensor_args.lookup(t);
       stashed_variables.save(&t, std::move(t));
       if (arg.defined()) {
