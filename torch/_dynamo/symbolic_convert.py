@@ -1353,7 +1353,7 @@ class InstructionTranslatorBase(
         )
         if isinstance(value, RemovableHandleVariable):
             unimplemented_v2(
-                gb_type="Storing handle in globals",
+                gb_type="Storing Tensor hook handle in globals",
                 context=name,
                 explanation="This is not supported.",
                 hints=[],
@@ -1975,7 +1975,7 @@ class InstructionTranslatorBase(
                 # aten.random.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented_v2(
-                    gb_type="random_ op called with `from` keyword",
+                    gb_type="Tensor.random_ op called with `from` keyword",
                     context="",
                     explanation="This is not supported.",
                     hints=[],
@@ -1993,7 +1993,7 @@ class InstructionTranslatorBase(
                 # aten.uniform.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented_v2(
-                    gb_type="uniform_ op called with `from` keyword",
+                    gb_type="Tensor.uniform_ op called with `from` keyword",
                     context="",
                     explanation="This is not supported.",
                     hints=[],
@@ -2119,7 +2119,7 @@ class InstructionTranslatorBase(
                 gb_type="Should not compile partial graph (STORE_ATTR)",
                 context="",
                 explanation="Dynamo has determined when encountering an unsupported "
-                "STORE_ATTR instruction that it should not compile the partial graph.",
+                "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
                 hints=[],
             )
         self.output.compile_subgraph(
@@ -3791,7 +3791,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             value = self.pop()
             if isinstance(value, RemovableHandleVariable):
                 unimplemented_v2(
-                    gb_type="Storing handle in globals (inline call)",
+                    gb_type="Storing Tensor hook handle in globals (inline call)",
                     context=inst.argval,
                     explanation="This is not supported.",
                     hints=[],

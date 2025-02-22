@@ -170,7 +170,7 @@ class DistributedUtilTest(TestCase):
             server_port=pick_free_port,
             timeout=1,
         )
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(DistNetworkError):
             create_c10d_store(
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
