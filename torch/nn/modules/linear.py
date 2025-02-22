@@ -288,9 +288,11 @@ class LazyLinear(LazyModuleMixin, Linear):
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()
         if self.in_features == 0:
-            assert (
-                input.shape[-1] == self.weight.shape[-1]
-            ), f"The in_features inferred from input: {input.shape[-1]} is not equal to in_features from self.weight: {self.weight.shape[-1]}"
+            assert input.shape[-1] == self.weight.shape[-1], (
+                f"The in_features inferred from input: {input.shape[-1]} "
+                f"is not equal to in_features from self.weight: "
+                f"{self.weight.shape[-1]}"
+            )
             self.in_features = input.shape[-1]
 
 
