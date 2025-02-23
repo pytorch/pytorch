@@ -785,8 +785,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
 }
 """
 
-    # set trans_b to generate gemm that
-    # supports transposed B matrix
+    # set trans_b to generate gemm that supports transposed B matrix
+    # set tail_n to support the tail of N
     # TODO add trans_b support for other micro gemms
     # and move setting of trans_b to the init of CppMicroGemm
     def __init__(
@@ -798,6 +798,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         compute_dtype,
         register_blocking,
         alpha=1,
+        tail_n=False,
         trans_b=False,
     ) -> None:
         super().__init__(
@@ -809,6 +810,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
             register_blocking,
             alpha,
         )
+        self.tail_n = tail_n
         # trans_b is only supported on platforms that
         # support avx512 or avx2 since transpose_block is
         # only implemented on these platforms
@@ -834,7 +836,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         if self.trans_b:
             # TODO supports tuning of sub_block_m/sub_block_n
             # to get better performance for specific shapes
-            sub_block_m = min(1, self.register_blocking.block_m)
+            sub_block_m = min(4, self.register_blocking.block_m)
             sub_block_n = min(4, self.register_blocking.block_n)
             # update options to generate kernel with trans_b and sub-block size
             options.update(
@@ -848,14 +850,15 @@ inline void {{kernel_name}}_transpose_b_kernel(
             options
         )
         # update options to generate the kernel for the tail of N
-        options.update(
-            {
-                "tail_n": True,
-            }
-        )
-        result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
-            options
-        )
+        if self.tail_n:
+            options.update(
+                {
+                    "tail_n": self.tail_n,
+                }
+            )
+            result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+                options
+            )
         result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
             options
         )
