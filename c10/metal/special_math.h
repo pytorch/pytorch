@@ -503,6 +503,16 @@ inline T spherical_bessel_j0(T x) {
   return static_cast<T>(::metal::sin(x) / x);
 }
 
+// TODO (dcci): There are currently two implementations on log1p,
+// one here (written using a Metal shader), the other in BinaryKernels.mm,
+// that uses MPS. We should consider consolidating, maybe rewriting the
+// MPS implementation using this approximation, or the other way around.
+template <typename T>
+inline T log1p(T x) {
+  return ::metal::log(1. + x);
+}
+
+template <typename T>
 inline T xlog1py(T x, T y) {
   if (::metal::isnan(y)) {
     return NAN;
@@ -512,7 +522,7 @@ inline T xlog1py(T x, T y) {
     return x;
   }
 
-  return x * ::metal::log1p(y);
+  return x * log1p(y);
 }
 
 } // namespace metal
