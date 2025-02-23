@@ -10,23 +10,45 @@ echo "unknown package type"
 exit /b 1
 
 :wheel
-call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
+:: change to source directory
+cd %PYTORCH_ROOT%
 
-call  %PYTORCH_ROOT%\.venv\Scripts\activate
+:: activate visual studio
+call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
+where cl.exe
 
-Echo Checking that torch is installed...
+:: create virtual environment
+python -m venv .venv
+echo * > .venv\.gitignore
+call .\.venv\Scripts\activate
+where python
+
+:: install dependencies
+Echo Installing dependencies...
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install pytest numpy protobuf
+
+:: find file name for pytorch wheel
+echo Searching for PyTorch wheel...
+for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
+
+Echo Installing PyTorch wheel...
+pip install %TORCH_WHEEL_FILENAME%
+
+echo Checking that torch is installed...
 python -c "import torch"
 if ERRORLEVEL 1 exit /b 1
 
 echo Running python rnn_smoke.py...
-python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
+python .\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
 echo Checking that basic CNN works...
-python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
+python .\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
-push %PYTORCH_ROOT%\test
+cd test
 
 set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
 
