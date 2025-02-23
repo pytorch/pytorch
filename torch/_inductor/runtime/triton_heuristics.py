@@ -591,6 +591,19 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
+
+
+            # Check if argument count matches what the kernel expects
+            expected_num_args = launcher.__code__.co_argcount - len(cloned_kwargs) - 2  # Subtract `grid` and `stream`
+            if len(args_with_constexprs) != expected_num_args:
+                raise ValueError(
+                    f"Incorrect number of arguments for launcher. "
+                    f"Expected {expected_num_args}, but got {len(args_with_constexprs)}. "
+                    "This may be due to args_with_constexprs overwriting grid."
+                )
+
+
+            
             launcher(
                 *args_with_constexprs,
                 **cloned_kwargs,
