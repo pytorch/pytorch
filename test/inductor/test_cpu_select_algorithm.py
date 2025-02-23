@@ -976,6 +976,7 @@ extern "C" void cpp_ref_gemm(const {{input_type}}* X, const {{input_type}}* W, f
                 torch.float,
                 GemmBlocking,
                 1,
+                True
                 trans_b,
             )
 
