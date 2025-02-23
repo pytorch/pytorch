@@ -431,61 +431,88 @@ A combination of versions that is known to work is `node@6.13.1` and
 `katex@0.13.18`. To install the latter with `npm` you can run
 ```npm install -g katex@0.13.18```
 
-### Previous Versions
+# Previous Versions
 
-Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
-
+Installation instructions and binaries for previous PyTorch versions can be found on the [PyTorch website](https://pytorch.org/previous-versions).
 
 ## Getting Started
 
-Three-pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
-- [The API Reference](https://pytorch.org/docs/)
-- [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
+Here are three essential resources to help you get started with PyTorch:
+
+- [**Tutorials**](https://pytorch.org/tutorials/): Learn the fundamentals and practical applications of PyTorch.
+- [**Examples**](https://github.com/pytorch/examples): Explore simple and easy-to-understand PyTorch code across various domains.
+- [**API Reference**](https://pytorch.org/docs/): Comprehensive documentation of PyTorch functions and modules.
+- [**Glossary**](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md): Definitions of key terms used in PyTorch.
 
 ## Resources
 
-* [PyTorch.org](https://pytorch.org/)
-* [PyTorch Tutorials](https://pytorch.org/tutorials/)
-* [PyTorch Examples](https://github.com/pytorch/examples)
-* [PyTorch Models](https://pytorch.org/hub/)
-* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
-* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
-* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
-* [PyTorch Twitter](https://twitter.com/PyTorch)
-* [PyTorch Blog](https://pytorch.org/blog/)
-* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
+- [**PyTorch.org**](https://pytorch.org/)
+- [**PyTorch Tutorials**](https://pytorch.org/tutorials/)
+- [**PyTorch Examples**](https://github.com/pytorch/examples)
+- [**PyTorch Models (Torch Hub)**](https://pytorch.org/hub/)
+- [**Intro to Deep Learning with PyTorch** (Udacity)](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+- [**Intro to Machine Learning with PyTorch** (Udacity)](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+- [**Deep Neural Networks with PyTorch** (Coursera)](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+- [**PyTorch Twitter**](https://twitter.com/PyTorch)
+- [**PyTorch Blog**](https://pytorch.org/blog/)
+- [**PyTorch YouTube Channel**](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
-* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
-* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+
+- **Forums**: Discuss research, implementations, and general questions in the [PyTorch Forums](https://discuss.pytorch.org).
+- **GitHub Issues**: Report bugs, request features, or share thoughts [here](https://github.com/pytorch/pytorch/issues).
+- **Slack**: The [PyTorch Slack](https://pytorch.slack.com/) is for experienced users and developers. Beginners should use the [forums](https://discuss.pytorch.org).  
+  - Request a Slack invite: [Fill this form](https://goo.gl/forms/PP1AGvNHpSaJP8to1).
+- **Newsletter**: Stay updated with PyTorch announcements by subscribing [here](https://eepurl.com/cbG0rv).
+- **Facebook Page**: Follow [PyTorch on Facebook](https://www.facebook.com/pytorch) for updates.
+- **Brand Guidelines**: For branding and logo usage, visit [PyTorch.org](https://pytorch.org/).
 
 ## Releases and Contributing
 
-Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch typically releases three minor updates per year. If you encounter any issues, please report them by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+We welcome all contributions! Here’s how you can contribute:
 
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+- **Bug Fixes**: Feel free to submit a pull request directly for bug fixes.
+- **New Features / Enhancements**: If you're introducing a new feature, utility function, or extending PyTorch core, **please open an issue first** to discuss the proposal.  
+  - PRs without prior discussion may be rejected if they don’t align with the core development direction.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+For more details, please read our [Contribution Guide](CONTRIBUTING.md).  
+For information on PyTorch releases, refer to the [Release Notes](RELEASE.md).
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
+PyTorch is a community-driven project maintained by skilled engineers and researchers. The core maintainers include:
 
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jamesb93), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito).
+- [Soumith Chintala](http://soumith.ch)
+- [Gregory Chanan](https://github.com/gchanan)
+- [Dmytro Dzhulgakov](https://github.com/dzhulgakov)
+- [Edward Yang](https://github.com/ezyang)
+- [Nikita Shulga](https://github.com/malfet)
 
-Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+With significant contributions from many talented individuals, including but not limited to:
+
+- [Trevor Killeen](https://github.com/killeent)
+- [Sasank Chilamkurthy](https://github.com/chsasank)
+- [Sergey Zagoruyko](https://github.com/szagoruyko)
+- [Adam Lerer](https://github.com/adamlerer)
+- [Francisco Massa](https://github.com/fmassa)
+- [Alykhan Tejani](https://github.com/alykhantejani)
+- [Luca Antiga](https://github.com/lantiga)
+- [Alban Desmaison](https://github.com/albanD)
+- [Andreas Koepf](https://github.com/andreaskoepf)
+- [James Bradbury](https://github.com/jamesb93)
+- [Zeming Lin](https://github.com/ebetica)
+- [Yuandong Tian](https://github.com/yuandong-tian)
+- [Guillaume Lample](https://github.com/glample)
+- [Marat Dukhan](https://github.com/Maratyszcza)
+- [Natalia Gimelshein](https://github.com/ngimel)
+- [Christian Sarofeen](https://github.com/csarofeen)
+- [Martin Raison](https://github.com/martinraison)
+- [Zachary Devito](https://github.com/zdevito)
+
+**Note:** This project is **not related** to [hughperkins/pytorch](https://github.com/hughperkins/pytorch). Hugh Perkins is a valuable contributor to the Torch community but is not associated with this repository.
 
 ## License
 
-PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+PyTorch is released under a BSD-style license. The full license text can be found in the [LICENSE](LICENSE) file.
