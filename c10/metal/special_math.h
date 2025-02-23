@@ -503,13 +503,18 @@ inline T spherical_bessel_j0(T x) {
   return static_cast<T>(::metal::sin(x) / x);
 }
 
-// TODO (dcci): There are currently two implementations on log1p,
-// one here (written using a Metal shader), the other in BinaryKernels.mm,
-// that uses MPS. We should consider consolidating, maybe rewriting the
-// MPS implementation using this approximation, or the other way around.
+// Compute log(1+x) without losing precision for small values of x
+// Adapted from https://www.johndcook.com/blog/cpp_log_one_plus_x/
 template <typename T>
 inline float log1p(T x) {
-  return ::metal::log(1. + x);
+  // x is large enough that the obvious evaluation is OK
+  if (::metal::fabs(x) > 1E-4) {
+    return ::metal::log(1. + x);
+  }
+
+  // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
+  // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
+  return (-0.5*x + 1.0)*x;
 }
 
 template <typename T>
