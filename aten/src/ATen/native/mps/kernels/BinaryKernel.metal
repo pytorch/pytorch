@@ -169,6 +169,7 @@ REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
 REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
 REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
 REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
+REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
 #endif
 
 // Complex binary functions
