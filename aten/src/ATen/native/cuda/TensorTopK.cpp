@@ -91,7 +91,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
       Tensor sortedIndices = at::empty_like(indices);
       Tensor sortedValues = at::empty_like(values);
-      at::cuda::sort_outf(values, /* stable= */ false, dim, largest, sortedValues, sortedIndices);
+      at::cuda::sort_outf(values, /* stable= */ false, dim, largest, /* dynamic_indices_type */ false, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
       values.copy_(sortedValues);
     }

@@ -292,7 +292,7 @@ void launch_stable_sort_kernel(
   AT_DISPATCH_V2(indices.scalar_type(), "launch_stable_sort_kernel", AT_WRAP([&] {
     scalar_t* indices_ptr = indices.mutable_data_ptr<scalar_t>();
     do_launch_stable_sort_kernel(self, dim, descending, values, indices_ptr);
-  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte);
+  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte, kLong);
 
 }
 } // namespace at::native

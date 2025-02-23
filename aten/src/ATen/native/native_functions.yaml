@@ -10080,25 +10080,25 @@
 
 - func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.values(Tensor self, int dim=-1, bool descending=False, bool dynamic_indices_type=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: sort_out
 
-- func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, bool dynamic_indices_type=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   structured: True
   dispatch:
     CPU, CUDA: sort_stable_out
     MPS: sort_stable_out_mps
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort(Tensor self, int dim=-1, bool descending=False, bool dynamic_indices_type=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: sort
   tags: core
 
-- func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, bool dynamic_indices_type=False) -> (Tensor values, Tensor indices)
   structured_delegate: sort.values_stable
   variants: method, function
   dispatch:

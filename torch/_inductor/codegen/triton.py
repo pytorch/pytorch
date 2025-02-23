@@ -3127,6 +3127,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        dynamic_indices_type: bool = False,
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
