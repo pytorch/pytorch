@@ -1135,6 +1135,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             GemmBlocking,
             1,
             True,
+            True,
         )
 
         with V.set_graph_handler(V.graph):
