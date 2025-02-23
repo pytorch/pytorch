@@ -514,7 +514,7 @@ inline float log1p(T x) {
 
   // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
   // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
-  return (-0.5*x + 1.0)*x;
+  return (-0.5 * x + 1.0) * x;
 }
 
 template <typename T>
