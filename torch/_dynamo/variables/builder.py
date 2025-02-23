@@ -1917,6 +1917,15 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        manual_whitelist = {
+            "L['tensor']",
+            "L['x']",
+            "L['seq_embs']['app']",
+            "L['self']._modules['non_seq_lce']",
+            "L['self']._modules['non_seq_lce'].n_input",
+            "L['self']._modules['y'].x",
+        }
+
         shape_env = self.tx.output.shape_env
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
@@ -1924,6 +1933,7 @@ class VariableBuilder:
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
             )
+
 
         # NB: We do not do float.  For motivation, see
         # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
@@ -1955,13 +1965,16 @@ class VariableBuilder:
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif not config.assume_static_by_default or self.source.name() in manual_whitelist:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
                 # for some reason it doesn't
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value)
+
+
+            print("LALA", self.source.name(), dynamic_dim)
 
             wrapped_value = shape_env.create_unspecified_symint_and_symbol(
                 value,
@@ -2807,7 +2820,17 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        manual_whitelist = {"L['tensor']"}
+        manual_whitelist = {
+            "L['tensor']",
+            "L['x']",
+            "L['seq_embs']['app']",
+            "L['self']._modules['non_seq_lce']",
+            "L['self']._modules['non_seq_lce'].n_input",
+            "L['self']._modules['y']._modules['compress']._parameters['weight']",
+            "L['self']._modules['y']._modules['compress']._parameters['bias']",
+            "L['self']._modules['y']._modules['norm']._parameters['weight']",
+            "L['self']._modules['y']._modules['norm']._parameters['bias']",
+        }
 
         if marked_dynamic or source.name() in manual_whitelist:
             # TODO: This can be batched
@@ -2824,7 +2847,7 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_size_dynamic(i)
         )
 
-        print(source.name(), i, frame_state_entry.is_size_dynamic(i))
+        print("LALA", source.name(), i, frame_state_entry.is_size_dynamic(i))
 
         # NB: previously, if size was dynamic, we wouldn't make its stride
         # dynamic.  But now, because of InferStride concept, we will properly
