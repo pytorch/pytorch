@@ -498,6 +498,24 @@ test_cachebench() {
   $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
 }
 
+test_cachebench_verify() {
+  TMP_TEST_REPORTS_DIR=$(mktemp -d)
+  TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode training \
+      --model nanogpt \
+      --benchmark torchbench \
+      --output "$TEST_OUTPUT"
+
+  # -s checks file exists and is non empty
+  if [[ ! -s "$TEST_OUTPUT" ]]; then
+    echo "Cachebench failed to produce an output."
+    echo "Run 'python benchmarks/dynamo/cachebench.py' to make sure it works"
+    exit 1
+  fi
+}
+
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1522,6 +1540,11 @@ elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchvision
   checkout_install_torchbench nanogpt BERT_pytorch resnet50
   PYTHONPATH=$(pwd)/torchbench test_cachebench
+elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
+  install_torchaudio cpu
+  install_torchvision
+  checkout_install_torchbench nanogpt
+  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     install_torchaudio cpu

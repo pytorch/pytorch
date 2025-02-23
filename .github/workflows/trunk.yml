@@ -246,3 +246,17 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
     secrets: inherit
+
+  linux-jammy-py3_9-gcc11-build:
+    name: linux-jammy-py3.9-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
+      test-matrix: |
+        { include: [
+          { config: "verify_cachebench", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
