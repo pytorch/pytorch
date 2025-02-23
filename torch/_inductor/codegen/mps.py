@@ -363,6 +363,10 @@ class MetalOverrides(OpOverrides):
     def zeta(a: CSEVariable, b: CSEVariable) -> str:
         return f"c10::metal::zeta({a}, {b})"
 
+    @staticmethod
+    def spherical_bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::spherical_bessel_j0({x})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
