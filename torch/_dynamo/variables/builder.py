@@ -2809,7 +2809,7 @@ def _automatic_dynamic(
         # For dynamic, apply None always
         manual_whitelist = {"L['tensor']"}
 
-        if marked_dynamic or source.name() in manual_whitelist
+        if marked_dynamic or source.name() in manual_whitelist:
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
