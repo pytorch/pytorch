@@ -24,7 +24,7 @@ call .\.venv\Scripts\activate
 where python
 
 :: install dependencies
-Echo Installing dependencies...
+echo Installing dependencies...
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install pytest numpy protobuf
@@ -33,8 +33,18 @@ pip install pytest numpy protobuf
 echo Searching for PyTorch wheel...
 for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
 
-Echo Installing PyTorch wheel...
+echo Installing PyTorch wheel...
 pip install %TORCH_WHEEL_FILENAME%
+
+echo pip list
+pip list 
+
+echo pip show torch
+python -m pip show torch
+
+echo import sys
+python -c "import sys; print(sys.path)"
+if ERRORLEVEL 1 exit /b 1
 
 echo Checking that torch is installed...
 python -c "import torch"
