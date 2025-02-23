@@ -567,6 +567,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)(const Tensor& self,
                                      std::optional<bool> stable,
                                      int64_t dim,
                                      bool descending,
+                                     bool dynamic_indices_type,
                                      const Tensor& values,
                                      const Tensor& indices) {
   sort_out_mps_impl(self, stable, dim, descending, values, indices);
