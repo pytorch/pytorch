@@ -183,6 +183,7 @@ def parse_cmd_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_cmd_args()
+    raise Exception("testing failure")
 
     dispatcher: dict[str, tuple[Callable[..., None], list[str]]] = {
         "torchbench": (_run_torchbench_model, TORCHBENCH_MODELS)
