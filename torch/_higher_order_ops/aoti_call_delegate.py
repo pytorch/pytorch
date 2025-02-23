@@ -70,12 +70,12 @@ def call_delegate_cpu(
     input_args: list[torch.Tensor],
 ) -> list[torch.Tensor]:
     # FX creates this immutable_dict/list concept. Get rid of this.
-    map_types = {
+    map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }
     new_args = pytree.tree_map_only(
-        tuple(map_types.keys()),
+        tuple(map_types.keys()),  # type: ignore[arg-type]
         lambda a: map_types[type(a)](a),
         input_args,
         lambda a: isinstance(a, tuple(map_types.keys())),
