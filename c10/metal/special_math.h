@@ -503,5 +503,17 @@ inline T spherical_bessel_j0(T x) {
   return static_cast<T>(::metal::sin(x) / x);
 }
 
+inline T xlog1py(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * ::metal::log1p(y);
+}
+
 } // namespace metal
 } // namespace c10

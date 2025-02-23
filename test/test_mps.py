@@ -336,6 +336,7 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.xlog1py',
         'special.zeta',
         'split',
         'split_with_sizes',
@@ -786,7 +787,6 @@ def mps_ops_modifier(ops):
         'special.ndtri': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
-        'special.xlog1py': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -836,6 +836,7 @@ def mps_ops_modifier(ops):
         'angle': [torch.int64],
 
         # Operations not supported for integral types
+        'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
