@@ -2579,6 +2579,7 @@ class Sort(Loops):
 
     stable: bool
     descending: bool
+    dynamic_indices_type: bool
 
     # HACK we mimic reduction
 
@@ -2607,7 +2608,7 @@ class Sort(Loops):
     ) -> Any:
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.sort(self.dtypes, values, self.stable, self.descending)
+        result = ops.sort(self.dtypes, values, self.stable, self.descending, self.dynamic_indices_type)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )
@@ -2649,6 +2650,7 @@ class Sort(Loops):
         axis: int,
         stable: bool,
         descending: bool,
+        dynamic_indices_type: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
     ) -> Sequence[Optional[TensorBox]]:
@@ -2707,6 +2709,7 @@ class Sort(Loops):
                     output_index=output_index,
                     stable=stable,
                     descending=descending,
+                    dynamic_indices_type=dynamic_indices_type,
                     **kwargs,
                 )
             )
