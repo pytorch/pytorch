@@ -3,6 +3,7 @@
 #include <cmath>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 
 #include <ATen/AccumulateType.h>
@@ -43,7 +44,7 @@ static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, cons
 }
 
 static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
+  AT_DISPATCH_V2(iter.dtype(), "linspace_cpu", AT_WRAP([&] {
     // step should be of double type for all integral types
     using step_t = std::conditional_t<std::is_integral_v<scalar_t>, double, scalar_t>;
     const scalar_t start = scalar_start.to<scalar_t>();
@@ -66,7 +67,7 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
             }
           }, {p_begin, p_end});
     });
-  });
+  }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
 }
 
 } // anonymous namespace
