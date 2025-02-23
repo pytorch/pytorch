@@ -371,14 +371,17 @@ class RandomBatchSampler(Sampler[list[int]]):
 
         self.n_batches = len(data_source) // batch_size
 
-    def initialize_indices(self) -> np.ndarray[int]:
+    def sample_indices(self) -> np.ndarray[int]:
         indices = np.arange(len(self.data_source))
         generator = self.generator if self.generator is not None else np.random.default_rng()
-        indices = indices if not self.replacement else generator.choice(indices, len(indices), replace=True)
+        if self.replacement:
+            indices = generator.choice(indices, len(indices), replace=True)
+        else:
+            generator.shuffle(indices)
         return indices
 
     def __iter__(self) -> Iterator[list[int]]:
-        indices = self.initialize_indices()
+        indices = self.sample_indices()
         indices_batches = [indices[i:i + self.batch_size] for i in range(0, len(indices), self.batch_size)]
         if self.drop_last:
             indices_batches.pop()
