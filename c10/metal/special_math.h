@@ -508,12 +508,12 @@ inline T spherical_bessel_j0(T x) {
 // that uses MPS. We should consider consolidating, maybe rewriting the
 // MPS implementation using this approximation, or the other way around.
 template <typename T>
-inline T log1p(T x) {
+inline float log1p(T x) {
   return ::metal::log(1. + x);
 }
 
 template <typename T>
-inline T xlog1py(T x, T y) {
+inline float xlog1py(T x, T y) {
   if (::metal::isnan(y)) {
     return NAN;
   }
