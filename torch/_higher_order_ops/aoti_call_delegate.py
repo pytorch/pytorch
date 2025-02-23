@@ -75,7 +75,7 @@ def call_delegate_cpu(
         torch.fx.immutable_collections.immutable_list: list,
     }
     new_args = pytree.tree_map_only(
-        tuple(map_types.keys()),  # type: ignore[arg-type]
+        tuple(map_types.keys()),
         lambda a: map_types[type(a)](a),
         input_args,
         lambda a: isinstance(a, tuple(map_types.keys())),

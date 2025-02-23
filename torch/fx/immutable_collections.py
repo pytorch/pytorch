@@ -77,7 +77,7 @@ class immutable_dict(dict[_KT, _VT]):
     update = _no_mutation  # type: ignore[assignment]
 
     def __hash__(self) -> int:  # type: ignore[override]
-        return hash(tuple(self.items()))
+        return hash(frozenset(self.items()))
 
     def __reduce__(self) -> tuple[type[Self], tuple[tuple[tuple[_KT, _VT], ...]]]:
         return (type(self), (tuple(self.items()),))
