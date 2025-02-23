@@ -745,10 +745,24 @@ std::vector<Shape> compute_shape_trace(const at::Tensor& self) {
 std::vector<Shape> compute_shape_sort(
     const at::Tensor& self,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool dynamic_indices_type) {
+  auto dtype_indices = c10::ScalarType::Long;
+  const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
+  if (dynamic_indices_type) {
+    dtype_indices = c10::ScalarType::Long;
+  } else if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
+    dtype_indices = at::ScalarType::Byte;
+  } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
+    dtype_indices = at::ScalarType::UInt16;
+  } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
+    dtype_indices = at::ScalarType::UInt32;
+  } else {
+    dtype_indices = at::ScalarType::UInt64;
+  }
   return {
       Shape(self.scalar_type(), self.sizes().vec()),
-      Shape(c10::ScalarType::Long, self.sizes().vec())};
+      Shape(dtype_indices, self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_slogdet(const at::Tensor& self) {
