@@ -504,6 +504,7 @@ test_cachebench_verify() {
 
   $TASKSET python "benchmarks/dynamo/cachebench.py" \
       --mode training \
+      --device cpu \
       --model nanogpt \
       --benchmark torchbench \
       --output "$TEST_OUTPUT"

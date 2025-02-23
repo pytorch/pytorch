@@ -257,6 +257,6 @@ jobs:
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
         { include: [
-          { config: "verify_cachebench", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
