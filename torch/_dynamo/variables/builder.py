@@ -2807,9 +2807,7 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        manual_whitelist = {"L['tensor']"}
-
-        if marked_dynamic or source.name() in manual_whitelist
+        if marked_dynamic:
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
@@ -2823,9 +2821,6 @@ def _automatic_dynamic(
         automatic_dynamic_size = (
             config.automatic_dynamic_shapes and frame_state_entry.is_size_dynamic(i)
         )
-
-        print(source.name(), i, frame_state_entry.is_size_dynamic(i))
-
         # NB: previously, if size was dynamic, we wouldn't make its stride
         # dynamic.  But now, because of InferStride concept, we will properly
         # not make stride dynamic even if it's wobbling
