@@ -1,9 +1,9 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
 import inspect
+import logging
 import operator
 import types
-import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from .graph import Graph
 
 __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
+
+log = logging.getLogger(__name__)
 
 BaseArgumentTypes = Union[
     str,
@@ -390,7 +392,7 @@ class Node(_NodeBase):
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         if self == x:
-            warnings.warn(
+            log.debug(
                 "Trying to prepend a node to itself. This behavior has no effect on the graph."
             )
             return
@@ -921,7 +923,9 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     elif isinstance(a, list):
         result = immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
-        return immutable_dict([(k, map_aggregate(v, fn)) for k, v in a.items()])  # type: ignore[return-value]
+        result = immutable_dict()
+        for k, v in a.items():
+            dict.__setitem__(result, k, map_aggregate(v, fn))  # type: ignore[index]
     elif isinstance(a, slice):
         result = slice(
             map_aggregate(a.start, fn),
