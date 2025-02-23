@@ -104,6 +104,7 @@ TO_TYPE(uint8_t, int8_t)
 TO_TYPE(uint16_t, int16_t)
 TO_TYPE(uint32_t, int32_t)
 TO_TYPE(uint64_t, int64_t)
+TO_TYPE(int64_t, int64_t)
 
 static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
   // radix_sort can be used only for 1D data
@@ -239,7 +240,7 @@ static void sort_kernel(
         }
       }
     );
-  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte);
+  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte, kLong);
 }
 
 static void topk_kernel(
