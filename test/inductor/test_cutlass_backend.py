@@ -752,9 +752,10 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    # @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.skipIf(True, "mixed mm path deleted. TODO: prologue path")
     def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -1007,7 +1008,7 @@ class TestCutlassBackend(TestCase):
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    # @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
