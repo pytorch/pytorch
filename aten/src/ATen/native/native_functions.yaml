@@ -13377,7 +13377,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_xlog1py_out
+    CPU, CUDA, MPS: special_xlog1py_out
   tags: pointwise
 
 - func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
