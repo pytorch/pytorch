@@ -290,8 +290,6 @@ _COMMON_SYCL_FLAGS = [
 def _get_sycl_arch_list():
     if 'TORCH_XPU_ARCH_LIST' in os.environ:
         return os.environ.get('TORCH_XPU_ARCH_LIST')
-    if not torch.xpu.is_available():
-        return ""
     arch_list = torch.xpu.get_arch_list()
     # Dropping dg2-* archs since they lack hardware support for fp64 and require
     # special consideration from the user. If needed these platforms can
