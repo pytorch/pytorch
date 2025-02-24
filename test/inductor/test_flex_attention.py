@@ -3715,6 +3715,31 @@ class GraphModule(torch.nn.Module):
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
+    @supported_platform
+    def test_validate_small_embedding_size_error_message(self):
+        # eager support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled cpu support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled gpu kernel does not support small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "NYI: embedding dimension of the query, key, and value must be "
+            "at least 16 but got E=8 and Ev=8",
+        ):
+            compiled_fa(q, k, v)
+
+        # compiled gpu kernel supports large embedding size
+        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
+
 
 class TestBlockMask(InductorTestCase):
     @supported_platform
