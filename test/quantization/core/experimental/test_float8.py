@@ -391,6 +391,54 @@ class TestFloat8Dtype(TestCase):
             x1_save_load = torch.load(fname)
             torch.testing.assert_close(x1, x1_save_load, atol=0, rtol=0)
 
+    @dtypes(torch.float8_e8m0fnu)
+    def test_uint8_roundtrip_pt2(self, dtype, device):
+        # this is needed for TORCH_LOGS="+dynamo" to properly render this dtype
+        assert (
+            dtype in torch.fx.graph.dtype_abbrs
+        ), f"{dtype} not found in `torch.fx.graph.dtype_abbrs`"
+
+        def foo(x0):
+            x1 = x0.view(dtype)
+            x2 = x1.view(torch.uint8)
+            return x2
+
+        x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
+        foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
+
+        with torch.no_grad():
+            y_c = foo_c(x0)
+            y_ref = foo(x0)
+
+        self.assertEqual(y_ref, y_c, atol=0, rtol=0)
+        print("done")
+
+    @dtypes(torch.float8_e8m0fnu)
+    def test_float32_cast_roundtrip_pt2(self, dtype, device):
+        # TODO also test bf16
+
+        # this is needed for TORCH_LOGS="+dynamo" to properly render this dtype
+        assert (
+            dtype in torch.fx.graph.dtype_abbrs
+        ), f"{dtype} not found in `torch.fx.graph.dtype_abbrs`"
+
+        def foo(x0):
+            x1 = x0.to(torch.float8_e8m0fnu)
+            x2 = x1.to(torch.float32)
+            return x2
+
+        x0 = torch.randn(16, 16, device=device, dtype=torch.float32)
+        foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
+
+        with torch.no_grad():
+            y_c = foo_c(x0)
+            y_ref = foo(x0)
+
+        print(y_c)
+        print(y_ref)
+        self.assertEqual(y_ref, y_c, atol=0, rtol=0)
+        print("done")
+
 
 instantiate_device_type_tests(TestFloat8Dtype, globals())
 
