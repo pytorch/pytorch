@@ -1,5 +1,5 @@
 name: Auto Request Review
-
+mangle
 on:
   pull_request:
     types: [opened, ready_for_review]
