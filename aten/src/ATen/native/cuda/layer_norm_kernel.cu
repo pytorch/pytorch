@@ -217,7 +217,7 @@ __device__ WelfordDataLN compute_stats(
 
 
 template <typename T, typename T_ACC,
-typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<!std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
   T_ACC eps,
@@ -282,7 +282,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 }
 
 template <typename T, typename T_ACC,
-typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int /*N*/,
   T_ACC /*eps*/,
@@ -519,7 +519,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     const T_ACC* rstd,
     T* dg,
     T* db) {
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (j < N) {
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
@@ -562,7 +562,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (j < N) {
     constexpr int unroll_factor = 8;
@@ -659,7 +659,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
   T_ACC* s_dg;
   T_ACC* s_db;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -745,12 +745,49 @@ void launch_vectorized_layer_norm_kernel(
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
     const dim3 threads(warp_size, num_threads() / warp_size, 1);
-    const dim3 blocks(M);
+    dim3 blocks(M);
+
+#ifdef USE_ROCM
+    uint64_t workgroupSize = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x);
+    // this caused invalid configuration problem
+    if (workgroupSize > std::numeric_limits<uint32_t>::max()) {
+      // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+      blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
+    }
+#endif
+
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
     vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#ifdef USE_ROCM
+    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+    // Ensure all elements are processed. Prepare for next round
+    int64_t remaining = M - blocks.x;
+    const T* X_data2 = X_data;
+    T_ACC* mean_data2 = mean_data;
+    T_ACC* rstd_data2 = rstd_data;
+    T* Y_data2 = Y_data;
+
+    while (remaining > 0) {
+      X_data2 += N * blocks.x;
+      mean_data2 += blocks.x;
+      rstd_data2 += blocks.x;
+      Y_data2 += N * blocks.x;
+
+      blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
+
+      vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data2,
+        gamma_data, beta_data, mean_data2, rstd_data2, Y_data2);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      remaining -= blocks.x;
+    }
+#endif
+
 }
 
 template <typename T, typename T_ACC>
@@ -784,7 +821,7 @@ void LayerNormKernelImplInternal(
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
+  if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
   can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
@@ -840,8 +877,8 @@ void cuLoadWriteStridedInputs(
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T curr_mean = mean[i1];
-    T curr_rstd = rstd[i1];
+    T_ACC curr_mean = mean[i1];
+    T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*N+i2;
@@ -1190,8 +1227,8 @@ void LayerNormBackwardKernelImplInternal(
     int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
 
     bool bVectorSizeMultiple = (N % vec_size == 0);
-    bool bTargetDataTypes = (std::is_same<T, float>::value || std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value);
+    bool bTargetDataTypes = (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>);
     const unsigned int alignment = sizeof(T) * vec_size;
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
@@ -1334,8 +1371,8 @@ void LayerNormBackwardKernelImpl(
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -1354,10 +1391,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
 
   Tensor Y = at::native::empty_like(
       *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
@@ -1374,7 +1411,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   for (const auto idx: c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto C10_UNUSED idx: c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
 
@@ -1390,8 +1427,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -1414,42 +1451,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   if (grad_input_mask[0]) {
     dX = at::native::empty_like(
         *X,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                    : at::native::zeros_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
     dbeta = M > 0 ? at::native::empty_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                   : at::native::zeros_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (M > 0 && N > 0) {
@@ -1459,7 +1496,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native

@@ -1,14 +1,15 @@
+# mypy: allow-untyped-defs
 import inspect
 import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Optional
 from types import ModuleType
 
 import torch
 
-_TAGS: Dict[str, Dict[str, Any]] = {
+_TAGS: dict[str, dict[str, Any]] = {
     "torch": {
         "cond": {},
         "dynamic-shape": {},
@@ -41,23 +42,23 @@ class SupportLevel(Enum):
     NOT_SUPPORTED_YET = 0
 
 
-class ExportArgs:
-    __slots__ = ("args", "kwargs")
-
-    def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
+ArgsType = tuple[Any, ...]
 
 
-InputsType = Union[Tuple[Any, ...], ExportArgs]
-
-
-def check_inputs_type(x):
-    if not isinstance(x, (ExportArgs, tuple)):
+def check_inputs_type(args, kwargs):
+    if not isinstance(args, tuple):
         raise ValueError(
-            f"Expecting inputs type to be either a tuple, or ExportArgs, got: {type(x)}"
+            f"Expecting args type to be a tuple, got: {type(args)}"
         )
-
+    if not isinstance(kwargs, dict):
+        raise ValueError(
+            f"Expecting kwargs type to be a dict, got: {type(kwargs)}"
+        )
+    for key in kwargs:
+        if not isinstance(key, str):
+            raise ValueError(
+                f"Expecting kwargs keys to be a string, got: {type(key)}"
+            )
 
 def _validate_tag(tag: str):
     parts = tag.split(".")
@@ -74,20 +75,21 @@ def _validate_tag(tag: str):
 
 @dataclass(frozen=True)
 class ExportCase:
-    example_inputs: InputsType
+    example_args: ArgsType
     description: str  # A description of the use case.
     model: torch.nn.Module
     name: str
-    extra_inputs: Optional[InputsType] = None  # For testing graph generalization.
+    example_kwargs: dict[str, Any] = field(default_factory=dict)
+    extra_args: Optional[ArgsType] = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
-    tags: Set[str] = field(default_factory=set)
+    tags: set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
-    dynamic_shapes: Optional[Dict[str, Any]] = None
+    dynamic_shapes: Optional[dict[str, Any]] = None
 
     def __post_init__(self):
-        check_inputs_type(self.example_inputs)
-        if self.extra_inputs is not None:
-            check_inputs_type(self.extra_inputs)
+        check_inputs_type(self.example_args, self.example_kwargs)
+        if self.extra_args is not None:
+            check_inputs_type(self.extra_args, {})
 
         for tag in self.tags:
             _validate_tag(tag)
@@ -96,10 +98,10 @@ class ExportCase:
             raise ValueError(f'Invalid description: "{self.description}"')
 
 
-_EXAMPLE_CASES: Dict[str, ExportCase] = {}
-_MODULES: Set[ModuleType] = set()
-_EXAMPLE_CONFLICT_CASES: Dict[str, List[ExportCase]] = {}
-_EXAMPLE_REWRITE_CASES: Dict[str, List[ExportCase]] = {}
+_EXAMPLE_CASES: dict[str, ExportCase] = {}
+_MODULES: set[ModuleType] = set()
+_EXAMPLE_CONFLICT_CASES: dict[str, list[ExportCase]] = {}
+_EXAMPLE_REWRITE_CASES: dict[str, list[ExportCase]] = {}
 
 
 def register_db_case(case: ExportCase) -> None:
@@ -121,9 +123,8 @@ def to_snake_case(name):
 
 
 def _make_export_case(m, name, configs):
-    if not issubclass(m, torch.nn.Module):
+    if not isinstance(m, torch.nn.Module):
         raise TypeError("Export case class should be a torch.nn.Module.")
-    m = m()
 
     if "description" not in configs:
         # Fallback to docstring if description is missing.
@@ -147,14 +148,7 @@ def export_case(**kwargs):
 
         assert module is not None
         _MODULES.add(module)
-        normalized_name = to_snake_case(m.__name__)
         module_name = module.__name__.split(".")[-1]
-        if module_name != normalized_name:
-            raise RuntimeError(
-                f'Module name "{module.__name__}" is inconsistent with exported program '
-                + f'name "{m.__name__}". Please rename the module to "{normalized_name}".'
-            )
-
         case = _make_export_case(m, module_name, configs)
         register_db_case(case)
         return case
@@ -172,17 +166,9 @@ def export_rewrite_case(**kwargs):
         if key not in _EXAMPLE_REWRITE_CASES:
             _EXAMPLE_REWRITE_CASES[key] = []
 
-        configs["example_inputs"] = parent.example_inputs
+        configs["example_args"] = parent.example_args
         case = _make_export_case(m, to_snake_case(m.__name__), configs)
         _EXAMPLE_REWRITE_CASES[key].append(case)
         return case
 
     return wrapper
-
-
-def normalize_inputs(x: InputsType) -> ExportArgs:
-    if isinstance(x, tuple):
-        return ExportArgs(*x)
-
-    assert isinstance(x, ExportArgs)
-    return x

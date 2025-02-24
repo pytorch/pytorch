@@ -13,7 +13,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
@@ -228,20 +227,9 @@ inline void _vec_host_softmax_backward_lastdim(
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           const scalar_t* grad_data = grad_data_base + i * dim_size;
           const scalar_t* output_data = output_data_base + i * dim_size;
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-          scalar_t sum;
-          if (log_softmax) {
-            sum = vec::reduce_all<scalar_t>(
+          if constexpr (log_softmax) {
+            auto sum = vec::reduce_all<scalar_t>(
                 [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
-          } else {
-            sum = vec::map2_reduce_all<scalar_t>(
-                [](Vec x, Vec y) { return x * y; },
-                [](Vec x, Vec y) { return x + y; },
-                grad_data,
-                output_data,
-                dim_size);
-          }
-          if (log_softmax) {
             vec::map2(
                 [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
                 grad_input_data,
@@ -249,6 +237,12 @@ inline void _vec_host_softmax_backward_lastdim(
                 output_data,
                 dim_size);
           } else {
+            auto sum = vec::map2_reduce_all<scalar_t>(
+                [](Vec x, Vec y) { return x * y; },
+                [](Vec x, Vec y) { return x + y; },
+                grad_data,
+                output_data,
+                dim_size);
             vec::map2(
                 [sum](Vec x, Vec y) { return (x - Vec(sum)) * y; },
                 grad_input_data,
@@ -1292,19 +1286,19 @@ static void log_softmax_backward_kernel_impl(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     softmax_backward_lastdim_kernel,
-    &softmax_backward_lastdim_kernel_impl);
+    &softmax_backward_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_lastdim_kernel,
-    &log_softmax_backward_lastdim_kernel_impl);
+    &log_softmax_backward_lastdim_kernel_impl)
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_kernel,
-    &log_softmax_backward_kernel_impl);
+    &log_softmax_backward_kernel_impl)
 } // namespace at::native

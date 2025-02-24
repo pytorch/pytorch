@@ -1,19 +1,27 @@
+# mypy: allow-untyped-defs
 import functools
 import hashlib
+import importlib.util
 import itertools
 import json
 import logging
 import os
 import os.path
+import pathlib
 import re
+import sys
 import tempfile
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
-from importlib import __import__
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Optional, Union
 from weakref import WeakSet
 
 import torch._logging.structured
+from torch._guards import CompileId
+from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
+
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +42,13 @@ DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
+LOG_TRACE_ID_FILTER = "TORCH_LOGS_TRACE_ID_FILTER"
 TRACE_ENV_VAR = "TORCH_TRACE"
+DTRACE_ENV_VAR = "TORCH_DTRACE"
+
+LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
+
+GET_DTRACE_STRUCTURED = False
 
 
 @dataclass
@@ -43,37 +57,37 @@ class LogRegistry:
     # Note: this only contains loggers registered
     # from register_log
     # e.g. "dynamo" -> "torch._dynamo"
-    log_alias_to_log_qnames: Dict[str, List[str]] = field(default_factory=dict)
+    log_alias_to_log_qnames: dict[str, list[str]] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
     # currently formatted as <module>.__<artifact_name>
     # e.g. "torch._dynamo.convert_frame.__guards"
-    artifact_log_qnames: Set[str] = field(default_factory=set)
+    artifact_log_qnames: set[str] = field(default_factory=set)
 
     # child logs of registered logs if specified via open
     # registration by the user (ie placing "torch._dynamo.output_graph" in the env var)
     # these need to be tracked so their levels can be reset properly
     # e.g. "torch._dynamo.output_graph"
-    child_log_qnames: Set[str] = field(default_factory=set)
+    child_log_qnames: set[str] = field(default_factory=set)
 
     # artifact names, populated by register_artifact
     # e.g. "guards"
-    artifact_names: Set[str] = field(default_factory=set)
+    artifact_names: set[str] = field(default_factory=set)
 
     # Artifacts that should be visible by default in the error message
-    visible_artifacts: Set[str] = field(default_factory=set)
+    visible_artifacts: set[str] = field(default_factory=set)
 
     # A short description of each artifact
-    artifact_descriptions: Dict[str, str] = field(default_factory=dict)
+    artifact_descriptions: dict[str, str] = field(default_factory=dict)
 
     # artifacts which are not displayed unless explicitly named in the
     # settings. Ex. output_code is NOT displayed even if the inductor
     # log level is set to DEBUG. It must be explicitly named in the settings
-    off_by_default_artifact_names: Set[str] = field(default_factory=set)
+    off_by_default_artifact_names: set[str] = field(default_factory=set)
 
     # logging format string for artifacts
-    artifact_log_formatters: Dict[str, logging.Formatter] = field(default_factory=dict)
+    artifact_log_formatters: dict[str, logging.Formatter] = field(default_factory=dict)
 
     def is_artifact(self, name):
         return name in self.artifact_names
@@ -82,7 +96,7 @@ class LogRegistry:
         return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qnames: Union[str, List[str]]):
+    def register_log(self, alias, log_qnames: Union[str, list[str]]):
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         self.log_alias_to_log_qnames[alias] = log_qnames
@@ -114,7 +128,7 @@ class LogRegistry:
         self.child_log_qnames.add(log_qname)
 
     # flattens all the qnames together (TODO: consider memoizing?)
-    def get_log_qnames(self) -> Set[str]:
+    def get_log_qnames(self) -> set[str]:
         return {
             qname
             for qnames in self.log_alias_to_log_qnames.values()
@@ -134,10 +148,10 @@ class LogRegistry:
 @dataclass
 class LogState:
     # qualified log names -> currently set log level
-    log_qname_to_level: Dict[str, str] = field(default_factory=dict)
+    log_qname_to_level: dict[str, str] = field(default_factory=dict)
 
     # the set of currently enabled artifacts
-    artifact_names: Set[str] = field(default_factory=set)
+    artifact_names: set[str] = field(default_factory=set)
 
     def enable_artifact(self, artifact_name):
         self.artifact_names.add(artifact_name)
@@ -175,9 +189,10 @@ log_state = LogState()
 
 # sample usage: torch._logging.set_logs(**torch._logging.DEFAULT_LOGGING)
 DEFAULT_LOGGING = {
-    "dynamo": logging.DEBUG,
-    "aot": logging.DEBUG,
-    "inductor": logging.DEBUG,
+    "dynamo": logging.INFO,
+    "aot": logging.INFO,
+    "inductor": logging.INFO,
+    "fsdp": logging.INFO,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,
@@ -195,9 +210,10 @@ def set_logs(
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
-    dist_c10d: Optional[int] = None,
-    dist_ddp: Optional[int] = None,
-    dist_fsdp: Optional[int] = None,
+    c10d: Optional[int] = None,
+    ddp: Optional[int] = None,
+    fsdp: Optional[int] = None,
+    dtensor: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -214,17 +230,26 @@ def set_logs(
     trace_call: bool = False,
     trace_bytecode: bool = False,
     output_code: bool = False,
+    kernel_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
+    pre_grad_graphs: bool = False,
     post_grad_graphs: bool = False,
+    ir_pre_fusion: bool = False,
+    ir_post_fusion: bool = False,
     onnx_diagnostics: bool = False,
     fusion: bool = False,
     overlap: bool = False,
     export: Optional[int] = None,
-    modules: Optional[Dict[str, Union[int, bool]]] = None,
+    modules: Optional[dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
+    compiled_autograd: bool = False,
     compiled_autograd_verbose: bool = False,
+    cudagraph_static_inputs: bool = False,
+    benchmarking: bool = False,
+    autotuning: bool = False,
+    graph_region_expansion: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -284,16 +309,20 @@ def set_logs(
             Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_c10d (:class:`Optional[int]`):
+        c10d (:class:`Optional[int]`):
             Whether to log c10d communication operations related debug info in PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_ddp (:class:`Optional[int]`):
+        ddp (:class:`Optional[int]`):
             Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_fsdp (:class:`Optional[int]`):
+        fsdp (:class:`Optional[int]`):
             Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dtensor (:class:`Optional[int]`):
+            Whether to log debug info related to ``DTensor``(DTensor) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -308,9 +337,6 @@ def set_logs(
 
         aot_joint_graph (:class:`bool`):
             Whether to emit the joint forward-backward graph generated by AOTAutograd. Default: ``False``
-
-        inductor (:class:`Optional[int]`):
-            Whether to log information from inductor cudagraphs. Default: ``logging.WARN``
 
         ddp_graphs (:class:`bool`):
             Whether to emit graphs generated by DDPOptimizer. Default: ``False``
@@ -355,7 +381,10 @@ def set_logs(
             traces bytecode. Default: ``False``
 
         output_code (:class:`bool`):
-            Whether to emit the TorchInductor output code. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
+
+        kernel_code (:class:`bool`):
+            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -363,8 +392,17 @@ def set_logs(
         perf_hints (:class:`bool`):
             Whether to emit the TorchInductor perf hints. Default: ``False``
 
+        pre_grad_graphs (:class:`bool`):
+            Whether to emit the graphs before inductor grad passes. Default: ``False``
+
         post_grad_graphs (:class:`bool`):
             Whether to emit the graphs generated by after post grad passes. Default: ``False``
+
+        ir_pre_fusion (:class:`bool`):
+            Whether to emit the graphs before inductor fusion passes. Default: ``False``
+
+        ir_post_fusion (:class:`bool`):
+            Whether to emit the graphs after inductor fusion passes. Default: ``False``
 
         onnx_diagnostics (:class:`bool`):
             Whether to emit the ONNX exporter diagnostics in logging. Default: ``False``
@@ -381,6 +419,9 @@ def set_logs(
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
 
+        benchmarking (:class:`bool`):
+            Whether to emit detailed Inductor benchmarking information. Default: ``False``
+
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -390,6 +431,15 @@ def set_logs(
             to this function and (2) if the log level for an unregistered module
             needs to be set. This can be done by providing the fully-qualified module
             name as the key, with the log level as the value. Default: ``None``
+
+        cudagraph_static_inputs (:class:`bool`):
+            Whether to emit debug info for cudagraph static input detection. Default: ``False``
+
+        autotuning (:class:`bool`):
+            Autotuning choice logs, such as kernel source, perf, and tuning parameters. Default: ``False``
+
+        graph_region_expansion (:class:`bool`):
+            Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
 
 
     Example::
@@ -459,9 +509,10 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
-        dist_c10d=dist_c10d,
-        dist_ddp=dist_ddp,
-        dist_fsdp=dist_fsdp,
+        c10d=c10d,
+        ddp=ddp,
+        fsdp=fsdp,
+        dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
@@ -473,9 +524,13 @@ def set_logs(
         trace_call=trace_call,
         trace_bytecode=trace_bytecode,
         output_code=output_code,
+        kernel_code=kernel_code,
         schedule=schedule,
         perf_hints=perf_hints,
+        pre_grad_graphs=pre_grad_graphs,
         post_grad_graphs=post_grad_graphs,
+        ir_pre_fusion=ir_pre_fusion,
+        ir_post_fusion=ir_post_fusion,
         onnx=onnx,
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
@@ -483,7 +538,12 @@ def set_logs(
         sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
+        compiled_autograd=compiled_autograd,
         compiled_autograd_verbose=compiled_autograd_verbose,
+        cudagraph_static_inputs=cudagraph_static_inputs,
+        benchmarking=benchmarking,
+        autotuning=autotuning,
+        graph_region_expansion=graph_region_expansion,
     )
 
 
@@ -644,7 +704,7 @@ Valid settings:
 @functools.lru_cache
 def _parse_log_settings(settings):
     if settings == "":
-        return dict()
+        return {}
 
     if settings == "help":
         raise ValueError(help_message(verbose=False))
@@ -696,11 +756,8 @@ def _parse_log_settings(settings):
 
 
 def _is_valid_module(qname):
-    try:
-        __import__(qname)
-        return True
-    except ImportError:
-        return False
+    spec = importlib.util.find_spec(qname)
+    return spec is not None
 
 
 def _update_log_state_from_env():
@@ -723,11 +780,34 @@ def _has_registered_parent(log_qname):
     return False
 
 
+def make_module_path_relative(abs_path):
+    """
+    Given an absolute filepath corresponding to a Python module which was
+    loaded via normal import mechanisms using sys.path, convert it into
+    a relative path relative to one of the Python search paths.
+    """
+
+    abs_path = pathlib.Path(abs_path).resolve()
+
+    for path in sys.path:
+        try:
+            rel_path = abs_path.relative_to(path)
+        except ValueError:
+            continue
+        else:
+            return str(rel_path)
+
+    return str(abs_path)
+
+
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
-    def __init__(self, *, trace: bool = False):
+    def __init__(
+        self, *, trace: bool = False, trace_id_filter: Optional[set[str]] = None
+    ):
         super().__init__()
         self._is_trace = trace
+        self._trace_id_filter = trace_id_filter
 
     def format(self, record):
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
@@ -783,14 +863,26 @@ class TorchLogsFormatter(logging.Formatter):
         if artifact_name is not None:
             record.artifactprefix = f" [__{artifact_name}]"
 
+        filepath = make_module_path_relative(record.pathname)
+
+        if (
+            self._trace_id_filter
+            and record.traceid.strip() not in self._trace_id_filter
+        ):
+            return ""
+
         prefix = (
-            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
-            f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
+            f"{filepath}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
         if self._is_trace:
             assert s == ""
-            r = f"{prefix} {json.dumps(record.metadata)}"
+            try:
+                r = f"{prefix} {json.dumps(record.metadata)}"
+            except TypeError:
+                log.warning("failing metadata: %r", record.metadata)
+                raise
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -801,8 +893,13 @@ class TorchLogsFormatter(logging.Formatter):
 
 def _default_formatter():
     fmt = os.environ.get(LOG_FORMAT_ENV_VAR, None)
+    trace_id_filter = {
+        item.strip()
+        for item in os.environ.get(LOG_TRACE_ID_FILTER, "").split(",")
+        if item.strip()
+    }
     if fmt is None:
-        return TorchLogsFormatter()
+        return TorchLogsFormatter(trace_id_filter=trace_id_filter)
     else:
         if fmt in ("short", "basic"):
             fmt = logging.BASIC_FORMAT
@@ -870,6 +967,8 @@ def _set_log_state(state):
 
 
 def _init_logs(log_file_name=None):
+    global GET_DTRACE_STRUCTURED
+
     _reset_logs()
     _update_log_state_from_env()
 
@@ -916,17 +1015,24 @@ def _init_logs(log_file_name=None):
     # Setup handler for the special trace_log, with different default
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
+
+    if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
+        GET_DTRACE_STRUCTURED = True
+        trace_dir_name = dtrace_dir_name
+
     # This handler may remove itself if trace_dir_name is None and we are not
     # actually in an FB environment.  This allows us to defer actually
     # initializing it until we actually need to log anything.  This is
     # important because JK initializes a C++ singleton, which will pork our
     # process if we subsequently fork.
-    handler = LazyTraceHandler(trace_dir_name)
+    global LOG_TRACE_HANDLER
+    if LOG_TRACE_HANDLER is None:
+        LOG_TRACE_HANDLER = LazyTraceHandler(trace_dir_name)
     # This log is ALWAYS at debug level.  We will additionally test if there
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
-    trace_log_handler = _track_handler(handler)
+    trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
 
@@ -966,15 +1072,18 @@ class LazyTraceHandler(logging.StreamHandler):
 
     def emit(self, record):
         if self.stream is None:
-            ok = False
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
-                open_func = self._builtin_open
 
                 import torch.version as torch_version
 
-                if hasattr(torch_version, "git_version"):
-                    log.info("LazyTraceHandler: disabled because not fbcode")
+                if (
+                    hasattr(torch_version, "git_version")
+                    and os.getenv("MAST_HPC_JOB_NAME") is None
+                ):
+                    log.info(
+                        "LazyTraceHandler: disabled because not fbcode or conda on mast"
+                    )
                 elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
                     log.info(
                         "LazyTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"
@@ -1034,15 +1143,68 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
+# Logs the time it takes to do structured logging by frame/compile id
+# key is always {frame_id}_{frame_compile_id}
+structured_logging_overhead: dict[str, float] = defaultdict(float)
+
+
+def add_structured_logging_overhead(time_spent: float) -> None:
+    global structured_logging_overhead
+    key = None
+    if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        frame_id = trace_id.compile_id.frame_id
+        frame_compile_id = trace_id.compile_id.frame_compile_id
+        # Why not trace_id.attempt, like structured logging?
+        # We aggregate across all attempts because
+        # a compilation metric is logged per successful attempt
+        key = f"{frame_id}_{frame_compile_id}"
+    # TODO: deal with structured logging that occurs outside of specific compile ids
+    # It's hard to figure out where we would log that if we want it in compilation metrics
+    # itself.
+    if key is not None:
+        key = str(key)
+        structured_logging_overhead[key] += time_spent
+
+
+def get_structured_logging_overhead() -> Optional[float]:
+    key = None
+    if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        frame_id = trace_id.compile_id.frame_id
+        frame_compile_id = trace_id.compile_id.frame_compile_id
+        key = f"{frame_id}_{frame_compile_id}"
+    if key is not None:
+        return structured_logging_overhead.get(key)
+    else:
+        return None
+
+
+def trace_structured_artifact(
+    name: str,  # this will go in metadata
+    encoding: str,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+) -> None:
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": name,
+            "encoding": encoding,
+        },
+        payload_fn=payload_fn,
+    )
+
+
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
-):
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
+) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
     too long (e.g., less than 1MB)
@@ -1050,7 +1212,13 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert "name" not in [
+        "rank",
+        "compiled_autograd_id",
+        "frame_id",
+        "frame_compile_id",
+        "attempt",
+    ]
     assert callable(
         metadata_fn
     ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
@@ -1060,7 +1228,8 @@ def trace_structured(
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:
-        record: Dict[str, object] = {}
+        start_time = time.time_ns()
+        record: dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:
             # TODO: Actually, the rank probably should just be emitted once at
@@ -1068,18 +1237,26 @@ def trace_structured(
             # never changes and we assume no interleaving
             if dist.is_available() and dist.is_initialized():
                 record["rank"] = dist.get_rank()
-            if (
-                trace_id := torch._guards.CompileContext.current_trace_id()
-            ) is not None:
-                record["frame_id"] = trace_id.compile_id.frame_id
-                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
-                record["attempt"] = trace_id.attempt
-            else:
+
+            trace_id = torch._guards.CompileContext.current_trace_id()
+            if expect_trace_id and trace_id is None and compile_id is None:
                 # Record the stack of the log call to better diagnose why we
                 # don't have a frame id for it
                 record["stack"] = torch._logging.structured.from_traceback(
                     CapturedTraceback.extract(skip=1).summary()
                 )
+            else:
+                cid = trace_id.compile_id if trace_id else compile_id
+                if cid is not None:
+                    if cid.compiled_autograd_id is not None:
+                        record["compiled_autograd_id"] = cid.compiled_autograd_id
+                    if cid.frame_id is not None:
+                        record["frame_id"] = cid.frame_id
+                    if cid.frame_compile_id is not None:
+                        record["frame_compile_id"] = cid.frame_compile_id
+                if trace_id:
+                    record["attempt"] = trace_id.attempt
+
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
@@ -1087,13 +1264,54 @@ def trace_structured(
                     # special case to look better
                     payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
                 else:
+
+                    def json_default(obj):
+                        # Sets aren't json serializable
+                        if isinstance(obj, set):
+                            return list(obj)
+                        raise TypeError(
+                            f"Object of type {type(obj)} is not JSON serializable"
+                        )
+
                     # force newlines so we are unlikely to overflow line limit
-                    payload = json.dumps(payload, indent=0)
+                    payload = json.dumps(payload, default=json_default, indent=0)
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()
         trace_log.debug(
             "", extra={"metadata": record, "payload": payload}, stacklevel=2
+        )
+        log_trace_structured_event(name, record)
+
+        if record_logging_overhead:
+            # Convert to seconds from nanoseconds, add it to the frame compile total
+            structured_logging_overhead_s = (time.time_ns() - start_time) / 1e9
+            add_structured_logging_overhead(structured_logging_overhead_s)
+
+
+def dtrace_structured(
+    name: str,
+    # NB: metadata expected to be dict so adding more info is forward compatible
+    # Tuple[str, int] is a special case for string interning
+    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    *,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    suppress_context: bool = False,
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+):
+    """
+    For logging more detailed information used for debugging. This may result in
+    the program becoming slow.
+    """
+    if GET_DTRACE_STRUCTURED:
+        trace_structured(
+            name,
+            metadata_fn,
+            payload_fn=payload_fn,
+            suppress_context=suppress_context,
+            expect_trace_id=expect_trace_id,
+            record_logging_overhead=record_logging_overhead,
         )
 
 

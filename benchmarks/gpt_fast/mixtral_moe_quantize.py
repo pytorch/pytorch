@@ -1,9 +1,10 @@
 # flake8: noqa: E266, C417, B950
+from mixtral_moe_model import ConditionalFeedForward
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mixtral_moe_model import ConditionalFeedForward
 
 ##### Quantization Primitives ######
 
@@ -131,7 +132,6 @@ class WeightOnlyInt8Linear(torch.nn.Module):
         target_dtype=None,
     ) -> None:
         assert target_dtype is not None
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -183,7 +183,5 @@ class ConditionalFeedForwardInt8(nn.Module):
         ].to(x.dtype)
         expert_outs = torch.einsum(
             "tao, taio -> tai", (x1 * x3), w2_weights
-        ) * self.scales2[expert_indices].to(
-            x.dtype
-        )  # [T, A, D, D]
+        ) * self.scales2[expert_indices].to(x.dtype)  # [T, A, D, D]
         return expert_outs

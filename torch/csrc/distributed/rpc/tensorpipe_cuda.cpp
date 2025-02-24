@@ -12,9 +12,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe_cuda.h>
 C10_DIAGNOSTIC_POP()
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL
@@ -26,7 +24,7 @@ std::unique_ptr<ChannelRegistration> makeCudaIpcChannel() {
 }
 
 // The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel)
 
 #endif
 
@@ -46,7 +44,7 @@ std::unique_ptr<ChannelRegistration> makeCudaGdrChannel() {
 // in order to ensure readiness and to agree on the device indices and thus the
 // queue pair to use. It automatically pairs each GPU to the "closest" NIC if
 // there are multiple of them (closest = longest prefix match in PCI tree).
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel)
 
 #endif
 
@@ -57,7 +55,7 @@ std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
 }
 
 // The cuda_xth channel supports same-process GPU-to-GPU comm
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel)
 
 std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
   auto context = tensorpipe::channel::cuda_basic::create(
@@ -70,11 +68,11 @@ std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     cuda_basic,
-    makeCudaBasicChannel);
+    makeCudaBasicChannel)
 
 class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
  public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
+  std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Message& message) const override {
@@ -94,7 +92,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
 
     message.tensors.push_back(std::move(tensor));
 
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   at::DataPtr allocateTensorForReceiving(
@@ -123,11 +121,9 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
-C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
+C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter)
 
 } // namespace
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif

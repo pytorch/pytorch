@@ -1,12 +1,19 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import wraps
-from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    TypeVar,
+    Union,
+)
+from collections.abc import Iterator, Sequence
 
 import torch
 import torch.distributed as dist
@@ -22,6 +29,10 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_utils import (
+    TEST_HPU,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -31,18 +42,26 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch._utils import _get_device_module
 
-DEVICE_TYPE = (
-    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
-)
-PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
+if TEST_CUDA:
+    DEVICE_TYPE = "cuda"
+    PG_BACKEND = "nccl"
+    DEVICE_COUNT = _get_device_module("cuda").device_count()
+elif TEST_HPU:
+    DEVICE_TYPE = "hpu"
+    PG_BACKEND = "hccl"
+    DEVICE_COUNT = _get_device_module("hpu").device_count()
+else:
+    DEVICE_TYPE = "cpu"
+    PG_BACKEND = "gloo"
 
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+if TEST_CUDA and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
-    NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
+    NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
 T = TypeVar("T")
 
@@ -63,12 +82,12 @@ class RMSNormPython(torch.nn.Module):
 
 
 class MLPModule(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, bias: bool = True):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = nn.Linear(10, 16, device=device)
+        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(16, 10, device=device)
+        self.net2 = nn.Linear(16, 10, bias=bias, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -208,7 +227,7 @@ class Transformer(nn.Module):
 
     @staticmethod
     def parallelize(
-        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool
+        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool, local_output_for_attn: bool = False
     ) -> nn.Module:
         assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
         # Parallelize the root submodules.
@@ -236,9 +255,9 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=local_output_for_attn)
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=local_output_for_attn)
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=local_output_for_attn)
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
@@ -271,6 +290,10 @@ class Transformer(nn.Module):
         )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
 
+        if local_output_for_attn:
+            for layer in module_tp.layers:
+                layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
+
         # Manually set output.weight so that parameters and gradients are shared.
         if module_tp.model_args.weight_tying:
             module_tp.output.weight = module_tp.tok_embeddings.weight
@@ -298,33 +321,40 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        return PG_BACKEND
+        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
+        return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
 
-    def init_pg(self) -> None:
+    def init_pg(self, eager_init) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
+        device_id = None
+        if "nccl" in self.backend:
+            # set device for nccl pg for collectives
+            torch.cuda.set_device(self.rank)
+            # we only need to set device_id for nccl backend with eager init
+            device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
+        # For nccl backend, bind the device to the process if device_id is not None
+        # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
+        # for form subgroup to avoid unnecesssary overhead.
         dist.init_process_group(
             backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
+            device_id=device_id,
         )
-
-        # set device for nccl pg for collectives
-        if "nccl" in self.backend:
-            torch.cuda.set_device(self.rank)
 
     def destroy_pg(self) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
-        # dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
+        # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         dist.barrier()
@@ -348,28 +378,37 @@ class DTensorTestBase(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
 
-TestFunc = Callable[[object], object]
+TestFunc = Callable[[...], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(func: TestFunc) -> TestFunc:
-    assert func is not None
+def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
-    @wraps(func)  # pyre-ignore[6]
-    def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
-    ) -> None:
-        # if backend not specified, and cuda available, then use nccl, else gloo
-        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
-            self.device_type = "cuda"
-        else:
-            self.device_type = "cpu"
+    def decorator(func, eager_init: bool = False):
 
-        self.init_pg()
-        func(self, *args, **kwargs)  # type: ignore[misc]
-        self.destroy_pg()
+        @wraps(func)  # pyre-ignore[6]
+        def wrapper(
+            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+        ) -> None:
+            # if enough GPU we can use GPU, otherwise we fallback to CPU
+            if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
+                self.device_type = "cpu"
+            else:
+                self.device_type = DEVICE_TYPE
 
-    return wrapper
+            self.init_pg(eager_init)
+
+            try:
+                func(self, *args, **kwargs)  # type: ignore[misc]
+            except Exception as e:
+                dist.destroy_process_group()
+                raise e
+
+            self.destroy_pg()
+
+        return wrapper
+
+    return decorator(func=eager_init) if callable(eager_init) else partial(decorator, eager_init=eager_init)
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
@@ -394,8 +433,8 @@ class DTensorConverter:
     def __init__(
         self,
         mesh: DeviceMesh,
-        args: Tuple[object, ...],
-        kwargs: Dict[str, object],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
     ) -> None:
         self.hit = 0
         self.miss = 0
@@ -405,19 +444,16 @@ class DTensorConverter:
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
-        self.flatten_args: List[object] = flatten_args
+        self.flatten_args: list[object] = flatten_args
         self.flatten_args_spec: TreeSpec = flatten_args_spec
-        self.flatten_kwargs: List[object] = flatten_kwargs
+        self.flatten_kwargs: list[object] = flatten_kwargs
         self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
 
-        choices_for_args = []
-        for arg in self.flatten_args:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
 
-        for arg in self.flatten_kwargs:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args.extend(
+            self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_kwargs if isinstance(arg, torch.Tensor)
+        )
 
         self.sharding_combs: Iterator[Sequence[Placement]] = iter(
             itertools.product(*choices_for_args)
@@ -451,7 +487,7 @@ class DTensorConverter:
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
         mesh_size = self.mesh.size()
-        sharding_choices: List[Placement] = [Replicate()]
+        sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
         # for bool tensor we treat it as replicated
         if arg.dtype != torch.bool:
@@ -471,12 +507,12 @@ class DTensorConverter:
     def __iter__(self) -> "DTensorConverter":
         return self
 
-    def __next__(self) -> Tuple[Tuple[object, ...], Dict[str, object]]:
+    def __next__(self) -> tuple[tuple[object, ...], dict[str, object]]:
         try:
             next_sharding_choices = next(self.sharding_combs)
             idx = 0
 
-            new_args: List[object] = []
+            new_args: list[object] = []
             for arg in self.flatten_args:
                 if isinstance(arg, torch.Tensor):
                     new_args.append(
@@ -488,7 +524,7 @@ class DTensorConverter:
                 else:
                     new_args.append(arg)
 
-            new_kwargs: List[object] = []
+            new_kwargs: list[object] = []
             for arg in self.flatten_kwargs:
                 if isinstance(arg, torch.Tensor):
                     new_kwargs.append(
@@ -508,7 +544,7 @@ class DTensorConverter:
             raise StopIteration from e
 
     def to_dist_tensor(
-        self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
+        self, t: torch.Tensor, mesh: DeviceMesh, placements: list[Placement]
     ) -> torch.Tensor:
         if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):

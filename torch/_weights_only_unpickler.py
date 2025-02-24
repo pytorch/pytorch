@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Unpickler restricted to loading only state dicts
 # Restrict constructing types to a list defined in _get_allowed_globals()
 # Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
@@ -9,6 +10,10 @@
 # - `torch.nn.Parameter`
 # - `collections.Counter`
 # - `collections.OrderedDict`
+# Additionally, users can use an allowlist for adding classes they have deemed as safe using
+# `_add_safe_globals()` (`torch.serialization.add_safe_globals`)
+# `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
+# `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -18,6 +23,9 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
+import warnings
+
+from _codecs import encode
 from collections import Counter, OrderedDict
 from pickle import (
     APPEND,
@@ -60,27 +68,133 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List
+from typing import Any, Callable, Union
 
 import torch
+from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+
+
+# modules in this list are never allowed, even if the user attempts to allowlist
+# functions/classes from them
+_blocklisted_modules = [
+    "sys",
+    "os",
+    "posix",
+    "nt",
+]
+
+_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
+
+
+def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
+
+
+def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+    global _marked_safe_globals_set
+    return list(_marked_safe_globals_set)
+
+
+def _clear_safe_globals():
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = set()
+
+
+def _remove_safe_globals(
+    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+):
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
+
+
+class _safe_globals:
+    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+        self.safe_globals = safe_globals
+
+    def __enter__(self):
+        _add_safe_globals(self.safe_globals)
+
+    def __exit__(self, type, value, tb):
+        _remove_safe_globals(self.safe_globals)
+
+
+# Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
+# For example if user had a script like
+#   torch.load(file_a)
+#   torch.serialization._add_safe_globals([torch.foo])
+#   torch.load(file_b)
+# the dynamic additions to safe_globals would not be picked up by
+# _get_allowed_globals due to the lru_cache
+def _get_user_allowed_globals():
+    rc: dict[str, Any] = {}
+    for f in _marked_safe_globals_set:
+        if isinstance(f, tuple):
+            if len(f) != 2:
+                raise ValueError(
+                    f"Expected tuple of length 2 (global, str of callable full path), but got tuple of length: {len(f)}"
+                )
+            if type(f[1]) is not str:
+                raise TypeError(
+                    f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
+                )
+            f, name = f
+            rc[name] = f
+        else:
+            module, name = f.__module__, f.__qualname__
+            rc[f"{module}.{name}"] = f
+    return rc
+
+
+def _tensor_rebuild_functions():
+    return {
+        torch._utils._rebuild_parameter,
+        torch._utils._rebuild_parameter_with_state,
+        torch._utils._rebuild_qtensor,
+        torch._utils._rebuild_tensor,
+        torch._utils._rebuild_tensor_v2,
+        torch._utils._rebuild_tensor_v3,
+        torch._utils._rebuild_sparse_tensor,
+        torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_nested_tensor,
+        torch._utils._rebuild_wrapper_subclass,
+        # Allowlisting this, but not allowlisting the numpy functions by default
+        # Reasoning is that we don't have control over the numpy functions, but
+        # this utility is provided by pytorch
+        torch._utils._rebuild_device_tensor_from_numpy,
+        # In 2.6, we should no longer have a dependency on numpy and the above
+        # _rebuild_device_tensor_from_numpy function.
+        torch._utils._rebuild_device_tensor_from_cpu_tensor,
+    }
 
 
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
-    rc: Dict[str, Any] = {
+    rc: dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
+        "torch.device": torch.device,
+        "_codecs.encode": encode,  # for bytes
+        "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
+        "builtins.complex": complex,  # for complex
     }
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t
+    for t in [getattr(torch, f"uint{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+    for t in [getattr(torch, f"int{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+
     # Tensor classes
     for tt in torch._tensor_classes:
         rc[f"{tt.__module__}.{tt.__name__}"] = tt
@@ -103,17 +217,7 @@ def _get_allowed_globals():
     ]:
         rc[str(qt)] = qt
     # Rebuild functions
-    for f in [
-        torch._utils._rebuild_parameter,
-        torch._utils._rebuild_parameter_with_state,
-        torch._utils._rebuild_qtensor,
-        torch._utils._rebuild_tensor,
-        torch._utils._rebuild_tensor_v2,
-        torch._utils._rebuild_tensor_v3,
-        torch._utils._rebuild_sparse_tensor,
-        torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
-    ]:
+    for f in _tensor_rebuild_functions():
         rc[f"torch._utils.{f.__name__}"] = f
 
     # Handles Tensor Subclasses, Tensor's with attributes.
@@ -122,12 +226,89 @@ def _get_allowed_globals():
     return rc
 
 
+def _read_global_instruction(readline: Callable) -> tuple[str, str]:
+    module = readline()[:-1].decode("utf-8")
+    name = readline()[:-1].decode("utf-8")
+    # Patch since torch.save default protocol is 2
+    # users will be running this code in python > 3
+    if (module, name) in NAME_MAPPING:
+        module, name = NAME_MAPPING[(module, name)]
+    elif module in IMPORT_MAPPING:
+        module = IMPORT_MAPPING[module]
+    return module, name
+
+
+def get_globals_in_pkl(file) -> set[str]:
+    globals_in_checkpoint = set()
+    read = file.read
+    readline = file.readline
+    op_to_bytes_to_read = {
+        NEWOBJ[0]: 0,
+        REDUCE[0]: 0,
+        BUILD[0]: 0,
+        APPEND[0]: 0,
+        APPENDS[0]: 0,
+        SETITEM[0]: 0,
+        SETITEMS[0]: 0,
+        MARK[0]: 0,
+        TUPLE[0]: 0,
+        TUPLE1[0]: 0,
+        TUPLE2[0]: 0,
+        TUPLE3[0]: 0,
+        NONE[0]: 0,
+        NEWFALSE[0]: 0,
+        NEWTRUE[0]: 0,
+        EMPTY_TUPLE[0]: 0,
+        EMPTY_LIST[0]: 0,
+        EMPTY_DICT[0]: 0,
+        EMPTY_SET[0]: 0,
+        BINPERSID[0]: 0,
+        BININT[0]: 4,
+        BININT1[0]: 1,
+        BININT2[0]: 2,
+        BINFLOAT[0]: 8,
+        BINGET[0]: 1,
+        LONG_BINGET[0]: 4,
+        BINPUT[0]: 1,
+        LONG_BINPUT[0]: 4,
+    }
+    while True:
+        key = read(1)
+        if not key:
+            raise EOFError
+        assert isinstance(key, bytes_types)
+        if key[0] == GLOBAL[0]:
+            module, name = _read_global_instruction(readline)
+            globals_in_checkpoint.add(f"{module}.{name}")
+        elif key[0] in op_to_bytes_to_read:
+            bytes_to_read = op_to_bytes_to_read[key[0]]
+            if bytes_to_read:
+                read(bytes_to_read)
+        # ops where bytes to read depends on the data
+        elif key[0] == BINUNICODE[0]:
+            strlen = unpack("<I", read(4))[0]
+            if strlen > maxsize:
+                raise UnpicklingError("String is too long")
+            read(strlen)
+        elif key[0] in {SHORT_BINSTRING[0], LONG1[0]}:
+            strlen = read(1)[0]
+            read(strlen)
+        # first and last op
+        elif key[0] == PROTO[0]:
+            read(1)[0]
+        elif key[0] == STOP[0]:
+            return globals_in_checkpoint
+        else:
+            raise UnpicklingError(f"Unsupported operand {key[0]}")
+
+
 class Unpickler:
     def __init__(self, file, *, encoding: str = "bytes"):
         self.encoding = encoding
         self.readline = file.readline
         self.read = file.read
-        self.memo: Dict[int, Any] = {}
+        self.memo: dict[int, Any] = {}
+        self.proto: int = -1
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -135,10 +316,9 @@ class Unpickler:
         Return the reconstituted object hierarchy specified in the file.
         """
         self.metastack = []
-        self.stack: List[Any] = []
+        self.stack: list[Any] = []
         self.append = self.stack.append
         read = self.read
-        readline = self.readline
         while True:
             key = read(1)
             if not key:
@@ -146,24 +326,81 @@ class Unpickler:
             assert isinstance(key, bytes_types)
             # Risky operators
             if key[0] == GLOBAL[0]:
-                module = readline()[:-1].decode("utf-8")
-                name = readline()[:-1].decode("utf-8")
+                module, name = _read_global_instruction(self.readline)
                 full_path = f"{module}.{name}"
+                if module in _blocklisted_modules:
+                    raise UnpicklingError(
+                        f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
+                    )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
+                elif full_path in _get_user_allowed_globals():
+                    self.append(_get_user_allowed_globals()[full_path])
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
+                elif full_path in (
+                    [
+                        "torch.distributed.device_mesh.DeviceMesh",
+                        "torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "torch.distributed.tensor._dtensor_spec.TensorMeta",
+                        "torch.distributed.tensor.DTensor",
+                        "torch.distributed.tensor.placement_types.Partial",
+                        "torch.distributed.tensor.placement_types.Replicate",
+                        "torch.distributed.tensor.placement_types.Shard",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
                 else:
-                    raise RuntimeError(f"Unsupported class {full_path}")
+                    builtins_name = "builtins"
+                    if (
+                        builtins_name in full_path
+                        and builtins_name == full_path[: len(builtins_name)]
+                    ):
+                        full_path = full_path[len(builtins_name) :]
+                        full_path = (
+                            full_path[1:]
+                            if len(full_path) > 0 and full_path[0] == "."
+                            else builtins_name + full_path
+                        )
+                    raise UnpicklingError(
+                        f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                        f"Please use `torch.serialization.add_safe_globals([{full_path}])` or the "
+                        f"`torch.serialization.safe_globals([{full_path}])` context manager to allowlist this global "
+                        "if you trust this class/function."
+                    )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
-                    raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
+                if cls is torch.nn.Parameter:
+                    self.append(torch.nn.Parameter(*args))
+                elif (
+                    cls in _get_user_allowed_globals().values()
+                    or cls in _get_allowed_globals().values()
+                ):
+                    self.append(cls.__new__(cls, *args))
+                else:
+                    raise UnpicklingError(
+                        "Can only create new object for nn.Parameter or classes allowlisted "
+                        f"via `add_safe_globals` but got {cls}"
+                    )
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values():
-                    raise RuntimeError(
+                if (
+                    func not in _get_allowed_globals().values()
+                    and func not in _get_user_allowed_globals().values()
+                ):
+                    raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
                 self.stack[-1] = func(*args)
@@ -177,16 +414,34 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
+                elif (
+                    type(inst) in _get_user_allowed_globals().values()
+                    or type(inst) in _get_allowed_globals().values()
+                ):
+                    if hasattr(inst, "__setstate__"):
+                        inst.__setstate__(state)
+                    else:
+                        # mimics load_build in pickle
+                        # https://github.com/python/cpython/blob/f0c6fccd08904787a39269367f09f263d496114c/Lib/pickle.py#L1854-L1867
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
+                        if state:
+                            inst.__dict__.update(state)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
                 else:
-                    raise RuntimeError(
-                        f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
+                    raise UnpicklingError(
+                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
+                        f"via `add_safe_globals`, but got {type(inst)}"
                     )
             # Stack manipulation
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
                 list_obj = self.stack[-1]
                 if type(list_obj) is not list:
-                    raise RuntimeError(
+                    raise UnpicklingError(
                         f"Can only append to lists, but got {type(list_obj)}"
                     )
                 list_obj.append(item)
@@ -194,7 +449,7 @@ class Unpickler:
                 items = self.pop_mark()
                 list_obj = self.stack[-1]
                 if type(list_obj) is not list:
-                    raise RuntimeError(
+                    raise UnpicklingError(
                         f"Can only extend lists, but got {type(list_obj)}"
                     )
                 list_obj.extend(items)
@@ -244,7 +499,7 @@ class Unpickler:
             elif key[0] == BINUNICODE[0]:
                 strlen = unpack("<I", read(4))[0]
                 if strlen > maxsize:
-                    raise RuntimeError("String is too long")
+                    raise UnpicklingError("String is too long")
                 strval = str(read(strlen), "utf-8", "surrogatepass")
                 self.append(strval)
             elif key[0] == SHORT_BINSTRING[0]:
@@ -257,7 +512,7 @@ class Unpickler:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
                 if type(pid) is not tuple and not type(pid) is not int:
-                    raise RuntimeError(
+                    raise UnpicklingError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )
                 if (
@@ -265,7 +520,7 @@ class Unpickler:
                     and len(pid) > 0
                     and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
                 ):
-                    raise RuntimeError(
+                    raise UnpicklingError(
                         f"Only persistent_load of storage is allowed, but got {pid[0]}"
                     )
                 self.append(self.persistent_load(pid))
@@ -283,13 +538,19 @@ class Unpickler:
                 self.append(decode_long(data))
             # First and last deserializer ops
             elif key[0] == PROTO[0]:
-                # Read and ignore proto version
-                read(1)[0]
+                self.proto = read(1)[0]
+                if self.proto != 2:
+                    warnings.warn(
+                        f"Detected pickle protocol {self.proto} in the checkpoint, which was "
+                        "not the default pickle protocol used by `torch.load` (2). The weights_only "
+                        "Unpickler might not support all instructions implemented by this protocol, "
+                        "please file an issue for adding support if you encounter this."
+                    )
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()
                 return rc
             else:
-                raise RuntimeError(f"Unsupported operand {key[0]}")
+                raise UnpicklingError(f"Unsupported operand {key[0]}")
 
     # Return a list of items pushed in the stack after last MARK instruction.
     def pop_mark(self):

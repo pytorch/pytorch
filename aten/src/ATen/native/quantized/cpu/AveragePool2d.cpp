@@ -24,8 +24,7 @@
 #include <limits>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
 
@@ -47,7 +46,7 @@ static void avg_pool2d_out_frame(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
   auto input_data = input_contig.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -57,8 +56,6 @@ static void avg_pool2d_out_frame(
 
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t xx, yy;
       /* For all output pixels... */
       scalar_t* ptr_output = output_data + k * outputWidth * outputHeight;
       const scalar_t* ptr_input = input_data + k * inputWidth * inputHeight;
@@ -66,8 +63,8 @@ static void avg_pool2d_out_frame(
           std::numeric_limits<typename scalar_t::underlying>::lowest();
       auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
 
-      for (yy = 0; yy < outputHeight; yy++) {
-        for (xx = 0; xx < outputWidth; xx++) {
+      for (int64_t yy = 0; yy < outputHeight; yy++) {
+        for (int64_t xx = 0; xx < outputWidth; xx++) {
           /* Compute the mean of the input image... */
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
@@ -82,8 +79,7 @@ static void avg_pool2d_out_frame(
           int sum_int = 0;
           ptr_output->val_ = 0;
 
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t divide_factor;
+          int64_t divide_factor = 0;
           int64_t size = (hend - hstart) * (wend - wstart);
           if (divisor_override.has_value()) {
             divide_factor = divisor_override.value();
@@ -95,10 +91,8 @@ static void avg_pool2d_out_frame(
             }
           }
 
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t kx, ky;
-          for (ky = hstart; ky < hend; ky++) {
-            for (kx = wstart; kx < wend; kx++)
+          for (int64_t ky = hstart; ky < hend; ky++) {
+            for (int64_t kx = wstart; kx < wend; kx++)
               sum_int += (ptr_input + ky * inputWidth + kx)->val_;
           }
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -185,8 +179,7 @@ Tensor q_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::optional<int64_t> divisor_override) {
   auto [kW, kH] = get_kernel(kernel_size);
   auto [dW, dH] = get_stride(stride, kW, kH);
   auto [padW, padH] = get_padding(padding);
@@ -210,7 +203,7 @@ Tensor q_avg_pool2d(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     // fast path for channel last: qavg_pool_2d_nhwc_stub
     qavg_pool2d_nhwc_stub(
         input.device().type(),
@@ -265,7 +258,7 @@ Tensor qnnpack_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto [kW, kH] = get_kernel(kernel_size);
   auto [dW, dH] = get_stride(stride, kW, kH);
   auto [padW, padH] = get_padding(padding);
@@ -362,7 +355,7 @@ Tensor avg_pool2d_quantized_cpu(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor output;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
@@ -390,5 +383,4 @@ Tensor avg_pool2d_quantized_cpu(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

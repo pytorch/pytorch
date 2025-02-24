@@ -1,4 +1,7 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
+
+# mypy: ignore-errors
+
 import dataclasses
 import json
 import os
@@ -7,7 +10,7 @@ import signal
 import subprocess
 import time
 import uuid
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from core.api import AutoLabels
 from core.types import Label
@@ -19,6 +22,7 @@ from worker.main import (
     WorkerTimerArgs,
     WorkerUnpickler,
 )
+
 
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]
@@ -94,7 +98,7 @@ class _BenchmarkProcess:
 
     @property
     def cmd(self) -> str:
-        cmd: List[str] = []
+        cmd: list[str] = []
         if self._work_order.source_cmd is not None:
             cmd.extend([self._work_order.source_cmd, "&&"])
 

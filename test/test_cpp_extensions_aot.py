@@ -2,23 +2,32 @@
 
 import os
 import re
+import subprocess
+import sys
 import unittest
 from itertools import repeat
+from pathlib import Path
 from typing import get_args, get_origin, Union
 
 import torch
 import torch.backends.cudnn
-
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    shell,
+    skipIfTorchDynamo,
+    TEST_XPU,
+    xfailIfTorchDynamo,
+)
+
 
 try:
     import pytest
 
     HAS_PYTEST = True
-except ImportError as e:
+except ImportError:
     HAS_PYTEST = False
 
 # TODO: Rewrite these tests so that they can be collected via pytest without
@@ -55,6 +64,10 @@ class TestCppExtensionAOT(common.TestCase):
         y = torch.randn(4, 4)
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
+        # test pybind support torch.dtype cast.
+        self.assertEqual(
+            str(torch.float32), str(cpp_extension.get_math_type(torch.half))
+        )
 
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
@@ -100,6 +113,22 @@ class TestCppExtensionAOT(common.TestCase):
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+    @unittest.skipIf(not TEST_XPU, "XPU not found")
+    @unittest.skipIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
+    def test_sycl_extension(self):
+        import torch_test_cpp_extension.sycl as sycl_extension
+
+        x = torch.zeros(100, device="xpu", dtype=torch.float32)
+        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+        z = sycl_extension.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
@@ -156,6 +185,48 @@ class TestCppExtensionAOT(common.TestCase):
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
+    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
+    @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
+    def test_python_agnostic(self):
+        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
+        # cpp_extensions/python_agnostic_extension folder, where the extension and
+        # setup calls specify py_limited_api to `True`. To approximate that the
+        # extension is indeed python agnostic, we test
+        #   a. The extension wheel name contains "cp39-abi3", meaning the wheel
+        # should be runnable for any Python 3 version after and including 3.9
+        #   b. The produced shared library does not have libtorch_python.so as a
+        # dependency from the output of "ldd _C.so"
+        #   c. The .so does not need any python related symbols. We approximate
+        # this by running "nm -u _C.so" and grepping that nothing starts with "Py"
+
+        dist_root = os.path.join("cpp_extensions", "python_agnostic_extension", "dist")
+        matches = list(Path(dist_root).glob("*.whl"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        whl_file = matches[0]
+        self.assertRegex(str(whl_file), r".*python_agnostic-0\.0-cp39-abi3-.*\.whl")
+
+        build_root = os.path.join(
+            "cpp_extensions", "python_agnostic_extension", "build"
+        )
+        matches = list(Path(build_root).glob("**/*.so"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        so_file = matches[0]
+        lddtree = subprocess.check_output(["ldd", so_file]).decode("utf-8")
+        self.assertFalse("torch_python" in lddtree)
+
+        missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
+        self.assertFalse("Py" in missing_symbols)
+
+        # finally, clean up the folder
+        cmd = [sys.executable, "setup.py", "clean"]
+        return_code = shell(
+            cmd,
+            cwd=os.path.join("cpp_extensions", "python_agnostic_extension"),
+            env=os.environ.copy(),
+        )
+        if return_code != 0:
+            return return_code
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
@@ -177,7 +248,7 @@ class TestPybindTypeCasters(common.TestCase):
         Our Pybind functions have a signature of the form `() -> return_type`.
         """
         # Imports needed for the `eval` below.
-        from typing import List, Tuple  # noqa: F401
+        from typing import List, Tuple  # noqa: F401, UP035
 
         return eval(re.search("-> (.*)\n", func.__doc__).group(1))
 
@@ -257,9 +328,9 @@ class TestPybindTypeCasters(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
     def test_unregistered(self):
-        a = torch.arange(0, 10, device="cpu")
+        torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
-            b = torch.arange(0, 10, device="maia")
+            torch.arange(0, 10, device="maia")
 
     @skipIfTorchDynamo("dynamo cannot model maia device")
     def test_zeros(self):
@@ -282,7 +353,7 @@ class TestMAIATensor(common.TestCase):
         b = torch.empty(5, 5, device="maia")
         self.assertEqual(maia_extension.get_test_int(), 0)
 
-        c = a + b
+        a + b
         self.assertEqual(maia_extension.get_test_int(), 1)
 
     def test_conv_backend_override(self):
@@ -311,7 +382,7 @@ class TestRNGExtension(common.TestCase):
     def setUp(self):
         super().setUp()
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 

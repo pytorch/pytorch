@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:

@@ -5,10 +5,13 @@
 # - ninja -j1 -v -n torch_python | sed -e 's/-O[23]/-g/g' -e 's#\[[0-9]\+\/[0-9]\+\] \+##' |sh
 # - Copy libs from build/lib to torch/lib folder
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any
+
 
 PYTORCH_ROOTDIR = Path(__file__).resolve().parent.parent
 TORCH_DIR = PYTORCH_ROOTDIR / "torch"
@@ -17,7 +20,7 @@ BUILD_DIR = PYTORCH_ROOTDIR / "build"
 BUILD_LIB_DIR = BUILD_DIR / "lib"
 
 
-def check_output(args: List[str], cwd: Optional[str] = None) -> str:
+def check_output(args: list[str], cwd: str | None = None) -> str:
     return subprocess.check_output(args, cwd=cwd).decode("utf-8")
 
 
@@ -63,7 +66,7 @@ def is_devel_setup() -> bool:
     return output.strip() == str(TORCH_DIR / "__init__.py")
 
 
-def create_build_plan() -> List[Tuple[str, str]]:
+def create_build_plan() -> list[tuple[str, str]]:
     output = check_output(
         ["ninja", "-j1", "-v", "-n", "torch_python"], cwd=str(BUILD_DIR)
     )
@@ -75,8 +78,14 @@ def create_build_plan() -> List[Tuple[str, str]]:
         if line.startswith(": &&") and line.endswith("&& :"):
             line = line[4:-4]
         line = line.replace("-O2", "-g").replace("-O3", "-g")
-        name = line.split("-o ", 1)[1].split(" ")[0]
-        rc.append((name, line))
+        # Build Metal shaders with debug infomation
+        if "xcrun metal " in line and "-frecord-sources" not in line:
+            line += " -frecord-sources -gline-tables-only"
+        try:
+            name = line.split("-o ", 1)[1].split(" ")[0]
+            rc.append((name, line))
+        except IndexError:
+            print(f"Skipping {line} as it does not specify output file")
     return rc
 
 
@@ -104,7 +113,7 @@ def main() -> None:
         print("More than 100 items needs to be rebuild, run `ninja torch_python` first")
         sys.exit(-1)
     for idx, (name, cmd) in enumerate(build_plan):
-        print(f"[{idx + 1 } / {len(build_plan)}] Building {name}")
+        print(f"[{idx + 1} / {len(build_plan)}] Building {name}")
         if args.verbose:
             print(cmd)
         subprocess.check_call(["sh", "-c", cmd], cwd=BUILD_DIR)

@@ -3,11 +3,11 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
-import torch
-import torch.distributed.rpc as rpc
-
 from metrics.MetricsLogger import MetricsLogger
 from utils import sparse_rpc_format_to_tensor, sparse_tensor_to_rpc_format
+
+import torch
+import torch.distributed.rpc as rpc
 
 
 class ParameterServerBase(ABC):

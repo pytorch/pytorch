@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -11,14 +12,13 @@ import json
 import os
 import signal
 import socket
-from string import Template
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
+from string import Template
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
-
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
     SimpleElasticAgent,
@@ -31,9 +31,14 @@ from torch.distributed.elastic.agent.server.health_check_server import (
     HealthCheckServer,
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import PContext, start_processes, LogsSpecs
+from torch.distributed.elastic.multiprocessing import (
+    LogsSpecs,
+    PContext,
+    start_processes,
+)
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+
 
 if TYPE_CHECKING:
     from torch.distributed.elastic.events.api import EventMetadataValue
@@ -50,6 +55,7 @@ __all__ = [
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+
 
 class LocalElasticAgent(SimpleElasticAgent):
     """An implementation of :py:class:`torchelastic.agent.server.ElasticAgent` that handles host-local workers.
@@ -157,8 +163,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._logs_specs = logs_specs
         self._health_check_server: Optional[HealthCheckServer] = None
 
-
-    def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
+    def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
         watchdog_enabled = os.getenv(enable_watchdog_env_name)
         watchdog_file_env_name = TORCHELASTIC_TIMER_FILE
@@ -168,8 +173,10 @@ class LocalElasticAgent(SimpleElasticAgent):
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             if not envs:
-                logger.warning("Empty envs variables, using empty run_id for FileTimerServer")
-                run_id = ''
+                logger.warning(
+                    "Empty envs variables, using empty run_id for FileTimerServer"
+                )
+                run_id = ""
             else:
                 run_id = envs[0]["TORCHELASTIC_RUN_ID"]
             self._worker_watchdog = timer.FileTimerServer(
@@ -177,11 +184,15 @@ class LocalElasticAgent(SimpleElasticAgent):
                 run_id=run_id,
                 max_interval=0.1,
                 daemon=True,
-                log_event=self._log_watchdog_event)
+                log_event=self._log_watchdog_event,
+            )
             self._worker_watchdog.start()
             logger.info("FileTimerServer started")
         else:
-            logger.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
+            logger.info(
+                "Environment variable '%s' not found. Do not start FileTimerServer.",
+                enable_watchdog_env_name,
+            )
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
             for worker_env in envs.values():
@@ -201,23 +212,31 @@ class LocalElasticAgent(SimpleElasticAgent):
                 healthcheck_port,
             )
             if self._worker_watchdog is None:
-                logger.info("FileTimerServer doesn't exist, using current time as dummy callback")
+                logger.info(
+                    "FileTimerServer doesn't exist, using current time as dummy callback"
+                )
                 alive_callback = LocalElasticAgent._get_current_time_secs
             else:
                 alive_callback = self._worker_watchdog.get_last_progress_time
 
-            self._health_check_server = create_healthcheck_server(
-                alive_callback=alive_callback,
-                port=int(healthcheck_port),
-                timeout=60,
-            )
-            self._health_check_server.start()
+            try:
+                healthcheck_port_as_int = int(healthcheck_port)
+                self._health_check_server = create_healthcheck_server(
+                    alive_callback=alive_callback,
+                    port=healthcheck_port_as_int,
+                    timeout=60,
+                )
+                self._health_check_server.start()
+            except ValueError:
+                logger.info(
+                    "Invalid healthcheck port value: '%s', expecting integer. Not starting healthcheck server.",
+                    healthcheck_port,
+                )
         else:
             logger.info(
                 "Environment variable '%s' not found. Do not start health check.",
                 healthcheck_port_env_name,
             )
-
 
     def _get_fq_hostname(self) -> str:
         return socket.getfqdn(socket.gethostname())
@@ -229,9 +248,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     ) -> None:
         wg = self._worker_group
         spec = wg.spec
-        md = {
-            "watchdog_event": name
-        }
+        md = {"watchdog_event": name}
         if request is not None:
             md["worker_pid"] = str(request.worker_pid)
             md["scope_id"] = request.scope_id
@@ -239,7 +256,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             md["signal"] = str(request.signal)
         md_str = json.dumps(md)
         state = "RUNNING"
-        metadata: Dict[str, EventMetadataValue] = {
+        metadata: dict[str, EventMetadataValue] = {
             "run_id": spec.rdzv_handler.get_run_id(),
             "global_rank": None,
             "group_rank": wg.group_rank,
@@ -263,24 +280,28 @@ class LocalElasticAgent(SimpleElasticAgent):
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
-    def _stop_workers(self, worker_group: WorkerGroup, is_restart: bool = False) -> None:
+    def _stop_workers(
+        self, worker_group: WorkerGroup, is_restart: bool = False
+    ) -> None:
         self._shutdown(is_restart=is_restart)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         spec = worker_group.spec
         store = worker_group.store
         assert store is not None
-        master_addr, master_port = super()._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
-        use_agent_store = spec.rdzv_handler.get_backend() == "static"
+        use_agent_store: bool = spec.rdzv_handler.use_agent_store
+        logger.info("use_agent_store: %s", use_agent_store)
 
-        args: Dict[int, Tuple] = {}
-        envs: Dict[int, Dict[str, str]] = {}
-        log_line_prefixes: Optional[Dict[int, str]] = {} if self._log_line_prefix_template else None
+        args: dict[int, tuple] = {}
+        envs: dict[int, dict[str, str]] = {}
+        log_line_prefixes: Optional[dict[int, str]] = (
+            {} if self._log_line_prefix_template else None
+        )
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -293,8 +314,8 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "WORLD_SIZE": str(worker.world_size),
                 "GROUP_WORLD_SIZE": str(worker_group.group_world_size),
                 "ROLE_WORLD_SIZE": str(worker.role_world_size),
-                "MASTER_ADDR": master_addr,
-                "MASTER_PORT": str(master_port),
+                "MASTER_ADDR": worker_group.master_addr,
+                "MASTER_PORT": str(worker_group.master_port),
                 "TORCHELASTIC_RESTART_COUNT": str(restart_count),
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
@@ -306,12 +327,14 @@ class LocalElasticAgent(SimpleElasticAgent):
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
 
-
             if self._log_line_prefix_template:
-                log_line_prefix = Template(self._log_line_prefix_template).safe_substitute(
+                log_line_prefix = Template(
+                    self._log_line_prefix_template
+                ).safe_substitute(
                     role_name=spec.role,
                     rank=worker.global_rank,
-                    local_rank=local_rank,)
+                    local_rank=local_rank,
+                )
                 log_line_prefixes[local_rank] = log_line_prefix
 
             envs[local_rank] = worker_env
@@ -336,7 +359,9 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False
+    ) -> None:
         if self._worker_watchdog is not None:
             self._worker_watchdog.stop()
             self._worker_watchdog = None
@@ -360,7 +385,9 @@ class LocalElasticAgent(SimpleElasticAgent):
             logger.error(
                 "[%s] worker pids do not match process_context pids."
                 " Expected: %s, actual: %s",
-                role, worker_pids, pc_pids
+                role,
+                worker_pids,
+                pc_pids,
             )
             return RunResult(state=WorkerState.UNKNOWN)
 

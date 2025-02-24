@@ -120,11 +120,11 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 
 void Interpreter::process(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  INTERPRETER_DISPATCH(key_, SINGLE_ARG(processImpl(op, stack)));
+  INTERPRETER_DISPATCH(key_, SINGLE_ARG(processImpl(op, stack)))
 }
 
 void Interpreter::sendToNextInterpreter(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
-  INTERPRETER_DISPATCH(key_, SINGLE_ARG(sendToNextInterpreterImpl(op, stack, grad_special_case)));
+  INTERPRETER_DISPATCH(key_, SINGLE_ARG(sendToNextInterpreterImpl(op, stack, grad_special_case)))
 }
 
 } // namespace at::functorch

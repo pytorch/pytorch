@@ -7,8 +7,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 template <typename T>
 inline T unpackIntegral(PyObject* obj, const char* type) {
@@ -80,6 +79,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       *(at::BFloat16*)data =
           at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
       break;
+    // TODO(#146647): simplify below with macros
     case at::kFloat8_e5m2:
       *(at::Float8_e5m2*)data =
           at::convert<at::Float8_e5m2, double>(THPUtils_unpackDouble(obj));
@@ -96,8 +96,12 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       *(at::Float8_e4m3fnuz*)data =
           at::convert<at::Float8_e4m3fnuz, double>(THPUtils_unpackDouble(obj));
       break;
+    case at::kFloat8_e8m0fnu:
+      *(at::Float8_e8m0fnu*)data =
+          at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
+      break;
     default:
-      throw std::runtime_error("invalid type");
+      throw std::runtime_error("store_scalar: invalid type");
   }
 }
 
@@ -138,10 +142,13 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
       return PyComplex_FromCComplex(
           *reinterpret_cast<Py_complex*>((c10::complex<double>*)data));
     case at::kBool:
-      return PyBool_FromLong(*(bool*)data);
+      // Don't use bool*, since it may take out-of-range byte as bool.
+      // Instead, we cast explicitly to avoid ASAN error.
+      return PyBool_FromLong(static_cast<bool>(*(uint8_t*)data));
     case at::kBFloat16:
       return PyFloat_FromDouble(
           at::convert<double, at::BFloat16>(*(at::BFloat16*)data));
+    // TODO(#146647): simplify below with macros
     case at::kFloat8_e5m2:
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e5m2>(*(at::Float8_e5m2*)data));
@@ -154,10 +161,12 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
     case at::kFloat8_e4m3fnuz:
       return PyFloat_FromDouble(at::convert<double, at::Float8_e4m3fnuz>(
           *(at::Float8_e4m3fnuz*)data));
+    case at::kFloat8_e8m0fnu:
+      return PyFloat_FromDouble(
+          at::convert<double, at::Float8_e8m0fnu>(*(at::Float8_e8m0fnu*)data));
     default:
-      throw std::runtime_error("invalid type");
+      throw std::runtime_error("load_scalar: invalid type");
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

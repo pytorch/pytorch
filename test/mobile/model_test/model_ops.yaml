@@ -30,6 +30,7 @@ root_operators:
   aten::__range_length: 106
   aten::__rshift__.int: 2
   aten::__xor__.bool: 16
+  aten::_aminmax: 18
   aten::_convolution: 27
   aten::_convolution.deprecated: 3
   aten::_infer_size: 9

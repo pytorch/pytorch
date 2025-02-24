@@ -1,8 +1,12 @@
 import os
 import sys
-
 from typing import Optional
 
+
+# [@compile_ignored: debug] Fails hard instead of graph breaking on guard on data dependent errors.
+no_data_dependent_graph_break = (
+    os.environ.get("TORCHDYNAMO_NO_DATA_DEPENDENT_GRAPH_BREAK", "0") == "1"
+)
 # [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
@@ -52,6 +56,14 @@ extended_debug_create_symbol = os.environ.get(
 # [@compile_ignored: debug]
 extended_debug_cpp = os.environ.get("TORCHDYNAMO_EXTENDED_DEBUG_CPP", "") != ""
 
+# Give extended debug information (line of code) when a torch function
+# is called during export.  This is useful for showing progress and detecting
+# where export might be stuck. Currently only works for strict=False.
+# [@compile_ignored: debug]
+extended_debug_current_loc = (
+    os.environ.get("TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC", "0") == "1"
+)
+
 # [@compile_ignored: debug] Show a warning for every specialization
 print_specializations = False
 
@@ -71,6 +83,16 @@ validate_shape_env_version_key = False
 # irrelevant.)
 symbol_guard_limit_before_specialize: Optional[int] = None
 
+# This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
+use_duck_shape = True
+
+# Controls the registration of torch.nonzero() on the meta device.
+# When True, nonzero returns a tensor with shape (self.numel(), self.dim())
+# assuming all elements are none-zero.
+# Default is False to prevent unintended registration. Set to True to enable.
+meta_nonzero_assume_all_nonzero = False
+
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

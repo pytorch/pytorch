@@ -2,6 +2,8 @@
 
 #include <Python.h>
 
+#include <torch/csrc/dynamo/framelocals_mapping.h>
+
 #ifdef __cplusplus
 
 #include <torch/csrc/dynamo/utils.h>
@@ -12,10 +14,22 @@ namespace py = pybind11;
 
 extern "C" {
 
+#else
+
+#include <stdbool.h>
+
 #endif
 
-// Flag to just run a frame normally
-#define SKIP_CODE ((void*)0x1)
+enum FrameAction {
+  DEFAULT, // look through the cache, compile if not found
+  SKIP, // eager
+  RUN_ONLY, // look through the cache, run eager if not found
+};
+
+typedef struct FrameExecStrategy {
+  enum FrameAction cur_action; // action to take for current frame
+  enum FrameAction recursive_action; // action to take for recursive frames
+} FrameExecStrategy;
 
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
@@ -34,14 +48,21 @@ typedef struct CacheEntry CacheEntry;
 #ifdef __cplusplus
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
+  // A pointer to the orig_code object to prevent race conditions in invalidate
+  // function.
+  PyCodeObject* orig_code;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
+  // Actions to apply to all frames with this code object
+  FrameExecStrategy strategy{DEFAULT, DEFAULT};
 
+  ExtraState(PyCodeObject* orig_code_arg);
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry);
+  void move_to_back(CacheEntry* cache_entry);
+  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
 } ExtraState;
 
 #else
@@ -65,6 +86,19 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state);
 // return
 //  - extra_state->frame_state: Borrowed.
 FrameState* extract_frame_state(ExtraState* extra_state);
+
+// Returns the FrameExecStrategy stored in extra_state.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
+
+// Set the FrameExecStrategy to be done to all frames with code object
+// corresponding to this extra_state. Ownership contract
+// - extra_state: Borrowed
+void extra_state_set_exec_strategy(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy);
 
 // Ownership contract
 // args
@@ -96,8 +130,7 @@ void destroy_extra_state(void* obj);
 // return
 //  - there is no return, but the extra_state is stolen, so it becomes
 //  set_extra_state responsibility to clean it up. It will be deleted during
-//  the reset_code/skip, when the set_extra_state is called with
-//  NULL/SKIP_CODE.
+//  the reset_code, when the set_extra_state is called with NULL.
 
 // Invariant - Dont set the extra state for the extra state that is already on
 // the code object. Otherwise, we will first free up the old extra state
@@ -121,13 +154,16 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 // Ownership contract
 // args
 //  - extra_state: Borrowed
-//  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
-PyObject* lookup(
+//   - Py_None or PyObject: Trace id of the compiled code.
+void lookup(
     ExtraState* extra_state,
-    PyObject* f_locals,
-    const PyObject* backend);
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

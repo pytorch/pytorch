@@ -8,15 +8,16 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import functools
+import os
 import signal
 import unittest
 import uuid
 from multiprocessing.pool import ThreadPool
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import call, patch
 
 import torch.distributed as dist
-
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic.agent.server.api import (
     _get_fq_hostname,
@@ -126,13 +127,15 @@ class TestAgent(SimpleElasticAgent):
         self.stop_workers_call_count = 0
         self.start_workers_call_count = 0
 
-    def _stop_workers(self, worker_group: WorkerGroup) -> None:
+    def _stop_workers(
+        self, worker_group: WorkerGroup, is_restart: bool = False
+    ) -> None:
         # workers are fake, nothing to stop; just clear the rdzv info
         worker_group.group_rank = None
         worker_group.group_world_size = None
         self.stop_workers_call_count += 1
 
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         # crate fake workers; make worker id equal to global rank
         ids = {}
         for worker in worker_group.workers:
@@ -168,7 +171,11 @@ class SimpleElasticAgentTest(unittest.TestCase):
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
-        endpoint = f"127.0.0.1:{port}"
+        if local_addr is None:
+            endpoint = f"127.0.0.1:{port}"
+        else:
+            endpoint = f"{local_addr}:{port}"
+
         rdzv_params = RendezvousParameters(
             backend="static",
             endpoint=endpoint,
@@ -296,7 +303,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         return calls
 
     def test_rendezvous(self):
-        spec = self._get_worker_spec(max_restarts=1)
+        hostname = _get_fq_hostname()
+        spec = self._get_worker_spec(max_restarts=1, local_addr=hostname)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
@@ -305,10 +313,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(1, worker_group.group_world_size)
         self.assertEqual(0, worker_group.group_rank)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertEqual(_get_fq_hostname(), master_addr)
-        self.assertTrue(master_port > 0)
+        self.assertEqual(hostname, worker_group.master_addr)
+        self.assertTrue(worker_group.master_port > 0)
 
         rank_set = {w.global_rank for w in worker_group.workers}
         for w in worker_group.workers:
@@ -324,28 +330,25 @@ class SimpleElasticAgentTest(unittest.TestCase):
             self.assertSetEqual(set(range(w.world_size)), rank_set)
 
     def test_rendezvous_default_master_addr(self):
-        spec = self._get_worker_spec(max_restarts=1)
+        hostname = _get_fq_hostname()
+        spec = self._get_worker_spec(max_restarts=1, local_addr=hostname)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertEqual(_get_fq_hostname(), master_addr)
-        self.assertGreater(master_port, 0)
+        self.assertEqual(_get_fq_hostname(), worker_group.master_addr)
+        self.assertGreater(worker_group.master_port, 0)
 
     def test_rendezvous_master_addr_with_local_addr(self):
-        spec_local_addr = "1.2.3.4"
+        spec_local_addr = "127.0.0.1"
         spec = self._get_worker_spec(max_restarts=1, local_addr=spec_local_addr)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertNotEqual(_get_fq_hostname(), master_addr)
-        self.assertEqual(spec_local_addr, master_addr)
-        self.assertGreater(master_port, 0)
+        self.assertNotEqual(_get_fq_hostname(), worker_group.master_addr)
+        self.assertEqual(spec_local_addr, worker_group.master_addr)
+        self.assertGreater(worker_group.master_port, 0)
 
     def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)
@@ -474,6 +477,29 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(1, mock_monitor_workers.call_count)
         self.assertEqual(spec.max_restarts, agent._remaining_restarts)
 
+    def get_worker_assigned(self, store, role_infos_len, info) -> list[Worker]:
+        i, role_info = info
+        spec = self._get_worker_spec(
+            max_restarts=3,
+            monitor_interval=0.1,
+            role=role_info.role,
+            local_world_size=role_info.local_world_size,
+        )
+        agent = TestAgent(spec)
+        workers = agent._assign_worker_ranks(
+            store, role_info.rank, role_infos_len, spec
+        )
+        return [
+            (
+                w.local_rank,
+                w.role_rank,
+                w.global_rank,
+                w.world_size,
+                w.role_world_size,
+            )
+            for w in workers
+        ]
+
     def test_assign_worker_ranks(self):
         role_infos = [
             _RoleInstanceInfo("parameter_server", 0, 4),
@@ -484,28 +510,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         ]
         store = dist.HashStore()
 
-        def f(info) -> List[Worker]:
-            i, role_info = info
-            spec = self._get_worker_spec(
-                max_restarts=3,
-                monitor_interval=0.1,
-                role=role_info.role,
-                local_world_size=role_info.local_world_size,
-            )
-            agent = TestAgent(spec)
-            workers = agent._assign_worker_ranks(
-                store, role_info.rank, len(role_infos), spec
-            )
-            return [
-                (
-                    w.local_rank,
-                    w.role_rank,
-                    w.global_rank,
-                    w.world_size,
-                    w.role_world_size,
-                )
-                for w in workers
-            ]
+        f = functools.partial(self.get_worker_assigned, store, len(role_infos))
 
         with ThreadPool(len(role_infos)) as pool:
             out = pool.map(f, enumerate(role_infos))
@@ -540,6 +545,59 @@ class SimpleElasticAgentTest(unittest.TestCase):
                 ],
             ],
         )
+
+    def test_assign_worker_ranks_indentical(self):
+        os.environ["TORCH_ELASTIC_WORKER_IDENTICAL"] = "1"
+        role_infos = [
+            _RoleInstanceInfo("trainer", 0, 4),
+            _RoleInstanceInfo("trainer", 1, 4),
+            _RoleInstanceInfo("trainer", 2, 4),
+            _RoleInstanceInfo("trainer", 3, 4),
+            _RoleInstanceInfo("trainer", 4, 4),
+        ]
+        store = dist.HashStore()
+
+        f = functools.partial(self.get_worker_assigned, store, len(role_infos))
+
+        with ThreadPool(len(role_infos)) as pool:
+            out = pool.map(f, enumerate(role_infos))
+
+        self.assertListEqual(
+            out,
+            [
+                [
+                    (0, 0, 0, 20, 20),
+                    (1, 1, 1, 20, 20),
+                    (2, 2, 2, 20, 20),
+                    (3, 3, 3, 20, 20),
+                ],
+                [
+                    (0, 4, 4, 20, 20),
+                    (1, 5, 5, 20, 20),
+                    (2, 6, 6, 20, 20),
+                    (3, 7, 7, 20, 20),
+                ],
+                [
+                    (0, 8, 8, 20, 20),
+                    (1, 9, 9, 20, 20),
+                    (2, 10, 10, 20, 20),
+                    (3, 11, 11, 20, 20),
+                ],
+                [
+                    (0, 12, 12, 20, 20),
+                    (1, 13, 13, 20, 20),
+                    (2, 14, 14, 20, 20),
+                    (3, 15, 15, 20, 20),
+                ],
+                [
+                    (0, 16, 16, 20, 20),
+                    (1, 17, 17, 20, 20),
+                    (2, 18, 18, 20, 20),
+                    (3, 19, 19, 20, 20),
+                ],
+            ],
+        )
+        os.environ["TORCH_ELASTIC_WORKER_IDENTICAL"] = "0"
 
     def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)

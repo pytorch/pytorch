@@ -74,7 +74,7 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
   // Ubuntu-22+ if `libnvrtc.so` is not found on the system, which strictly
   // speaking is not necessary for usecases below See
   // https://github.com/pytorch/pytorch/issues/97041
-  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+  [[maybe_unused]] static auto cudnn_cnn_infer_handler = [] {
     void* handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
     char* err = dlerror();
     if (!handle) {
@@ -90,11 +90,13 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
   auto strides = t.strides();
   bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
       memory_format == at::MemoryFormat::ChannelsLast3d;
+
+  std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides[0], channels_last);
+      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
-               .setStrides(strides.size(), strides.data())
+               .setStrides(strides_copy.size(), strides_copy.data())
                .setId(id)
                .setAlignment(alignment)
                .setDataType(dataType)

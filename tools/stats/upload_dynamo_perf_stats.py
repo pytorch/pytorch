@@ -1,29 +1,37 @@
+from __future__ import annotations
+
 import argparse
 import csv
+import hashlib
+import json
 import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any
 
-from tools.stats.upload_stats_lib import download_s3_artifacts, unzip, upload_to_rockset
+from tools.stats.upload_stats_lib import (
+    download_s3_artifacts,
+    unzip,
+    upload_to_dynamodb,
+)
 
 
 ARTIFACTS = [
     "test-reports",
 ]
 ARTIFACT_REGEX = re.compile(
-    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
+    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.-]+)_(?P<job>\d+).zip"
 )
 
 
-def upload_dynamo_perf_stats_to_rockset(
+def get_perf_stats(
     repo: str,
     workflow_run_id: int,
     workflow_run_attempt: int,
     head_branch: str,
     match_filename: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     match_filename_regex = re.compile(match_filename)
     perf_stats = []
     with TemporaryDirectory() as temp_dir:
@@ -78,9 +86,22 @@ def upload_dynamo_perf_stats_to_rockset(
     return perf_stats
 
 
+def generate_partition_key(repo: str, doc: dict[str, Any]) -> str:
+    """
+    Generate an unique partition key for the document on DynamoDB
+    """
+    workflow_id = doc["workflow_id"]
+    job_id = doc["job_id"]
+    test_name = doc["test_name"]
+    filename = doc["filename"]
+
+    hash_content = hashlib.md5(json.dumps(doc).encode("utf-8")).hexdigest()
+    return f"{repo}/{workflow_id}/{job_id}/{test_name}/{filename}/{hash_content}"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upload dynamo perf stats from S3 to Rockset"
+        description="Upload dynamo perf stats from S3 to DynamoDB"
     )
     parser.add_argument(
         "--workflow-run-id",
@@ -107,16 +128,10 @@ if __name__ == "__main__":
         help="head branch of the workflow",
     )
     parser.add_argument(
-        "--rockset-collection",
+        "--dynamodb-table",
         type=str,
         required=True,
-        help="the name of the Rockset collection to store the stats",
-    )
-    parser.add_argument(
-        "--rockset-workspace",
-        type=str,
-        default="commons",
-        help="the name of the Rockset workspace to store the stats",
+        help="the name of the DynamoDB table to store the stats",
     )
     parser.add_argument(
         "--match-filename",
@@ -125,15 +140,16 @@ if __name__ == "__main__":
         help="the regex to filter the list of CSV files containing the records to upload",
     )
     args = parser.parse_args()
-    perf_stats = upload_dynamo_perf_stats_to_rockset(
+    perf_stats = get_perf_stats(
         args.repo,
         args.workflow_run_id,
         args.workflow_run_attempt,
         args.head_branch,
         args.match_filename,
     )
-    upload_to_rockset(
-        collection=args.rockset_collection,
+    upload_to_dynamodb(
+        dynamodb_table=args.dynamodb_table,
+        repo=args.repo,
         docs=perf_stats,
-        workspace=args.rockset_workspace,
+        generate_partition_key=generate_partition_key,
     )

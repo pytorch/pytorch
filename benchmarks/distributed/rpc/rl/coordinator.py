@@ -1,12 +1,12 @@
 import time
 
 import numpy as np
+from agent import AgentBase
+from observer import ObserverBase
 
 import torch
 import torch.distributed.rpc as rpc
 
-from agent import AgentBase
-from observer import ObserverBase
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
@@ -72,7 +72,6 @@ class CoordinatorBase:
             print(f"Episode {ep} - ", end="")
 
             n_steps = episode_steps
-            agent_start_time = time.time()
 
             futs = []
             for ob_rref in self.ob_rrefs:

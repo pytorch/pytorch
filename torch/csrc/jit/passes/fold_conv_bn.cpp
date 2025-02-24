@@ -19,8 +19,7 @@
 #include <stack>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
     const ConvBNParameters& p) {
@@ -105,7 +104,7 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", std::move(optional_tensor_type), true);
-      auto optional_tensor = c10::optional<at::Tensor>();
+      auto optional_tensor = std::optional<at::Tensor>();
       module.setattr("bias", std::move(optional_tensor));
       replaceConvBiasWithGetAttr(module);
     }
@@ -407,5 +406,4 @@ graph(%self, %input, %conv, %batchnorm):
   return m;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

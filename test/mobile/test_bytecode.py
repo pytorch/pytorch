@@ -20,6 +20,7 @@ from torch.jit.mobile import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 pytorch_test_dir = Path(__file__).resolve().parents[1]
 
 # script_module_v4.ptl and script_module_v5.ptl source code
@@ -330,7 +331,6 @@ class testVariousModelVersions(TestCase):
             script_module_v4_buffer = _backport_for_mobile_to_buffer(
                 script_module_v5_path, maximum_checked_in_model_version - 1
             )
-            buf = io.StringIO()
 
             # Check version of the model v4 from backport
             bytesio = io.BytesIO(script_module_v4_buffer)
@@ -362,7 +362,7 @@ class testVariousModelVersions(TestCase):
         sample_input = torch.tensor([1])
 
         script_module = torch.jit.script(MyTestModule())
-        script_module_result = script_module(sample_input)
+        script_module(sample_input)
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)

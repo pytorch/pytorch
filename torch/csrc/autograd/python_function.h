@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -10,10 +11,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace torch::jit {
@@ -36,19 +36,19 @@ struct PyNode : public Node {
 
   variable_list apply(variable_list&& inputs) override;
   variable_list defer_to_dynamo(
-      variable_list&& inputs,
-      std::optional<PyObject*> compiler);
+      const variable_list& inputs,
+      const std::optional<PyObject*>& compiler);
 
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
 
+  bool is_aot_backward() const override;
+
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
-
-  bool compiled_autograd_should_lift() const;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
@@ -95,7 +95,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 struct THPFunction {
   PyObject_HEAD
 
-      PyObject* needs_input_grad;
+  PyObject* needs_input_grad;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were
@@ -151,9 +151,9 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject* module);
-extern PyTypeObject THPFunctionType;
-extern PyObject* THPFunctionClass;
-extern PyObject* THPGradientEdgeClass;
+TORCH_PYTHON_API extern PyTypeObject THPFunctionType;
+TORCH_PYTHON_API extern PyObject* THPFunctionClass;
+TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

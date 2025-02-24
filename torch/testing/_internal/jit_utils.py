@@ -39,7 +39,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -176,7 +176,7 @@ class JitTestCase(JitCommonTestCase):
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
 
-        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        fusion_groups : dict[torch._C.Block, list[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
         self.assertTrue(len(fusion_groups) == 1, f'got {graph}')
         (graph, fusion_nodes) = next(iter(fusion_groups.items()))
@@ -230,7 +230,7 @@ class JitTestCase(JitCommonTestCase):
                 # and it's easier to just work with a fresh copy each time.
                 buffer_copy = buffer.getvalue()
 
-                code_files, debug_files = extract_files(buffer)
+                code_files, _debug_files = extract_files(buffer)
 
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
@@ -247,7 +247,7 @@ class JitTestCase(JitCommonTestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            code_files_2, debug_files_2 = extract_files(saved_module_buffer_2)
+            code_files_2, _debug_files_2 = extract_files(saved_module_buffer_2)
 
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
@@ -385,7 +385,7 @@ class JitTestCase(JitCommonTestCase):
             if not frame:
                 raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars: Dict[str, Any] = {}
+        defined_vars: dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
@@ -407,7 +407,7 @@ class JitTestCase(JitCommonTestCase):
             with self.assertRaisesRegex(exception, regex):
                 if isinstance(script, str):
                     frame = self.get_frame_vars(frames_up)
-                    the_locals: Dict[str, Any] = {}
+                    the_locals: dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -471,7 +471,7 @@ class JitTestCase(JitCommonTestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals: Dict[str, Any] = {}
+                    the_locals: dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -503,9 +503,9 @@ class JitTestCase(JitCommonTestCase):
                 if capture_output:
                     with self.capture_stdout() as script_stdout:
                         script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout() as opt_script_stdout:
+                    with self.capture_stdout():
                         opt_script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout() as _python_stdout:
+                    with self.capture_stdout():
                         python_outputs = python_fn(*inputs)
                     if not IS_WINDOWS:
                         self.assertExpected(script_stdout[0], subname='stdout')
@@ -740,7 +740,7 @@ def attrs_with_prefix(module, prefix):
 def warmup_backward(f, *args):
     profiling_count = 3
     results = []
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)
@@ -770,7 +770,7 @@ def _get_py3_code(code, fn_name):
         return fn
 
 class TensorExprTestOptions:
-    def __init__(self):
+    def __init__(self) -> None:
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
 
@@ -796,7 +796,7 @@ class TensorExprTestOptions:
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
 def clone_inputs(args):
-    inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+    inputs: list[Union[torch.Tensor, list[torch.Tensor]]] = []
 
     for arg in args:
         if isinstance(arg, torch.Tensor):
@@ -810,7 +810,7 @@ def clone_inputs(args):
 
 def get_traced_sample_variant_pairs(device, dtype, op):
     # tuples of (variant, sample)
-    outputs: List[Tuple[Any, Any]] = []
+    outputs: list[tuple[Any, Any]] = []
 
     samples = op.sample_inputs(device, dtype)
 

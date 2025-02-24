@@ -2,12 +2,13 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 from torch.distributed.pipelining import pipeline, SplitPoint
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 d_hid = 16
 n_layers = 8
-batch_size = 4
+microbatch_size = 4
 
 
 class MLPModule(torch.nn.Module):
@@ -34,10 +35,9 @@ class TransformerLike(torch.nn.Module):
 
 
 class TransformerTests(TestCase):
-    def test_ir(self):
-        transformer = TransformerLike()
-        print("Original model:\n", transformer)
-        x = torch.randn(batch_size, d_hid)
+    def test_ir(self, device):
+        transformer = TransformerLike().to(device)
+        x = torch.randn(microbatch_size, d_hid, device=device)
 
         # Split into 2 stages
         num_stages = 2
@@ -45,7 +45,6 @@ class TransformerTests(TestCase):
 
         pipe = pipeline(
             transformer,
-            1,
             (x,),
             split_spec=split_spec,
         )
@@ -59,20 +58,22 @@ class TransformerTests(TestCase):
         layers = []
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
-            print(f"\nStage {stage_idx}: \n", stage_mod)
             layers += get_layers(stage_mod)
 
         # Check layer completeness
         orig_layers = get_layers(transformer)
         assert sorted(layers) == sorted(orig_layers), f"{layers} != {orig_layers}"
-        print("Layers matched! ", layers)
+        print("Layers matched!")
 
         # Check equivalence
         ref = transformer(x)
         out = pipe(x)[0]
         torch.testing.assert_close(out, ref)
-        print(f"\nEquivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+        print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
+
+devices = ["cpu", "cuda", "hpu", "xpu"]
+instantiate_device_type_tests(TransformerTests, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

@@ -2,19 +2,20 @@
 
 import io
 
+
 try:
     from . import test_export, testing
 except ImportError:
-    import test_export
-    import testing
+    import test_export  # @manual=fbcode//caffe2/test:test_export-library
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 from torch.export import export, load, save
-from torch.export._trace import _export
+
 
 test_classes = {}
 
 
-def mocked_serder_export(*args, **kwargs):
+def mocked_serder_export_strict(*args, **kwargs):
     ep = export(*args, **kwargs)
     buffer = io.BytesIO()
     save(ep, buffer)
@@ -23,8 +24,11 @@ def mocked_serder_export(*args, **kwargs):
     return loaded_ep
 
 
-def mocked_serder_export_pre_dispatch(*args, **kwargs):
-    ep = _export(*args, **kwargs, pre_dispatch=True)
+def mocked_serder_export_non_strict(*args, **kwargs):
+    if "strict" in kwargs:
+        ep = export(*args, **kwargs)
+    else:
+        ep = export(*args, **kwargs, strict=False)
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
@@ -32,36 +36,28 @@ def mocked_serder_export_pre_dispatch(*args, **kwargs):
     return loaded_ep
 
 
-def make_dynamic_cls(cls):
-    suffix = "_serdes"
-    suffix_pre_dispatch = "_serdes_pre_dispatch"
-
-    cls_prefix = "SerDesExport"
-    cls_prefix_pre_dispatch = "SerDesExportPreDispatch"
-
-    test_class = testing.make_test_cls_with_mocked_export(
-        cls,
-        cls_prefix,
-        suffix,
-        mocked_serder_export,
-        xfail_prop="_expected_failure_serdes",
-    )
-
-    test_class_pre_dispatch = testing.make_test_cls_with_mocked_export(
-        cls,
-        cls_prefix_pre_dispatch,
-        suffix_pre_dispatch,
-        mocked_serder_export_pre_dispatch,
-        xfail_prop="_expected_failure_serdes_pre_dispatch",
-    )
+def make_dynamic_cls(cls, strict):
+    if strict:
+        test_class = testing.make_test_cls_with_mocked_export(
+            cls,
+            "SerDesExport",
+            test_export.SERDES_SUFFIX,
+            mocked_serder_export_strict,
+            xfail_prop="_expected_failure_serdes",
+        )
+    else:
+        test_class = testing.make_test_cls_with_mocked_export(
+            cls,
+            "SerDesExportNonStrict",
+            test_export.SERDES_NON_STRICT_SUFFIX,
+            mocked_serder_export_non_strict,
+            xfail_prop="_expected_failure_serdes_non_strict",
+        )
 
     test_classes[test_class.__name__] = test_class
-    test_classes[test_class_pre_dispatch.__name__] = test_class_pre_dispatch
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
-    globals()[test_class_pre_dispatch.__name__] = test_class_pre_dispatch
     test_class.__module__ = __name__
-    test_class_pre_dispatch.__module__ = __name__
 
 
 tests = [
@@ -69,7 +65,8 @@ tests = [
     test_export.TestExport,
 ]
 for test in tests:
-    make_dynamic_cls(test)
+    make_dynamic_cls(test, True)
+    make_dynamic_cls(test, False)
 del test
 
 if __name__ == "__main__":

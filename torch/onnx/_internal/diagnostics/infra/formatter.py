@@ -4,10 +4,9 @@ import dataclasses
 import json
 import re
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Union
 
 from torch._logging import LazyString
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import sarif
 
 
@@ -35,7 +34,6 @@ def lazy_format_exception(exception: Exception) -> LazyString:
     )
 
 
-@_beartype.beartype
 def snake_case_to_camel_case(s: str) -> str:
     splits = s.split("_")
     if len(splits) <= 1:
@@ -43,20 +41,17 @@ def snake_case_to_camel_case(s: str) -> str:
     return "".join([splits[0], *map(str.capitalize, splits[1:])])
 
 
-@_beartype.beartype
 def camel_case_to_snake_case(s: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", s).lower()
 
 
-@_beartype.beartype
 def kebab_case_to_snake_case(s: str) -> str:
     return s.replace("-", "_")
 
 
-@_beartype.beartype
 def _convert_key(
-    object: Union[Dict[str, Any], Any], convert: Callable[[str], str]
-) -> Union[Dict[str, Any], Any]:
+    object: dict[str, Any] | Any, convert: Callable[[str], str]
+) -> dict[str, Any] | Any:
     """Convert and update keys in a dictionary with "convert".
 
     Any value that is a dictionary will be recursively updated.
@@ -69,14 +64,14 @@ def _convert_key(
     Returns:
         The updated object.
     """
-    if not isinstance(object, Dict):
+    if not isinstance(object, dict):
         return object
     new_dict = {}
     for k, v in object.items():
         new_k = convert(k)
-        if isinstance(v, Dict):
+        if isinstance(v, dict):
             new_v = _convert_key(v, convert)
-        elif isinstance(v, List):
+        elif isinstance(v, list):
             new_v = [_convert_key(elem, convert) for elem in v]
         else:
             new_v = v
@@ -92,19 +87,16 @@ def _convert_key(
     return new_dict
 
 
-@_beartype.beartype
-def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str:
+def sarif_to_json(attr_cls_obj: _SarifClass, indent: str | None = " ") -> str:
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))
 
 
-@_beartype.beartype
 def format_argument(obj: Any) -> str:
     return f"{type(obj)}"
 
 
-@_beartype.beartype
 def display_name(fn: Callable) -> str:
     if hasattr(fn, "__qualname__"):
         return fn.__qualname__

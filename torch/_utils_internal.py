@@ -1,14 +1,31 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    import shutil
+
+    if not shutil.which("strobeclient"):
+        log.info(
+            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
+        )
+    else:
+        log.info("Strobelight profiler is enabled via environment variable")
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -62,12 +79,26 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
         )
 
 
-# Meta only, act as nop otherwise.
-def compile_time_strobelight_meta(phase_name):
-    def compile_time_strobelight_meta_inner(function):
+# NB!  This treats "skip" kwarg specially!!
+def compile_time_strobelight_meta(
+    phase_name: str,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def compile_time_strobelight_meta_inner(
+        function: Callable[_P, _T],
+    ) -> Callable[_P, _T]:
         @functools.wraps(function)
-        def wrapper_function(*args, **kwargs):
-            return function(*args, **kwargs)
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
+                kwargs["skip"] = skip + 1
+
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
 
         return wrapper_function
 
@@ -87,7 +118,7 @@ def compile_time_strobelight_meta(phase_name):
 #
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
-def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
@@ -107,16 +138,38 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_trace_structured_event(*args, **kwargs) -> None:
+    pass
+
+
+def log_cache_bypass(*args, **kwargs) -> None:
+    pass
+
+
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
 
-def export_api_rollout_check() -> bool:
+def check_if_torch_exportable():
     return False
 
 
-def justknobs_check(name: str) -> bool:
+def export_training_ir_rollout_check() -> bool:
+    return True
+
+
+def log_torch_jit_trace_exportability(
+    api: str,
+    type_of_export: str,
+    export_outcome: str,
+    result: str,
+):
+    _, _, _, _ = api, type_of_export, export_outcome, result
+    return
+
+
+def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
@@ -139,7 +192,7 @@ def justknobs_check(name: str) -> bool:
     fork safe and you will break anyone who forks the process and then
     hits JK again.
     """
-    return True
+    return default
 
 
 def justknobs_getval_int(name: str) -> int:
@@ -147,6 +200,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)
@@ -176,6 +233,10 @@ def max_clock_rate():
             return 1100
 
 
+def get_mast_job_name_version() -> Optional[tuple[str, int]]:
+    return None
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
@@ -191,6 +252,21 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
-    pass
+    return None
+
+
+def log_chromium_event_internal(
+    event: dict[str, Any],
+    stack: list[str],
+    logger_uuid: str,
+    start_time_ns: int,
+):
+    return None
+
+
+def record_chromium_event_internal(
+    event: dict[str, Any],
+):
+    return None

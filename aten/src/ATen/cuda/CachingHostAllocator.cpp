@@ -98,14 +98,15 @@ struct CUDACachingHostAllocatorImpl
             pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
-      free(ptr);
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
     }
   }
 
   void record_stream(
-      c10::optional<std::vector<EventPool::Event>>& events,
+      std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
     event->record(stream);
@@ -123,6 +124,11 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
+  bool pinned_use_background_threads() override {
+    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+        pinned_use_background_threads();
+  }
+
   EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
@@ -131,8 +137,8 @@ struct CUDACachingHostAllocatorImpl
 
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
-        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            pinned_max_register_threads());
+        static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_max_register_threads()));
     return pool;
   }
 
@@ -152,6 +158,7 @@ struct CUDACachingHostAllocatorImpl
     uintptr_t alignedStart =
         (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
     for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
   }
@@ -161,7 +168,7 @@ struct CUDACachingHostAllocatorImpl
         cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
 
     // If host and device pointer don't match, give a warning and exit
-    void* devptr;
+    void* devptr = nullptr;
     AT_CUDA_CHECK(cudaHostGetDevicePointer(&devptr, (void*)ptr, 0));
     TORCH_CHECK(
         (void*)devptr == (void*)ptr,
@@ -175,7 +182,8 @@ struct CUDACachingHostAllocatorImpl
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
     // can minimize the cost for the cuda global lock.
-    *ptr = malloc(roundSize);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    *ptr = std::malloc(roundSize);
 
     // Parallelize the mapping/registering of pages to reduce wall time
     size_t pageSize = (1 << 12); // 4kB pages

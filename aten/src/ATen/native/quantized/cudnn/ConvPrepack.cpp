@@ -7,27 +7,21 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
-#include <array>
-#include <vector>
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
+#include <utility>
 
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias,
+        std::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -68,7 +62,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
       kSpatialDim,
       "D convolution.");
   TORCH_CHECK(!transpose, "cudNN quantized conv prepack expects transpose = false")
-  const int num_unpadded_output_channels = weight.size(0);
+  const auto num_unpadded_output_channels = weight.size(0);
   const auto qtype = weight.qscheme();
   if (bias.has_value()) {
     TORCH_CHECK(bias.value().dim() == 1, "bias should be a vector (1D Tensor)");
@@ -86,8 +80,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   // currently, limit padding support to groups=1 (ungrouped conv)
   // TODO: implement this for groups > 1
   auto num_input_channels = weight.size(1);
-  int8_t num_output_slices2pad = (4 - num_unpadded_output_channels % 4) % 4;
-  int8_t num_input_slices2pad = (4 - num_input_channels % 4) % 4;
+  auto num_output_slices2pad = (4 - num_unpadded_output_channels % 4) % 4;
+  auto num_input_slices2pad = (4 - num_input_channels % 4) % 4;
   if (num_output_slices2pad != 0 || num_input_slices2pad != 0) {
     // the second argument is an initializer list of padded values. there are 2 values for each dimension.
     // refer to https://pytorch.org/docs/stable/generated/torch.nn.functional.pad.html for more details
@@ -99,7 +93,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
 
   auto ret_ptr = c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
           weight.to(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think. make it more general?
-          bias,
+          std::move(bias),
           stride,
           padding,
           output_padding,
@@ -116,7 +110,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
     2>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias_in,
+        std::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -124,8 +118,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
         int64_t groups,
         bool transpose);
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 template <int kSpatialDim = 2>
@@ -133,14 +127,14 @@ class QConvPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
+    for ([[maybe_unused]] const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
@@ -150,7 +144,7 @@ class QConvPackWeightInt8Cudnn final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -167,20 +161,20 @@ class QConv1dPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
     const torch::List<int64_t> output_padding({0});
-    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+    return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/false);
   }
 
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -199,7 +193,7 @@ class QConv1dPackWeightInt8Cudnn final {
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
 
     return PackedConvWeightCudnn<2>::prepack(
-        weight, bias, stride, padding, output_padding, dilation, groups,
+        weight, std::move(bias), stride, padding, output_padding, dilation, groups,
         transpose);
   }
 };
@@ -212,8 +206,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

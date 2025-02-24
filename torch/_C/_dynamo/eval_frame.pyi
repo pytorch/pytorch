@@ -1,26 +1,57 @@
+import enum
 import types
-from typing import List, NewType, Optional
+from typing import Literal, overload
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
-# We implement our own FrameType-like type for Python >= 3.11. So it's not actually an alias of FrameType, but still
-# exposes the same interface.
-_PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
-
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
+def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
+def get_eval_frame_callback() -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
 def unsupported(obj1: object, obj2: object) -> object: ...
 def skip_code(code: types.CodeType) -> None: ...
 def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
+def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
-    def check_fn(self, *args, **kwargs): ...
+    def check_fn(self, *args: object, **kwargs: object) -> bool: ...
     code: types.CodeType
-    next: Optional[_CacheEntry]
+    next: _CacheEntry | None
 
 class _ExtraState:
-    def invalidate(self, cache_entry: _CacheEntry): ...
+    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[_CacheEntry]: ...
+class _FrameAction(enum.Enum):
+    DEFAULT: Literal[0]
+    SKIP: Literal[1]
+    RUN_ONLY: Literal[2]
 
-py_opcode_caches: List[int]
+class _FrameExecStrategy:
+    cur_action: _FrameAction
+    recursive_action: _FrameAction
+
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(
+        self, cur_action: _FrameAction, recursive_action: _FrameAction
+    ) -> None: ...
+
+# This is an object that encapsulates the Python FrameType, and exposes
+# properties Dynamo cares about for a frame.
+class _PyInterpreterFrame:
+    f_code: types.CodeType
+    f_locals: dict[str, object]
+    f_globals: dict[str, object]
+    f_builtins: dict[str, object]
+    f_lasti: int
+    f_lineo: int
+    f_back: types.FrameType
+    # A tuple containing cell objects captured by this frame.
+    closure: tuple[types.CellType]
+
+def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
+
+py_opcode_caches: list[int]
+
+def code_framelocals_names(code: types.CodeType) -> tuple[str]: ...

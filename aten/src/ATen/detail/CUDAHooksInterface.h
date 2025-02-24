@@ -6,16 +6,13 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-// Forward-declares at::Generator and at::cuda::NVRTC
+// NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
-struct Generator;
+
+// Forward-declares at::cuda::NVRTC
 namespace cuda {
 struct NVRTC;
 } // namespace cuda
-} // namespace at
-
-// NB: Class must live in `at` due to limitations of Registry.h.
-namespace at {
 
 #ifdef _MSC_VER
 constexpr const char* CUDA_HELP =
@@ -62,22 +59,34 @@ constexpr const char* CUDA_HELP =
 struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() override = default;
+  ~CUDAHooksInterface() override = default;
 
   // Initialize THCState and, transitively, the CUDA state
-  virtual void initCUDA() const {
+  void init() const override {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual const Generator& getDefaultCUDAGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  const Generator& getDefaultGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false,
+        "Cannot get default CUDA generator without ATen_cuda library. ",
+        CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Generator getNewGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false,
+        "Cannot get CUDA generator without ATen_cuda library. ",
+        CUDA_HELP);
+  }
+
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const {
+  bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
@@ -113,7 +122,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -121,7 +130,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
@@ -185,6 +194,12 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   virtual int getNumGPUs() const {
     return 0;
   }
+
+#ifdef USE_ROCM
+  virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
+    TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
+  }
+#endif
 
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);

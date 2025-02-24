@@ -147,7 +147,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  if constexpr (std::is_const<scalar_t>::value) {
+  if constexpr (std::is_const_v<scalar_t>) {
     return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
   } else {
     return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
@@ -525,10 +525,10 @@ static Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target * weight_).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target * weight_).sum() / (input.numel() / n_classes);
+          return -(input * target * weight_).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target * weight_).sum();
@@ -540,10 +540,10 @@ static Tensor cross_entropy_loss_prob_target(
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target).sum() / (input.numel() / n_classes);
+          return -(input * target).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target).sum();
@@ -624,7 +624,7 @@ static Tensor cross_entropy_loss_label_smoothing(
 Tensor cross_entropy_loss_symint(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight,
+    const std::optional<Tensor>& weight,
     int64_t reduction,
     c10::SymInt ignore_index,
     double label_smoothing) {
@@ -658,36 +658,19 @@ Tensor cross_entropy_loss_symint(
   return ret;
 }
 
-Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
+Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
   Tensor total_weight = at::empty({0}, self.options());
-  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight_opt, reduction, ignore_index));
 }
 
-Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
-}
-
-// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
-static Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
+Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight_opt, reduction, std::move(ignore_index)));
 }
 
 Tensor nll_loss_nd_symint(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight,
+    const std::optional<Tensor>& weight,
     int64_t reduction,
     c10::SymInt ignore_index) {
   if (self.dim() < 1) {

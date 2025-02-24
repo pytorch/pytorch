@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -37,36 +36,38 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <chrono>
 #include <mutex>
+#include <optional>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
-    "If this flag is set to false TorchScript will be using the legacy/original executor");
+    "If this flag is set to false TorchScript will be using the legacy/original executor")
 
 C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
-    "Disables warning.warn prints in TorchScript graph");
+    "Disables warning.warn prints in TorchScript graph")
 
 C10_DEFINE_bool(
     torch_jit_static_then_dynamic,
     false,
-    "fuse on two static compilations then 10 dynamic");
+    "fuse on two static compilations then 10 dynamic")
 
 C10_DEFINE_bool(
     torch_jit_always_dynamic,
     false,
-    "fuse on 12 dynamic compilations");
+    "fuse on 12 dynamic compilations")
 
 C10_DEFINE_bool(
     torch_jit_release_profiling_graph_after_optimization,
     false,
-    "After getOptimizedPlanFor release the optimization record for reduction of memory in inference. This is aggressive memory saving, and please be cautious!");
+    "After getOptimizedPlanFor release the optimization record for reduction of memory in inference. This is aggressive memory saving, and please be cautious!")
 
 C10_DEFINE_int32(
     torch_jit_release_profiling_graph_delay_in_seconds,
     60,
-    "How long to wait before releasing the profiling graph after optimizaiton is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.");
+    "How long to wait before releasing the profiling graph after optimizaiton is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.")
 
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
@@ -74,11 +75,11 @@ constexpr size_t kDefaultBailoutDepth = 20;
 C10_DEFINE_int64(
     torch_jit_num_profiled_runs,
     kDefaultNumProfiledRuns,
-    "Number of profiling runs");
+    "Number of profiling runs")
 C10_DEFINE_int64(
     torch_jit_bailout_depth,
     kDefaultBailoutDepth,
-    "Number of re-specializations");
+    "Number of re-specializations")
 
 namespace torch::jit {
 
@@ -118,11 +119,11 @@ static FusionStrategy getInitialStrategy() {
 }
 
 // defer initial value so that we can load in gflags
-static c10::optional<FusionStrategy> fusion_strategy = c10::nullopt;
+static std::optional<FusionStrategy> fusion_strategy = std::nullopt;
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  if (fusion_strategy == c10::nullopt) {
+  if (fusion_strategy == std::nullopt) {
     fusion_strategy = getInitialStrategy();
   }
   return *fusion_strategy;
@@ -130,7 +131,7 @@ FusionStrategy getFusionStrategy() {
 
 FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  if (fusion_strategy == c10::nullopt) {
+  if (fusion_strategy == std::nullopt) {
     fusion_strategy = getInitialStrategy();
   }
   FusionStrategy old_strategy = *fusion_strategy;
@@ -198,7 +199,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 // differentiable graph. Autodiff will inspect these properties and prune
 // off gradients that aren't required
 // `requires_grad` properties from `dnode->outputs()` will also be transferred
-static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
+[[maybe_unused]] static void setRequiresGradOnDiffGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   for (size_t i = 0; i < dnode->inputs().size(); i++) {
     if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
@@ -320,7 +321,7 @@ static bool guardDifferentiableGraph(Node* dnode) {
     // we inline the differentiable graph as a fallback
     // ideally we would set this up for re-profiling
     UpdateDifferentiableGraphRequiresGrad(
-        dnode->g(attr::Subgraph), c10::nullopt);
+        dnode->g(attr::Subgraph), std::nullopt);
     SubgraphUtils::unmergeSubgraph(dnode);
     return false;
   }
@@ -613,7 +614,7 @@ size_t ProfilingGraphExecutorImpl::getInstantiatedBailoutDepth() {
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
   // TODO: instantiate simple executor when getProfilingMode() is false
@@ -700,7 +701,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
 
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to

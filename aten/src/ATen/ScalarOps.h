@@ -18,8 +18,8 @@ namespace at::detail {
 Tensor& scalar_fill(Tensor& self, const Scalar& value);
 TORCH_API Tensor scalar_tensor_static(
     const Scalar& s,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Device> device_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Device> device_opt);
 } // namespace at::detail
 
 // This is in the c10 namespace because we use ADL to find the functions in it.

@@ -14,8 +14,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NB: This code duplicates existing logic at torch/autograd/__init__.py and
 // torch._C._EngineBase.run_backward in torch/csrc/autograd/python_engine.cpp
@@ -165,7 +164,7 @@ static variable_list run_backward(
 void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
@@ -186,7 +185,7 @@ variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     bool allow_unused) {
   variable_list gradients = _make_grads(outputs, grad_outputs);
@@ -215,5 +214,4 @@ void exit_dual_level(uint64_t level) {
 
 } // namespace forward_ad
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -1,8 +1,9 @@
 import os
 import sys
 
-import torch.cuda
 from setuptools import setup
+
+import torch.cuda
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.utils.cpp_extension import (
     BuildExtension,
@@ -10,7 +11,9 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
     CUDAExtension,
     ROCM_HOME,
+    SyclExtension,
 )
+
 
 if sys.platform == "win32":
     vc_version = os.getenv("VCToolsVersion", "")
@@ -67,6 +70,15 @@ if torch.backends.mps.is_available():
     )
     ext_modules.append(extension)
 
+if torch.xpu.is_available() and USE_NINJA:
+    extension = SyclExtension(
+        "torch_test_cpp_extension.sycl",
+        ["xpu_extension.sycl"],
+        extra_compile_args={"cxx": CXX_FLAGS, "sycl": ["-O2"]},
+    )
+    ext_modules.append(extension)
+
+
 # todo(mkozuki): Figure out the root cause
 if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
     # malfet: One should not assume that PyTorch re-exports CUDA dependencies
@@ -108,4 +120,9 @@ setup(
     ext_modules=ext_modules,
     include_dirs="self_compiler_include_dirs_test",
     cmdclass={"build_ext": BuildExtension.with_options(use_ninja=USE_NINJA)},
+    entry_points={
+        "torch.backends": [
+            "device_backend = torch_test_cpp_extension:_autoload",
+        ],
+    },
 )

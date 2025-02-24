@@ -1,6 +1,6 @@
+# mypy: allow-untyped-defs
 import sys
 from contextlib import contextmanager
-
 from typing import TYPE_CHECKING
 
 import torch
@@ -64,21 +64,30 @@ class verbose:
         return False
 
 
-def set_flags(_enabled):
-    orig_flags = (torch._C._get_mkldnn_enabled(),)
-    torch._C._set_mkldnn_enabled(_enabled)
+def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None):
+    orig_flags = (
+        torch._C._get_mkldnn_enabled(),
+        torch._C._get_mkldnn_deterministic(),
+        torch._C._get_onednn_allow_tf32(),
+    )
+    if _enabled is not None:
+        torch._C._set_mkldnn_enabled(_enabled)
+    if _deterministic is not None:
+        torch._C._set_mkldnn_deterministic(_deterministic)
+    if _allow_tf32 is not None:
+        torch._C._set_onednn_allow_tf32(_allow_tf32)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False):
+def flags(enabled=False, deterministic=False, allow_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled)
+        orig_flags = set_flags(enabled, deterministic, allow_tf32)
     try:
         yield
     finally:
         with __allow_nonbracketed_mutation():
-            set_flags(orig_flags[0])
+            set_flags(*orig_flags)
 
 
 class MkldnnModule(PropModule):
@@ -86,12 +95,17 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+    deterministic = ContextProp(
+        torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+    )
+    allow_tf32 = ContextProp(
+        torch._C._get_onednn_allow_tf32, torch._C._set_onednn_allow_tf32
+    )
 
 
 if TYPE_CHECKING:
     enabled: ContextProp
+    deterministic: ContextProp
+    allow_tf32: ContextProp
 
-
-# Cool stuff from torch/backends/cudnn/__init__.py and
-# https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)

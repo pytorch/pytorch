@@ -233,7 +233,7 @@ void nll_loss2d_forward_out_cuda_template(
     Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   // See Note [Writing Nondeterministic Operations]
@@ -356,7 +356,7 @@ void nll_loss2d_backward_out_cuda_template(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
@@ -467,7 +467,7 @@ void nll_loss2d_backward_out_cuda_template(
 std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cuda(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     Tensor& output,
@@ -480,7 +480,7 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cuda(
 std::tuple<Tensor, Tensor> nll_loss2d_forward_cuda(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   auto output = at::empty({0}, self.options());
@@ -494,7 +494,7 @@ Tensor& nll_loss2d_backward_out_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight,
@@ -515,7 +515,7 @@ Tensor nll_loss2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {

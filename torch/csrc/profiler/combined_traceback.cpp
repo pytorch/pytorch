@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 namespace torch {
 
@@ -77,7 +78,7 @@ SymbolizedTracebacks symbolize(
   }
   // gather symbol names for C++ frames
   if (!all_cpp_ips.empty()) {
-    r.all_frames = unwind::symbolize(all_cpp_ips);
+    r.all_frames = unwind::symbolize(all_cpp_ips, torch::get_symbolize_mode());
   }
 
   // batch symbolization requests so we dedup frame objects
@@ -90,8 +91,9 @@ SymbolizedTracebacks symbolize(
   for (const auto& e : to_symbolize) {
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
-        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-        cur_python->appendSymbolized(cur_py_frames, r);
+        if (cur_python) {
+          cur_python->appendSymbolized(cur_py_frames, r);
+        }
         cur_py_frames.clear();
       }
       cur_python = e->python_;
@@ -104,8 +106,9 @@ SymbolizedTracebacks symbolize(
     }
   }
   if (!cur_py_frames.empty()) {
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-    cur_python->appendSymbolized(cur_py_frames, r);
+    if (cur_python) {
+      cur_python->appendSymbolized(cur_py_frames, r);
+    }
     cur_py_frames.clear();
   }
   std::vector<std::vector<uint64_t>> python_frame_fragments =

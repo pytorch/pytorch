@@ -8,7 +8,6 @@ import sys
 import warnings
 
 import numpy
-
 import pytest
 
 
@@ -21,6 +20,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 from hypothesis import given, strategies as st
 from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -29,8 +29,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -130,7 +131,7 @@ class TestNonarrayArgs(TestCase):
         tgt = [2, 5, 2, 3, 7, 2, 2]
         assert_equal(out, tgt)
 
-    @xpassIfTorchDynamo  # (reason="TODO implement compress(...)")
+    @xpassIfTorchDynamo_np  # (reason="TODO implement compress(...)")
     def test_compress(self):
         arr = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
         tgt = [[5, 6, 7, 8, 9]]
@@ -145,7 +146,7 @@ class TestNonarrayArgs(TestCase):
 
     def test_cumproduct(self):
         A = [[1, 2, 3], [4, 5, 6]]
-        assert_(np.all(np.cumproduct(A) == np.array([1, 2, 6, 24, 120, 720])))
+        assert_(np.all(np.cumprod(A) == np.array([1, 2, 6, 24, 120, 720])))
 
     def test_diagonal(self):
         a = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
@@ -204,7 +205,7 @@ class TestNonarrayArgs(TestCase):
         s = np.float64(1.0)
         assert_(isinstance(s.round(), (np.float64, np.ndarray)))
 
-    @xpassIfTorchDynamo  # (reason="scalar instances")
+    @xpassIfTorchDynamo_np  # (reason="scalar instances")
     @parametrize(
         "dtype",
         [
@@ -233,14 +234,14 @@ class TestNonarrayArgs(TestCase):
             # pytest.param(
             #    2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
             # ),
-            subtest((2**31 - 1, -1), decorators=[xpassIfTorchDynamo]),
+            subtest((2**31 - 1, -1), decorators=[xpassIfTorchDynamo_np]),
             subtest(
                 (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
-                decorators=[xpassIfTorchDynamo],
+                decorators=[xpassIfTorchDynamo_np],
             ),
             subtest(
                 (2**31 - 1, -math.ceil(math.log10(2**31 - 1))),
-                decorators=[xpassIfTorchDynamo],
+                decorators=[xpassIfTorchDynamo_np],
             ),
         ],
     )
@@ -610,7 +611,7 @@ class TestBoolCmp(TestCase):
             assert_array_equal(np.signbit(self.signd[i:]), self.ed[i:])
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestSeterr(TestCase):
     def test_default(self):
         err = np.geterr()
@@ -700,7 +701,7 @@ class TestFloatExceptions(TestCase):
     @parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
-        ftype = np.obj2sctype(typecode)
+        ftype = np.dtype(typecode).type
         if np.dtype(ftype).kind == "f":
             # Get some extreme values for the type
             fi = np.finfo(ftype)
@@ -803,11 +804,9 @@ class TestTypes(TestCase):
         # these are failing because of the "scalars do not upcast arrays" rule
         # Two first tests (i32 + f32 -> f64, and i64+f32 -> f64) xfail
         # until ufuncs implement the proper type promotion (ufunc loops?)
-        b = np.bool_(0)
-        i8, i16, i32, i64 = np.int8(0), np.int16(0), np.int32(0), np.int64(0)
-        u8 = np.uint8(0)
+        i8, i32, i64 = np.int8(0), np.int32(0), np.int64(0)
         f32, f64 = np.float32(0), np.float64(0)
-        c64, c128 = np.complex64(0), np.complex128(0)
+        c128 = np.complex128(0)
 
         assert_equal(promote_func(i32, f32), np.dtype(np.float64))
         assert_equal(promote_func(i64, f32), np.dtype(np.float64))
@@ -869,7 +868,7 @@ class TestTypes(TestCase):
         # assert_equal(b, [0.0, 1.5])
         # assert_equal(b.dtype, np.dtype('f4'))
 
-    @xpassIfTorchDynamo  # (reason="'Scalars do not upcast arrays' rule")
+    @xpassIfTorchDynamo_np  # (reason="'Scalars do not upcast arrays' rule")
     def test_coercion_2(self):
         def res_type(a, b):
             return np.add(a, b).dtype
@@ -920,17 +919,22 @@ class TestTypes(TestCase):
         # Also test keyword arguments
         assert_(np.can_cast(from_=np.int32, to=np.int64))
 
-    @xpassIfTorchDynamo  # (reason="value-based casting?")
+    @xpassIfTorchDynamo_np  # (reason="value-based casting?")
     def test_can_cast_values(self):
         # gh-5917
-        for dt in np.sctypes["int"] + np.sctypes["uint"]:
+        for dt in [np.int8, np.int16, np.int32, np.int64] + [
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ]:
             ii = np.iinfo(dt)
             assert_(np.can_cast(ii.min, dt))
             assert_(np.can_cast(ii.max, dt))
             assert_(not np.can_cast(ii.min - 1, dt))
             assert_(not np.can_cast(ii.max + 1, dt))
 
-        for dt in np.sctypes["float"]:
+        for dt in [np.float16, np.float32, np.float64, np.longdouble]:
             fi = np.finfo(dt)
             assert_(np.can_cast(fi.min, dt))
             assert_(np.can_cast(fi.max, dt))
@@ -942,7 +946,7 @@ class NIterError(Exception):
 
 
 @skip(reason="NP_VER: fails on CI")
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestFromiter(TestCase):
     def makegen(self):
@@ -968,8 +972,8 @@ class TestFromiter(TestCase):
         expected = np.array(list(self.makegen()))
         a = np.fromiter(self.makegen(), int)
         a20 = np.fromiter(self.makegen(), int, 20)
-        assert_(np.alltrue(a == expected, axis=0))
-        assert_(np.alltrue(a20 == expected[:20], axis=0))
+        assert_(np.all(a == expected, axis=0))
+        assert_(np.all(a20 == expected[:20], axis=0))
 
     def load_data(self, n, eindex):
         # Utility method for the issue 2592 tests.
@@ -1168,7 +1172,7 @@ class TestIndex(TestCase):
         assert_equal(c.dtype, np.dtype("int32"))
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestBinaryRepr(TestCase):
     def test_zero(self):
         assert_equal(np.binary_repr(0), "0")
@@ -1206,7 +1210,7 @@ class TestBinaryRepr(TestCase):
         assert_equal(np.binary_repr(np.int64(-(2**62)), width=64), "11" + "0" * 62)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestBaseRepr(TestCase):
     def test_base3(self):
         assert_equal(np.base_repr(3**5, 3), "100000")
@@ -1419,7 +1423,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="byteorder not supported in torch")
+    @xpassIfTorchDynamo_np  # (reason="byteorder not supported in torch")
     def test_simple_nonnative(self):
         # Test non native double input with scalar min/max.
         # Test native double input with non native double scalar min/max.
@@ -1439,7 +1443,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="clamp not supported for complex")
+    @xpassIfTorchDynamo_np  # (reason="clamp not supported for complex")
     def test_simple_complex(self):
         # Test native complex input with native double scalar min/max.
         # Test native input with complex double scalar min/max.
@@ -1492,12 +1496,12 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    #   @xpassIfTorchDynamo  # (reason="casting not supported")
+    #   @xpassIfTorchDynamo_np  # (reason="casting not supported")
     @parametrize(
         "casting",
         [
             subtest(None, decorators=[xfail]),
-            subtest("unsafe", decorators=[xpassIfTorchDynamo]),
+            subtest("unsafe", decorators=[xpassIfTorchDynamo_np]),
         ],
     )
     def test_simple_int32_inout(self, casting):
@@ -1625,7 +1629,7 @@ class TestClip(TestCase):
         act = self.clip(a, m * np.zeros(a.shape), M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="newbyteorder not supported")
+    @xpassIfTorchDynamo_np  # (reason="newbyteorder not supported")
     def test_type_cast_06(self):
         # Test native with NON native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1636,7 +1640,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a, m_s, M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="newbyteorder not supported")
+    @xpassIfTorchDynamo_np  # (reason="newbyteorder not supported")
     def test_type_cast_07(self):
         # Test NON native with native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1648,7 +1652,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a_s, m, M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="newbyteorder not supported")
+    @xpassIfTorchDynamo_np  # (reason="newbyteorder not supported")
     def test_type_cast_08(self):
         # Test NON native with native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1660,7 +1664,7 @@ class TestClip(TestCase):
         act = a_s.clip(m, M)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="newbyteorder not supported")
+    @xpassIfTorchDynamo_np  # (reason="newbyteorder not supported")
     def test_type_cast_09(self):
         # Test native with NON native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1682,7 +1686,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a, m, M, out=b)
         assert_array_equal(ac, act)
 
-    @xpassIfTorchDynamo  # (reason="newbyteorder not supported")
+    @xpassIfTorchDynamo_np  # (reason="newbyteorder not supported")
     def test_type_cast_11(self):
         # Test non native with native scalar, min/max, out non native
         a = self._generate_non_native_data(self.nr, self.nc)
@@ -2158,7 +2162,6 @@ class TestCreationFuncs(TestCase):
 
     def setUp(self):
         super().setUp()
-        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {
@@ -2533,7 +2536,7 @@ class TestArgwhere(TestCase):
         assert_equal(np.argwhere([4, 0, 2, 1, 3]), [[0], [2], [3], [4]])
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestStringFunction(TestCase):
     def test_set_string_function(self):
         a = np.array([1])
@@ -2897,7 +2900,7 @@ class TestIndices(TestCase):
             assert_(arr.dtype == dtype)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestRequire(TestCase):
     flag_names = [
         "C",
@@ -2964,7 +2967,7 @@ class TestRequire(TestCase):
         assert_raises(ValueError, np.require, a, None, ["C", "F"])
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestBroadcast(TestCase):
     def test_broadcast_in_args(self):
         # gh-5881
@@ -3026,7 +3029,7 @@ class TestBroadcast(TestCase):
     def test_shape_mismatch_error_message(self):
         with assert_raises(
             ValueError,
-            match=r"arg 0 with shape \(1, 3\) and " r"arg 2 with shape \(2,\)",
+            match=r"arg 0 with shape \(1, 3\) and arg 2 with shape \(2,\)",
         ):
             np.broadcast([[1, 2, 3]], [[4], [5]], [6, 7])
 

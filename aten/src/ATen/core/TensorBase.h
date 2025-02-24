@@ -16,7 +16,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/intrusive_ptr.h>
 
 #include <ATen/core/NamedTensor.h>
@@ -88,7 +88,7 @@ class TORCH_API TensorBase {
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
   explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
-      : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
+      : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
  public:
@@ -104,6 +104,7 @@ class TORCH_API TensorBase {
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
+  ~TensorBase() noexcept = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -147,7 +148,7 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
-  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, std::optional<at::MemoryFormat> memory_format=std::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -249,7 +250,7 @@ class TORCH_API TensorBase {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  c10::optional<DimnameList> opt_names() const {
+  std::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -625,7 +626,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
@@ -645,7 +646,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
@@ -712,7 +713,7 @@ class TORCH_API TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -831,9 +832,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename c10::invoke_result_t<T&, TensorBase>>, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename std::invoke_result_t<T&, TensorBase>>, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -953,7 +954,7 @@ TensorBase make_tensor_base(Args&&... args) {
 
 } // namespace detail
 
-static inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
+inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
   return legacyExtractDispatchKey(t.key_set());
 }
 
@@ -1010,7 +1011,7 @@ struct ExclusivelyOwnedTraits<at::TensorBase> : public c10::ExclusivelyOwnedTens
 namespace at {
 
 inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
-    const c10::optional<TensorBase>& opt) {
+    const std::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
     : c10::MaybeOwned<TensorBase>::owned(std::in_place);

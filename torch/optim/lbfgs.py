@@ -1,5 +1,11 @@
+# mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
-from .optimizer import Optimizer
+from torch import Tensor
+
+from .optimizer import Optimizer, ParamsT
+
 
 __all__ = ["LBFGS"]
 
@@ -99,17 +105,17 @@ def _strong_wolfe(
     # exact point satisfying the criteria
     insuf_progress = False
     # find high and low points in bracket
-    low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)
+    low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
     while not done and ls_iter < max_ls:
         # line-search bracket is so small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
+        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:  # type: ignore[possibly-undefined]
             break
 
         # compute new trial value
         t = _cubic_interpolate(
             bracket[0],
             bracket_f[0],
-            bracket_gtd[0],
+            bracket_gtd[0],  # type: ignore[possibly-undefined]
             bracket[1],
             bracket_f[1],
             bracket_gtd[1],
@@ -147,7 +153,7 @@ def _strong_wolfe(
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)
+            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -158,19 +164,19 @@ def _strong_wolfe(
                 # old high becomes new low
                 bracket[high_pos] = bracket[low_pos]
                 bracket_f[high_pos] = bracket_f[low_pos]
-                bracket_g[high_pos] = bracket_g[low_pos]
+                bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
+            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
 
     # return stuff
-    t = bracket[low_pos]
+    t = bracket[low_pos]  # type: ignore[possibly-undefined]
     f_new = bracket_f[low_pos]
-    g_new = bracket_g[low_pos]
+    g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
     return f_new, g_new, t, ls_func_evals
 
 
@@ -195,30 +201,34 @@ class LBFGS(Optimizer):
 
     Args:
         params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float): learning rate (default: 1)
-        max_iter (int): maximal number of iterations per optimization step
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
             (default: 20)
-        max_eval (int): maximal number of function evaluations per optimization
+        max_eval (int, optional): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
-        tolerance_grad (float): termination tolerance on first order optimality
+        tolerance_grad (float, optional): termination tolerance on first order optimality
             (default: 1e-7).
-        tolerance_change (float): termination tolerance on function
+        tolerance_change (float, optional): termination tolerance on function
             value/parameter changes (default: 1e-9).
-        history_size (int): update history size (default: 100).
-        line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
     """
 
     def __init__(
         self,
-        params,
-        lr=1,
-        max_iter=20,
-        max_eval=None,
-        tolerance_grad=1e-7,
-        tolerance_change=1e-9,
-        history_size=100,
-        line_search_fn=None,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 1,
+        max_iter: int = 20,
+        max_eval: Optional[int] = None,
+        tolerance_grad: float = 1e-7,
+        tolerance_change: float = 1e-9,
+        history_size: int = 100,
+        line_search_fn: Optional[str] = None,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
+        if not 0.0 <= lr:
+            raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(
@@ -234,7 +244,7 @@ class LBFGS(Optimizer):
 
         if len(self.param_groups) != 1:
             raise ValueError(
-                "LBFGS doesn't support per-parameter options " "(parameter groups)"
+                "LBFGS doesn't support per-parameter options (parameter groups)"
             )
 
         self._params = self.param_groups[0]["params"]

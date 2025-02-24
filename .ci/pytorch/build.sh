@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -ex -o pipefail
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -44,21 +44,13 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
 # Enable LLVM dependency for TensorExpr testing
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export USE_LLVM=/opt/rocm/llvm
-  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
-else
-  export USE_LLVM=/opt/llvm
-  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
-fi
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
   # To build test_edge_op_registration
@@ -95,7 +87,7 @@ else
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+  if [[ "$ANACONDA_PYTHON_VERSION" = "3.12" || "$ANACONDA_PYTHON_VERSION" = "3.13" ]]; then
     export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
     export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
   fi
@@ -179,13 +171,15 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  export USE_XPU=1
+  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
+  export USE_KINETO=0
+  export TORCH_XPU_ARCH_LIST=pvc
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]; } && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
@@ -198,7 +192,7 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ "$TORCH_CUDA_ARCH_LIST" == *"8.6"* || "$TORCH_CUDA_ARCH_LIST" == *"8.0"* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
   echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
   echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
   export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
@@ -210,10 +204,12 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
-  export LDSHARED="clang --shared"
-  export USE_CUDA=0
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export USE_CUDA=1
+  fi
   export USE_ASAN=1
-  export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
+  export REL_WITH_DEB_INFO=1
+  export UBSAN_FLAGS="-fno-sanitize-recover=all"
   unset USE_LLVM
 fi
 
@@ -225,17 +221,17 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
     export USE_PRECOMPILED_HEADERS=1
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
-  export USE_GLOO_WITH_OPENSSL=ON
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-# Do not change workspace permissions for ROCm CI jobs
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -252,10 +248,9 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e
+  set -e -o pipefail
 
   get_bazel
-  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -283,13 +278,28 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0 release candidate for builds
-        # Which should be backward compatible with Numpy-1.X
-        python -mpip install --pre numpy==2.0.0rc1
+        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+        python -mpip install numpy==2.0.2
       fi
-      WERROR=1 python setup.py bdist_wheel
+
+      WERROR=1 python setup.py clean
+
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        python3 tools/packaging/split_wheel.py bdist_wheel
+      else
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
-      python setup.py bdist_wheel
+      python setup.py clean
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
+        exit 1
+      else
+        python setup.py bdist_wheel
+      fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
@@ -327,10 +337,11 @@ else
     CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -340,10 +351,10 @@ else
     JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -355,7 +366,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -367,8 +378,10 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    MAX_JOBS=$(nproc --ignore=4)
-    export MAX_JOBS
+    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
+      MAX_JOBS=$(nproc --ignore=4)
+      export MAX_JOBS
+    fi
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -385,9 +398,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-# snadampal: skipping it till sccache support added for aarch64
-# https://github.com/pytorch/pytorch/issues/121559
-if [[ "$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+# don't do this for bazel or s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

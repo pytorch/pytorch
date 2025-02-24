@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest
-from typing import Dict
 
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
-
 from torchgen.gen_executorch import (
     ComputeCodegenUnboxedKernels,
     gen_functions_declarations,
@@ -23,6 +23,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
+
 
 TEST_YAML = """
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -345,7 +346,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             valid_tags=set(),
         )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }
@@ -491,7 +492,9 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
             (specialized_kernel_key, self.default_backend_metadata),
         )
 
-        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        result = ComputeCodegenUnboxedKernels(
+            selector, use_aten_lib, add_exception_boundary=False
+        )(entry)
         # Concat used to prevent whitespace stripping
         expected_str = (
             """
@@ -502,12 +505,14 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
+
     }
 ),
 """
@@ -536,7 +541,11 @@ Kernel(
         )
 
         self.assertRaises(
-            Exception, ComputeCodegenUnboxedKernels(selector, use_aten_lib), entry
+            Exception,
+            ComputeCodegenUnboxedKernels(
+                selector, use_aten_lib, add_exception_boundary=False
+            ),
+            entry,
         )
 
     def test_codegen_unboxed_specialized_missing_root_op(self) -> None:
@@ -558,11 +567,14 @@ Kernel(
             (specialized_kernel_key, self.default_backend_metadata),
         )
 
-        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
-        # Concat used to prevent whitespace stripping
-        expected_str = """"""
+        for add_exception_boundary in (True, False):
+            result = ComputeCodegenUnboxedKernels(
+                selector, use_aten_lib, add_exception_boundary
+            )(entry)
+            # Concat used to prevent whitespace stripping
+            expected_str = """"""
 
-        self.assertEqual(expected_str, result)
+            self.assertEqual(expected_str, result)
 
     def test_codegen_unboxed_default(self) -> None:
         """
@@ -579,7 +591,9 @@ Kernel(
         use_aten_lib = False
         entry = (self.native_function_no_kern, self.default_kernel_entry)
 
-        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        result = ComputeCodegenUnboxedKernels(
+            selector, use_aten_lib, add_exception_boundary=False
+        )(entry)
         # Concat used to prevent whitespace stripping
         expected_str = (
             """
@@ -589,17 +603,49 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
+
     }
 ),
 """
         )
 
+        self.assertEqual(expected_str, result)
+
+        result = ComputeCodegenUnboxedKernels(
+            selector, use_aten_lib, add_exception_boundary=True
+        )(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        try {
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+        internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
+
+        *stack[0] = EValue(result_);
+        } catch (const std::exception& ex) {
+          ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
+          context.fail(torch::executor::Error::Internal);
+        }
+    }
+),
+"""
+        )
+        self.maxDiff = None
         self.assertEqual(expected_str, result)
 
     def test_codegen_unboxed_default_kernel_key_selected(self) -> None:
@@ -615,7 +661,9 @@ Kernel(
         use_aten_lib = False
         entry = (self.native_function_no_kern, self.default_kernel_entry)
 
-        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        result = ComputeCodegenUnboxedKernels(
+            selector, use_aten_lib, add_exception_boundary=False
+        )(entry)
         # Concat used to prevent whitespace stripping
         expected_str = (
             """
@@ -625,12 +673,14 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
+
     }
 ),
 """

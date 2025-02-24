@@ -2,13 +2,12 @@
 
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/tensor.h>
+#include <optional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 BackendDevice::BackendDevice()
     : type_(getBackend()->GetDefaultDeviceType()),
@@ -51,40 +50,40 @@ BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
 c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
-  return c10::Device(at::kLazy, device.ordinal());
+  return c10::Device(
+      at::kLazy, static_cast<c10::DeviceIndex>(device.ordinal()));
 }
 
-c10::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
+std::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
   for (auto& tensor : tensors) {
     if (auto lt = TryGetLtcTensor(tensor)) {
       return lt->GetDevice();
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
+std::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
   return GetBackendDevice(at::ITensorListRef(tensors));
 }
 
-c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
+std::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<BackendDevice> GetBackendDevice(
-    const c10::optional<c10::Device>& device) {
+std::optional<BackendDevice> GetBackendDevice(
+    const std::optional<c10::Device>& device) {
   if (device) {
-    return c10::make_optional(atenDeviceToBackendDevice(*device));
+    return atenDeviceToBackendDevice(*device);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<BackendDevice> GetBackendDevice() {
-  return c10::nullopt;
+std::optional<BackendDevice> GetBackendDevice() {
+  return std::nullopt;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -139,10 +139,10 @@ enum class DispatchKey : uint16_t {
   // element we can return for cases when a DispatchKeySet contains no elements.
   // You can think a more semantically accurate definition of DispatchKey is:
   //
-  //    using DispatchKey = optional<RealDispatchKey>
+  //    using DispatchKey = std::optional<RealDispatchKey>
   //
   // and Undefined == nullopt.  We didn't actually represent
-  // it this way because optional<RealDispatchKey> would take two
+  // it this way because std::optional<RealDispatchKey> would take two
   // words, when DispatchKey fits in eight bits.
 
   Undefined = 0,
@@ -353,12 +353,14 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  AutocastMTIA,
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,
   AutocastXLA,
   // AutocastXLA is only being used for TPUs. XLA GPUs continue to use
   // AutocastCUDA.
+  AutocastMPS,
   AutocastCUDA,
   AutocastPrivateUse1,
 

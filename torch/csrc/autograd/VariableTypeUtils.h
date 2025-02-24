@@ -29,8 +29,7 @@
 #endif
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 enum class can_mutate_inplace_result {
   success,
   non_default_backward_view,
@@ -94,7 +93,8 @@ inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
 }
 
 inline void throw_error_out_requires_grad(const char* name) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       name,
       "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");
@@ -166,7 +166,7 @@ struct Flatten : IterArgs<Flatten> {
   void operator()(const at::Tensor& x) {
     out.emplace_back(x);
   }
-  void operator()(const c10::optional<at::Tensor>& x) {
+  void operator()(const std::optional<at::Tensor>& x) {
     if (x.has_value())
       out.emplace_back(x.value());
   }
@@ -217,7 +217,7 @@ inline at::Tensor as_view(
           tensor,
           diff_view_meta->get_backward_view().chain(
               base, tensor, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);
@@ -225,7 +225,7 @@ inline at::Tensor as_view(
       return make_variable_differentiable_view(
           tensor,
           ViewInfo(base, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);
@@ -233,8 +233,8 @@ inline at::Tensor as_view(
   }
 
   // If they cannot be shared, create the required view infos
-  c10::optional<ViewInfo> new_bw_info;
-  c10::optional<ViewInfo> new_fw_info;
+  std::optional<ViewInfo> new_bw_info;
+  std::optional<ViewInfo> new_fw_info;
 
   if (is_bw_differentiable) {
     auto bw_view_func = view_func ? view_func->clone_and_set() : nullptr;
@@ -298,7 +298,7 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    const c10::optional<at::Tensor>& tensor,
+    const std::optional<at::Tensor>& tensor,
     const char* name,
     const char* fn_name = "") {
   if (tensor.has_value()) {
@@ -320,14 +320,14 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const c10::List<std::optional<at::Tensor>>& tensors,
     const char* name,
     const char* fn_name = "") {
   // GradMode check is expensive, so check it only once for TensorLists
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (c10::optional<at::Tensor> tensor : tensors) {
+  for (std::optional<at::Tensor> tensor : tensors) {
     if (tensor.has_value()) {
       check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
@@ -345,11 +345,11 @@ inline std::vector<SavedVariable> make_saved_variable_list(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const c10::List<std::optional<at::Tensor>>& tensors,
     const bool is_output = false) {
   return fmap(
       tensors,
-      [&is_output](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
+      [&is_output](const std::optional<at::Tensor>& tensor) -> SavedVariable {
         if (tensor.has_value()) {
           return SavedVariable{*tensor, is_output /* is output */};
         } else {
@@ -398,7 +398,7 @@ namespace {
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {
  public:
-  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -413,7 +413,7 @@ class WrapperFunctor final : public c10::OperatorKernel {
 
 template <class Return, class... Args>
 Return run_jit_decomposition_with_args_for_jvp(
-    c10::string_view name,
+    std::string_view name,
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
     Args&&... args) {
@@ -438,5 +438,4 @@ Return run_jit_decomposition_with_args_for_jvp(
 
 } // namespace impl
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
+import logging
 import weakref
-
-from typing import Set
+from typing import TYPE_CHECKING
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -9,6 +10,16 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
+
+logger = logging.getLogger(__name__)
+
+
+__all__ = ["ModuleTracker"]
 
 
 class ModuleTracker:
@@ -44,16 +55,17 @@ class ModuleTracker:
 
     """
 
-    parents: Set[str]
+    parents: set[str]
     """
     A Set containing the fqn for each module currently running their forward
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.parents = {"Global"}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
+        self._hooks: list[RemovableHandle] = []
 
     def _maybe_set_engine_callback(self):
         # This assumes no concurrent calls to backward
@@ -90,9 +102,10 @@ class ModuleTracker:
             if is_bw:
                 self._maybe_set_engine_callback()
             if name in self.parents:
-                print(
-                    "The module hierarchy tracking seems to be messed up."
-                    "Please file a bug to PyTorch."
+                logger.info(
+                    "The module hierarchy tracking seems to be broken as this Module was already entered. %s during %s",
+                    name,
+                    "backward" if is_bw else "forward",
                 )
             self.parents.add(name)
 
@@ -102,11 +115,11 @@ class ModuleTracker:
         def fn(*args):
             if name in self.parents:
                 self.parents.remove(name)
-            elif not is_bw:
-                # Due to some input/output not requiring gradients, we cannot enforce
-                # proper nesting in backward
-                raise RuntimeError(
-                    "The Module hierarchy tracking is wrong. Report a bug to PyTorch"
+            else:
+                logger.info(
+                    "The Module hierarchy tracking is confused as we're exiting a Module that was never entered. %s during %s",
+                    name,
+                    "backward" if is_bw else "forward",
                 )
 
         return fn
@@ -118,7 +131,9 @@ class ModuleTracker:
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
-            register_multi_grad_hook(tensors, self._get_pop_fn(name, True))
+            self._hooks.append(
+                register_multi_grad_hook(tensors, self._get_pop_fn(name, True))
+            )
 
     def _fw_post_hook(self, mod, input, output):
         name = self._get_mod_name(mod)
@@ -127,7 +142,9 @@ class ModuleTracker:
         args, _ = tree_flatten(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
-            register_multi_grad_hook(tensors, self._get_append_fn(name, True))
+            self._hooks.append(
+                register_multi_grad_hook(tensors, self._get_append_fn(name, True))
+            )
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
@@ -137,3 +154,6 @@ class ModuleTracker:
     def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()
+        for hook in self._hooks:
+            hook.remove()
+        self._hooks.clear()

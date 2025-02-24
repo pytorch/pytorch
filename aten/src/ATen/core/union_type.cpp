@@ -29,7 +29,7 @@ ListTypePtr ListType::ofOptionalTensors() {
 
 namespace {
 
-c10::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, ArrayRef<TypePtr> from) {
+std::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, ArrayRef<TypePtr> from) {
   std::vector<TypePtr> types;
 
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
@@ -50,7 +50,7 @@ c10::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, Ar
               });
 
   if (types.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   } else if (types.size() == 1) {
     return types[0];
   } else {
@@ -93,12 +93,12 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   if (types->empty()) {
     return;
   }
-  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> c10::optional<TypePtr> {
+  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> std::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
     if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
         || (!t1->isSubtypeOf(*NoneType::get()) && t2->isSubtypeOf(*NoneType::get()))) {
-          return c10::nullopt;
+          return std::nullopt;
     } else {
       return unifyTypes(t1, t2, /*default_to_union=*/false);
     }
@@ -114,7 +114,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   size_t end_idx = types->size()-1;
   for (size_t i = types->size()-1; i > 0; --i) {
     for (size_t j = std::min(i-1, end_idx); ; --j) {
-      c10::optional<TypePtr> unified;
+      std::optional<TypePtr> unified;
       unified = get_supertype((*types)[i], (*types)[j]);
       if (unified) {
         (*types)[j] = *unified;
@@ -186,7 +186,7 @@ OptionalType::OptionalType(const TypePtr& contained)
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    contained_ = UnionType::create({*without_none});
+    contained_ = UnionType::create({std::move(without_none.value())});
   }
   has_free_variables_ = contained_->hasFreeVariables();
 }
@@ -272,13 +272,13 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   return union_type;
 }
 
-c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+std::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   return subtractTypeSetFrom(to_subtract, containedTypes());
 }
 
-c10::optional<TypePtr> UnionType::toOptional() const {
+std::optional<TypePtr> UnionType::toOptional() const {
   if (!canHoldType(*NoneType::get())) {
-      return c10::nullopt;
+      return std::nullopt;
   }
 
   std::vector<TypePtr> copied_types = this->containedTypes().vec();
@@ -286,7 +286,7 @@ c10::optional<TypePtr> UnionType::toOptional() const {
   auto maybe_opt = UnionType::create(std::move(copied_types));
 
   if (maybe_opt->kind() == UnionType::Kind) {
-    return c10::nullopt;
+    return std::nullopt;
   } else {
     return maybe_opt;
   }
@@ -432,7 +432,7 @@ bool UnionType::canHoldType(const Type& type) const {
 bool OptionalType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     auto optional_rhs = union_rhs->toOptional();
-    // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
+    // `**optional_rhs` = `*` to get value of `std::optional<TypePtr>`,
     // then `*` to dereference the pointer
     return optional_rhs && *this == **optional_rhs;
   } else if (auto optional_rhs = rhs.cast<OptionalType>()) {

@@ -1,11 +1,14 @@
-from typing import Dict
+# mypy: allow-untyped-defs
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
+from torch.types import _size
+
 
 __all__ = ["TransformedDistribution"]
 
@@ -43,7 +46,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, transforms, validate_args=None):
         if isinstance(transforms, Transform):
@@ -124,7 +127,7 @@ class TransformedDistribution(Distribution):
         return support
 
     @property
-    def has_rsample(self):
+    def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
     def sample(self, sample_shape=torch.Size()):
@@ -140,7 +143,7 @@ class TransformedDistribution(Distribution):
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters

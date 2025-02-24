@@ -3,14 +3,12 @@ import re
 import unittest
 from copy import deepcopy
 from itertools import product
-from tempfile import NamedTemporaryFile
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -20,6 +18,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._pytree import tree_map
+
 
 if TEST_NUMPY:
     import numpy as np
@@ -203,35 +202,8 @@ class TestLoadStateDict(NNTestCase):
             module_state_dict = module.state_dict()
             self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
 
-        model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
+        model[0][0].register_load_state_dict_pre_hook(hook_fn)
         model.load_state_dict(model.state_dict(), strict=True)
-
-    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
-    @swap([True, False])
-    def test_register_state_dict_pre_hook_backward_compat(self):
-        called = False
-
-        def my_state_dict_pre_hook(*args, **kwargs):
-            nonlocal called
-            called = True
-
-        m = nn.Linear(1, 1)
-        self.assertTrue(hasattr(m, "_state_dict_pre_hooks"))
-        delattr(m, "_state_dict_pre_hooks")
-        # Save and load, ensure we can still call state_dict
-        # without running into issues.
-        with NamedTemporaryFile() as f:
-            # Note that torch.save / torch.load is not recommended
-            # to save / load modules.
-            torch.save(m, f.name)
-            m = torch.load(f.name)
-
-        # Ensure we can run state_dict without issues
-        _ = m.state_dict()
-        self.assertFalse(called)
-        m.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        _ = m.state_dict()
-        self.assertTrue(called)
 
     # fails swapping as LSTM installs weak references on the parameters
     @swap([False])
@@ -251,7 +223,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_custom(self):
         class CustomState(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
                 self.sub = torch.nn.Linear(5, 5)
@@ -292,7 +264,7 @@ class TestLoadStateDict(NNTestCase):
     @parametrize("keep_vars", [True, False])
     def test_load_state_dict_assign_meta(self, keep_vars):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -368,7 +340,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_assign_with_optimizer(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -381,7 +353,7 @@ class TestLoadStateDict(NNTestCase):
         x = torch.randn(4, 3)
         num_iters = 3
 
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()
@@ -399,7 +371,7 @@ class TestLoadStateDict(NNTestCase):
         opt2.load_state_dict(opt_state_dict)
 
         y = x.clone()
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()
@@ -418,7 +390,7 @@ class TestLoadStateDict(NNTestCase):
         # Assigned tensor is allowed to have different properties than initial
         # tensor except for shape
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -454,7 +426,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_with_unexpected_key(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
 
@@ -602,7 +574,7 @@ class TestLoadStateDictSwap(TestCase):
     def test_swap_subclass(self, assign):
         def _create_model(subclass=None):
             m = torch.nn.Linear(2, 3, bias=False)
-            m.register_buffer("buf", torch.randn(2, 3))
+            m.buf = torch.nn.Buffer(torch.randn(2, 3))
             if subclass is not None:
                 m.weight = torch.nn.Parameter(subclass(m.weight))
                 m.buf = subclass(m.buf)

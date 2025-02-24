@@ -1,11 +1,9 @@
+# mypy: allow-untyped-defs
 from functools import partial
-
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
-
 import torch._prims as prims
-
 import torch._prims_common as utils
 import torch._refs as refs
 import torch._refs.linalg as linalg
@@ -17,7 +15,6 @@ from torch._prims_common import (
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
-    NumberType,
     TensorLikeType,
 )
 from torch._prims_common.wrappers import (
@@ -110,13 +107,15 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
+    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
         torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
@@ -284,12 +283,12 @@ def norm(
     else:
         if ord is None:
             ord = 2.0
-        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd
 @out_wrapper("U", "S", "Vh", exact_dtype=True)
-def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+def svd(A: TensorLikeType, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     return prims.svd(A, full_matrices=full_matrices)
 
 

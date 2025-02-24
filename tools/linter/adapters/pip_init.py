@@ -1,6 +1,9 @@
 """
 Initializer script that installs stuff to pip.
 """
+
+from __future__ import annotations
+
 import argparse
 import logging
 import os
@@ -9,10 +12,8 @@ import subprocess
 import sys
 import time
 
-from typing import List
 
-
-def run_command(args: List[str]) -> "subprocess.CompletedProcess[bytes]":
+def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -55,8 +56,10 @@ if __name__ == "__main__":
 
     if uv_available:
         pip_args = ["uv", "pip", "install"]
+    elif sys.executable:
+        pip_args = [sys.executable, "-mpip", "install"]
     else:
-        pip_args = ["pip", "install"]
+        pip_args = ["pip3", "install"]
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.

@@ -10,12 +10,11 @@ import re
 import tempfile
 import threading
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Union
 
 import torch
-
 import torch._dynamo
-
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
@@ -47,10 +46,12 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 
 def safe_schema_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> Any:
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
@@ -63,10 +64,12 @@ def safe_schema_check(
 
 def safe_autograd_registration_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
@@ -82,10 +85,12 @@ def safe_autograd_registration_check(
 
 def safe_fake_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
@@ -96,11 +101,13 @@ def safe_fake_check(
 
 def safe_aot_autograd_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     dynamic: bool,
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> Any:
     # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
     # inputs.
@@ -113,7 +120,20 @@ def safe_aot_autograd_check(
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
     # and assumes `func` does not modify its inputs.
-    return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
+    if rtol and atol:
+        assert_equals_fn = functools.partial(
+            torch.testing.assert_close, rtol=rtol, atol=atol
+        )
+    else:
+        assert_equals_fn = torch.testing.assert_close
+    return aot_autograd_check(
+        func,
+        args,
+        kwargs,
+        dynamic,
+        check_gradients="auto",
+        assert_equals_fn=assert_equals_fn,
+    )
 
 
 def deepcopy_tensors(inputs: Any) -> Any:
@@ -157,10 +177,10 @@ DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
 
 def generate_opcheck_tests(
     testcase: Any,
-    namespaces: List[str],
+    namespaces: list[str],
     failures_dict_path: Optional[str] = None,
-    additional_decorators: Dict[str, Callable] = None,
-    test_utils: List[str] = DEFAULT_TEST_UTILS,
+    additional_decorators: Optional[dict[str, Callable]] = None,
+    test_utils: list[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -363,7 +383,7 @@ def validate_failures_dict_formatting(failures_dict_path: str) -> None:
 
 
 def validate_failures_dict_structure(
-    failure_dict: "FailuresDict", test_utils: List[str], testcase: Any
+    failure_dict: "FailuresDict", test_utils: list[str], testcase: Any
 ) -> None:
     """Validates the failures dict.
 
@@ -394,9 +414,7 @@ def validate_failures_dict_structure(
 
     """
     failure_dict = failure_dict.data
-    qualnames = list(failure_dict.keys())
     for test_to_option in failure_dict.values():
-        test_names = list(test_to_option.keys())
         for test_name, test_dict in test_to_option.items():
             if set(test_dict.keys()) != set({"comment", "status"}):
                 raise RuntimeError(
@@ -451,7 +469,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def __init__(
         self,
-        namespaces: List[str],
+        namespaces: list[str],
         test_util_name: str,
         test_util: Callable,
         failures_dict: "FailuresDict",
@@ -622,13 +640,20 @@ def should_print_better_repro() -> None:
 
 def opcheck(
     op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
-) -> Dict[str, str]:
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
+) -> dict[str, str]:
     """See torch.library.opcheck for docstring"""
+
+    if (rtol is None) ^ (atol is None):
+        raise ValueError(
+            "opcheck(op, ...): if you specify one of rtol/atol, you must specify both"
+        )
 
     if kwargs is None:
         kwargs = {}
@@ -657,7 +682,7 @@ def opcheck(
     for test_util in test_utils:
         tester = ALL_TEST_UTILS[test_util]
         try:
-            tester(op, args, kwargs)
+            tester(op, args, kwargs, rtol=rtol, atol=atol)
             results_dict[test_util] = "SUCCESS"
         except Exception as ex:
             if raise_exception:
@@ -676,8 +701,8 @@ class OpCheckError(Exception):
 def generate_repro(
     test: str,
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     save_data: bool,
     dry_run: bool = False,
@@ -742,7 +767,7 @@ def resolve_unique_overload_or_throw(
 DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
 
 
-FailuresDictData = Dict[str, Dict[str, Dict[str, str]]]
+FailuresDictData = dict[str, dict[str, dict[str, str]]]
 
 
 VERSION = 1

@@ -390,7 +390,7 @@ void conv_depthwise_shape_check(
 Tensor conv_depthwise3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {
@@ -695,7 +695,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
 
 }
 
-REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backward_cuda);
+REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backward_cuda)
 
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_OTHERS

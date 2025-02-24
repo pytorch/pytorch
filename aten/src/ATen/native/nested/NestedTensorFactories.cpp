@@ -1,18 +1,17 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   TensorOptions options_ = TensorOptions()
                                .dtype(dtype)
                                .layout(layout)
@@ -37,11 +36,11 @@ static TensorOptions verify_empty_parameters(
 
 Tensor empty_like_nested(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
@@ -83,12 +82,12 @@ static inline Device ensure_has_index(Device device) {
 
 Tensor _to_copy_nested(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
     bool non_blocking,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !layout.has_value() || self.layout() == layout.value(),
       "to(options) doesn't support converting to a different layout, "
@@ -104,7 +103,7 @@ Tensor _to_copy_nested(
     options = options.device(ensure_has_index(options.device()));
   }
   // memory_format is handled separately due to MemoryFormat::Preserve logic
-  options = self.options().merge_in(options).memory_format(c10::nullopt);
+  options = self.options().merge_in(options).memory_format(std::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   bool pin_out =
@@ -132,7 +131,7 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
 
 Tensor clone_nested(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
   auto self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||
@@ -193,6 +192,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(dim == 0, "narrow(): only dim=0 supported for nested tensors, but got: ", dim);
   TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative");
@@ -232,18 +232,16 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
 
 Tensor alias_nested(const Tensor& self) {
   auto* nt_impl = get_nested_tensor_impl(self);
-  const at::Tensor& buffer = nt_impl->get_unsafe_storage_as_tensor();
+  auto buffer = nt_impl->get_unsafe_storage_as_tensor();
   const auto& nested_sizes = nt_impl->get_nested_sizes();
   const auto& nested_strides = nt_impl->get_nested_strides();
   const auto& storage_offsets = nt_impl->get_storage_offsets();
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       std::move(buffer),
-      std::move(nested_sizes),
-      std::move(nested_strides),
-      std::move(storage_offsets));
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
 }
 
-
-} // namespace native
-} // namespace at
+} // namespace at::native

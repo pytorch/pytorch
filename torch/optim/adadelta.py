@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional
+# mypy: allow-untyped-defs
+from typing import Any, cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -12,11 +13,13 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["Adadelta", "adadelta"]
 
@@ -25,16 +28,18 @@ class Adadelta(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1.0,
-        rho=0.9,
-        eps=1e-6,
-        weight_decay=0,
+        lr: Union[float, Tensor] = 1.0,
+        rho: float = 0.9,
+        eps: float = 1e-6,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         *,
         capturable: bool = False,
         maximize: bool = False,
         differentiable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= rho <= 1.0:
@@ -77,12 +82,12 @@ class Adadelta(Optimizer):
 
     def _init_group(
         self,
-        group: Dict[str, Any],
-        params_with_grad: List[Tensor],
-        grads: List[Tensor],
-        square_avgs: List[Tensor],
-        acc_deltas: List[Tensor],
-        state_steps: List[Tensor],
+        group: dict[str, Any],
+        params_with_grad: list[Tensor],
+        grads: list[Tensor],
+        square_avgs: list[Tensor],
+        acc_deltas: list[Tensor],
+        state_steps: list[Tensor],
     ):
         has_complex = False
         p: Tensor
@@ -134,11 +139,11 @@ class Adadelta(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            square_avgs: List[Tensor] = []
-            acc_deltas: List[Tensor] = []
-            state_steps: List[Tensor] = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            square_avgs: list[Tensor] = []
+            acc_deltas: list[Tensor] = []
+            state_steps: list[Tensor] = []
             (
                 lr,
                 rho,
@@ -214,16 +219,15 @@ Adadelta.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
+        lr (float, Tensor, optional): coefficient that scale delta before it is applied
+            to the parameters (default: 1.0)
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will
             result in a slower average, which can be helpful for preventing
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6).
-        lr (float, optional): coefficient that scale delta before it is applied
-            to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
         {_capturable_doc}
@@ -238,11 +242,11 @@ Adadelta.__doc__ = (
 
 
 def _single_tensor_adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    square_avgs: list[Tensor],
+    acc_deltas: list[Tensor],
+    state_steps: list[Tensor],
     *,
     lr: float,
     rho: float,
@@ -254,7 +258,7 @@ def _single_tensor_adadelta(
     has_complex: bool,
 ):
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -292,11 +296,11 @@ def _single_tensor_adadelta(
 
 
 def _multi_tensor_adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    square_avgs: list[Tensor],
+    acc_deltas: list[Tensor],
+    state_steps: list[Tensor],
     *,
     lr: float,
     rho: float,
@@ -310,7 +314,7 @@ def _multi_tensor_adadelta(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -324,15 +328,20 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, acc_deltas, state_steps]
+        [params, grads, square_avgs, acc_deltas, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_square_avgs,
-        device_acc_deltas,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_square_avgs_,
+        device_acc_deltas_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(list[Tensor], device_params_)
+        device_grads = cast(list[Tensor], device_grads_)
+        device_square_avgs = cast(list[Tensor], device_square_avgs_)
+        device_acc_deltas = cast(list[Tensor], device_acc_deltas_)
+        device_state_steps = cast(list[Tensor], device_state_steps_)
         if has_complex:
             _view_as_real(
                 device_params, device_grads, device_square_avgs, device_acc_deltas
@@ -342,7 +351,7 @@ def _multi_tensor_adadelta(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -388,11 +397,11 @@ def _multi_tensor_adadelta(
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adadelta)
 def adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    square_avgs: list[Tensor],
+    acc_deltas: list[Tensor],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     capturable: bool = False,
@@ -413,7 +422,7 @@ def adadelta(
 
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

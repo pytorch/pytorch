@@ -4,11 +4,11 @@
 import logging
 
 import torch
-
 from torch import nn
 from torch.ao.pruning.sparsifier import utils
 from torch.nn.utils import parametrize
 from torch.testing._internal.common_utils import TestCase
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO

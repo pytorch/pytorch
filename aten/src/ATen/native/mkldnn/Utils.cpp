@@ -3,7 +3,7 @@
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
@@ -79,14 +79,14 @@ void check_mkldnn_binary_fusion_inputs(
 #if AT_MKLDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
-  [](torch::List<c10::optional<at::Scalar>> scalars, \
-     c10::optional<c10::string_view> algorithm) {    \
+  [](torch::List<std::optional<at::Scalar>> scalars, \
+     std::optional<std::string_view> algorithm) {    \
     return ideep::attr_t::fuse_##NAME();             \
   }
 
 AttrFunction attr_func_leaky_relu =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<std::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 1 &&
               scalars[0].get().toOptional<at::Scalar>().has_value(),
@@ -97,8 +97,8 @@ AttrFunction attr_func_leaky_relu =
     };
 
 AttrFunction attr_func_hardtanh =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<std::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 2 &&
               scalars[0].get().toOptional<at::Scalar>().has_value() &&
@@ -112,8 +112,8 @@ AttrFunction attr_func_hardtanh =
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
-AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
-                                 c10::optional<c10::string_view> algorithm) {
+AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
+                                 std::optional<std::string_view> algorithm) {
   TORCH_CHECK(
       algorithm.has_value(),
       "gelu is expected to have one str input: algorithm");
@@ -131,8 +131,8 @@ AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
 };
 
 AttrFunction attr_func_hardsigmoid =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<std::string_view> algorithm) {
       ideep::attr_t attr;
       ideep::post_ops po;
       po.append_eltwise(
@@ -141,8 +141,8 @@ AttrFunction attr_func_hardsigmoid =
       return attr;
     };
 
-const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
-  static const std::map<c10::string_view, AttrFunction> fusion_attr_map{
+const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
+  static const std::map<std::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
@@ -154,24 +154,24 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
       {"gelu", attr_func_gelu},
   };
   return fusion_attr_map;
-};
+}
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map() {
-  static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
+const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
+  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"relu", {ideep::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
-};
+}
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
-  static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
+const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
+  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"add", {ideep::algorithm::binary_add}},
       {"sub", {ideep::algorithm::binary_sub}},
       {"mul", {ideep::algorithm::binary_mul}},
       {"div", {ideep::algorithm::binary_div}},
   };
   return fusion_attr_map;
-};
+}
 
 #endif // AT_MKLDNN_ENABLED()
-}}
+}

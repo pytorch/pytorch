@@ -2,16 +2,15 @@
 #include <ATen/core/jit_type.h>
 #include <c10/core/Device.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <memory>
+#include <optional>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -27,7 +26,7 @@ of the Node (based on the rule itself)
 Returns: Bool indicating if anything was changed
 */
 
-bool setDeviceType(Value* value, c10::optional<Device> device) {
+bool setDeviceType(Value* value, std::optional<Device> device) {
   auto tensor_type = value->type()->expect<TensorType>();
   bool changed = tensor_type->device() != device;
   if (changed) {
@@ -36,7 +35,7 @@ bool setDeviceType(Value* value, c10::optional<Device> device) {
   return changed;
 }
 
-bool setReturnsToDevice(Node* n, c10::optional<Device> device) {
+bool setReturnsToDevice(Node* n, std::optional<Device> device) {
   bool changed = false;
   for (Value* out : n->outputs()) {
     auto tensor_type = out->type()->cast<TensorType>();
@@ -67,7 +66,7 @@ bool returnSecondArgDeviceRule(Node* n) {
   return setReturnsToDevice(n, tensor_type->device());
 }
 
-bool isZerodimCPUTensor(std::shared_ptr<TensorType> tensor_type) {
+bool isZerodimCPUTensor(const std::shared_ptr<TensorType>& tensor_type) {
   // CPU devices on zerodim tensors are the only device that can be
   // overwritten by another device. Therefore, to be conservative
   // assume that it is not a zerodim cpu tensor if something is not known.
@@ -88,12 +87,12 @@ bool propWithNoDevice(Node* n) {
   }
   if (input_num == n->inputs().size()) {
     // No tensor found
-    return setReturnsToDevice(n, c10::nullopt);
+    return setReturnsToDevice(n, std::nullopt);
   }
 
   auto tensor_type = n->inputs()[input_num]->type()->expect<TensorType>();
   bool only_seen_cpu_zerodim = isZerodimCPUTensor(tensor_type);
-  c10::optional<Device> device = tensor_type->device();
+  std::optional<Device> device = tensor_type->device();
 
   // Now see if all inputs have a consistent device type
   for (input_num++; input_num < n->inputs().size(); input_num++) {
@@ -108,7 +107,7 @@ bool propWithNoDevice(Node* n) {
         only_seen_cpu_zerodim = false;
       } else {
         // Bail on the type not match case
-        return setReturnsToDevice(n, c10::nullopt);
+        return setReturnsToDevice(n, std::nullopt);
       }
     }
   }
@@ -149,7 +148,7 @@ bool defaultDeviceProp(Node* n) {
 
 struct DeviceTypePropagationPass : public PropertyPropBase {
   explicit DeviceTypePropagationPass(std::shared_ptr<Graph> graph)
-      : PropertyPropBase(graph) {
+      : PropertyPropBase(std::move(graph)) {
     buildRuleRegistry();
   }
 
@@ -160,7 +159,7 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
   }
 
  private:
-  void propagateNode(Node* n, bool _ = false) override {
+  void propagateNode(Node* n, bool _ = true) override {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
@@ -261,5 +260,4 @@ bool DeviceTypePropagation(std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

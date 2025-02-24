@@ -3,8 +3,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <optional>
 
 #include <array>
 #include <functional>
@@ -302,6 +302,31 @@ struct TORCH_API RecordFunction {
   template <typename F>
   void before(
       F fn,
+      c10::ArrayRef<const c10::IValue> args,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(std::move(fn), args, current_sequence_nr);
+  }
+
+  template <typename F>
+  void before(
+      F fn,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(fn, current_sequence_nr);
+  }
+
+  template <typename F>
+  void before(
+      F fn,
       const std::vector<IValue>* args,
       int64_t current_sequence_nr = -1) {
     before(
@@ -328,6 +353,8 @@ struct TORCH_API RecordFunction {
 
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
+  RecordFunction(RecordFunction&&) = delete;
+  RecordFunction& operator=(RecordFunction&&) = delete;
 
   const char* name() const;
 
@@ -433,10 +460,10 @@ struct TORCH_API RecordFunction {
     return handle_;
   }
 
-  c10::optional<OperatorName> operator_name() const;
+  std::optional<OperatorName> operator_name() const;
 
   // This method returns a copy of the FunctionSchema and can be expensive.
-  c10::optional<FunctionSchema> operator_schema() const;
+  std::optional<FunctionSchema> operator_schema() const;
 
   void setHandle(RecordFunctionHandle handle) {
     handle_ = handle;
@@ -521,7 +548,7 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
-TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
     RecordScope scope);
 
 namespace detail {
@@ -629,6 +656,13 @@ void record_function_with_scope_and_debug_handle(
 #define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::USER_SCOPE, fn, inputs)
 
+#define RECORD_USER_SCOPE_WITH_KWARGS_ONLY(fn, kwargs) \
+  RECORD_FUNCTION_WITH_SCOPE(                          \
+      at::RecordScope::USER_SCOPE,                     \
+      fn,                                              \
+      c10::ArrayRef<const c10::IValue>{},              \
+      kwargs)
+
 // Helper macro to pass in debug handle that is used to
 // post process events
 #define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(             \
@@ -732,6 +766,10 @@ class TORCH_API RecordFunctionGuard {
     enableRecordFunction(is_enabled);
   }
 
+  RecordFunctionGuard(RecordFunctionGuard&& other) = delete;
+  RecordFunctionGuard(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(RecordFunctionGuard&&) = delete;
   virtual ~RecordFunctionGuard() {
     enableRecordFunction(prev_value_);
   }

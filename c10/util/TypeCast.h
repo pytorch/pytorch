@@ -5,8 +5,10 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <c10/util/overflows.h>
 
 #include <type_traits>
 
@@ -150,6 +152,19 @@ struct static_cast_with_inter_type<
   }
 };
 
+// TODO(#146647): Can we make all these template specialization happen
+// based off our apply macros?
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e8m0fnu> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Float8_e8m0fnu src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
 template <>
 struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Half> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
@@ -177,7 +192,7 @@ C10_HOST_DEVICE To convert(From f) {
 }
 
 // Define separately to avoid being inlined and prevent code-size bloat
-C10_API void report_overflow(const char* name);
+[[noreturn]] C10_API void report_overflow(const char* name);
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {

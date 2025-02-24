@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import inspect
 import os
@@ -9,11 +10,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 import torch
 import torch.testing._internal.jit_utils
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from torch.testing import FileCheck
-
 from torch.testing._internal.jit_utils import JitTestCase
 
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

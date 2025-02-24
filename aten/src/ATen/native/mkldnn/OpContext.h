@@ -6,9 +6,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace mkldnn {
+namespace at::native::mkldnn {
 
 const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"none", ideep::attr_t()},
@@ -17,7 +15,7 @@ const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
 
 using SerializationTypeConvPrePack = std::tuple<
     Tensor,
-    c10::optional<Tensor>,
+    std::optional<Tensor>,
     std::vector<int64_t>,
     std::vector<int64_t>,
     std::vector<int64_t>,
@@ -28,7 +26,7 @@ using SerializationTypeConvPrePack = std::tuple<
 class ConvOpContext : public torch::jit::CustomClassHolder {
  protected:
   Tensor orig_weight_;
-  c10::optional<Tensor> orig_bias_;
+  std::optional<Tensor> orig_bias_;
   std::vector<int64_t> stride_;
   std::vector<int64_t> padding_;
   std::vector<int64_t> dilation_;
@@ -60,7 +58,7 @@ class MkldnnConvOpContext final : public ConvOpContext {
  public:
   MkldnnConvOpContext(
       Tensor&& weight,
-      c10::optional<Tensor>&& bias,
+      std::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
@@ -83,7 +81,7 @@ class MkldnnConvOpContext final : public ConvOpContext {
 
   static c10::intrusive_ptr<ConvOpContext> create_context(
       Tensor&& weight,
-      c10::optional<Tensor>&& bias,
+      std::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
@@ -92,8 +90,6 @@ class MkldnnConvOpContext final : public ConvOpContext {
       const ideep::attr_t& attr);
 };
 
-} // namespace mkldnn
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

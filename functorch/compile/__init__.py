@@ -25,7 +25,6 @@ from torch._functorch.fx_minifier import minifier
 from torch._functorch.partitioners import (
     default_partition,
     draw_graph,
-    draw_joint_graph,
     min_cut_rematerialization_partition,
 )
 from torch._functorch.python_key import pythonkey_decompose

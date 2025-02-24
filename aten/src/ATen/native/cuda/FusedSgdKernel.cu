@@ -86,12 +86,8 @@ struct FusedSgdMathFunctor {
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
     const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
-#ifndef USE_ROCM
     const auto use_faster_load_store =
         (n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned;
-#else
-    const auto use_faster_load_store{false};
-#endif
     if (use_faster_load_store) {
       for (auto i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
@@ -157,8 +153,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
@@ -203,8 +199,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (lr.is_cpu()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -224,12 +220,12 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
-  if (grad_scale != c10::nullopt) {
+  if (grad_scale.has_value()) {
     TORCH_CHECK(
         grad_scale->device() == params[0].device(),
         "grad_scale must be on the same GPU device as the params");
   }
-  if (found_inf != c10::nullopt) {
+  if (found_inf.has_value()) {
     TORCH_CHECK(
         found_inf->device() == params[0].device(),
         "found_inf must be on the same GPU device as the params");
@@ -279,8 +275,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -343,8 +339,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -395,7 +391,7 @@ void _fused_sgd_kernel_cuda_(
   }
   TORCH_CHECK(
       lr.device() == params[0].device(),
-      "found_inf must be on the same GPU device as the params");
+      "lr must be on the same GPU device as the params");
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =

@@ -4,8 +4,8 @@ import torch
 import torch._lazy
 import torch._lazy.ts_backend
 from torch import float16, float32
-
 from torch.testing._internal.common_utils import TestCase
+
 
 torch._lazy.ts_backend.init()
 
@@ -19,7 +19,7 @@ class TestMetaKernel(TestCase):
         fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float32).to("lazy")
 
         with self.assertRaises(Exception):
-            out_nobias = fc_nobias(input)
+            fc_nobias(input)
 
     def test_addmm(self):
         """Tests that the addmm meta kernel returns the correct output type"""

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <oneapi/dnnl/dnnl.hpp>
-#include <oneapi/dnnl/dnnl_types.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_types.h>
 
 namespace at::native::onednn {
 /* oneDNN quantization usage:
@@ -75,10 +75,18 @@ to oneDNN doc.
 using kind_t = dnnl::primitive::kind;
 struct PostOpParam {
   // eltwise post op constructor
-  PostOpParam(float scale, float alpha, float beta, dnnl::algorithm algo, kind_t kind)
+  PostOpParam(
+      float scale,
+      float alpha,
+      float beta,
+      dnnl::algorithm algo,
+      kind_t kind)
       : scale_(scale), alpha_(alpha), beta_(beta), algo_(algo), kind_(kind) {}
   // sum post op constructor
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
+  // sum post op with zp
+  PostOpParam(float scale, int64_t zero_point, kind_t kind)
+      : scale_(scale), zero_point_(zero_point), kind_(kind) {}
   // binary post op constructor
   PostOpParam(
       at::Tensor& binary,
@@ -95,11 +103,16 @@ struct PostOpParam {
   PostOpParam(int mask, kind_t kind) : mask_(mask), kind_(kind) {}
 
   // post sum or binary with scale post op constructor
-  PostOpParam(at::Tensor& binary, float scale, dnnl::algorithm algo, kind_t kind)
+  PostOpParam(
+      at::Tensor& binary,
+      float scale,
+      dnnl::algorithm algo,
+      kind_t kind)
       : scale_(scale), binary_(binary), algo_(algo), kind_(kind) {}
 
   // for int8 sum/eltwise
   float scale_ = 1.0;
+  int64_t zero_point_ = 0;
   // for eltwise
   float alpha_ = 0.0;
   float beta_ = 0.0;
@@ -164,7 +177,7 @@ class Attr {
       float sum_q_scale = 1.f,
       int64_t zp = 0) {
     ops_params_.push_back(
-        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, kind_t::sum));
+        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, zp, kind_t::sum));
     return *this;
   }
 
@@ -182,8 +195,9 @@ class Attr {
   // append binary post op
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
-    bool binary_is_channels_last = (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
-                                      binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
+    bool binary_is_channels_last =
+        (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+         binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
 
     binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
     dnnl::memory::desc md = get_onednn_md(binary_);
@@ -206,14 +220,13 @@ class Attr {
   }
 
   // append bias with binary_add method (only used for QConv now)
-  template <int N>
-  Attr& append_bias(const at::Tensor& binary) {
+  Attr& append_bias(const at::Tensor& binary, const int ndimension) {
     // In PyTorch, bias are in shape of [OC],
     // we expand its shape according to Conv dimension
     // Conv1d [OC, 1, 1], Conv2d [1, OC, 1, ,1], Conv3d [1, OC, 1, 1, 1]
     at::Tensor binary_ = binary.contiguous();
     dnnl::memory::desc binary_md;
-    switch (N) {
+    switch (ndimension) {
       case 1:
         binary_md = dnnl::memory::desc(
             {binary.size(0), 1, 1},
@@ -233,8 +246,8 @@ class Attr {
             dnnl::memory::format_tag::abcde);
         break;
       default:
-        TORCH_INTERNAL_ASSERT(0,
-            "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
+        TORCH_INTERNAL_ASSERT(
+            0, "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
     }
     // In this case, expected_md = binary_md
     ops_params_.push_back(PostOpParam(
@@ -248,7 +261,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst){
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -263,9 +276,10 @@ class Attr {
         }
         case kind_t::sum: {
           float scale = ops_params_[i].scale_;
+          int64_t zero_point = ops_params_[i].zero_point_;
           // TODO [Asymmetric]:
           // Post-sum zp for gpu is not supported currently
-          dnnl_post_ops_.append_sum(scale);
+          dnnl_post_ops_.append_sum(scale, zero_point);
           break;
         }
         case kind_t::binary: {
@@ -286,22 +300,6 @@ class Attr {
       }
     }
 
-    // if output is quantized, then append the eltwise linear to adjust the
-    // output scale/zero_point
-    if (dst.is_quantized()) {
-      // [Note: Gap of u8 qtensor scale between oneDNN and PyTorch]
-      // The /2 here is for output_scale collected by observer is different
-      // from quantization requirements in oneDNN.
-      // For Observer, the conv_scale (activation scale in other case) is
-      // computed through 2max_v/(qmax - qmin). The max_v is collected
-      // from the tensor to be observerd.
-      // (https://pytorch.org/docs/stable/generated/torch.quantization.observer.MinMaxObserver.html#torch.quantization.observer.MinMaxObserver)
-      // On the other hand, for u8 in oneDNN, the scale for quantization is
-      // defined as max_v/(qmax-qmin). Hence, we need to divide by 2 here.
-      // (https://oneapi-src.github.io/oneDNN/dev_guide_inference_int8.html)
-      dnnl_post_ops_.append_eltwise(
-          kind_with_linear, 1.f / q_scale_, q_zero_point_);
-    }
     return dnnl_post_ops_;
   }
 
@@ -332,8 +330,8 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    auto engine =
-        GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+    auto engine = GpuEngineManager::Instance().get_engine(
+        {c10::kXPU, c10::xpu::current_device()});
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {
@@ -346,8 +344,7 @@ class Attr {
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
         binary_m = at::native::onednn::make_onednn_memory(
-          md, engine, binary.data_ptr()
-        );
+            md, engine, binary.data_ptr());
 
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
@@ -361,5 +358,99 @@ class Attr {
   std::vector<PostOpParam> ops_params_; // series of post ops
   dnnl::post_ops dnnl_post_ops_;
 };
+
+static inline void construct_attr_for_unary(
+    const std::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const std::string_view& unary_post_op_algorithm,
+    at::native::onednn::Attr& attr) {
+  if (unary_post_op == "relu") {
+    attr = attr.append_post_eltwise(
+        /* eltwise_scale */ 1.f,
+        /* alpha */ 0.f,
+        /* beta */ 0.f,
+        attr.kind_with_relu);
+  } else if (unary_post_op == "leaky_relu") {
+    auto alpha = unary_post_op_args[0].value().to<float>();
+    attr = attr.append_post_eltwise(1.0, alpha, 0.f, attr.kind_with_relu);
+  } else if (unary_post_op == "tanh") {
+    attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
+  } else if (unary_post_op == "gelu") {
+    auto post_algorithm = unary_post_op_algorithm == "none"
+        ? attr.kind_with_gelu_erf
+        : attr.kind_with_gelu_tanh;
+    attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, post_algorithm);
+  } else if (unary_post_op == "hardtanh") {
+    auto alpha = unary_post_op_args[0].value().to<float>();
+    auto beta = unary_post_op_args[1].value().to<float>();
+    attr = attr.append_post_eltwise(1.0, alpha, beta, attr.kind_with_clip);
+  } else if (unary_post_op == "hardswish") {
+    attr = attr.append_post_eltwise(
+        1.0f, 1.f / 6.f, 1.f / 2.f, attr.kind_with_hardswish);
+  } else if (unary_post_op == "swish") {
+    attr = attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish);
+  } else {
+    TORCH_CHECK(
+        unary_post_op == "none",
+        "onednn qlinear: unspported unary post op",
+        unary_post_op);
+  }
+}
+
+static inline void construct_attr_by_post_op(
+    const std::string_view& binary_post_op,
+    double binary_alpha,
+    double input1_scale,
+    int64_t input1_zero_point,
+    std::optional<at::Tensor> accum,
+    const std::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const std::string_view& unary_post_op_algorithm,
+    at::native::onednn::Attr& attr) {
+  bool is_none_post_op =
+      (binary_post_op == "none" && unary_post_op == "none"); // not post-ops
+  bool is_unary_post_op_only =
+      (binary_post_op == "none" && unary_post_op != "none"); // ex., conv + relu
+  bool is_valid_binary_combination =
+      (binary_post_op == "add" || binary_post_op == "sum") &&
+      (unary_post_op == "none" || unary_post_op == "relu");
+  TORCH_INTERNAL_ASSERT(
+      is_unary_post_op_only || is_none_post_op || is_valid_binary_combination,
+      "Please provide valid combination of unary post operators and binary post operators");
+
+  if (binary_post_op == "none") {
+    construct_attr_for_unary(
+        unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
+  } else if (binary_post_op == "sum") {
+    if (unary_post_op == "none") {
+      if (input1_zero_point != 0)
+        attr = attr.append_post_eltwise(
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
+            -input1_zero_point * input1_scale,
+            attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
+    } else if (unary_post_op == "relu") {
+      if (input1_zero_point != 0)
+        attr = attr.append_post_eltwise(
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
+            -input1_zero_point * input1_scale,
+            attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
+      attr = attr.append_post_eltwise(
+          /* scale */ 1.f,
+          /* alpha */ 0.f,
+          /* beta */ 0.f,
+          attr.kind_with_relu);
+    }
+  } else if (binary_post_op == "add") {
+    TORCH_CHECK(accum.has_value());
+    attr = attr.append_post_binary(attr.kind_with_binary_add, accum.value());
+    if (unary_post_op == "relu") {
+      attr = attr.append_post_eltwise(1.f, 0.f, 0.f, attr.kind_with_relu);
+    }
+  }
+}
 
 } // namespace at::native::onednn

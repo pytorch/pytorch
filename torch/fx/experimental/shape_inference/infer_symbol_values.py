@@ -1,10 +1,12 @@
 import re
-from typing import Any, DefaultDict, Dict, List, Tuple, Union
+from collections import defaultdict
+from typing import Any, Union
 
 import numpy as np
-
 import sympy as sp
+
 import torch
+
 
 square_brackets_pattern = r"\[([^]]+)\]"
 parentheses_pattern = r"\((.*?)\)"
@@ -12,10 +14,10 @@ s_pattern = r"s\d+"
 
 
 def infer_symbol_values(
-    symints: List[Union[torch.SymInt, int]],
-    init_symints: List[Union[torch.SymInt, int]],
-    symbol_idx_dict: Dict[str, int],
-    padding_constraints: DefaultDict[torch.SymInt, List[Union[sp.Expr, int]]],
+    symints: list[Union[torch.SymInt, int]],
+    init_symints: list[Union[torch.SymInt, int]],
+    symbol_idx_dict: dict[str, int],
+    padding_constraints: defaultdict[torch.SymInt, list[Union[sp.Expr, int]]],
     constraint: str,
 ) -> None:
     if constraint.find("non-singleton") != -1:
@@ -82,8 +84,8 @@ def infer_symbol_values(
 def calculate_value(
     left_expression: Union[str, Any, None],
     right_expression: Union[str, Any, None],
-    symints: List[Union[torch.SymInt, int]],
-    symbol_idx_dict: Dict[str, int],
+    symints: list[Union[torch.SymInt, int]],
+    symbol_idx_dict: dict[str, int],
 ) -> None:
     var, val = solve_equation(left_expression, right_expression)
     idx = symbol_idx_dict[var]
@@ -94,7 +96,7 @@ def calculate_value(
 def solve_equation(
     left_expression: Union[str, Any, None],
     right_expression: Union[str, Any, None],
-) -> Tuple[str, int]:
+) -> tuple[str, int]:
     expression = f"{left_expression} - {right_expression}"
     var = re.findall(s_pattern, expression)[0]
     if re.findall(parentheses_pattern, expression):
@@ -115,9 +117,9 @@ def solve_equation(
 
 
 def update_equation(
-    symints: List[Union[torch.SymInt, int]],
-    init_symints: List[Union[torch.SymInt, int]],
-    padding_constraints: DefaultDict[torch.SymInt, List[Union[sp.Expr, int]]],
+    symints: list[Union[torch.SymInt, int]],
+    init_symints: list[Union[torch.SymInt, int]],
+    padding_constraints: defaultdict[torch.SymInt, list[Union[sp.Expr, int]]],
     init_eq: sp.Expr,
     new_mod_num: int,
     var: torch.SymInt,

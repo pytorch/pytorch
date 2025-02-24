@@ -3,17 +3,18 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 namespace {
-  std::string toString(c10::optional<DispatchKey> k) {
+#ifndef STRIP_ERROR_MESSAGES
+  std::string toString(std::optional<DispatchKey> k) {
     if (k.has_value()) {
       return toString(*k);
     } else {
       return "(catch all)";
     }
   }
+#endif
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
@@ -39,7 +40,7 @@ namespace {
     // TODO: figure out if we can just directly save real schema at def time
     FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
     FunctionSchema inferred = inferred_.cloneWithRealTypes();
-    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
+    std::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
@@ -95,15 +96,15 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug,
 
 void OperatorEntry::deregisterSchema() {
   TORCH_INTERNAL_ASSERT(schema_.has_value());
-  schema_ = c10::nullopt;
+  schema_ = std::nullopt;
   dispatchKeyExtractor_.deregisterSchema();
 }
 
 OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<CppSignature> cpp_signature,
+  std::optional<CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -150,7 +151,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
     if (dispatch_key != DispatchKey::Meta) {
-      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overrided.\n",
+      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
             "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
@@ -181,7 +182,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 
 void OperatorEntry::deregisterKernel_(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   AnnotatedKernelContainerIterator kernel
 ) {
   // Redirect catchAll deregistrations to CompositeImplicitAutograd.
@@ -508,8 +509,9 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
-};
+}
 
+#ifndef STRIP_ERROR_MESSAGES
 static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   const std::string substr = "PrivateUse1";
   if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
@@ -525,6 +527,7 @@ static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   }
   return dispatch_key;
 }
+#endif
 
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
@@ -625,5 +628,4 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
-}
 }

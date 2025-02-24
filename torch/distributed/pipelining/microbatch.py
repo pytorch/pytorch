@@ -1,10 +1,18 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
+from torch.fx.node import map_aggregate
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+
+__all__ = [
+    "TensorChunkSpec",
+    "split_args_kwargs_into_chunks",
+    "merge_chunks",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +53,11 @@ sum_reducer = _LossReducer(torch.tensor(0.0), lambda a, b: a + b)
 DEFAULT_CHUNK_DIM = 0
 
 
-# Class used to specify chunking of inputs
 class TensorChunkSpec:
+    """
+    Class used to specify chunking of inputs
+    """
+
     def __init__(self, split_dim):
         self.split_dim = split_dim
 
@@ -59,6 +70,43 @@ class TensorChunkSpec:
 
     def __str__(self):
         return f"TensorChunkSpec({self.split_dim})"
+
+    @staticmethod
+    def from_tuple(
+        chunk_dims: tuple[int, ...],
+    ):
+        """
+        A helper for creating a tuple of `TensorChunkSpec` from a tuple of chunk
+        dimensions (int's).
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> # There are three positional arguments to the model, and
+            >>> # we are chunking them along dimension 0, 0 and 1, respectively
+            >>> args_chunk_spec = TensorChunkSpec.from_tuple((0, 0, 1))
+        """
+        args_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),  # type: ignore[arg-type,return-value]
+        )
+        return args_chunk_spec
+
+    @staticmethod
+    def from_dict(
+        chunk_dims: dict[str, int],
+    ):
+        """
+        A helper for creating a dictionary of `TensorChunkSpec` from a
+        dictionary of chunk dimensions (int's).
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+            >>> kwargs_chunk_spec = TensorChunkSpec.from_dict({"id": 0, "mask": 1})
+        """
+        kwargs_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),  # type: ignore[arg-type,return-value]
+        )
+        return kwargs_chunk_spec
 
 
 # Class used to specify replication of inputs
@@ -176,9 +224,7 @@ def _shard_dict_of_args(
     for chunk_idx in range(real_num_chunks):
         chunk_args = {}
         for key, arg in args_sharded_replicated.items():
-            arg_single_chunk = []
-            for v_flat in arg:
-                arg_single_chunk.append(v_flat[chunk_idx])
+            arg_single_chunk = [v_flat[chunk_idx] for v_flat in arg]
             chunk_args[key] = arg_single_chunk
         chunks_flat.append(chunk_args)
 
@@ -196,12 +242,12 @@ def _shard_dict_of_args(
 
 
 def split_args_kwargs_into_chunks(
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
     chunks: int,
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-) -> Tuple[List[Tuple], List[Dict]]:
+    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
+    kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
+) -> tuple[list[tuple], list[dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
     according to  their respective chunking specs.
@@ -292,15 +338,16 @@ def split_args_kwargs_into_chunks(
             f"{len(args_split_dict)}, {len(kwargs_split)}"
         )
 
-    args_split = []
-    for chunk_args in args_split_dict:
-        args_split.append(tuple(chunk_args[i] for i in range(len(chunk_args))))
+    args_split = [
+        tuple(chunk_args[i] for i in range(len(chunk_args)))
+        for chunk_args in args_split_dict
+    ]
 
     return args_split, kwargs_split
 
 
 def merge_chunks(
-    chunks: List[Any],
+    chunks: list[Any],
     chunk_spec,
 ):
     """

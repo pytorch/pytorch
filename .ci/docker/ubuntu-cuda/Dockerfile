@@ -30,7 +30,8 @@ ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -80,6 +81,8 @@ RUN bash ./install_openssl.sh
 ENV OPENSSL_DIR /opt/openssl
 
 ARG INDUCTOR_BENCHMARKS
+ARG ANACONDA_PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface.txt huggingface.txt
@@ -102,6 +105,14 @@ COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
+
+ARG HALIDE
+# Build and install halide
+COPY ./common/install_halide.sh install_halide.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/halide.txt halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
+RUN rm install_halide.sh common_utils.sh halide.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
@@ -139,7 +150,7 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 ARG CUDNN_VERSION
 ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
-RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
+RUN if [ -n "${CUDNN_VERSION}" ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
 
 # Install CUSPARSELT
@@ -148,10 +159,17 @@ COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash install_cusparselt.sh
 RUN rm install_cusparselt.sh
 
+# Install CUDSS
+ARG CUDA_VERSION
+COPY ./common/install_cudss.sh install_cudss.sh
+RUN bash install_cudss.sh
+RUN rm install_cudss.sh
+
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
+RUN if [ -h /usr/local/cuda-12.4/cuda-12.4 ]; then rm /usr/local/cuda-12.4/cuda-12.4; fi
 
 USER jenkins
 CMD ["bash"]

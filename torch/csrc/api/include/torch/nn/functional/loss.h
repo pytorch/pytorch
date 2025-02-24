@@ -4,9 +4,7 @@
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/loss.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -47,8 +45,7 @@ inline Tensor kl_div(
     const Tensor& target,
     KLDivFuncOptions::reduction_t reduction,
     bool log_target = false) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  torch::Reduction::Reduction reduction_enum;
+  torch::Reduction::Reduction reduction_enum{};
 
   if (std::holds_alternative<enumtype::kMean>(reduction)) {
     TORCH_WARN(
@@ -346,7 +343,7 @@ inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
     SmoothL1LossFuncOptions::reduction_t reduction,
-    c10::optional<double> beta_opt = c10::nullopt) {
+    std::optional<double> beta_opt = std::nullopt) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN(
         "Using a target size (",
@@ -405,9 +402,9 @@ inline Tensor smooth_l1_loss(
     const SmoothL1LossFuncOptions& options,
     double beta) {
   TORCH_CHECK(
-      options.beta() == c10::nullopt,
+      !options.beta().has_value(),
       "expected beta not to be provided in 'options', but got ",
-      options.beta().value());
+      options.beta());
   return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 
@@ -656,7 +653,7 @@ inline Tensor triplet_margin_with_distance_loss(
     const Tensor& anchor,
     const Tensor& positive,
     const Tensor& negative,
-    c10::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t>
+    std::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t>
         distance_function,
     double margin,
     bool swap,
@@ -887,7 +884,7 @@ inline Tensor nll_loss(
     const Tensor& target,
     const Tensor& weight,
     int64_t ignore_index,
-    const NLLLossFuncOptions::reduction_t reduction) {
+    const NLLLossFuncOptions::reduction_t& reduction) {
   if (input.dim() < 2) {
     TORCH_CHECK(false, "Expected 2 or more dimensions (got ", input.dim(), ")");
   }
@@ -1039,6 +1036,4 @@ inline Tensor binary_cross_entropy_with_logits(
       options.pos_weight());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -34,7 +34,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
   if (input.stride(1) != 1) {
     input = input.contiguous();
   }
-  c10::optional<at::cuda::CUDAGuard> device_guard;
+  std::optional<at::cuda::CUDAGuard> device_guard;
   if (!kIsMeta) {
     device_guard.emplace(input.device());
   }
@@ -90,7 +90,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
 std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(const Tensor& input, const Tensor& threads_masks) // Returned by `_sparse_semi_structured_tile`
 {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_sparse_semi_structured_apply: not supported");
+  TORCH_CHECK(false, "_sparse_semi_structured_apply: not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else
   TORCH_CHECK(

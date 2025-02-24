@@ -102,10 +102,9 @@ void multi_margin_loss_out_cpu_template(
     const Tensor& target,
     int p,
     const Scalar& margin,
-    const c10::optional<Tensor>& weight,
+    const std::optional<Tensor>& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
@@ -216,8 +215,7 @@ void multi_margin_loss_backward_out_cpu_template(
     const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
@@ -266,7 +264,7 @@ Tensor multi_margin_loss_cpu(
     const Tensor& target,
     const Scalar& p,
     const Scalar& margin,
-    const c10::optional<Tensor>& weight,
+    const std::optional<Tensor>& weight,
     int64_t reduction) {
   auto output = at::empty({0}, input.options());
   multi_margin_loss_out_cpu_template(
@@ -278,7 +276,7 @@ Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     const Tensor& target,
     const Scalar& p,
     const Scalar& margin,
-    const c10::optional<Tensor>& weight,
+    const std::optional<Tensor>& weight,
     int64_t reduction,
     Tensor& output) {
   multi_margin_loss_out_cpu_template(
@@ -291,7 +289,7 @@ Tensor multi_margin_loss_cpu_backward(
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin, const std::optional<Tensor>& weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -314,7 +312,7 @@ Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]

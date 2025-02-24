@@ -142,7 +142,7 @@ namespace {
 WarningHandler* getBaseHandler() {
   static WarningHandler base_warning_handler_ = WarningHandler();
   return &base_warning_handler_;
-};
+}
 
 class ThreadWarningHandler {
  public:
@@ -175,7 +175,7 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-bool warn_always = false;
+static bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
   warn_always = setting;

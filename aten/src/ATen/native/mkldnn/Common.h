@@ -6,14 +6,13 @@
 #if AT_MKLDNN_ENABLED()
 
 #include <ideep/tensor.hpp>
+#include <utility>
 
-namespace at {
-namespace native {
-namespace mkldnn {
+namespace at::native::mkldnn {
 
 struct ContextConv final {
   ideep::tensor weight_packed_;
-  c10::optional<at::Tensor> at_bias_;
+  std::optional<at::Tensor> at_bias_;
   std::vector<int64_t> padding_;
   std::vector<int64_t> stride_;
   std::vector<int64_t> dilation_;
@@ -24,7 +23,7 @@ struct ContextConv final {
 
   ContextConv(
       ideep::tensor&& weight_packed,
-      c10::optional<at::Tensor> at_bias,
+      std::optional<at::Tensor> at_bias,
       std::vector<int64_t> padding,
       std::vector<int64_t> stride,
       std::vector<int64_t> dilation,
@@ -32,15 +31,13 @@ struct ContextConv final {
       ideep::attr_t attr)
       : weight_packed_(std::move(weight_packed)),
         at_bias_(std::move(at_bias)),
-        padding_(padding),
-        stride_(stride),
-        dilation_(dilation),
+        padding_(std::move(padding)),
+        stride_(std::move(stride)),
+        dilation_(std::move(dilation)),
         groups_(groups),
         attr_(attr) {}
 };
 
-} // namespace mkldnn
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

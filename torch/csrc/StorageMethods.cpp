@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
@@ -49,9 +50,6 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // PyLong_FromVoidPtr should not need to mutate the pointer in order
-  // to extract a new long object from it.
-
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&
@@ -59,7 +57,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
-  return PyLong_FromVoidPtr(self_.mutable_data());
+  return torch::autograd::utils::wrap(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -94,7 +92,13 @@ static PyObject* THPStorage_copy_(
   TORCH_CHECK(
       !invalid, "Attempted to call copy_() on an invalid python storage.")
 
-  TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
+  TORCH_CHECK(
+      self_.nbytes() == src.nbytes(),
+      "size does not match, self was ",
+      self_.nbytes(),
+      " bytes but src was ",
+      src.nbytes(),
+      " bytes");
 
   at::storage_copy(self_, src, non_blocking);
 
@@ -182,6 +186,16 @@ static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
   Py_INCREF(self);
   return self;
   END_HANDLE_TH_ERRORS
+}
+
+template <typename T>
+static void decodeWrapper(
+    void* data,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t count) {
+  torch::utils::THP_decodeBuffer(
+      static_cast<T*>(data), src, do_byte_swap, count);
 }
 
 static PyObject* THPStorage_fromBuffer(
@@ -296,79 +310,43 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   uint8_t* src = (uint8_t*)buffer.buf;
+  auto fake_mode_active =
+      c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
-      c10::GetDefaultCPUAllocator(),
+      fake_mode_active ? c10::GetAllocator(c10::DeviceType::Meta)
+                       : c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
-  if (is_endian_independent) {
-    memcpy(storage->mutable_data(), src + offset, count);
-  } else if (scalar_type == at::kBool) {
-    // Because of ASAN checks, that are failing whenever
-    // we are trying to get a value which is not 0 or 1, we have to manually
-    // convert original values to boolean ones.
-    torch::utils::THP_decodeBoolBuffer(
-        static_cast<bool*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kShort) {
-    torch::utils::THP_decodeInt16Buffer(
-        static_cast<int16_t*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kInt) {
-    torch::utils::THP_decodeInt32Buffer(
-        static_cast<int32_t*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kLong) {
-    torch::utils::THP_decodeInt64Buffer(
-        static_cast<int64_t*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kHalf) {
-    torch::utils::THP_decodeHalfBuffer(
-        static_cast<c10::Half*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kBFloat16) {
-    torch::utils::THP_decodeBFloat16Buffer(
-        static_cast<c10::BFloat16*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kFloat) {
-    torch::utils::THP_decodeFloatBuffer(
-        static_cast<float*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kDouble) {
-    torch::utils::THP_decodeDoubleBuffer(
-        static_cast<double*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kComplexFloat) {
-    torch::utils::THP_decodeComplexFloatBuffer(
-        static_cast<c10::complex<float>*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else if (scalar_type == at::kComplexDouble) {
-    torch::utils::THP_decodeComplexDoubleBuffer(
-        static_cast<c10::complex<double>*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
-  } else {
-    TORCH_CHECK(false, "Unknown type: ", scalar_type);
+  static const std::unordered_map<
+      at::ScalarType,
+      std::function<void(void*, const uint8_t*, bool, size_t)>>
+      decode_map = {
+          {at::kBool, decodeWrapper<bool>},
+          {at::kShort, decodeWrapper<int16_t>},
+          {at::kInt, decodeWrapper<int32_t>},
+          {at::kLong, decodeWrapper<int64_t>},
+          {at::kHalf, decodeWrapper<c10::Half>},
+          {at::kBFloat16, decodeWrapper<c10::BFloat16>},
+          {at::kFloat, decodeWrapper<float>},
+          {at::kDouble, decodeWrapper<double>},
+          {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
+          {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
+
+  // don't actually do a memcp if we are running with FakeTensorMode
+  if (!fake_mode_active) {
+    if (is_endian_independent) {
+      memcpy(storage->mutable_data(), src + offset, count);
+    } else {
+      auto it = decode_map.find(scalar_type);
+      if (it != decode_map.end()) {
+        it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
+      } else {
+        TORCH_CHECK(false, "Unknown type: ", scalar_type);
+      }
+    }
   }
 
   PyBuffer_Release(&buffer);
@@ -419,7 +397,7 @@ static PyObject* THPStorage_fromFile(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -455,7 +433,7 @@ PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
@@ -544,7 +522,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
+static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   TORCH_CHECK(
@@ -561,7 +539,7 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
   PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);
@@ -618,7 +596,8 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   const c10::DataPtr& data_ptr = self_.data_ptr();
   at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
 
-  if (map_allocator == nullptr) {
+  if (map_allocator == nullptr ||
+      !(map_allocator->flags() & at::ALLOCATOR_MAPPED_SHARED)) {
     Py_RETURN_NONE;
   }
   std::string filename = map_allocator->filename();

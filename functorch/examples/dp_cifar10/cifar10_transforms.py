@@ -12,16 +12,16 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
+from torchvision import models, transforms
+from torchvision.datasets import CIFAR10
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-import torchvision.transforms as transforms
-
 from torch.func import functional_call, grad_and_value, vmap
-from torchvision import models
-from torchvision.datasets import CIFAR10
-from tqdm import tqdm
+
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
@@ -185,7 +185,7 @@ def test(args, model, test_loader, device):
 
     top1_avg = np.mean(top1_acc)
 
-    print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
+    print(f"\tTest set:Loss: {np.mean(losses):.6f} Acc@1: {top1_avg :.6f} ")
     return np.mean(top1_acc)
 
 
@@ -213,10 +213,6 @@ def main():
     else:
         generator = None
 
-    augmentations = [
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-    ]
     normalize = [
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),

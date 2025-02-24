@@ -12,11 +12,11 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-
 from torch.distributed.optim import (
     _apply_optimizer_in_backward,
     _get_in_backward_optimizers,
 )
+
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
 
@@ -144,7 +144,7 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
     def test_get_optimizers_in_backward(self):
         # Create a simple test model
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(10, 5)
                 self.linear2 = torch.nn.Linear(5, 2)

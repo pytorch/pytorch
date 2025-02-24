@@ -45,7 +45,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
     Handle(const Handle& rhs) = delete;
     // Following https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-    Handle(Handle&& rhs) : Handle() { std::swap(handle, rhs.handle); }
+    Handle(Handle&& rhs) noexcept : Handle() { std::swap(handle, rhs.handle); }
     // operator= takes argument by value
     Handle& operator=(Handle rhs) { std::swap(handle, rhs.handle); return *this; }
     ~Handle() {

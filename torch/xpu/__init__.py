@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package introduces support for the XPU backend, specifically tailored for
 Intel GPU optimization.
@@ -8,25 +9,27 @@ This package is lazily initialized, so you can always import it, and use
 import threading
 import traceback
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._C
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker
+
 from ._utils import _get_device_index
 from .streams import Event, Stream
+
 
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -119,9 +122,7 @@ def _lazy_init():
         # just return without initializing in that case.
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -215,7 +216,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -229,8 +230,15 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
+    # pybind service attributes are no longer needed and their presence breaks
+    # the further logic related to the serialization of the created dictionary.
+    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
+    # to fix Triton tests.
+    # This field appears after updating pybind to 2.13.6.
     return {
-        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith("__")
+        prop: getattr(props, prop)
+        for prop in dir(props)
+        if not prop.startswith(("__", "_pybind11_"))
     }
 
 
@@ -246,8 +254,6 @@ def get_device_properties(device: Optional[_device_t] = None) -> _XpuDevicePrope
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
-    if device < 0 or device >= device_count():
-        raise AssertionError("Invalid device index")
     return _get_device_properties(device)  # type: ignore[name-defined]  # noqa: F821
 
 
@@ -372,6 +378,33 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
+def get_stream_from_external(
+    data_ptr: int, device: Optional[_device_t] = None
+) -> Stream:
+    r"""Return a :class:`Stream` from an external SYCL queue.
+
+    This function is used to wrap SYCL queue created in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This function doesn't manage the queue life-cycle, it is the user
+       responsibility to keep the referenced queue alive while this returned stream is
+       being used. The different SYCL queue pointers will result in distinct
+       :class:`Stream` objects, even if the SYCL queues they dereference are equivalent.
+
+    Args:
+        data_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
+        device(torch.device or int, optional): the device where the queue was originally created.
+            It is the user responsibility to ensure the device is specified correctly.
+    """
+    _lazy_init()
+    streamdata = torch._C._xpu_getStreamFromExternal(
+        data_ptr, _get_device_index(device, optional=True)
+    )
+    return Stream(
+        stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2]
+    )
+
+
 def synchronize(device: _device_t = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 
@@ -385,17 +418,22 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def empty_cache() -> None:
-    r"""Release all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other XPU application.
+def get_arch_list() -> list[str]:
+    r"""Return list XPU architectures this library was compiled for."""
+    if not _is_compiled():
+        return []
+    arch_flags = torch._C._xpu_getArchFlags()
+    if arch_flags is None:
+        return []
+    return arch_flags.split()
 
-    .. note::
-        :func:`~torch.xpu.empty_cache` doesn't increase the amount of XPU
-        memory available for PyTorch. However, it may help reduce fragmentation
-        of XPU memory in certain cases.
-    """
-    if is_initialized():
-        torch._C._xpu_emptyCache()
+
+def get_gencode_flags() -> str:
+    r"""Return XPU AOT(ahead-of-time) build flags this library was compiled with."""
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return ""
+    return f'-device {",".join(arch for arch in arch_list)}'
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:
@@ -445,7 +483,30 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
     return default_generator.get_offset()
 
 
-from .random import *  # noqa: F403
+# import here to avoid circular import
+from .memory import (
+    empty_cache,
+    max_memory_allocated,
+    max_memory_reserved,
+    mem_get_info,
+    memory_allocated,
+    memory_reserved,
+    memory_stats,
+    memory_stats_as_nested_dict,
+    reset_accumulated_memory_stats,
+    reset_peak_memory_stats,
+)
+from .random import (
+    get_rng_state,
+    get_rng_state_all,
+    initial_seed,
+    manual_seed,
+    manual_seed_all,
+    seed,
+    seed_all,
+    set_rng_state,
+    set_rng_state_all,
+)
 
 
 __all__ = [
@@ -459,12 +520,14 @@ __all__ = [
     "device_of",
     "device_count",
     "empty_cache",
+    "get_arch_list",
     "get_device_capability",
     "get_device_name",
     "get_device_properties",
+    "get_gencode_flags",
     "get_rng_state",
     "get_rng_state_all",
-    "get_stream",
+    "get_stream_from_external",
     "init",
     "initial_seed",
     "is_available",
@@ -472,6 +535,15 @@ __all__ = [
     "is_initialized",
     "manual_seed",
     "manual_seed_all",
+    "max_memory_allocated",
+    "max_memory_reserved",
+    "mem_get_info",
+    "memory_allocated",
+    "memory_reserved",
+    "memory_stats",
+    "memory_stats_as_nested_dict",
+    "reset_accumulated_memory_stats",
+    "reset_peak_memory_stats",
     "seed",
     "seed_all",
     "set_device",

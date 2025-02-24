@@ -1,3 +1,6 @@
+# mypy: allow-untyped-defs
+
+# pyre-unsafe
 import argparse
 import io
 import os
@@ -7,12 +10,13 @@ import subprocess
 import time
 
 import numpy as np
+
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
+import torch.nn as nn
 import torch.optim as optim
 from torch.distributed.optim import DistributedOptimizer
 from torch.distributed.rpc import RRef, TensorPipeRpcBackendOptions
@@ -82,18 +86,18 @@ def _retrieve_embedding_parameters(emb_rref):
 
 def _print_header():
     _print_cont("\n")
-    _print_cont("%10s" % "")
-    for p in [50, 75, 90, 95]:
-        _print_cont("%14s%10s" % ("sec/epoch", "epoch/sec"))
+    _print_cont(" " * 10)
+    for _ in [50, 75, 90, 95]:
+        _print_cont(f"{'sec/epoch':14s}{'epoch/sec':10s}")
     _print_cont("\n")
 
 
 def _print_benchmark(prefix, nelem, measurements):
     measurements = sorted(measurements)
-    _print_cont("%8s:" % prefix)
+    _print_cont(f"{prefix:8s}:")
     for p in [50, 75, 90, 95]:
         v = np.percentile(measurements, p)
-        _print_cont("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+        _print_cont(f"  p{p:02d}:  {v:1.3f}s  {nelem / v:6d}/s")
     _print_cont("\n")
 
 
@@ -108,7 +112,6 @@ def _run_printable(cmd):
     buffer = io.BytesIO()
     torch.save(proc.stdout.decode("utf-8"), buffer)
     input_tensor = torch.ByteTensor(list(buffer.getvalue()))
-    input_length = torch.IntTensor([input_tensor.size(0)])
 
     output = []
     buffer = io.BytesIO(np.asarray(input_tensor).tobytes())
@@ -139,8 +142,7 @@ def _run_trainer(emb_rref_list, rank):
         )
 
     # model.parameters() only includes local parameters.
-    for param in model.parameters():
-        model_parameter_rrefs.append(RRef(param))
+    model_parameter_rrefs.extend(RRef(param) for param in model.parameters())
 
     # Setup distributed optimizer
     opt = DistributedOptimizer(optim.SGD, model_parameter_rrefs, lr=0.05)
@@ -169,7 +171,7 @@ def _run_trainer(emb_rref_list, rank):
 
     measurements = []
     # Include warm-up cycles during training
-    for epoch in range(100 + WARMUP_CYCLES):
+    for _ in range(100 + WARMUP_CYCLES):
         start = time.time()
         batch_size = 0
 
@@ -209,13 +211,12 @@ def run_worker(rank, world_size):
 
     # Rank 16. Master
     if rank == (NUM_TRAINERS + NUM_PS):
-
         rpc.init_rpc(
-            "master", rank=rank,
+            "master",
+            rank=rank,
             backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
-            world_size=world_size
+            world_size=world_size,
         )
-
 
         # Build the Embedding tables on the Parameter Servers.
         emb_rref_list = []
@@ -255,7 +256,6 @@ def run_worker(rank, world_size):
 
     # Rank 0-7. Trainers
     elif rank >= 0 and rank < NUM_PS:
-
         # Initialize process group for Distributed DataParallel on trainers.
         dist.init_process_group(
             backend=dist.Backend.GLOO,
@@ -284,25 +284,24 @@ def run_worker(rank, world_size):
             rpc_backend_options=rpc_backend_options,
         )
         # parameter server do nothing
-        pass
 
     # block until all rpcs finish
     rpc.shutdown()
 
 
 if __name__ == "__main__":
-    """ Initializing the distributed environment. """
+    """Initializing the distributed environment."""
 
     output = _run_printable("nvidia-smi topo -m")
     print("-------------------------------------------")
     print("                  Info                     ")
     print("-------------------------------------------")
-    print("")
+    print()
     print(f"* PyTorch version: {torch.__version__}")
     print(f"* CUDA version: {torch.version.cuda}")
-    print("")
+    print()
     print("------------ nvidia-smi topo -m -----------")
-    print("")
+    print()
     print(output[0])
     print("-------------------------------------------")
     print("PyTorch Distributed Benchmark (DDP and RPC)")

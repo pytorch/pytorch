@@ -21,7 +21,7 @@ void cpu_avg_pool2d(
     int64_t dW, int64_t dH,
     int64_t padW, int64_t padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   using acc_t = at::opmath_type<scalar_t>;
 
   auto input = input_.contiguous();
@@ -71,7 +71,7 @@ void cpu_avg_pool2d(
 
       acc_t sum = 0;
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -100,7 +100,7 @@ void cpu_avg_pool2d(
 }
 
 template <typename scalar_t,
-          typename std::enable_if<!is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          std::enable_if_t<!is_reduced_floating_point<scalar_t>::value, int> = 0>
 void cpu_avg_pool2d_channels_last(
     const Tensor& output_,
     const Tensor& input_,
@@ -108,7 +108,7 @@ void cpu_avg_pool2d_channels_last(
     int64_t dW, int64_t dH,
     int64_t padW, int64_t padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   TORCH_CHECK(input_.ndimension() == 4,
               "2d average pooling with channels last format supports tensors with 4 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast;
@@ -147,7 +147,7 @@ void cpu_avg_pool2d_channels_last(
       ih1 = std::min(ih1, input_height);
       iw1 = std::min(iw1, input_width);
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -214,7 +214,7 @@ void cpu_avg_pool2d_channels_last(
 }
 
 template <typename scalar_t,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          std::enable_if_t<is_reduced_floating_point<scalar_t>::value, int> = 0>
 void cpu_avg_pool2d_channels_last(
     const Tensor& output_,
     const Tensor& input_,
@@ -222,7 +222,7 @@ void cpu_avg_pool2d_channels_last(
     int64_t dW, int64_t dH,
     int64_t padW, int64_t padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   TORCH_CHECK(input_.ndimension() == 4,
               "2d average pooling with channels last format supports tensors with 4 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast;
@@ -266,7 +266,7 @@ void cpu_avg_pool2d_channels_last(
       ih1 = std::min(ih1, input_height);
       iw1 = std::min(iw1, input_width);
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -309,8 +309,7 @@ void cpu_avg_pool2d_channels_last(
           int64_t d2 = 0;
           for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
             bVec data_bvec = bVec::loadu(in + d2);
-            fVec data_fvec0, data_fvec1;
-            std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+            auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
             fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
             fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -354,7 +353,7 @@ void cpu_avg_pool2d_backward(
     int dW, int dH,
     int padW, int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
@@ -387,7 +386,7 @@ void cpu_avg_pool2d_backward(
           ih1 = std::min(ih1, input_height);
           iw1 = std::min(iw1, input_width);
 
-          int64_t divide_factor;
+          int64_t divide_factor = 0;
           if (divisor_override.has_value()) {
             divide_factor = divisor_override.value();
           } else {
@@ -422,7 +421,7 @@ void cpu_avg_pool2d_backward_channels_last(
     int dW, int dH,
     int padW, int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto memory_format = at::MemoryFormat::ChannelsLast;
   auto grad_input = grad_input_.contiguous(memory_format);
   auto grad_output = grad_output_.contiguous(memory_format);
@@ -456,7 +455,7 @@ void cpu_avg_pool2d_backward_channels_last(
           ih1 = std::min(ih1, input_height);
           iw1 = std::min(iw1, input_width);
 
-          int64_t divide_factor;
+          int64_t divide_factor = 0;
           if (divisor_override.has_value()) {
             divide_factor = divisor_override.value();
           } else {
@@ -501,7 +500,7 @@ void avg_pool2d_kernel_impl(
     int64_t dW, int64_t dH,
     int64_t padW, int64_t padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(), "avg_pool2d", [&] {
@@ -527,7 +526,7 @@ void avg_pool2d_backward_kernel_impl(
     int dW, int dH,
     int padW, int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, grad_output.scalar_type(), "avg_pool2d_backward", [&] {
@@ -555,7 +554,7 @@ void cpu_avg_pool3d(
     int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   using acc_t = at::opmath_type<scalar_t>;
 
   auto input = input_.contiguous();
@@ -612,7 +611,7 @@ void cpu_avg_pool3d(
 
       acc_t sum = 0;
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -643,7 +642,7 @@ void cpu_avg_pool3d(
 }
 
 template <typename scalar_t,
-          typename std::enable_if<!is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          std::enable_if_t<!is_reduced_floating_point<scalar_t>::value, int> = 0>
 void cpu_avg_pool3d_channels_last(
     const Tensor& output_,
     const Tensor& input_,
@@ -651,7 +650,7 @@ void cpu_avg_pool3d_channels_last(
     int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   TORCH_CHECK(input_.ndimension() == 5,
               "3d average pooling with channels last format supports tensors with 5 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast3d;
@@ -697,7 +696,7 @@ void cpu_avg_pool3d_channels_last(
       ih1 = std::min(ih1, input_height);
       iw1 = std::min(iw1, input_width);
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -766,7 +765,7 @@ void cpu_avg_pool3d_channels_last(
 }
 
 template <typename scalar_t,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          std::enable_if_t<is_reduced_floating_point<scalar_t>::value, int> = 0>
 void cpu_avg_pool3d_channels_last(
     const Tensor& output_,
     const Tensor& input_,
@@ -774,7 +773,7 @@ void cpu_avg_pool3d_channels_last(
     int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   TORCH_CHECK(input_.ndimension() == 5,
               "3d average pooling with channels last format supports tensors with 5 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast3d;
@@ -825,7 +824,7 @@ void cpu_avg_pool3d_channels_last(
       ih1 = std::min(ih1, input_height);
       iw1 = std::min(iw1, input_width);
 
-      int64_t divide_factor;
+      int64_t divide_factor = 0;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();
       } else {
@@ -869,8 +868,7 @@ void cpu_avg_pool3d_channels_last(
             int64_t d2 = 0;
             for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
               bVec data_bvec = bVec::loadu(in + d2);
-              fVec data_fvec0, data_fvec1;
-              std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+              auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
 
               fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
               fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -915,7 +913,7 @@ void cpu_avg_pool3d_backward(
     int dW, int dH, int dD,
     int padW, int padH, int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
@@ -954,7 +952,7 @@ void cpu_avg_pool3d_backward(
             ih1 = std::min(ih1, input_height);
             iw1 = std::min(iw1, input_width);
 
-            int64_t divide_factor;
+            int64_t divide_factor = 0;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
             } else {
@@ -992,7 +990,7 @@ void cpu_avg_pool3d_backward_channels_last(
     int dW, int dH, int dD,
     int padW, int padH, int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto memory_format = at::MemoryFormat::ChannelsLast3d;
   auto grad_input = grad_input_.contiguous(memory_format);
   auto grad_output = grad_output_.contiguous(memory_format);
@@ -1033,7 +1031,7 @@ void cpu_avg_pool3d_backward_channels_last(
             ih1 = std::min(ih1, input_height);
             iw1 = std::min(iw1, input_width);
 
-            int64_t divide_factor;
+            int64_t divide_factor = 0;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
             } else {
@@ -1083,7 +1081,7 @@ void avg_pool3d_kernel_impl(
     int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(), "avg_pool3d", [&] {
@@ -1110,7 +1108,7 @@ void avg_pool3d_backward_kernel_impl(
     int dW, int dH, int dD,
     int padW, int padH, int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, grad_output.scalar_type(), "avg_pool3d_backward", [&] {
@@ -1132,9 +1130,9 @@ void avg_pool3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(avg_pool2d_kernel, &avg_pool2d_kernel_impl);
-REGISTER_DISPATCH(avg_pool2d_backward_kernel, &avg_pool2d_backward_kernel_impl);
-REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
-REGISTER_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl);
+REGISTER_DISPATCH(avg_pool2d_kernel, &avg_pool2d_kernel_impl)
+REGISTER_DISPATCH(avg_pool2d_backward_kernel, &avg_pool2d_backward_kernel_impl)
+REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl)
+REGISTER_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl)
 
 } // at::native

@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 import collections
-from typing import Any, Dict, List, Union
+import warnings
+from typing import Any, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -14,6 +16,7 @@ from torch.export.exported_program import (
     InputSpec,
     TensorArgument,
 )
+from torch.fx.graph_module import _get_attr
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -24,15 +27,15 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     if that's the case).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
-        self._constant_attrs: Dict[
-            Union[int, torch.Tensor, FakeScriptObject], List[Any]
+        self._constant_attrs: dict[
+            Union[int, torch.Tensor, FakeScriptObject], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
-        self._script_object_map: Dict[int, torch.ScriptObject] = {}
+        self._script_object_map: dict[int, torch.ScriptObject] = {}
 
     def __getitem__(
         self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
@@ -89,6 +92,8 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
     # The FQN of the constant tensor in the state dict should
     # correspond to the module where the constant tensor was
     # originally used.
+    if len(node.meta["nn_module_stack"]) == 0:
+        return constant_name
     parent_fqn = list(node.meta["nn_module_stack"].values())[-1][0]
     if len(parent_fqn) > 0:
         return f"{parent_fqn}.{constant_name}"
@@ -108,7 +113,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -126,7 +131,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: Dict[
+    all_constants: dict[
         str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
     ] = {}
 
@@ -142,17 +147,26 @@ def lift_constants_pass(
         tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
     )
 
-    first_user_input_loc, first_user_input = 0, None
+    first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and node.name in graph_signature.user_inputs:
+        if node.op == "placeholder":
+            if node.name in graph_signature.user_inputs:
+                first_user_input = node
+                break
+            first_user_input_loc += 1
+        # If we ever hit here, it means that
+        # there was no user input so the constants
+        # should be inserted right before the first
+        # non-placeholder node.
+        if node.op != "placeholder":
             first_user_input = node
             break
-        first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
+    renamed_targets = {}
     for node in gm.graph.nodes:
         if node.op == "get_attr":
-            constant_val = getattr(gm, node.target)
+            constant_val = _get_attr(gm, node.target)
             if constant_val in lifted_objs:
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
@@ -160,6 +174,7 @@ def lift_constants_pass(
                 const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+                renamed_targets[node.name] = const_placeholder_node.name
                 continue
 
             # For ScriptObject, Tensor and FakeScriptObject constants:
@@ -181,6 +196,15 @@ def lift_constants_pass(
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
+                # Remove the parameterness of constant_val
+                if isinstance(constant_val, torch.nn.Parameter):
+                    warnings.warn(
+                        f"{node.target} created when tracing {node.meta.get('stack_trace', '<unknown stack>')} is a parameter. But"
+                        f"it's not registered with register_parameter(). export will treat it as a constant tensor"
+                    )
+                    # We get the real data out of the parameter by disabling the surrounding fake mode.
+                    with unset_fake_temporarily():
+                        constant_val = constant_val.data
                 constant_kind = InputKind.CONSTANT_TENSOR
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
@@ -233,10 +257,12 @@ def lift_constants_pass(
                 elif isinstance(constant_val, FakeScriptObject):
                     class_fqn = constant_val.script_class_name
                     const_placeholder_node.meta["val"] = CustomObjArgument(
-                        constant_fqn, class_fqn
+                        constant_fqn, class_fqn, constant_val
                     )
                     input_spec_arg = CustomObjArgument(
-                        name=const_placeholder_node.name, class_fqn=class_fqn
+                        name=const_placeholder_node.name,
+                        class_fqn=class_fqn,
+                        fake_val=constant_val,
                     )
                 else:
                     raise SpecViolationError(
@@ -246,6 +272,8 @@ def lift_constants_pass(
                 lifted_objs.add(constant_val, const_placeholder_node)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+
+                renamed_targets[node.name] = const_placeholder_node.name
 
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(
@@ -263,18 +291,22 @@ def lift_constants_pass(
                     all_constants[constant_fqn] = constant_val
                 first_user_input_loc += 1
 
+    for spec in graph_signature.output_specs:
+        if spec.arg.name in renamed_targets:
+            spec.arg.name = renamed_targets[spec.arg.name]
+
     return all_constants
 
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
     For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
-    constants: Dict[
+    constants: dict[
         str,
         Union[
             torch.Tensor,
@@ -286,18 +318,24 @@ def rewrite_script_object_meta(
         if "val" not in node.meta:
             continue
 
-        if isinstance(node.meta["val"], torch.ScriptObject):
-            old_meta = node.meta["val"]
+        old_meta = node.meta["val"]
+
+        if isinstance(old_meta, torch.ScriptObject):
             class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
             new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
-        elif isinstance(node.meta["val"], FakeScriptObject):
-            old_meta = node.meta["val"]  # type: ignore[assignment]
+        elif isinstance(old_meta, FakeScriptObject):
             class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
-            new_meta = CustomObjArgument(node.name, class_fqn)
+            new_meta = CustomObjArgument(node.name, class_fqn, old_meta)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
+    return constants
+
+
+def _materialize_and_lift_constants(gm, export_graph_signature, constant_attrs):
+    constants = rewrite_script_object_meta(gm)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
     return constants

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import builtins
 import dis
@@ -6,12 +7,9 @@ import inspect
 import re
 import typing
 import warnings
-
 from textwrap import dedent
-from typing import Type
 
 import torch
-
 from torch._C import (
     _GeneratorType,
     AnyType,
@@ -35,8 +33,7 @@ from torch._C import (
     TupleType,
     UnionType,
 )
-from torch._sources import get_source_lines_and_file
-from .._jit_internal import (  # type: ignore[attr-defined]
+from torch._jit_internal import (  # type: ignore[attr-defined]
     _Await,
     _qualified_name,
     Any,
@@ -58,11 +55,14 @@ from .._jit_internal import (  # type: ignore[attr-defined]
     Tuple,
     Union,
 )
+from torch._sources import get_source_lines_and_file
+
 from ._state import _get_script_class
+
 
 if torch.distributed.rpc.is_available():
     from torch._C import RRefType
-    from .._jit_internal import is_rref, RRef
+    from torch._jit_internal import is_rref, RRef
 
 from torch._ops import OpOverloadPacket
 
@@ -349,7 +349,7 @@ def try_real_annotations(fn, loc):
 
 # Finds common type for enum values belonging to an Enum class. If not all
 # values have the same type, AnyType is returned.
-def get_enum_value_type(e: Type[enum.Enum], loc):
+def get_enum_value_type(e: type[enum.Enum], loc):
     enum_values: List[enum.Enum] = list(e)
     if not enum_values:
         raise ValueError(f"No enum values defined for: '{e.__class__}'")

@@ -9,7 +9,7 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
-
+from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
@@ -18,7 +18,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
 )
-
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -28,8 +27,8 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-
 from torch.utils._stats import count_label
+
 
 pytree = torch.utils._pytree
 
@@ -54,9 +53,7 @@ def ordered_set(*items):
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
+    return device.type != "hpu"
 
 
 _like_tensor_constructors = ordered_set(
@@ -94,9 +91,9 @@ _device_not_kwarg_ops = ordered_set(
     aten._nested_tensor_from_tensor_list.default,
     aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
-    aten.is_pinned.default,
     aten.to.device,
     aten.to.prim_Device,
+    aten.is_pinned.default,
     aten._pin_memory.default,
     aten._pin_memory.out,
     aten._resize_output.default,
@@ -145,6 +142,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
@@ -180,6 +190,19 @@ def constructors(fake_mode, func, *args, **kwargs):
     return FakeTensor(fake_mode, r, out_device)
 
 
+@register_op_impl(aten.is_pinned.default)
+def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    # we'll ignore device argument because it is deprecated and not
+    # actually used by is_pinned.
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(inp)
+    return r
+
+
 @register_op_impl(aten.to.prim_Device)
 @register_op_impl(aten.to.device)
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
@@ -199,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -258,9 +273,16 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(aten._unique2.default)
-def unique2(
-    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+def _unique(
+    fake_mode,
+    func,
+    arg,
+    dim,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    *,
+    unique_consecutive=False,
 ):
     if (
         fake_mode.shape_env is None
@@ -269,7 +291,10 @@ def unique2(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.unique_memo) is None:
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+
+    # Do not use a memo for unique_dim
+    if dim is not None or nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -291,26 +316,74 @@ def unique2(
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+            numel = arg.numel() if dim is None else arg.size(dim)
+            if not has_free_symbols(numel):
+                maxval = int(numel)
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.unique_memo = nnz
+        if dim is None:
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz
+            else:
+                arg.unique_memo = nnz
 
-    ret = [arg.new_empty((nnz,))]
-
-    if return_inverse:
-        ret.append(torch.empty_like(arg))
+    if dim is None:
+        ret = [arg.new_empty((nnz,))]
     else:
-        ret.append(arg.new_empty(0))
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    if return_counts:
-        ret.append(torch.empty_like(arg))
+    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
+    if return_inverse or return_if_dim_and_cpu:
+        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
-        ret.append(arg.new_empty(0))
+        inverse = arg.new_empty(0)
+    ret.append(inverse)
+
+    if return_counts or return_if_dim_and_cpu:
+        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+    else:
+        counts = arg.new_empty(0)
+    ret.append(counts)
 
     return tuple(ret)
+
+
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten.unique_dim.default)
+def unique_dim(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        # normalize dim to be non-negative
+        dim if dim >= 0 else dim % max(arg.ndim, 1),
+        sorted,
+        return_inverse,
+        return_counts,
+    )
+
+
+@register_op_impl(aten.unique_consecutive.default)
+def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        False,
+        return_inverse,
+        return_counts,
+        unique_consecutive=True,
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -332,16 +405,17 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
+    if (r := arg.item_memo) is not None:
+        return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
         and not fake_mode.allow_scalar_outputs
     ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
-    if (r := arg.item_memo) is not None:
-        return r
     if is_float_dtype(arg.dtype):
         r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
@@ -352,6 +426,11 @@ def local_scalar_dense(fake_mode, func, arg):
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
     arg.item_memo = r
     return r
+
+
+@register_op_impl(torch.ops.aten.nonzero_numpy.default)
+def nonzero_numpy(fake_mode, func, arg):
+    return torch.ops.aten.nonzero.default(arg).unbind(1)
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -369,6 +448,8 @@ def nonzero(fake_mode, func, arg):
             _constrain_range_for_size,
             has_free_symbols,
         )
+        from torch.utils._sympy.numbers import IntInfinity
+        from torch.utils._sympy.value_ranges import bound_sympy
 
         if not has_free_symbols(arg.numel()) and arg.numel() == 0:
             # If numel is zero, then the output size must be zero.
@@ -387,12 +468,53 @@ def nonzero(fake_mode, func, arg):
 
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
+            else:
+                prod_node = math.prod(arg.shape).node
+                prod_range = bound_sympy(
+                    prod_node.expr, prod_node.shape_env.var_to_range
+                )
+                if isinstance(prod_range.upper, IntInfinity):
+                    maxval = sys.maxsize - 1
+                else:
+                    maxval = prod_range.upper
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
+
+
+@register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
+def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=None):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            # Without symints/symfloats, cannot handle this
+            raise DynamicOutputShapeException(func)
+
+        total_L = fake_mode.shape_env.create_unbacked_symint()
+
+        maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(padded.numel()):
+            maxval = int(padded.numel())
+
+        _constrain_range_for_size(total_L, min=0, max=maxval)
+
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -414,10 +536,23 @@ def masked_select(fake_mode, func, self, mask):
         _constrain_range_for_size,
         has_free_symbols,
     )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
 
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        if self.numel() > 2:
-            maxval = int(self.numel())
+        num_elements = int(self.numel())
+    else:
+        prod_node = math.prod(self.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
+    if num_elements > 2:
+        maxval = num_elements
 
     _constrain_range_for_size(nnz, max=maxval)
 
@@ -469,19 +604,18 @@ def has_meta(func):
     lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -543,7 +677,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -590,6 +724,7 @@ def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
         if x
         not in (
             # these are already registered elsewhere
+            aten.is_pinned.default,
             aten.to.device,
             aten.to.prim_Device,
             aten._nested_tensor_from_tensor_list.default,
@@ -662,259 +797,21 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
-@register_op_impl(aten._scaled_dot_product_flash_attention.default)
-def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
-    _, kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
+@register_op_impl(torch.ops.aten.bincount.default)
+def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
 
-    query = kwargs["query"]
-    key = kwargs["key"]
-    return_debug_mask = kwargs["return_debug_mask"]
-    # unused: value, dropout_p, is_causal, scale
+    new_size = fake_mode.shape_env.create_unbacked_symint()
 
-    def convert_tensor(t, device):
-        return FakeTensor(fake_mode, t, device)
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
-    max_seqlen_batch_k = key.size(2)
-
-    query_t = query.transpose(1, 2)
-    # empty_like already returns a fake tensor so we don't need to convert it
-    attention = torch.empty_like(query_t).transpose(1, 2)
-    logsumexp = convert_tensor(
-        torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q),
-            dtype=torch.float,
-            device="meta",
-        ),
-        device=query.device,
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = convert_tensor(
-            torch.empty(
-                (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-                dtype=query.dtype,
-                device="meta",
-            ),
-            device=query.device,
-        )
-    else:
-        debug_mask = convert_tensor(
-            torch.empty(0, dtype=query.dtype, device="meta"),
-            query.device,
-        )
-
-    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
-    # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return meta tensors here
-    # it's possible we'll need to have some special handling in inductor for sdpa
-
-    return (
-        attention,
-        logsumexp,
-        None,
-        None,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        debug_mask,
-    )
-
-
-@register_op_impl(aten._scaled_dot_product_efficient_attention.default)
-def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
-    _, kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    query = kwargs["query"]
-    key = kwargs["key"]
-    value = kwargs["value"]
-    compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: attn_bias, dropout_p, is_causal, scale
-
-    def convert_tensor(t, device):
-        return FakeTensor(fake_mode, t, device)
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    num_heads = query.size(-2)
-    K = query.size(-1)
-    Kv = value.size(-1)
-
-    res = convert_tensor(
-        torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device="meta"),
-        query.device,
-    )
-
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
-    logsum_exp = convert_tensor(
-        torch.empty(
-            (B, num_heads, logsumexp_dim),
-            dtype=torch.float,
-            device="meta",
-        ),
-        query.device,
-    )
-
-    res = res.transpose(1, 2)
-
-    # See Note [Seed and Offset]:
-    seed = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-    offset = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-
-    return res, logsum_exp, seed, offset
-
-
-@register_op_impl(aten._flash_attention_forward.default)
-def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
-    _, kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    query = kwargs["query"]
-    key = kwargs["key"]
-    cum_seq_q = kwargs["cum_seq_q"]
-    cum_seq_k = kwargs["cum_seq_k"]
-    max_q = kwargs["max_q"]
-    max_k = kwargs["max_k"]
-    return_debug_mask = kwargs["return_debug_mask"]
-    # unused: value, dropout_p, is_causal, scale
-
-    def convert_tensor(t, device):
-        return FakeTensor(fake_mode, t, device)
-
-    # NB: there are two underlying paths:
-    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
-    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
-    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
-    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
-    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
-    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
-    num_heads = query.size(-2)
-    head_dim = query.size(-1)
-
-    # Cuda Path
-    # note: empty_like already returns a fake tensor, we don't need to wrap it
-    attention = torch.empty_like(query)
-    logsumexp = convert_tensor(
-        torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q),
-            dtype=torch.float,
-            device="meta",
-        ),
-        device=query.device,
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = convert_tensor(
-            torch.empty(
-                (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-                dtype=query.dtype,
-                device="meta",
-            ),
-            query.device,
-        )
-    else:
-        debug_mask = convert_tensor(
-            torch.empty(0, dtype=query.dtype, device="meta"),
-            query.device,
-        )
-
-    # See Note [Seed and Offset]:
-    return (
-        attention,
-        logsumexp,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        debug_mask,
-    )
-
-
-@register_op_impl(aten._efficient_attention_forward.default)
-def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
-    _, kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    query = kwargs["query"]
-    key = kwargs["key"]
-    value = kwargs["value"]
-    cu_seqlens_q = kwargs["cu_seqlens_q"]
-    max_seqlen_q = kwargs["max_seqlen_q"]
-    max_seqlen_k = kwargs["max_seqlen_k"]
-    compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
-
-    def convert_tensor(t, device):
-        return FakeTensor(fake_mode, t, device)
-
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    num_heads = query.size(-2)
-    K = query.size(-1)
-    Kv = value.size(-1)
-
-    res = convert_tensor(
-        torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device="meta"),
-        query.device,
-    )
-
-    logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
-    actual_max_seqlen_q = M
-    if cu_seqlens_q is not None:
-        assert max_seqlen_q is not None
-        actual_max_seqlen_q = max_seqlen_q
-    actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
-    logsum_exp = convert_tensor(
-        torch.empty(
-            (logsumexp_batch_dim, num_heads, logsumexp_dim),
-            dtype=torch.float,
-            device="meta",
-        ),
-        query.device,
-    )
-
-    # See Note [Seed and Offset]:
-    seed = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-    offset = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-
-    return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
+    _constrain_range_for_size(new_size, min=minlength)
+    return inputs.new_empty(new_size)
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
@@ -1013,15 +910,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -1030,13 +921,15 @@ def make_fast_binary_impl(slow_ref):
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and op.shape == final_shape
+                and guard_size_oblivious(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
@@ -1046,7 +939,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
@@ -1130,6 +1022,14 @@ def make_fast_binary_impl(slow_ref):
     return fast_binary_impl
 
 
+# disable the python dispatcher to avoid decomposing detach() further
+# (proxy_mode should still decompose detach() though)
+def fast_detach(fake_mode, x):
+    with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+        out = torch.ops.aten.detach.default(x)
+    return FakeTensor(fake_mode, out, x.device)
+
+
 @functools.lru_cache(None)
 def get_fast_op_impls():
     import torch._refs
@@ -1144,4 +1044,5 @@ def get_fast_op_impls():
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(torch._refs.div)
     )
+    register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

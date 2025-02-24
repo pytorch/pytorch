@@ -2,12 +2,12 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -16,8 +16,7 @@
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Value;
 
@@ -62,9 +61,9 @@ struct Element {
   // We memoize the results of `getMemoryLocations` to speed up queries.
   // A nullopt means that this cache is not yet populated. Since `MemoryDAG` is
   // immutable, this cache should never need to be invalidated.
-  mutable c10::optional<MemoryLocations> cachedMemoryLocations_;
+  mutable std::optional<MemoryLocations> cachedMemoryLocations_;
 
-  mutable c10::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
+  mutable std::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
 };
 
 // class MemoryDAG
@@ -172,5 +171,4 @@ class TORCH_API MemoryDAGBuilder {
   // the map to construct the `MemoryDAG`
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

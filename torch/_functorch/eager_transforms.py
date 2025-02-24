@@ -8,11 +8,10 @@
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch._C._functorch import (
     _assert_wrapped_functional,
     _func_decrement_nesting,
@@ -27,6 +26,8 @@ from torch._C._functorch import (
     _wrap_for_grad,
     _wrap_functional_tensor,
     get_inplace_requires_grad_allowed,
+    get_unwrapped,
+    is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
 )
 from torch._functorch.utils import argnums_t, exposed_in
@@ -42,8 +43,8 @@ from torch.utils._pytree import (
     tree_unflatten,
     treespec_pprint,
 )
-from .apis import vmap
 
+from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -63,45 +64,6 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _vjp_treespec_compare(primals_out, cotangents):
-    # Revert this once #116264 gets fixed
-    _, primals_out_spec = tree_flatten(primals_out)
-    _, cotangents_spec = tree_flatten(cotangents)
-    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
-    # function is not inlined.
-    if primals_out_spec != cotangents_spec:
-        raise RuntimeError(
-            f"Expected pytree structure of cotangents to be the same "
-            f"as pytree structure of outputs to the function. "
-            f"cotangents: {treespec_pprint(cotangents_spec)}, "
-            f"primal output: {treespec_pprint(primals_out_spec)}"
-        )
-
-
-def _jvp_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    _, primals_spec = tree_flatten(primals)
-    _, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f"{jvp_str}: Expected primals and tangents to have the same python "
-            f"structure. For example, if primals is a tuple of 3 tensors, "
-            f"tangents also must be. Got primals with structure {primals_spec} "
-            f"and tangents with structure {tangents_spec}"
-        )
-
-
-def _linearize_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    _, primals_argspec = tree_flatten(primals)
-    _, tangent_argspec = tree_flatten(tangents)
-    if tangent_argspec != primals_argspec:
-        raise RuntimeError(
-            f"Expected the tangents {tangent_argspec} to have "
-            f"the same argspec as the primals {primals_argspec}"
-        )
-
-
 def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -113,9 +75,7 @@ def _create_differentiable(inps, level=None):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
                 return _set_tensor_requires_grad(x)
-        raise ValueError(
-            f"Thing passed to transform API must be Tensor, " f"got {type(x)}"
-        )
+        raise ValueError(f"Thing passed to transform API must be Tensor, got {type(x)}")
 
     return tree_map(create_differentiable, inps)
 
@@ -389,10 +349,7 @@ def _vjp_with_argnums(
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            # Note for the reviewer: This is extremely odd but it passes the
-            # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-            # The equivalent "if argnums is None" fails for some reason
-            if not isinstance(argnums, int) and not argnums:
+            if argnums is None:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
@@ -427,7 +384,13 @@ def _vjp_with_argnums(
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            _vjp_treespec_compare(primals_out, cotangents)
+            if primals_out_spec != cotangents_spec:
+                raise RuntimeError(
+                    f"Expected pytree structure of cotangents to be the same "
+                    f"as pytree structure of outputs to the function. "
+                    f"cotangents: {treespec_pprint(cotangents_spec)}, "
+                    f"primal output: {treespec_pprint(primals_out_spec)}"
+                )
             result = _autograd_grad(
                 flat_primals_out,
                 flat_diff_primals,
@@ -465,7 +428,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, Tuple[int]] = 0,
+    argnums: Union[int, tuple[int]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
@@ -600,6 +563,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -761,12 +725,6 @@ def jacrev(
         if has_aux:
             return output_input, aux
         return output_input
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
@@ -953,7 +911,7 @@ def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
         )
 
 
-def assert_non_empty_tensor_output(output: List[Any], api: str) -> None:
+def assert_non_empty_tensor_output(output: list[Any], api: str) -> None:
     if (len(output) == 1 and output[0] is None) or len(output) < 1:
         raise RuntimeError(
             f"{api}: Expected f to be a function that has non-empty output (got output = {output})"
@@ -988,7 +946,7 @@ def assert_output_is_tensor_or_tensors(output: Any, api: str) -> None:
 
 
 def assert_non_empty_list_of_tensors(
-    output: List[torch.Tensor], api: str, argname: str
+    output: list[torch.Tensor], api: str, argname: str
 ) -> None:
     if len(output) == 0:
         raise RuntimeError(f"{api}: Expected {argname} to contain at least one Tensor.")
@@ -996,7 +954,7 @@ def assert_non_empty_list_of_tensors(
         if isinstance(out, torch.Tensor):
             continue
         raise RuntimeError(
-            f"{api}: Expected {argname} to only contain Tensors, got " f"{type(out)}"
+            f"{api}: Expected {argname} to only contain Tensors, got {type(out)}"
         )
 
 
@@ -1086,7 +1044,6 @@ def jvp(
     )
 
 
-@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(
     func: Callable,
     primals: Any,
@@ -1118,7 +1075,13 @@ def _jvp_with_argnums(
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    _jvp_treespec_compare(diff_args, tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f"{jvp_str}: Expected primals and tangents to have the same python "
+            f"structure. For example, if primals is a tuple of 3 tensors, "
+            f"tangents also must be. Got primals with structure {primals_spec} "
+            f"and tangents with structure {tangents_spec}"
+        )
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
 
@@ -1132,10 +1095,7 @@ def _jvp_with_argnums(
                     fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
                 )
                 duals = tree_unflatten(flat_duals, primals_spec)
-                # Note for the reviewer: This is extremely odd but it passes the
-                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-                # The equivalent "if argnums is not None" fails for some reason
-                if isinstance(argnums, (int, tuple)):
+                if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
@@ -1289,6 +1249,7 @@ def jacfwd(
 
     """
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1342,12 +1303,6 @@ def jacfwd(
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
@@ -1675,7 +1630,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:
@@ -1692,7 +1646,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             outputs = _unwrap_all_tensors_from_functional(
                 func_outputs, reapply_views=reapply_views
             )
-            flat_outputs, func_out_spec = tree_flatten(outputs)
 
             for a in flattened_wrapped_args + flattened_wrapped_kwargs:
                 if isinstance(a, torch.Tensor):
@@ -1723,7 +1676,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
 
 
 @exposed_in("torch.func")
-def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
+def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     """
     Returns the value of ``func`` at ``primals`` and linear approximation
     at ``primals``.
@@ -1784,7 +1737,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
             duals = tree_unflatten(flat_duals, primals_argspec)
             output = func(*duals)
             tangents = tree_map_only(
-                torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output
+                torch.Tensor, lambda dual: safe_unpack_dual(dual, False)[1], output
             )
 
         return tangents
@@ -1830,7 +1783,11 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
         flat_tangents, tangent_argspec = tree_flatten(tangents)
-        _linearize_treespec_compare(primals, tangents)
+        if tangent_argspec != primals_argspec:
+            raise RuntimeError(
+                f"Expected the tangents {tangent_argspec} to have "
+                f"the same argspec as the primals {primals_argspec}"
+            )
 
         forward_ad_checks(flat_tangents)
 
@@ -1840,3 +1797,19 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         return tree_unflatten(flat_output, output_spec)
 
     return output, jvp_fn
+
+
+@exposed_in("torch.func")
+def debug_unwrap(tensor: torch.Tensor, *, recurse=True) -> torch.Tensor:
+    """Unwraps a functorch tensor (e.g. BatchedTensor, GradTrackingTensor) to its underlying tensor.
+
+    This function should only be used in a debug setting (e.g. trying to print the
+    value of a Tensor in a debugger). Otherwise, using the result of function
+    inside of a function being transformed will lead to undefined behavior.
+    """
+    if not is_functorch_wrapped_tensor(tensor):
+        return tensor
+    result = get_unwrapped(tensor)
+    if recurse:
+        return debug_unwrap(result)
+    return result

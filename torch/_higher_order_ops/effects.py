@@ -1,9 +1,13 @@
+# mypy: allow-untyped-defs
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Union
+from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -17,19 +21,34 @@ class _EffectType(Enum):
     ORDERED = "Ordered"
 
 
-SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
-    torch.ops.aten._print.default: _EffectType.ORDERED,
-}
+OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
-    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+SIDE_EFFECTS: "WeakKeyDictionary[OpType, _EffectType]" = WeakKeyDictionary(
+    {
+        torch.ops.aten._print.default: _EffectType.ORDERED,
+        call_torchbind: _EffectType.ORDERED,
+    }
+)
+
+
+def _register_effectful_op(op: OpType, effect: _EffectType):
+    assert isinstance(
+        op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ) and not has_aliasing(op)
     if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
         raise RuntimeError(
             f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
             f"trying to register a different effect type {effect}."
         )
     SIDE_EFFECTS[op] = effect
+
+
+def _deregister_effectful_op(op: OpType):
+    if op not in SIDE_EFFECTS:
+        raise RuntimeError(f"Op {op} is not registered as effectful")
+
+    del SIDE_EFFECTS[op]
 
 
 class WithEffects(HigherOrderOperator):
@@ -46,17 +65,17 @@ class WithEffects(HigherOrderOperator):
     per "effect type", which are enumerated in the _EffectType enum.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("with_effects")
 
     def __call__(
         self,
         token,
-        op: torch._ops.OpOverload,
-        *args: Tuple[Any, ...],
-        **kwargs: Dict[str, Any],
-    ) -> Tuple[Any, ...]:
-        assert isinstance(op, torch._ops.OpOverload)
+        op: OpType,
+        *args: tuple[Any, ...],
+        **kwargs: dict[str, Any],
+    ) -> tuple[Any, ...]:
+        assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
         assert isinstance(kwargs, dict)
@@ -66,7 +85,11 @@ class WithEffects(HigherOrderOperator):
 with_effects = WithEffects()
 
 
-def has_aliasing(op: torch._ops.OpOverload):
+def has_aliasing(op: OpType):
+    # NOT FOR PUBLIC USE
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        return op not in SIDE_EFFECTS
+
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
             return True
@@ -83,7 +106,7 @@ def has_effects(op, args, kwargs) -> bool:
         return False
 
     return (
-        isinstance(op, torch._ops.OpOverload)
+        isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
         and get_effect_key(op, args, kwargs) is not None
     )
@@ -94,7 +117,7 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
         return SIDE_EFFECTS[op]
 
     for arg in args:
-        if isinstance(arg, torch.ScriptObject):
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
             # Add it to the table so that next time we see the same op we don't
             # have to parse through the args again
             SIDE_EFFECTS[op] = _EffectType.ORDERED
@@ -103,15 +126,19 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     return None
 
 
+def new_token_tensor() -> torch.Tensor:
+    return torch.tensor([])
+
+
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
-    new_token = torch.tensor([])
+    new_token = new_token_tensor()
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
@@ -122,9 +149,9 @@ def with_effects_fake(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
         return result
@@ -135,18 +162,21 @@ def with_effects_proxy(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
-    if not mode.enable_tracing:
-        return with_effects(token, op, *args, **kwargs)
-
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
 
     proxy_token = mode.tracer.unwrap_proxy(token)
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+
+    from torch.fx.node import has_side_effect
+
+    # To avoid the being DCEed by graph.eliminate_dead_code if they.
+    # don't have output or their outputs are not used.
+    has_side_effect(op)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
@@ -162,12 +192,21 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
+def _get_schema(op, args) -> torch.FunctionSchema:
+    if isinstance(op, torch._ops.OpOverload):
+        return op._schema
+    elif op == call_torchbind:
+        return getattr(args[0], args[1]).schema
+    else:
+        raise RuntimeError(f"Unable to get schema for op {op}")
+
+
 def handle_effects(
     allow_token_discovery: bool,
-    tokens: Dict[_EffectType, torch.Tensor],
-    op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    tokens: dict[_EffectType, torch.Tensor],
+    op: OpType,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     """
     Args:
@@ -191,29 +230,54 @@ def handle_effects(
         assert (
             allow_token_discovery
         ), f"Could not find a token for effect {key} which came from the function {op}"
-        tokens[key] = torch.tensor([])
+        proxy_tensor_mode = torch._C._get_dispatch_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        if proxy_tensor_mode is not None:
+            # If we discovered a new token during tracing, we are in backward.
+            # Then we patch the graph, adding additional tangents_token as input to the joint graph.
+            tracer = proxy_tensor_mode.tracer
+
+            from torch.fx.experimental.proxy_tensor import (
+                disable_proxy_modes_tracing,
+                track_tensor_tree,
+            )
+
+            with disable_proxy_modes_tracing():
+                token_tensor = new_token_tensor()
+
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(
+                "placeholder", "tangents_token", (), {}, name="tangents_token"
+            )
+            track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
+
+            tokens[key] = token_tensor
+        else:
+            tokens[key] = new_token_tensor()
+
     token = tokens[key]
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
     ctx = PythonFunctionalizeAPI()
 
-    unwrapped_token = ctx.unwrap_tensors([token])[0]  # type: ignore[arg-type]
-    unwrapped_args = ctx.unwrap_tensors(args)  # type: ignore[arg-type]
+    unwrapped_token = ctx.unwrap_tensors([token])[0]
+    unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         (new_token, *unwrapped_outs) = with_effects(
-            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs  # type: ignore[arg-type]
+            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
-    if len(op._schema.returns) == 0:
+    schema = _get_schema(op, unwrapped_args)
+    if len(schema.returns) == 0:
         assert unwrapped_outs[0] is None
         unwrapped_outs = None  # type: ignore[assignment]
-    elif len(op._schema.returns) == 1:
+    elif len(schema.returns) == 1:
         assert len(unwrapped_outs) == 1
         unwrapped_outs = unwrapped_outs[0]
     else:
-        assert len(unwrapped_outs) == len(op._schema.returns)
+        assert len(unwrapped_outs) == len(schema.returns)
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.
@@ -221,4 +285,4 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_outs)

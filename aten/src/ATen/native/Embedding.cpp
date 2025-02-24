@@ -81,14 +81,14 @@ Tensor embedding_sparse_backward(
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "embedding_backward: scale_grad_by_freq not supported with sparse gradients");
   }
 
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    c10::List<c10::optional<Tensor>> c({indices != padding_idx});
+    c10::List<std::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }

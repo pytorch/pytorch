@@ -155,7 +155,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     }
     oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
         << " to be on GPU (while checking arguments for " << c << ")";
-    AT_ERROR(oss.str());
+    TORCH_CHECK(false, oss.str());
   }
   TORCH_CHECK(
     t1->get_device() == t2->get_device(),
@@ -200,7 +200,7 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
       }
       oss << "; but got " << t->toString()
           << " instead (while checking arguments for " << c << ")";
-      AT_ERROR(oss.str());
+      TORCH_CHECK(false, oss.str());
     }
 }
 
@@ -327,7 +327,7 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // see overloads of computeStride() below.
 //
 template <typename ResultVec, typename NewShapeVec, typename Numel>
-inline c10::optional<ResultVec> computeStride_impl(
+inline std::optional<ResultVec> computeStride_impl(
     const NewShapeVec& oldshape,
     const NewShapeVec& oldstride,
     const NewShapeVec& newshape,
@@ -372,15 +372,15 @@ inline c10::optional<ResultVec> computeStride_impl(
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldshape[tensor_d - 1], 1)) &&
-         oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+         TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
       while (view_d >= 0 &&
             (TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (view_numel != tensor_numel) {
-        return c10::nullopt;
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(view_numel, tensor_numel))) {
+        return std::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -390,12 +390,12 @@ inline c10::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return newstride;
 }
 
-c10::optional<std::vector<int64_t>> computeStride(
+std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape) {
@@ -403,7 +403,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<SymDimVector> computeStride(
+std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape) {
@@ -411,7 +411,7 @@ c10::optional<SymDimVector> computeStride(
   return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<DimVector> computeStride(
+std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape) {

@@ -2,14 +2,15 @@ import itertools
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from typing import Callable, List, Tuple
+from typing import Callable
+
+from tabulate import tabulate
+from tqdm import tqdm
 
 import torch
 import torch.utils.benchmark as benchmark
-from tabulate import tabulate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
-from tqdm import tqdm
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -67,7 +68,7 @@ class Experiment:
 
 def get_input(
     config: ExperimentConfig,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(
         (config.batch_size, config.num_heads, config.q_seq_len, config.head_dim),
         dtype=config.dtype,
@@ -118,7 +119,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     )
 
 
-def generate_experiment_configs() -> List[ExperimentConfig]:
+def generate_experiment_configs() -> list[ExperimentConfig]:
     batch_sizes = [
         1,
         8,
@@ -159,7 +160,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     return all_configs
 
 
-def print_results(experiments: List[Experiment]):
+def print_results(experiments: list[Experiment]):
     table_data = defaultdict(list)
     for experiment in experiments:
         for key, value in experiment.asdict().items():

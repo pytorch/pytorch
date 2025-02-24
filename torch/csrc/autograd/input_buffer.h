@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <c10/core/Stream.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 namespace torch::autograd {
 
@@ -18,7 +18,7 @@ struct InputBuffer {
   explicit InputBuffer(size_t size) : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
-  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)){};
+  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
@@ -27,10 +27,8 @@ struct InputBuffer {
   TORCH_API void add(
       size_t pos,
       Variable&& var,
-      const c10::optional<c10::Stream>& opt_producer_stream,
-      const c10::optional<c10::Stream>& opt_consumer_stream);
-
-  at::Device device() const;
+      const std::optional<c10::Stream>& opt_producer_stream,
+      const std::optional<c10::Stream>& opt_consumer_stream);
 
   Variable operator[](size_t pos) {
     return buffer[pos];

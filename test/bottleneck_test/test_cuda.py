@@ -5,7 +5,7 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = nn.Linear(20, 20)
 
@@ -18,7 +18,7 @@ def main():
     data = torch.randn(10, 50).cuda()
     model = Model().cuda()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.0001)
-    for i in range(10):
+    for _ in range(10):
         optimizer.zero_grad()
         loss = model(data)
         loss.backward()

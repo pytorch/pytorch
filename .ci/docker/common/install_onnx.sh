@@ -15,7 +15,7 @@ pip_install \
   flatbuffers==2.0 \
   mock==5.0.1 \
   ninja==1.10.2 \
-  networkx==2.0 \
+  networkx==2.5 \
   numpy==1.24.2
 
 # ONNXRuntime should be installed before installing
@@ -30,15 +30,16 @@ pip_install \
 
 pip_install coloredlogs packaging
 
-pip_install onnxruntime==1.17.0
-pip_install onnx==1.15.0
-# pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@3e869ef8ccf19b5ebd21c10d3e9c267c9a9fa729" --no-deps
-pip_install onnxscript==0.1.0.dev20240315 --no-deps
+pip_install onnxruntime==1.18.1
+pip_install onnx==1.17.0
+pip_install onnxscript==0.1.0 --no-deps
+# required by onnxscript
+pip_install ml_dtypes
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-large-v3");' > "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrained("hf-internal-testing/tiny-random-gptj");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu

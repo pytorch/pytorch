@@ -7,7 +7,7 @@ namespace c10 {
 namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
-  c10::optional<int64_t> c = rhs->nested_int();
+  std::optional<int64_t> c = rhs->nested_int();
   return (
       c.has_value() && lhs->nested_int() == *c &&
       lhs->nested_int_coeff() == rhs->nested_int_coeff());
@@ -68,7 +68,7 @@ c10::SymNode NestedIntSymNodeImpl::le(const c10::SymNode& other) {
 
 c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
   TORCH_CHECK(!other->nested_int(), "nested int cannot be multiplied by nested int");
-  c10::optional<int64_t> c = other->constant_int();
+  std::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
   return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c));
 }

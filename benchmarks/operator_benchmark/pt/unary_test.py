@@ -1,6 +1,6 @@
-import torch
-
 import operator_benchmark as op_bench
+
+import torch
 
 
 """Microbenchmarks for point-wise unary operator."""
@@ -72,6 +72,10 @@ def long_(input):
     return input.long()
 
 
+def clamp(input):
+    return torch.clamp(input, min=0.25, max=0.75)
+
+
 unary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
@@ -86,6 +90,7 @@ unary_ops_list = op_bench.op_list(
         ["atan_", torch.atan_],
         ["ceil", torch.ceil],
         ["ceil_", torch.ceil_],
+        ["clamp", clamp],
         ["clone", torch.clone],
         ["cos", torch.cos],
         ["cos_", torch.cos_],
@@ -104,6 +109,7 @@ unary_ops_list = op_bench.op_list(
         ["floor_", torch.floor_],
         ["frac", torch.frac],
         ["frac_", torch.frac_],
+        ["gelu", torch.nn.functional.gelu],
         ["hardshrink", torch.hardshrink],
         ["lgamma", torch.lgamma],
         ["log", torch.log],

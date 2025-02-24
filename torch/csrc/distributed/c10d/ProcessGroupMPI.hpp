@@ -17,8 +17,6 @@
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <c10/util/CallOnce.h>
-
 #include <mpi.h>
 
 namespace c10d {
@@ -86,8 +84,8 @@ class TORCH_API ProcessGroupMPI : public Backend {
     explicit WorkMPI(
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt)
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
+            std::nullopt)
         : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
@@ -114,8 +112,8 @@ class TORCH_API ProcessGroupMPI : public Backend {
         MPI_Request request,
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt);
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
+            std::nullopt);
 
     ~AsyncWork() override;
 
@@ -243,8 +241,8 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> enqueue(
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputTensors =
-          c10::nullopt);
+      const std::optional<std::vector<at::Tensor>>& inputTensors =
+          std::nullopt);
 
   bool stop_;
 
@@ -258,7 +256,6 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Global states
   static void initMPIOnce();
   static void mpiExit();
-  static c10::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
   static int mpiThreadSupport_;

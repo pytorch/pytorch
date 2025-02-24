@@ -35,7 +35,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
-  };
+  }
 
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;
@@ -140,11 +140,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("int_")().cast<int64_t>();
   }
 
-  c10::optional<int64_t> maybe_as_int() override {
+  std::optional<int64_t> maybe_as_int() override {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
-      return c10::nullopt;
+      return std::nullopt;
     } else {
       return r.cast<int64_t>();
     }
@@ -153,6 +153,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("str")().cast<std::string>();
+  }
+
+  std::string _graph_repr() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("_graph_repr")().cast<std::string>();
   }
 
   c10::SymNode dispatch_sym_ite_(
@@ -198,11 +203,31 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode float_truediv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode int_truediv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode pow(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode float_pow(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode pow_by_natural(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode floordiv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode int_floordiv(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 

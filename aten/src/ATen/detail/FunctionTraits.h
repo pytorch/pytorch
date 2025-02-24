@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <tuple>
 
 // Modified from https://stackoverflow.com/questions/7943525/is-it-possible-to-figure-out-the-parameter-type-and-return-type-of-a-lambda
@@ -44,13 +45,13 @@ struct function_traits<ReturnType(Args...)> {
   // arity is the number of arguments.
   enum { arity = sizeof...(Args) };
 
-  typedef std::tuple<Args...> ArgsTuple;
-  typedef ReturnType result_type;
+  using ArgsTuple = std::tuple<Args...>;
+  using result_type = ReturnType;
 
   template <size_t i>
   struct arg
   {
-      typedef typename std::tuple_element<i, std::tuple<Args...>>::type type;
+      using type = typename std::tuple_element<i, std::tuple<Args...>>::type;
       // the i-th argument is equivalent to the i-th tuple element of a tuple
       // composed of those arguments.
   };

@@ -7,6 +7,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -121,7 +122,7 @@ ProcessGroupMPI::AsyncWork::AsyncWork(
     MPI_Request request,
     std::vector<at::Tensor> outputTensors,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
       outputTensors_(std::move(outputTensors)),
       request_(request) {
@@ -198,6 +199,11 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
     populateException();
     std::rethrow_exception(exception_);
   }
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupMPI::AsyncWork>::unsafe_reclaim_from_nonowning(this));
+  }
   // Always return true, because abort API is not implemented.
   return true;
 }
@@ -220,8 +226,6 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 // Static global states
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
-// We only want to initialize once
-c10::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
 void ProcessGroupMPI::mpiExit() {
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -229,8 +233,8 @@ void ProcessGroupMPI::mpiExit() {
 }
 
 void ProcessGroupMPI::initMPIOnce() {
-  // Initialize MPI environment
-  c10::call_once(onceFlagInitMPI, []() {
+  // Initialize MPI environment. We only want to initialize once.
+  static bool init_mpi_flag [[maybe_unused]] = []() {
     int mpi_was_initialized = 0;
     MPI_CHECK(MPI_Initialized(&mpi_was_initialized));
     if (mpi_was_initialized == 0) {
@@ -250,7 +254,8 @@ void ProcessGroupMPI::initMPIOnce() {
     } else {
       TORCH_WARN_ONCE("MPI was previously initialized.");
     }
-  });
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
@@ -379,7 +384,7 @@ void ProcessGroupMPI::runLoop() {
 c10::intrusive_ptr<Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+    const std::optional<std::vector<at::Tensor>>& inputTensors) {
   auto work =
       c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
@@ -410,7 +415,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::broadcast(
   return enqueue(
       std::move(entry),
       "mpi:broadcast",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
@@ -436,7 +441,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
   return enqueue(
       std::move(entry),
       "mpi:all_reduce",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce_coalesced(
@@ -473,7 +478,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
   return enqueue(
       std::move(entry),
       "mpi:reduce",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
@@ -522,7 +527,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
   return enqueue(
       std::move(entry),
       "mpi:all_gather",
-      c10::optional<std::vector<at::Tensor>>(inputTensors));
+      std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allgather_coalesced(
@@ -598,14 +603,14 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
     return enqueue(
         std::move(entry),
         "mpi:gather",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
     auto entry =
         std::make_unique<WorkEntry>(&inputTensors, nullptr, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:gather",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
 
@@ -672,8 +677,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
         std::move(entry),
         "mpi:scatter",
         !inputTensors.empty()
-            ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
-            : c10::nullopt);
+            ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
+            : std::nullopt);
   } else {
     auto entry = std::make_unique<WorkEntry>(
         nullptr, &outputTensors, std::move(runFunc));
@@ -681,8 +686,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
         std::move(entry),
         "mpi:scatter",
         !inputTensors.empty()
-            ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
-            : c10::nullopt);
+            ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
+            : std::nullopt);
   }
 }
 
@@ -734,7 +739,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
     // Need alltoallv
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
@@ -772,7 +777,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
 
@@ -835,7 +840,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
   return enqueue(
       std::move(entry),
       "mpi:all_to_all",
-      c10::optional<std::vector<at::Tensor>>(inputTensors));
+      std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::send(
@@ -864,7 +869,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::send(
       request,
       std::vector<at::Tensor>(),
       "mpi:send",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::recv(
@@ -893,7 +898,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recv(
       request,
       tensors,
       "mpi:recv",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
@@ -921,7 +926,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
       request,
       tensors,
       "mpi:recvAnySource",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
@@ -932,7 +937,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
       };
   auto entry =
       std::make_unique<WorkEntry>(nullptr, nullptr, std::move(runFunc));
-  return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
+  return enqueue(std::move(entry), "mpi:barrier", std::nullopt);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(

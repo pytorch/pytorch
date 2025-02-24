@@ -8,12 +8,14 @@
 
 namespace at {
 
+#ifndef STRIP_ERROR_MESSAGES
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
   os << "Tensor" << tensor.names();
   return os.str();
 }
+#endif
 
 int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   TORCH_CHECK(dim.type() != NameType::WILDCARD,
@@ -38,7 +40,7 @@ std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dim
   return result;
 }
 
-static void report_positional_error(
+[[noreturn]] static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
     DimnameList names,
@@ -128,7 +130,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 }
 
 const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
-    c10::optional<DimnameList> maybe_names,
+    std::optional<DimnameList> maybe_names,
     bool validate_names) {
   auto maybe_name_list = maybe_names.value_or(at::ArrayRef<Dimname>{});
   propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_name_list, validate_names);
@@ -389,10 +391,8 @@ void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
     return;
   }
   std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
-  std::copy(
-      self.opt_names()->begin(),
-      self.opt_names()->end(),
-      outnames.begin() + result_dim - self.dim());
+  auto const names = self.names();
+  std::copy( names.begin(), names.end(), outnames.begin() + result_dim - self.dim());
   propagate_names(result, outnames);
 }
 

@@ -16,8 +16,7 @@
 
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qavg_pool3d_nhwc_stub);
 
@@ -100,7 +99,7 @@ Tensor q_avg_pool3d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto [kW, kH, kD] = get_kernel(kernel_size);
   auto [dW, dH, dD] = get_stride(stride, kW, kH, kD);
   auto [padW, padH, padD] = get_padding(padding);
@@ -128,7 +127,7 @@ Tensor q_avg_pool3d(
       input_nhwc.options().memory_format(input_nhwc.suggest_memory_format()),
       input_nhwc.q_scale(),
       input_nhwc.q_zero_point(),
-      c10::nullopt);
+      std::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
   qavg_pool3d_nhwc_stub(
       input_nhwc.device().type(),
@@ -165,7 +164,7 @@ Tensor avg_pool3d_quantized_cpu(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor output;
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
     output = q_avg_pool3d<scalar_t>(
@@ -180,5 +179,4 @@ Tensor avg_pool3d_quantized_cpu(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

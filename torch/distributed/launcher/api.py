@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,19 +9,24 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
-from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, LogsSpecs, SignalException
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs,
+    LogsSpecs,
+    SignalException,
+)
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
-__all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
+
+__all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
 
 logger = get_logger(__name__)
 
@@ -58,7 +64,8 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
-    ..note:
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
@@ -72,13 +79,13 @@ class LaunchConfig:
     role: str = "default_role"
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
-    rdzv_configs: Dict[str, Any] = field(default_factory=dict)
+    rdzv_configs: dict[str, Any] = field(default_factory=dict)
     rdzv_timeout: int = -1
     max_restarts: int = 3
     monitor_interval: float = 0.1
     start_method: str = "spawn"
     log_line_prefix_template: Optional[str] = None
-    metrics_cfg: Dict[str, str] = field(default_factory=dict)
+    metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
 
     def __post_init__(self):
@@ -133,7 +140,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: List[Any]
+    entrypoint: Union[Callable, str, None], args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -156,7 +163,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint
@@ -176,8 +183,8 @@ def _get_addr_and_port(
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
-    args: List[Any],
-) -> Dict[int, Any]:
+    args: list[Any],
+) -> dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
         logger.warning("config has no run_id, generated a random run_id: %s", run_id)
@@ -211,8 +218,8 @@ def launch_agent(
             "max_restarts": config.max_restarts,
             "monitor_interval": config.monitor_interval,
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
-            "metrics_cfg": config.metrics_cfg
-        }
+            "metrics_cfg": config.metrics_cfg,
+        },
     )
 
     rdzv_parameters = RendezvousParameters(

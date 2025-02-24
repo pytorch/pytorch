@@ -3,6 +3,7 @@ import os
 import re
 import sys
 
+
 # This script takes the logs produced by the benchmark scripts (e.g.,
 # torchbench.py) and parses it into a CSV file that summarizes what
 # is failing and why.  It is kept separate from the benchmark script
@@ -191,7 +192,7 @@ for name, name2, log in chunker(entries, 3):
             "unique_graph_breaks": unique_graph_breaks,
         }
     )
-    i += 1
+    i += 1  # noqa: SIM113
 
 if c:
     print(f"failed to classify {c} entries", file=sys.stderr)

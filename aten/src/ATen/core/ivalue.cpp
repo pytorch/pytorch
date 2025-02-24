@@ -45,7 +45,7 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 }
 
 TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
-    c10::string_view str_) {
+    std::string_view str_) {
   return c10::make_intrusive<ConstantString>(std::string(str_));
 }
 
@@ -471,7 +471,7 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  const auto& expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto& expected_ty = c10::getTypePtr<std::optional<at::Tensor>>();
   return expected_ty == ty;
 }
 
@@ -569,12 +569,7 @@ static std::ostream& printMaybeAnnotatedDict(
 static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
-  auto sign = "";
-  if (d.imag() >= 0) {
-    sign = "+";
-  } else {
-    sign = "-";
-  }
+  auto sign = d.imag() >= 0 ? '+' : '-';
   return out << real << sign << imag << "j";
 }
 
@@ -756,7 +751,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     torch::jit::Function* lt_func =
         checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
     if (!lt_func) {
-      AT_ERROR(why_not.str());
+      TORCH_CHECK(false, why_not.str());
     }
 
     return [lt_func](const IValue& a, const IValue& b) {
@@ -772,7 +767,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     };
   }
 
-  AT_ERROR("IValues of type: ", v.tagKind(), " are not comparable");
+  TORCH_CHECK(false, "IValues of type: ", v.tagKind(), " are not comparable");
 }
 
 IValueComparator getGreaterThanComparator(const IValue& v) {
@@ -886,14 +881,14 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
 
-IValue IValue::deepcopy(c10::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+IValue IValue::deepcopy(std::optional<at::Device> device) const {
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+    IValue::HashIdentityIValueMap& memo,
+    std::optional<at::Device> device) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
@@ -967,7 +962,7 @@ IValue IValue::deepcopy(
       copy = *this;
     } break;
     default: {
-      AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
+      TORCH_CHECK(false, "Can't deepcopy IValue with tag: ", tagKind());
     }
   }
   // NB: this doesn't work if an object contains itself, and it may
@@ -1027,14 +1022,14 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    c10::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+    std::optional<at::Device> device) const {
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+    IValue::HashIdentityIValueMap& memo,
+    std::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -1050,7 +1045,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";
-      AT_ERROR(err.str());
+      TORCH_CHECK(false, err.str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo, device));
   }
@@ -1178,6 +1173,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
 
 namespace {
 
+#ifndef STRIP_ERROR_MESSAGES
 std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
   std::ostringstream oss;
   std::copy(
@@ -1186,6 +1182,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
       std::ostream_iterator<c10::Device>(oss, ", "));
   return oss.str();
 }
+#endif
 
 }
 

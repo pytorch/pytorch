@@ -23,7 +23,6 @@ If you want to test float16
 
 """
 
-
 import argparse
 import dataclasses
 import functools
@@ -44,15 +43,15 @@ from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
-import torch
-
-import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
+
+import torch
+import torch._dynamo
+
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -91,8 +90,6 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
-        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
-        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -388,11 +385,6 @@ def get_skip_tests(suite, device, is_training: bool):
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
         elif device == "cuda":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
-    else:
-        if hasattr(module, "SKIP"):
-            skip_tests.update(module.SKIP)
-        if is_training and hasattr(module, "SKIP_TRAIN"):
-            skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
@@ -439,7 +431,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.enable_cpu_launcher:
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
+                    cmd = f"{cmd} {base_cmd} {args.extra_args} --dashboard"
                     skip_tests_str = get_skip_tests(suite, device, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
@@ -549,7 +541,7 @@ def build_summary(args):
         out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
         out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
         out_io.write(
-            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory / 1e9}\n"
         )
 
     title = "## Build Summary"
@@ -719,9 +711,9 @@ class ParsePerformanceLogs(Parser):
             for idx, (batch_a, batch_b) in enumerate(
                 zip(batch_sizes, frame_batch_sizes)
             ):
-                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
-                    f"a={batch_a}, b={batch_b}"
-                )
+                assert (
+                    batch_a == batch_b or batch_a == 0 or batch_b == 0
+                ), f"a={batch_a}, b={batch_b}"
                 batch_sizes[idx] = max(batch_a, batch_b)
         for frame in frames:
             frame["batch_size"] = batch_sizes
@@ -775,12 +767,18 @@ class ParsePerformanceLogs(Parser):
                         if not perf_row.empty:
                             if acc_row.empty:
                                 perf_row[compiler] = 0.0
+                            elif acc_row[compiler].iloc[0] in (
+                                "model_fail_to_load",
+                                "eager_fail_to_run",
+                            ):
+                                perf_row = pd.DataFrame()
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
                                 perf_row[compiler] = 0.0
-                    perf_rows.append(perf_row)
+                    if not perf_row.empty:
+                        perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
 
@@ -1451,7 +1449,7 @@ class DashboardUpdater:
             RegressionDetector(self.args).generate_comment()
             try:
                 RegressionTracker(self.args).diff()
-            except Exception as e:
+            except Exception:
                 logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")

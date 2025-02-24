@@ -10,7 +10,7 @@ def check_error(desc, fn, *required_substrings):
         print(desc)
         print("-" * 80)
         print(error_message)
-        print("")
+        print()
         for sub in required_substrings:
             assert sub in error_message
         return

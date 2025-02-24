@@ -376,7 +376,7 @@ Tensor& slow_conv2d_forward_out_cuda(
     const Tensor &self_,
     const Tensor &weight_,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias_,
+    const std::optional<Tensor> &bias_,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor &output) {
@@ -409,7 +409,7 @@ Tensor slow_conv2d_forward_cuda(
     const Tensor &self,
     const Tensor &weight,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias,
+    const std::optional<Tensor> &bias,
     IntArrayRef stride,
     IntArrayRef padding) {
   auto output = at::empty({0}, self.options());

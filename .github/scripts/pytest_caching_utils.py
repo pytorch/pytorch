@@ -1,7 +1,7 @@
 import hashlib
 import os
 from pathlib import Path
-from typing import Dict, NamedTuple
+from typing import NamedTuple
 
 from file_io_utils import (
     copy_file,
@@ -14,10 +14,12 @@ from file_io_utils import (
     zip_folder,
 )
 
+
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "gha-artifacts"
 LASTFAILED_FILE_PATH = Path("v/cache/lastfailed")
+TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
 # Temp folders
 ZIP_UPLOAD = "zip-upload"
@@ -28,6 +30,8 @@ UNZIPPED_CACHES = "unzipped-caches"
 # Since the pr identifier can be based on include user defined text (like a branch name)
 # we hash it to sanitize the input and avoid corner cases
 class PRIdentifier(str):
+    __slots__ = ()
+
     def __new__(cls, value: str) -> "PRIdentifier":
         md5 = hashlib.md5(value.encode("utf-8")).hexdigest()
         return super().__new__(cls, md5)
@@ -191,6 +195,10 @@ def _merge_pytest_caches(
         pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
     )
 
+    _merge_additional_failures_files(
+        pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
+    )
+
 
 def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) -> None:
     # Simple cases where one of the files doesn't exist
@@ -213,8 +221,8 @@ def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) 
 
 
 def _merged_lastfailed_content(
-    from_lastfailed: Dict[str, bool], to_lastfailed: Dict[str, bool]
-) -> Dict[str, bool]:
+    from_lastfailed: dict[str, bool], to_lastfailed: dict[str, bool]
+) -> dict[str, bool]:
     """
     The lastfailed files are dictionaries where the key is the test identifier.
     Each entry's value appears to always be `true`, but let's not count on that.
@@ -232,3 +240,27 @@ def _merged_lastfailed_content(
             del to_lastfailed[""]
 
     return to_lastfailed
+
+
+def _merge_additional_failures_files(
+    source_pytest_cache: Path, dest_pytest_cache: Path
+) -> None:
+    # Simple cases where one of the files doesn't exist
+    source_lastfailed_file = (
+        source_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    )
+    dest_lastfailed_file = dest_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+
+    if not source_lastfailed_file.exists():
+        return
+    if not dest_lastfailed_file.exists():
+        copy_file(source_lastfailed_file, dest_lastfailed_file)
+        return
+
+    # Both files exist, so we need to merge them
+    from_lastfailed = load_json_file(source_lastfailed_file)
+    to_lastfailed = load_json_file(dest_lastfailed_file)
+    merged_content = list(set(from_lastfailed + to_lastfailed))
+
+    # Save the results
+    write_json_file(dest_lastfailed_file, merged_content)

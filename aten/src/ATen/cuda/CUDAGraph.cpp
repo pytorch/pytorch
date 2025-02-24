@@ -7,9 +7,7 @@
 
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <thread>
-#include <vector>
 
 namespace at::cuda {
 
@@ -17,23 +15,9 @@ static bool _cuda_graphs_debug = false;
 constexpr int kSynchronizeBusyWaitMillis = 10;
 
 MempoolId_t graph_pool_handle() {
-  // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
-  static std::atomic<CaptureId_t> uid{1};
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  return {0, uid++};
-}
-
-
-// Get the expected id of a capture sequence so that we can call beginAllocateStreamToPool
-// before starting a graph capture
-CaptureId_t capture_sequence_id() {
-  // id starts at 1:
-  // Ensures uuid count starts at 1. 0 is reserved to mean "not set by cudaStreamGetCaptureInfo".
-  // (But how do we know GetCaptureInfo never sets id_ to 0? Because that's the current behavior,
-  // and I asked cuda devs to keep it that way, and they agreed.)
-  static std::atomic<CaptureId_t> uuid{1};
-  return uuid++;
+  return c10::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -100,7 +84,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
   // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   gen->register_graph(this);
 
   for (auto& [generator_state, wholegraph_increments] :
@@ -118,8 +102,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
-  id_ = capture_sequence_id();
-
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
     // But only one should be nonzero.
@@ -128,17 +110,18 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
     mempool_id_ = pool;
   } else {
-    // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
+    // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = {id_, 0};
+    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
+    TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
-      cudaStreamCaptureStatus status;
-      CaptureId_t stream_capture_id;
+      cudaStreamCaptureStatus status{};
+      CaptureId_t stream_capture_id = 0;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
@@ -157,11 +140,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  cudaStreamCaptureStatus status;
+  cudaStreamCaptureStatus status{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
-  TORCH_INTERNAL_ASSERT(id_ > 0);
 }
 
 void CUDAGraph::capture_end() {
@@ -174,7 +156,7 @@ void CUDAGraph::capture_end() {
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
 
-  TORCH_CHECK(graph_ != NULL, "Invalid capture.");
+  TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -188,8 +170,8 @@ void CUDAGraph::capture_end() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040)
-  int version;
+#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
 #endif
@@ -201,7 +183,9 @@ void CUDAGraph::capture_end() {
 #else
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
 #endif
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040)
+//Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
+//It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
+#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -217,7 +201,7 @@ void CUDAGraph::capture_end() {
   }
 
   size_t numCUDAGraphNodes = 0;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
   if (numCUDAGraphNodes == 0) {
       TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
                  "attempted to be captured on wrong device or stream.");
@@ -247,7 +231,7 @@ void CUDAGraph::replay() {
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
-  int version;
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
     // Workaround for bug in libcuda.so that causes replayed graphs with
@@ -268,11 +252,12 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
       TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
-      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), 1<<10)); // most verbose output
+      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
       AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+      has_graph_ = false;
     }
   } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");
+    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
@@ -326,6 +311,18 @@ CUDAGraph::~CUDAGraph() {
     generator_state->unregister_graph(this);
   }
   reset();
+
+// There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
+// They wait for next sync point in order to free the memory, this is to ensure that all
+// hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
+// We need to ensure all async opreations finish before deleting the object.
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
+  if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
+  {
+    AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
+    AT_CUDA_CHECK(cudaDeviceSynchronize());
+  }
+#endif
 }
 
 } // namespace at::cuda

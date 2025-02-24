@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copyreg
 import enum
 import functools
@@ -5,11 +6,10 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C as _C
-import torch.utils.hooks as hooks
 from torch._namedtensor_internals import (
     check_serializing_named_tensor,
     is_ellipsis,
@@ -25,7 +25,6 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
-from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
@@ -71,6 +70,28 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     return ret
 
 
+def _dtype_to_typestr(dtype):
+    # CUDA devices are little-endian and tensors are stored in native byte
+    # order. 1-byte entries are endian-agnostic.
+    return {
+        torch.complex64: "<c8",
+        torch.complex128: "<c16",
+        torch.bfloat16: "<V2",  # Same as ml_dtypes.bfloat16.dtype.str.
+        torch.float16: "<f2",
+        torch.float32: "<f4",
+        torch.float64: "<f8",
+        torch.uint8: "|u1",
+        torch.int8: "|i1",
+        torch.uint16: "<u2",
+        torch.int16: "<i2",
+        torch.uint32: "<u4",
+        torch.int32: "<i4",
+        torch.uint64: "<u8",
+        torch.int64: "<i8",
+        torch.bool: "|b1",
+    }[dtype]
+
+
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
@@ -79,6 +100,35 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    _is_param: bool
+
+    def _clear_non_serializable_cached_data(self):
+        r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
+        from being serialized.
+
+        For example, subclasses with custom dispatched sizes / strides cache this info in
+        non-serializable PyCapsules within the ``__dict__``, and this must be cleared out for
+        serialization to function.
+
+        Any subclass that overrides this MUST call ``super()._clear_non_serializable_cached_data().``
+        Additional data cleared within the override must be able to be re-cached transparently
+        to avoid breaking subclass functionality.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor._clear_non_serializable_cached_data, (self,), self
+            )
+        # NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
+        # this info via non-serializable PyCapsules.
+        CACHED_SIZES_STRIDES_KEYS = [
+            "_sym_sizes_capsule",
+            "_sym_sizes_capsule_len",
+            "_sym_strides_capsule",
+            "_sym_strides_capsule_len",
+        ]
+        for key in CACHED_SIZES_STRIDES_KEYS:
+            self.__dict__.pop(key, None)
+
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -123,8 +173,8 @@ class Tensor(torch._C.TensorBase):
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
-                        Tuple[torch.qscheme, float, int],
-                        Tuple[torch.qscheme, Tensor, Tensor, int],
+                        tuple[torch.qscheme, float, int],
+                        tuple[torch.qscheme, Tensor, Tensor, int],
                     ]
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
@@ -204,19 +254,35 @@ class Tensor(torch._C.TensorBase):
                     if hasattr(self, slot):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
+            # don't try to deepcopy non-serializable cached data
+            self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
         state = torch._utils._get_obj_state(self)
-        if type(self) is Tensor and not state:
+        # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
+        # some state that cannot be pickled
+        if (
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            hasattr(torch, "_subclasses")
+            and type(self) is torch._subclasses.fake_tensor.FakeTensor
+            and materialize_fake_tensors
+        ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        # sizes / strides cache needs to be cleared here because it'll just be re-cached
+        # if cleared earlier. Note that state references the -actual- tensor dict.
+        self._clear_non_serializable_cached_data()
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -246,9 +312,32 @@ class Tensor(torch._C.TensorBase):
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
+
+        from torch.utils.hooks import warn_if_has_hooks
+
         # See Note [Don't serialize hooks]
-        torch.utils.hooks.warn_if_has_hooks(self)
-        backward_hooks: Dict[Any, Any] = OrderedDict()
+        warn_if_has_hooks(self)
+        backward_hooks: dict[Any, Any] = OrderedDict()
+
+        skip_data = torch.serialization._serialization_tls.skip_data
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
+
+        if self.device.type in ["xla", "maia"] or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
+        ):
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
+            cpu_tensor = self.cpu()
+            return (
+                torch._utils._rebuild_device_tensor_from_cpu_tensor,
+                (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
+            )
+        # Legacy comment that does not hold anymore.
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -259,13 +348,14 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "maia"] or (
-            not torch._C._has_storage(self)
-            and self.device.type == torch._C._get_privateuse1_backend_name()
-        ):
+        if self.device.type in ["mtia"]:
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
             numpy_tensor = (
                 self.cpu().numpy()
                 if self.dtype != torch.bfloat16
@@ -278,6 +368,10 @@ class Tensor(torch._C.TensorBase):
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
+            if skip_data:
+                warnings.warn(
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                )
             arg_meta = (
                 self.dtype,
                 tuple(self.size()),
@@ -286,9 +380,13 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
+                )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
-                Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
+                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
             ]
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
@@ -367,6 +465,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif self.is_nested:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize nested tensor under skip_data context manager, file an issue if you need this feature"
+                )
             args_nested = (
                 # NB: values() currently returns the storage as a buffer in an unsafe way.
                 # Ideally, we'd use a private API for this instead. TODO: Switch to this if
@@ -381,14 +483,30 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(
-                    self,
-                    (
-                        torch._subclasses.fake_tensor.FakeTensor,
-                        torch._subclasses.functional_tensor.FunctionalTensor,
-                    ),
+                isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
+                or (
+                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    and self.data_ptr() == 0
                 )
-                or self.data_ptr() == 0
+            )
+        ):
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
+        elif (
+            type(self) is not torch.Tensor
+            and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and not (skip_data and materialize_fake_tensors)
             )
         ):
             arg_wrapper_subclass = (
@@ -416,6 +534,16 @@ class Tensor(torch._C.TensorBase):
                     dtype=self.dtype,
                     _internal=True,
                 )  # type: ignore[assignment]
+
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            if (
+                hasattr(torch, "_subclasses")
+                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and skip_data
+            ):
+                storage._fake_device = self.device
+
             args = (
                 storage,
                 self.storage_offset(),
@@ -468,8 +596,8 @@ class Tensor(torch._C.TensorBase):
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionally requires specifying ``gradient``.
-        It should be a tensor of matching type and location, that contains
+        gradient, the function additionally requires specifying a ``gradient``.
+        It should be a tensor of matching type and shape, that represents
         the gradient of the differentiated function w.r.t. ``self``.
 
         This function accumulates gradients in the leaves - you might need to zero
@@ -491,12 +619,9 @@ class Tensor(torch._C.TensorBase):
             See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
         Args:
-            gradient (Tensor or None): Gradient w.r.t. the
-                tensor. If it is a tensor, it will be automatically converted
-                to a Tensor that does not require grad unless ``create_graph`` is True.
-                None values can be specified for scalar Tensors or ones that
-                don't require grad. If a None value would be acceptable then
-                this argument is optional.
+            gradient (Tensor, optional): The gradient of the function
+                being differentiated w.r.t. ``self``.
+                This argument can be omitted if ``self`` is a scalar.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
@@ -505,10 +630,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other Tensors will be ignored. If not
+            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors.
+                used to compute the :attr:`tensors`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -567,7 +692,10 @@ class Tensor(torch._C.TensorBase):
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
                 self.grad_fn._register_hook_dict(self)
-        handle = hooks.RemovableHandle(self._backward_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -622,8 +750,11 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
-        handle = hooks.RemovableHandle(self._post_accumulate_grad_hooks)
+            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._post_accumulate_grad_hooks)
         self._post_accumulate_grad_hooks[handle.id] = hook
         return handle
 
@@ -717,7 +848,7 @@ class Tensor(torch._C.TensorBase):
         It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
+        :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
@@ -763,22 +894,22 @@ class Tensor(torch._C.TensorBase):
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def solve(self, other):
-        from ._linalg_utils import solve
+        from torch._linalg_utils import solve
 
         return solve(self, other)
 
     def lstsq(self, other):
-        from ._linalg_utils import lstsq
+        from torch._linalg_utils import lstsq
 
         return lstsq(self, other)
 
     def eig(self, eigenvectors=False):
-        from ._linalg_utils import eig
+        from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
 
     def symeig(self, eigenvectors=False):
-        from ._linalg_utils import _symeig
+        from torch._linalg_utils import _symeig
 
         return _symeig(self, eigenvectors=eigenvectors)
 
@@ -809,6 +940,7 @@ class Tensor(torch._C.TensorBase):
         normalized: bool = False,
         onesided: Optional[bool] = None,
         return_complex: Optional[bool] = None,
+        align_to_window: Optional[bool] = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -830,6 +962,7 @@ class Tensor(torch._C.TensorBase):
                 normalized=normalized,
                 onesided=onesided,
                 return_complex=return_complex,
+                align_to_window=align_to_window,
             )
         return torch.stft(
             self,
@@ -842,6 +975,7 @@ class Tensor(torch._C.TensorBase):
             normalized,
             onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
 
     def istft(
@@ -970,8 +1104,14 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
@@ -1098,7 +1238,7 @@ class Tensor(torch._C.TensorBase):
             array = array.astype("uint8")
         return torch.from_numpy(array)
 
-    def __contains__(self, element):
+    def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
 
         Args:
@@ -1111,7 +1251,7 @@ class Tensor(torch._C.TensorBase):
             element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
         ):
             # type hint doesn't understand the __contains__ result array
-            return (element == self).any().item()  # type: ignore[union-attr]
+            return bool((element == self).any().item())  # type: ignore[union-attr]
 
         raise RuntimeError(
             f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
@@ -1126,7 +1266,11 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
@@ -1149,23 +1293,8 @@ class Tensor(torch._C.TensorBase):
                 "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
             )
 
-        # CUDA devices are little-endian and tensors are stored in native byte
-        # order. 1-byte entries are endian-agnostic.
-        typestr = {
-            torch.complex64: "<c8",
-            torch.complex128: "<c16",
-            torch.float16: "<f2",
-            torch.float32: "<f4",
-            torch.float64: "<f8",
-            torch.uint8: "|u1",
-            torch.int8: "|i1",
-            torch.int16: "<i2",
-            torch.int32: "<i4",
-            torch.int64: "<i8",
-        }[self.dtype]
-
+        typestr = _dtype_to_typestr(self.dtype)
         itemsize = self.element_size()
-
         shape = tuple(self.shape)
         if self.is_contiguous():
             # __cuda_array_interface__ v2 requires the strides to be omitted
@@ -1280,7 +1409,7 @@ class Tensor(torch._C.TensorBase):
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
-    def unflatten(self, dim, sizes):
+    def unflatten(self, dim, sizes):  # type: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
 
@@ -1372,31 +1501,131 @@ class Tensor(torch._C.TensorBase):
         """
         return self.to_sparse()
 
-    def dim_order(self):
+    def dim_order(
+        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
+    ):
         """
+        dim_order(ambiguity_check=False) -> tuple
 
-        dim_order() -> tuple
+        Returns the uniquely determined tuple of int describing the dim order or
+        physical layout of :attr:`self`.
 
-        Returns a tuple of int describing the dim order or physical layout of :attr:`self`.
-
-        Args:
-            None
-
-        Dim order represents how dimensions are laid out in memory,
+        The dim order represents how dimensions are laid out in memory of dense tensors,
         starting from the outermost to the innermost dimension.
 
-        Example::
+        Note that the dim order may not always be uniquely determined.
+        If `ambiguity_check` is True, this function raises a RuntimeError when the dim order cannot be uniquely determined;
+        If `ambiguity_check` is a list of memory formats, this function raises a RuntimeError when tensor can not be interpreted
+        into exactly one of the given memory formats, or it cannot be uniquely determined.
+        If `ambiguity_check` is False, it will return one of legal dim order(s) without checking its uniqueness.
+        Otherwise, it will raise TypeError.
+
+        Args:
+            ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
+
+        Examples::
+
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
+            >>> torch.empty((2, 3, 5, 7)).transpose(1, 2).dim_order()
+            (0, 2, 1, 3)
             >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).dim_order()
             (0, 2, 3, 1)
+            >>> torch.empty((1, 2, 3, 4)).dim_order()
+            (0, 1, 2, 3)
+            >>> try:
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check=True)
+            ... except RuntimeError as e:
+            ...     print(e)
+            The tensor does not have unique dim order, or cannot map to exact one of the given memory formats.
+            >>> torch.empty((1, 2, 3, 4)).dim_order(
+            ...     ambiguity_check=[torch.contiguous_format, torch.channels_last]
+            ... )  # It can be mapped to contiguous format
+            (0, 1, 2, 3)
+            >>> try:
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL")
+            ... except TypeError as e:
+            ...     print(e)
+            The ambiguity_check argument must be a bool or a list of memory formats.
 
         .. warning::
             The dim_order tensor API is experimental and subject to change.
-
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        if self.is_sparse:
+            raise AttributeError(
+                f"Can't get dim order on sparse type: {self.type()} "
+                "Use Tensor.to_dense() to convert to a dense tensor first."
+            )
+
+        # Sanity check ambiguity_check data types
+        if not isinstance(ambiguity_check, bool):
+            if not isinstance(ambiguity_check, list):
+                raise TypeError(
+                    "The ambiguity_check argument must be a bool or a list of memory formats."
+                )
+            for memory_format in ambiguity_check:
+                if not isinstance(memory_format, torch.memory_format):
+                    raise TypeError(
+                        "The ambiguity_check argument must be a bool or a list of memory formats."
+                    )
+
+        def invalid_unique_memory_format(tensor, valid_memory_formats):
+            """
+            Returns True if the tensor cannot be uniquely mapped to any of the given memory formats, False otherwise.
+            """
+
+            n_legality = 0
+
+            for memory_format in valid_memory_formats:
+                if tensor.is_contiguous(memory_format=memory_format):
+                    n_legality += 1
+
+            return n_legality != 1
+
+        def has_multiple_dim_order(tensor):
+            """
+            Returns True if there're multiple legal dim orders for given tensor, False otherwise.
+
+            The tensor is considered to have multiple legal dim orders if either of the following conditions is met:
+
+            * Singleton Dimensions: There's at least one singleteon dimension in the tensor.
+              Since their size is 1, they don't affect the memory offset (stride * index
+              is zero because index is always zero). Therefore, they can be placed anywhere
+              in the dimension order without changing how data is accessed.
+            * Same strides: Strides reflect how the tensor is stored in memory.
+              If any two dimensions have the same stride, swapping these dimensions won't
+              change how data is accessed, leading to multiple correct dimension orders.
+            """
+
+            sizes = tensor.size()
+            strides = tensor.stride()
+
+            # Check if there are any duplicate strides
+            has_duplicate_strides = any(
+                earlier == later for earlier, later in zip(strides, strides[1:])
+            )
+
+            # Check if there are any singleton dimensions
+            has_singleton_dims = any(size == 1 for size in sizes)
+
+            return has_duplicate_strides or has_singleton_dims
+
+        valid_memory_formats = (
+            ambiguity_check if isinstance(ambiguity_check, list) else []
+        )
+        check_multiple_dim_order = (
+            ambiguity_check if isinstance(ambiguity_check, bool) else True
+        )
+
+        if (
+            check_multiple_dim_order and has_multiple_dim_order(self)
+        ) and invalid_unique_memory_format(self, valid_memory_formats):
+            raise RuntimeError(
+                "The tensor does not have unique dim order, or cannot map to exact one of the given memory formats."
+            )
 
         import torch._prims_common as utils
 
@@ -1500,11 +1729,26 @@ class Tensor(torch._C.TensorBase):
                     event = torch.cuda.Event()
                     event.record(sync_stream)
                     stream.wait_event(event)
+        if self.device.type == "xla":
+            import torch_xla
+            import torch_xla.utils.dlpack as xla_dlpack
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                raise RuntimeError(
+                    "Can't export to dlpack an XLA tensor that is not on CUDA."
+                )
+            return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+    def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+
+        from torch.utils.dlpack import DLDeviceType
+
         device = self.device
         idx = device.index if device.index is not None else 0
         torch_device_type = device.type
@@ -1516,8 +1760,20 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
-        elif self.device.type == "xpu":
+        elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
+        elif self.device.type == "privateuse1":
+            device_type = DLDeviceType.kDLExtDev
+        elif torch_device_type == "xla":
+            import torch_xla
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
+
+            device_type = DLDeviceType.kDLGPU
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

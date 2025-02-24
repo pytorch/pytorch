@@ -7,6 +7,7 @@
 #include <Attr.h>
 #include <Utils.h>
 
+#include <c10/core/ScalarType.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
@@ -33,9 +34,15 @@ sycl::event matmul(
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
-  at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
-  at::Tensor dst = is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+  at::Tensor m1 = mat1;
+  at::Tensor m2 = mat2;
+
+  undo_broadcast_on_batch(m1, m2);
+
+  m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
+  m2 = is_onednn_matmul_strides(m2) ? m2 : m2.contiguous();
+  at::Tensor dst =
+      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
@@ -45,13 +52,13 @@ sycl::event matmul(
   if (dims == 3) {
     mb = dst.size(0);
     TORCH_CHECK(
-        mb == m1.size(0) && mb == m2.size(0),
+        mb == mat1.size(0) && mb == mat2.size(0),
         "batch size mismatch, dst mb: ",
         mb,
         "m1 mb",
-        m1.size(0),
+        mat1.size(0),
         " m2 mb: ",
-        m2.size(0));
+        mat2.size(0));
   }
 
   // validate bias and make it compatible with oneDNN implementation
@@ -103,9 +110,9 @@ sycl::event matmul(
   b = b.contiguous(); // avoid reorder 2 times
 
   // xpu matmul support both ab/ba shape for m2 tensor, we don't check any more
-  auto m1_usr_dt = get_onednn_dtype(m1);
-  auto m2_usr_dt = get_onednn_dtype(m2);
-  auto dst_usr_dt = get_onednn_dtype(dst);
+  auto m1_usr_dt = get_onednn_dtype_include_double(m1);
+  auto m2_usr_dt = get_onednn_dtype_include_double(m2);
+  auto dst_usr_dt = get_onednn_dtype_include_double(dst);
 
   auto m1_dt = m1_usr_dt;
   auto m2_dt = m2_usr_dt;
@@ -118,11 +125,13 @@ sycl::event matmul(
   dnnl::memory::desc bias_md;
 
   // Naive Master weight
-  if (m1_dt == dnnl::memory::data_type::bf16 && m2_dt == dnnl::memory::data_type::f32) {
+  if (m1_dt == dnnl::memory::data_type::bf16 &&
+      m2_dt == dnnl::memory::data_type::f32) {
     m2_dt = dnnl::memory::data_type::bf16;
     dst_dt = dnnl::memory::data_type::bf16;
   } else if (
-      m1_dt == dnnl::memory::data_type::f32 && m2_dt == dnnl::memory::data_type::bf16) {
+      m1_dt == dnnl::memory::data_type::f32 &&
+      m2_dt == dnnl::memory::data_type::bf16) {
     m1_dt = dnnl::memory::data_type::bf16;
     dst_dt = dnnl::memory::data_type::bf16;
   }
@@ -142,8 +151,8 @@ sycl::event matmul(
     }
     dst_strides = {dst.stride(0), dst.stride(1)};
   } else {
-    m1_dims = {mb, m, k};
-    m2_dims = {mb, k, n};
+    m1_dims = {m1.size(0), m, k};
+    m2_dims = {m2.size(0), k, n};
     dst_dims = {mb, m, n};
 
     m1_strides = {m1.stride(0), m1.stride(1), m1.stride(2)};
@@ -157,7 +166,7 @@ sycl::event matmul(
 
   if (with_bias) {
     bias_dims = get_onednn_dims(b);
-    bias_dt = get_onednn_dtype(b);
+    bias_dt = get_onednn_dtype_include_double(b);
     bias_strides = get_onednn_strides(b);
   }
 
@@ -176,10 +185,11 @@ sycl::event matmul(
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
 
-  #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
-        pattr.set_deterministic(true);
-  #endif
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn())
+    pattr.set_deterministic(true);
+#endif
 
   // scratchpad
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -191,10 +201,11 @@ sycl::event matmul(
   // STEP3: create primitive
   if (with_bias) {
     bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
-    matmul_pd =
-        dnnl::matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
+    matmul_pd = dnnl::matmul::primitive_desc(
+        engine, m1_md, m2_md, bias_md, dst_md, pattr);
   } else {
-    matmul_pd = dnnl::matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
+    matmul_pd =
+        dnnl::matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
   }
 
   matmul_p = dnnl::matmul(matmul_pd);
@@ -220,7 +231,9 @@ sycl::event matmul(
 
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, m1.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)},
+      m1.options().dtype(at::kByte),
+      std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
@@ -233,7 +246,8 @@ sycl::event matmul(
     args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
-  sycl::event matmul_event = dnnl::sycl_interop::execute(matmul_p, stream, args, deps);
+  sycl::event matmul_event =
+      dnnl::sycl_interop::execute(matmul_p, stream, args, deps);
 
   if (!dst.is_same(result))
     result.copy_(dst);

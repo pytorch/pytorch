@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_convert_weight_to_int4pack_native.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/empty.h>
@@ -12,77 +13,61 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
+// #define _CAPTURE_KERNEL 1
+
 namespace at::native {
 
 using namespace mps;
 
-static at::native::mps::MetalShaderLibrary lib(R"METAL_QUANTIZED(
-#include <metal_stdlib>
-using namespace metal;
-
-// A is sizes.x x sizes.y
-// B.T is sizes.z x sizes.y
-// C is sizes.x x sizes.z
-
-template<typename T, unsigned groupSize>
-kernel void int4pack_mm(
-    constant T                 * A              [[buffer(0)]],
-    constant uchar             * B              [[buffer(1)]],
-    constant T                 * scalesAndZeros [[buffer(2)]],
-    device   T                 * outputData     [[buffer(3)]],
-    constant uint3             & sizes          [[buffer(4)]],
-    uint2                        thread_index   [[thread_position_in_grid]]) {
-    const uint lda = sizes.y;
-    const uint ldc = sizes.z;
-    const uint m = thread_index.y; // 0..sizes.x-1
-    const uint n = thread_index.x; // 0..sizes.z-1
-    const uint nb = n / 32;
-    const uint ldb = min(32U,  sizes.z - nb * 32);
-    const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
-    constant T *A_ptr = A + m * lda;
-    constant uchar *B_ptr = B + (nb * 16 * sizes.y);
-
-    float rc = 0.0;
-    uint k = 0;
-    for (uint32_t kb = 0; kb < k_block ; kb ++) {
-      const T scale = scalesAndZeros[(kb * ldc + n) * 2 + 0];
-      const T zero = scalesAndZeros[(kb * ldc + n) * 2 + 1] - scale * T(8);
-      for(uint idx = 0; idx < groupSize && k < sizes.y; idx++, k++) {
-        const auto a_val = float(A_ptr[k]);
-        uchar b_val = B_ptr[(k * ldb + (n % 32))/2];
-        b_val = (n & 1) == 0 ? b_val & 0x0f : (b_val >> 4);
-        rc += a_val * float(scale * T(b_val) + zero);
-      }
-    }
-    outputData[m * sizes.z + n] = T(rc);
-}
-
-#define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
-template                                                                 \
-[[host_name("int4pack_mm_" #GSIZE "_" #DTYPE)]]                          \
-kernel void int4pack_mm<DTYPE, GSIZE>(                                   \
-    constant DTYPE             * A              [[buffer(0)]],           \
-    constant uchar             * B              [[buffer(1)]],           \
-    constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
-    device   DTYPE             * outputData     [[buffer(3)]],           \
-    constant uint3             & sizes          [[buffer(4)]],           \
-    uint2                        thread_index [[thread_position_in_grid]])
-
-INSTANTIATE_INT4MM(float, 32);
-INSTANTIATE_INT4MM(half, 32);
-INSTANTIATE_INT4MM(float, 64);
-INSTANTIATE_INT4MM(half, 64);
-INSTANTIATE_INT4MM(float, 128);
-INSTANTIATE_INT4MM(half, 128);
-INSTANTIATE_INT4MM(float, 256);
-INSTANTIATE_INT4MM(half, 256);
-#if __METAL_VERSION__ >= 310
-INSTANTIATE_INT4MM(bfloat, 32);
-INSTANTIATE_INT4MM(bfloat, 64);
-INSTANTIATE_INT4MM(bfloat, 128);
-INSTANTIATE_INT4MM(bfloat, 256);
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Quantized_metallib.h>
 #endif
-)METAL_QUANTIZED");
+
+Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
+  TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
+  TORCH_CHECK(in.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
+              __func__,
+              " : innerKTiles need to be 2, 4, or 8, got ",
+              innerKTiles);
+
+  auto weight = in.contiguous();
+  auto N = weight.size(0);
+  auto Kdiv2 = weight.size(1);
+  auto K = Kdiv2 * 2;
+
+  // Create fake shapes for cpu. The meta registration in dynamo requires
+  // operator has the same output shape for each device. So creating a fake
+  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
+  auto weight_packed = at::empty({N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2},
+                                 at::TensorOptions().dtype(at::kInt).device(at::kMPS));
+  MPSStream* mpsStream = getCurrentMPSStream();
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(Kdiv2 / 4), 0, 0};
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture(fmt::format("weight_to_int4pack_{}x{}", N, Kdiv2), mpsStream);
+      }
+#endif
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      const std::string kernel = fmt::format("weight_to_int4pack");
+      id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
+      const auto maxThreadsPerGroup = [quantizedPSO maxTotalThreadsPerThreadgroup];
+      [computeEncoder setComputePipelineState:quantizedPSO];
+      mtl_setArgs(computeEncoder, weight, weight_packed, sizes);
+      [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2 / 4, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(mpsStream);
+      }
+#endif
+    }
+  });
+  return weight_packed;
+}
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
   constexpr int64_t kNTileSize = 8;
@@ -114,8 +99,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
 
   auto C = at::empty({M, N}, A.options());
   MPSStream* mpsStream = getCurrentMPSStream();
-  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
-  static bool firstCapture = false;
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N), 0};
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
@@ -128,13 +112,8 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
-      mtl_setBuffer(computeEncoder, A, 0);
-      mtl_setBuffer(computeEncoder, B, 1);
-      mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
-      mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
-                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+      mtl_setArgs(computeEncoder, A, B, qScaleAndZeros, C, sizes);
+      [computeEncoder dispatchThreads:MTLSizeMake(N / 4 * 32, 1, M) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
@@ -163,7 +142,45 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
   TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N, __func__, " : expect scales to be 1d tensor with size ", N);
 
   auto C = at::empty({M, N}, A.options());
-
+  TORCH_CHECK(N % 32 == 0 && K % 32 == 0);
+#if 1
+  MPSStream* mpsStream = getCurrentMPSStream();
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N), 0};
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture(fmt::format("int8pack_mm_{}x{}x{}", M, N, K), mpsStream);
+      }
+#endif
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      std::string kernel;
+      // heuristic, to use mv kernel for mm with small M. M = 10 is the performance tipping point.
+      if (M < 12) {
+        kernel = fmt::format("int8pack_mv_{}", scalarToMetalTypeString(A));
+      } else {
+        kernel = fmt::format("large_m_int8pack_mm_{}", scalarToMetalTypeString(A));
+      }
+      id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
+      [computeEncoder setComputePipelineState:quantizedPSO];
+      mtl_setArgs(computeEncoder, A, B, scales, C, sizes);
+      if (M < 12) {
+        [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, M, 1)
+                       threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      } else {
+        [computeEncoder setThreadgroupMemoryLength:12288 atIndex:0];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake((M + 31) / 32, (N + 63) / 64, 1)
+                       threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      }
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(mpsStream);
+      }
+#endif
+    }
+  });
+#else
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *ATensor = nil, *BTensor = nil, *scalesTensor = nil;
@@ -193,6 +210,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
                 dictionaryFromPlaceholders(APlaceholder, BPlaceholder, scalesPlaceholder),
                 outputPlaceholder);
   }
+#endif
 
   return C;
 }

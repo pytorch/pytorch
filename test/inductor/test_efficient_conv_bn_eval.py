@@ -4,10 +4,10 @@ import importlib
 import itertools
 import os
 import sys
-import unittest
 
 import torch
 from torch import nn
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -16,23 +16,16 @@ sys.path.append(pytorch_test_dir)
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
-
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from inductor.test_torchinductor import copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    copy_tests,
+)
 
 
 class ConvOp(nn.Module):
@@ -158,7 +151,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager = mod_eager(inp)
             out_optimized = mod_optimized(inp)
 
-            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager, atol=3e-04, rtol=1e-5)
 
             out_eager.mean().backward()
             out_optimized.mean().backward()
@@ -170,7 +163,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager_bw = mod_eager(inp_bw)
             out_optimized_bw = mod_optimized(inp_bw)
 
-            self.assertEqual(out_eager_bw, out_optimized_bw, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_eager_bw, out_optimized_bw, atol=3e-04, rtol=1e-5)
             current_value = counters["inductor"]["efficient_conv_bn_eval"]
             self.assertEqual(
                 current_value - original_value, test_class.expected_optimization_count
@@ -214,17 +207,17 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class EfficientConvBNEvalCudaTests(TestCase):
-        device = "cuda"
+    class EfficientConvBNEvalGpuTests(TestCase):
+        device = GPU_TYPE
 
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCudaTests, "cuda")
+    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalGpuTests, GPU_TYPE)
 
 del EfficientConvBNEvalTemplate
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

@@ -1,9 +1,9 @@
-# mypy: ignore-errors
+from collections.abc import Iterable
+from typing import Any
 
-from typing import Any, Iterable
+from torch._vendor.packaging.version import InvalidVersion, Version
+from torch.version import __version__ as internal_version
 
-from ._vendor.packaging.version import InvalidVersion, Version
-from .version import __version__ as internal_version
 
 __all__ = ["TorchVersion"]
 
@@ -25,6 +25,8 @@ class TorchVersion(str):
             TorchVersion('1.10.0a') > '1.2'
             TorchVersion('1.10.0a') > '1.2.1'
     """
+
+    __slots__ = ()
 
     # fully qualified type names here to appease mypy
     def _convert_to_version(self, inp: Any) -> Any:

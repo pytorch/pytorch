@@ -1,16 +1,16 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import inspect
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Union
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     _override_module_mixed_precision,
 )
-
 from torch.distributed.fsdp.wrap import (
     _construct_wrap_fn,
     _or_policy,
@@ -25,9 +25,9 @@ from torch.distributed.fsdp.wrap import (
 def _auto_wrap(
     root_module: nn.Module,
     policy: Union[Callable, _Policy],
-    ignored_modules: Set[nn.Module],
-    ignored_params: Set[nn.Parameter],
-    root_kwargs: Dict[str, Any],
+    ignored_modules: set[nn.Module],
+    ignored_params: set[nn.Parameter],
+    root_kwargs: dict[str, Any],
     fsdp_fn: Callable,  # e.g. `FullyShardedDataParallel` or `fully_shard`
 ):
     """
@@ -111,7 +111,7 @@ def _check_nested_wrapping(root_module: nn.Module):
 
 
 def _warn_on_overridden_mixed_precision(
-    overridden_module_classes: Set[Type[nn.Module]],
+    overridden_module_classes: set[type[nn.Module]],
 ):
     if len(overridden_module_classes) == 0:
         return
@@ -125,8 +125,8 @@ def _warn_on_overridden_mixed_precision(
 
 def _validate_frozen_params(
     root_module: nn.Module,
-    modules_to_wrap: Set[nn.Module],
-    ignored_params: Set[nn.Parameter],
+    modules_to_wrap: set[nn.Module],
+    ignored_params: set[nn.Parameter],
     use_orig_params: bool,
 ):
     """
@@ -136,15 +136,15 @@ def _validate_frozen_params(
     recommended for ``use_orig_params=True`` (user warning).
     """
     post_order_named_modules = _get_post_order_named_modules(root_module)
-    visited_modules: Set[nn.Module] = set()
+    visited_modules: set[nn.Module] = set()
     for module_name, module in post_order_named_modules:
         if module in modules_to_wrap:
             param_to_fqn = _get_managed_param_to_fqn(
                 module, ignored_params, visited_modules, module_name
             )
-            frozen_param_fqns: List[str] = []
+            frozen_param_fqns: list[str] = []
             frozen_param_numel = 0
-            nonfrozen_param_fqns: List[str] = []
+            nonfrozen_param_fqns: list[str] = []
             nonfrozen_param_numel = 0
             for param, fqn in param_to_fqn.items():
                 if param.requires_grad:
@@ -178,7 +178,7 @@ def _validate_frozen_params(
 
 def _get_post_order_named_modules(
     root_module: nn.Module,
-) -> List[Tuple[str, nn.Module]]:
+) -> list[tuple[str, nn.Module]]:
     """
     This returns the named modules following a post-order traversal, which is a
     valid reverse topological sort. We achieve this using the reverse of a
@@ -202,7 +202,7 @@ def _get_post_order_named_modules(
     visited_modules = {root_module}
     stack = [("", root_module)]
     # Append and reverse at the end for linear-time algorithm
-    reverse_post_order_named_modules: List[Tuple[str, nn.Module]] = []
+    reverse_post_order_named_modules: list[tuple[str, nn.Module]] = []
     while stack:
         module_name, module = stack.pop()
         reverse_post_order_named_modules.append((module_name, module))
@@ -220,10 +220,10 @@ def _get_post_order_named_modules(
 
 def _get_managed_param_to_fqn(
     module_to_wrap: nn.Module,
-    ignored_params: Set[nn.Parameter],
-    visited_modules: Set[nn.Module],
+    ignored_params: set[nn.Parameter],
+    visited_modules: set[nn.Module],
     root_prefix: str,
-) -> Dict[nn.Parameter, str]:
+) -> dict[nn.Parameter, str]:
     """
     This returns a dict that maps managed parameter to its FQN for the given
     ``module_to_wrap``. The dict's keys are exactly the parameters that would
@@ -238,7 +238,7 @@ def _get_managed_param_to_fqn(
     on the full module tree in one shot. Given those differences, we do not try
     to unify the two.
     """
-    param_to_fqn: Dict[nn.Parameter, str] = {}
+    param_to_fqn: dict[nn.Parameter, str] = {}
     # Run BFS (or any tree traversal works)
     queue = collections.deque([(module_to_wrap, root_prefix)])
     visited_modules.add(module_to_wrap)

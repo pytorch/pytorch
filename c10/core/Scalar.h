@@ -19,6 +19,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/overflows.h>
 
 namespace c10 {
 
@@ -48,16 +49,9 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND7(
-      Half,
-      BFloat16,
-      Float8_e5m2,
-      Float8_e4m3fn,
-      Float8_e5m2fnuz,
-      Float8_e4m3fnuz,
-      ComplexHalf,
-      DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND3(Half, BFloat16, ComplexHalf, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_FLOAT8_TYPES(DEFINE_IMPLICIT_CTOR)
 
   // Helper constructors to allow Scalar creation from long and long long types
   // As std::is_same_v<long, long long> is false(except Android), one needs to
@@ -69,11 +63,19 @@ class C10_API Scalar {
       "int64_t is the same as long long on MacOS");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
+#if defined(_MSC_VER)
+  static_assert(
+      std::is_same_v<long long, int64_t>,
+      "int64_t is the same as long long on Windows");
+  Scalar(long vv) : Scalar(vv, true) {}
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
   static_assert(
-      std::is_same_v<long, int64_t>,
-      "int64_t is the same as long on Linux");
+      sizeof(void*) != 8 || std::is_same_v<long, int64_t>,
+      "int64_t is the same as long on 64 bit Linux");
+#if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
+#endif /* not 32-bit system */
 #endif
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
@@ -115,6 +117,9 @@ class C10_API Scalar {
       return checked_convert<type, double>(v.d, #type);               \
     } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
+    } else if (Tag::HAS_sd == tag) {                                  \
+      return checked_convert<type, double>(                           \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     }                                                                 \
     if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
@@ -125,9 +130,6 @@ class C10_API Scalar {
     } else if (Tag::HAS_si == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymInt().guard_int(__FILE__, __LINE__), #type);           \
-    } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, int64_t>(                          \
-          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     } else if (Tag::HAS_sb == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymBool().guard_bool(__FILE__, __LINE__), #type);         \
@@ -249,8 +251,7 @@ class C10_API Scalar {
       auto val = v.z;
       return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
-      TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
-      return v.d == num;
+      return toDouble() == num;
     } else if (tag == Tag::HAS_i) {
       if (overflows<T>(v.i, /* strict_unsigned */ true)) {
         return false;
@@ -282,8 +283,7 @@ class C10_API Scalar {
       TORCH_INTERNAL_ASSERT(!isSymbolic());
       return v.z == num;
     } else if (isFloatingPoint()) {
-      TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
-      return (v.d == num.real()) && (num.imag() == T());
+      return (toDouble() == num.real()) && (num.imag() == T());
     } else if (tag == Tag::HAS_i) {
       if (overflows<T>(v.i, /* strict_unsigned */ true)) {
         return false;

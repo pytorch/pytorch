@@ -53,14 +53,12 @@ void _dim_apply(
           return;
         }
 
-        for (const auto i C10_UNUSED : c10::irange(n)) {
-          f(
-            reinterpret_cast<scalar_t*>(values_data_bytes),
+        for ([[maybe_unused]] const auto i : c10::irange(n)) {
+          f(reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
             reinterpret_cast<int64_t*>(indices_data_bytes),
             indices_dim_stride,
-            dim_size
-          );
+            dim_size);
 
           values_data_bytes += strides[0];
           indices_data_bytes += strides[1];
@@ -141,6 +139,32 @@ static void parallel_sort1d_kernel(
 }
 #endif
 
+template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
+static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
+            const indices_accessor_t& indices_accessor,
+            int64_t dim_size, bool descending, bool stable) {
+  auto composite_accessor = CompositeRandomAccessorCPU<
+    value_accessor_t, indices_accessor_t
+  >(value_accessor, indices_accessor);
+  if (descending) {
+    if (stable) {
+      std::stable_sort(composite_accessor, composite_accessor + dim_size,
+        KeyValueCompDesc<scalar_t>());
+    } else {
+      std::sort(composite_accessor, composite_accessor + dim_size,
+        KeyValueCompDesc<scalar_t>());
+    }
+  } else {
+    if (stable) {
+      std::stable_sort(composite_accessor, composite_accessor + dim_size,
+        KeyValueCompAsc<scalar_t>());
+    } else {
+      std::sort(composite_accessor, composite_accessor + dim_size,
+        KeyValueCompAsc<scalar_t>());
+    }
+  }
+}
+
 static void sort_kernel(
     const TensorBase& self,
     const TensorBase& values,
@@ -168,34 +192,31 @@ static void sort_kernel(
       auto* indices, int64_t indices_dim_stride,
       int64_t dim_size
     ) {
-      using scalar_t = typename std::remove_pointer<decltype(values)>::type;
-      auto values_accessor = StridedRandomAccessor<scalar_t>(
-        values, values_dim_stride);
-      auto indices_accessor = StridedRandomAccessor<int64_t>(
-        indices, indices_dim_stride);
-      auto composite_accessor = CompositeRandomAccessorCPU<
-        decltype(values_accessor), decltype(indices_accessor)
-      >(values_accessor, indices_accessor);
-
-      if (descending) {
-        if (stable) {
-          std::stable_sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
-        }
-        else {
-          std::sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
-        }
-      }
-      else {
-        if (stable) {
-          std::stable_sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
-        }
-        else {
-          std::sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
-        }
+      using scalar_t = std::remove_pointer_t<decltype(values)>;
+      if (values_dim_stride == 1 && indices_dim_stride == 1) {
+        sort_kernel_impl<
+          scalar_t, decltype(values), decltype(indices)
+        >(values, indices, dim_size, descending, stable);
+      } else if (values_dim_stride == 1 && indices_dim_stride != 1) {
+        auto indices_accessor = StridedRandomAccessor<int64_t>(
+          indices, indices_dim_stride);
+        sort_kernel_impl<
+          scalar_t, decltype(values), decltype(indices_accessor)
+        >(values, indices_accessor, dim_size, descending, stable);
+      } else if (values_dim_stride != 1 && indices_dim_stride == 1) {
+        auto values_accessor = StridedRandomAccessor<scalar_t>(
+          values, values_dim_stride);
+        sort_kernel_impl<
+          scalar_t, decltype(values_accessor), decltype(indices)
+        >(values_accessor, indices, dim_size, descending, stable);
+      } else {
+        auto values_accessor = StridedRandomAccessor<scalar_t>(
+          values, values_dim_stride);
+        auto indices_accessor = StridedRandomAccessor<int64_t>(
+          indices, indices_dim_stride);
+        sort_kernel_impl<
+          scalar_t, decltype(values_accessor), decltype(indices_accessor)
+        >(values_accessor, indices_accessor, dim_size, descending, stable);
       }
     }
   );
@@ -243,7 +264,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(sort_stub, &sort_kernel);
-REGISTER_DISPATCH(topk_stub, &topk_kernel);
+REGISTER_DISPATCH(sort_stub, &sort_kernel)
+REGISTER_DISPATCH(topk_stub, &topk_kernel)
 
 } //at::native

@@ -25,28 +25,28 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-            const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+            const Tensor& hx, const std::optional<Tensor>& cx_opt,
             int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-            IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
+            IntArrayRef fn_batch_sizes, const std::optional<Tensor>& fn_dropout_state_opt
             ) {
-        AT_ERROR("miopen_rnn : ATen not compiled with MIOpen support.");
+        TORCH_CHECK(false, "miopen_rnn : ATen not compiled with MIOpen support.");
     }
 
     std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
-            const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
+            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const std::optional<Tensor>& cx_opt,
+            const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const std::optional<Tensor>& grad_hy_r_opt, const std::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const std::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
-        AT_ERROR("miopen_rnn_backward: ATen not compiled with MIOpen support.");
+        TORCH_CHECK(false, "miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
-}} //namespace at::native
+} //namespace at::native
 
 #else // AT_ROCM_ENABLED()
 
@@ -109,7 +109,7 @@ struct RNNDescriptorParams {
                 {
                     std::ostringstream oss;
                     oss << "unrecognized miopen RNN mode " << fn_mode;
-                    AT_ERROR(oss.str());
+                    TORCH_CHECK(false, oss.str());
                 }
         }
     }
@@ -323,7 +323,7 @@ int64_t _num_linear_layers(miopenRNNMode_t mode) {
         case miopenRNNTANH:
             return 2;
         default:
-            AT_ERROR("Unknown miopen RNN mode : ", mode);
+            TORCH_CHECK(false, "Unknown miopen RNN mode : ", mode);
     }
 }
 
@@ -444,15 +444,15 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-        const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+        const Tensor& hx, const std::optional<Tensor>& cx_opt,
         int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-        IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
+        IntArrayRef fn_batch_sizes, const std::optional<Tensor>& fn_dropout_state_opt
         ) {
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
     const Tensor& cx = *cx_maybe_owned;
-    const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
+    const Tensor& fn_dropout_state = fn_dropout_state_opt.value_or(Tensor());
 
     check_attributes(input_r, weight, {hx, cx});
     auto input = input_r;
@@ -758,18 +758,18 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
-        const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
+        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const std::optional<Tensor>& cx_opt,
+        const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const std::optional<Tensor>& grad_hy_r_opt, const std::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const std::optional<Tensor>& dropout_state_opt,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
     const Tensor& cx = *cx_maybe_owned;
-    const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
-    const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
-    const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
-    const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+    const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+    const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+    const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
+    const Tensor& dropout_state = dropout_state_opt.value_or(Tensor());
 
     if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
         return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
@@ -803,8 +803,8 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-    static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-    AT_ERROR("NOT IMPLEMENTED");
+    static_assert(std::is_same_v<hidden_type, void>, "pack_hidden not implemented for this type");
+    TORCH_CHECK(false, "NOT IMPLEMENTED");
 }
 
 template<>
@@ -876,8 +876,8 @@ void NAME##_packed_miopen(Tensor& output, Tensor& hy,                          \
       has_biases, MODE, num_layers, dropout_p, train, bidirectional);          \
 }                                                                              \
                                                                                \
-REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen);                    \
-REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen);
+REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen)                    \
+REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen)
 
 ONE_HIDDEN_RNN(gru, miopenGRU)
 ONE_HIDDEN_RNN(rnn_tanh, miopenRNNTANH)
@@ -889,9 +889,9 @@ void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
     auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
         miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-    output = result.first;
-    hy = std::get<0>(result.second);
-    cy = std::get<1>(result.second);
+    output = std::move(result.first);
+    hy = std::move(std::get<0>(result.second));
+    cy = std::move(std::get<1>(result.second));
 }
 
 void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
@@ -900,13 +900,13 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
     auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
         params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
-    output = result.first;
-    hy = std::get<0>(result.second);
-    cy = std::get<1>(result.second);
+    output = std::move(result.first);
+    hy = std::move(std::get<0>(result.second));
+    cy = std::move(std::get<1>(result.second));
 }
 
-REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
-REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
+REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
+REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
 }} //namespace native.

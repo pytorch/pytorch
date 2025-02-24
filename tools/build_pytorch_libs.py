@@ -1,17 +1,31 @@
+from __future__ import annotations
+
 import os
 import platform
-import shutil
+import subprocess
 from glob import glob
-from typing import Dict, Optional
-
-from setuptools import distutils  # type: ignore[import]
+from pathlib import Path
 
 from .setup_helpers.cmake import CMake, USE_NINJA
-
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
 
 
-def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
+repo_root = Path(__file__).absolute().parent.parent
+third_party_path = os.path.join(repo_root, "third_party")
+
+
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils  # type: ignore[import]
+
+        return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+
+
+def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
     vc_arch = "x64" if IS_64BIT else "x86"
 
     if platform.machine() == "ARM64":
@@ -34,7 +48,7 @@ def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
                 "emulation is enabled!"
             )
 
-    vc_env: Dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    vc_env = _get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.
@@ -47,7 +61,7 @@ def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
     return vc_env
 
 
-def _create_build_env() -> Dict[str, str]:
+def _create_build_env() -> dict[str, str]:
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
     # you should NEVER add something to this list. It is bad practice to
@@ -71,15 +85,41 @@ def _create_build_env() -> Dict[str, str]:
     return my_env
 
 
-def build_caffe2(
-    version: Optional[str],
-    cmake_python_library: Optional[str],
+def read_nccl_pin() -> str:
+    nccl_file = "nccl-cu12.txt"
+    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv(
+        "CUDA_VERSION", ""
+    ).startswith("11"):
+        nccl_file = "nccl-cu11.txt"
+    nccl_pin_path = os.path.join(
+        repo_root, ".ci", "docker", "ci_commit_pins", nccl_file
+    )
+    with open(nccl_pin_path) as f:
+        return f.read().strip()
+
+
+def checkout_nccl() -> None:
+    release_tag = read_nccl_pin()
+    print(f"-- Checkout nccl release tag: {release_tag}")
+    nccl_basedir = os.path.join(third_party_path, "nccl")
+    if not os.path.exists(nccl_basedir):
+        subprocess.check_call(
+            ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+            cwd=third_party_path,
+        )
+        subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
+
+
+def build_pytorch(
+    version: str | None,
+    cmake_python_library: str | None,
     build_python: bool,
     rerun_cmake: bool,
     cmake_only: bool,
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
+    checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
         version, cmake_python_library, build_python, build_test, my_env, rerun_cmake
@@ -87,8 +127,3 @@ def build_caffe2(
     if cmake_only:
         return
     cmake.build(my_env)
-    if build_python:
-        caffe2_proto_dir = os.path.join(cmake.build_dir, "caffe2", "proto")
-        for proto_file in glob(os.path.join(caffe2_proto_dir, "*.py")):
-            if proto_file != os.path.join(caffe2_proto_dir, "__init__.py"):
-                shutil.copy(proto_file, os.path.join("caffe2", "proto"))

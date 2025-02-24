@@ -29,9 +29,120 @@ PackedTensorAccessor32<scalar_t, ndim, PtrTraits> dummy_packed_accessor32() {
   return {nullptr, zeros.data(), zeros.data()};
 }
 
+template <typename scalar_t, typename index_t>
+__global__ void
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
+conv_depthwise2d_forward_kernel_generic(
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
+    PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> output,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> weight,
+    const PackedTensorAccessor32<const scalar_t, 1, DefaultPtrTraits> bias,
+    bool biasEnabled,
+    index_t totalElements,
+    const int outputChannels,
+    const int depthwiseMultiplier,
+    const int inputWidth, const int inputHeight,
+    const int outputWidth, const int outputHeight,
+    const int kernelWidth, const int kernelHeight,
+    const int strideWidth, const int strideHeight,
+    const int padWidth, const int padHeight,
+    const int dilationWidth, const int dilationHeight) {
+  using acc_t = at::acc_type<scalar_t, true>;
+
+  CUDA_KERNEL_LOOP_TYPE(linearIndex, totalElements, index_t) {
+    //calculate n,c,h,w indices, replacing modulos by divide and multiply add,
+    //result is same as would be in the code below
+    //const int n = linearIndex / batchStride; //batchStride = outputChannels * outputHeight * outputWidth
+    //const int c = (linearIndex / channelStride) % outputChannels; //channelStride = outputHeight * outputWidth
+    //const int h = (linearIndex / outputWidth) % outputHeight;
+    //const int w = linearIndex % outputWidth;
+
+    int indtmp1 = linearIndex/outputWidth;
+    const int w = linearIndex - indtmp1 * outputWidth;
+    int indtmp2 = indtmp1/outputHeight;
+    const int h = indtmp1 - indtmp2 * outputHeight;
+    indtmp1 = indtmp2;
+    indtmp2 = indtmp1/outputChannels;
+    const int c = indtmp1 - indtmp2 * outputChannels;
+    const int n = indtmp2;
+
+    int inputChannel = c;
+    int inputChannels = outputChannels;
+    if (depthwiseMultiplier !=1) {
+      inputChannel /= depthwiseMultiplier;
+      inputChannels /= depthwiseMultiplier;
+    }
+
+    int weightOffset = c * kernelHeight * kernelWidth;
+
+    // By precisely computing the filtering boundaries, we avoid repeating several
+    // expensive edge condition checks for every fetched item. If the input element is
+    // resident in L1, then the extra branches and comparisons would have been
+    // comparable in terms of cycles with the actual data fetch. Therefore computing
+    // boundaries ahead of the loop showed significant performance boost.
+
+    int kHmin = 0, kHmax = kernelHeight, kWmin = 0, kWmax = kernelWidth;
+
+    // Top
+    int h_in_min = -padHeight + h * strideHeight;
+    if (h_in_min < 0) {
+      kHmin =  -h_in_min / dilationHeight;
+      if ((-h_in_min) % dilationHeight > 0) {
+        kHmin++;
+      }
+    }
+
+    // Bottom
+    int h_in_max = h_in_min + (kernelHeight - 1) * dilationHeight - inputHeight + 1;
+    if (h_in_max >= 0) {
+      kHmax = kernelHeight - h_in_max / dilationHeight;
+      if (h_in_max % dilationHeight > 0) {
+        kHmax--;
+      }
+    }
+
+    // Left
+    int w_in_min = -padWidth + w * strideWidth;
+    if (w_in_min < 0) {
+      kWmin = -w_in_min / dilationWidth;
+      if ((-w_in_min) % dilationWidth > 0) {
+        kWmin++;
+      }
+    }
+
+    // Right
+    int w_in_max = w_in_min + (kernelWidth - 1) * dilationWidth - inputWidth + 1;
+    if (w_in_max >= 0) {
+      kWmax = kernelWidth - w_in_max / dilationWidth;
+      if (w_in_max % dilationWidth > 0) {
+        kWmax--;
+      }
+    }
+
+    acc_t value = biasEnabled ? static_cast<acc_t>(bias.data()[c]) : acc_t(0);
+    const index_t offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+
+    for (int kH = kHmin; kH < kHmax; ++kH) {
+      const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
+      for (int kW = kWmin; kW < kWmax; ++kW) {
+        const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
+        const index_t offset = offset0 + h_in * inputWidth + w_in;
+        value += (static_cast<acc_t>(weight.data()[weightOffset + kH * kernelWidth + kW]) *
+                    static_cast<acc_t>(input.data()[offset]));
+      }
+    }
+    output.data()[linearIndex] = static_cast<scalar_t>(value);
+  }
+}
 
 template <int kSize, typename scalar_t, typename index_t>
-__global__ void conv_depthwise2d_forward_kernel(
+__global__ void
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
+conv_depthwise2d_forward_kernel(
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> output,
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> weight,
@@ -102,6 +213,9 @@ __global__ void conv_depthwise2d_forward_kernel(
 }
 
 template <int kSize, int stride, typename scalar_t, typename index_t>
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
 __global__ void conv_depthwise2d_backward_kernel(
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> grad_output,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_input,
@@ -134,17 +248,11 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-#if !defined(USE_ROCM)
-#pragma unroll
-#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-#if !defined(USE_ROCM)
-#pragma unroll
-#endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
-#if defined(USE_ROCM)
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
@@ -170,7 +278,6 @@ __global__ void conv_depthwise2d_backward_kernel(
     grad_input.data()[linearIndex] = static_cast<scalar_t>(value);
   }
 }
-
 
 template <typename scalar_t, typename index_t=unsigned>
 __global__ void conv_depthwise2d_grad_weight_kernel(
@@ -315,7 +422,13 @@ void conv_depthwise2d_forward_out(
     const auto bias_a = has_bias ?
       bias.packed_accessor32<const scalar_t, 1>() :
       dummy_packed_accessor32<const scalar_t, 1>();
-    if (kW == 3 && kH == 3) {
+    if (kW == 5 && kH == 5) {
+      conv_depthwise2d_forward_kernel<5> <<<grid, block, 0, stream>>>(
+        input_a, output_a, weight_a, bias_a, has_bias, n, outputChannels, depthwiseMultiplier,
+        width, height, outputWidth, outputHeight,
+        kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else if (kW == 3 && kH == 3) {
       conv_depthwise2d_forward_kernel<3> <<<grid, block, 0, stream>>>(
         input_a, output_a, weight_a, bias_a, has_bias, n, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight,
@@ -328,7 +441,7 @@ void conv_depthwise2d_forward_out(
         kW, kH, dW, dH, padW, padH, dilationW, dilationH);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      conv_depthwise2d_forward_kernel<0> <<<grid, block, 0, stream>>>(
+      conv_depthwise2d_forward_kernel_generic<<<grid, block, 0, stream>>>(
         input_a, output_a, weight_a, bias_a, has_bias, n, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight,
         kW, kH, dW, dH, padW, padH, dilationW, dilationH);
@@ -391,7 +504,24 @@ void conv_depthwise2d_backward_out(
     auto grad_input_a = grad_input.packed_accessor32<scalar_t, 4>();
     auto weight_a = weight.packed_accessor32<const scalar_t, 4>();
 
-    if (kW == 3 && kH == 3) {
+    if (kW == 5 && kH == 5) {
+      if (dW == 1 && dH == 1){
+        conv_depthwise2d_backward_kernel<5, 1><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else if (dW == 2 && dH == 2) {
+        conv_depthwise2d_backward_kernel<5, 2><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+        conv_depthwise2d_backward_kernel<5, 0><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    } else if (kW == 3 && kH == 3) {
       if (dW == 1 && dH == 1){
         conv_depthwise2d_backward_kernel<3, 1><<<grid, block, 0, stream>>>(
             grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
@@ -517,15 +647,15 @@ void conv_depthwise2d_grad_weight_out(
 
 }  // namespace (anonymous)
 
-const Tensor& conv_depthwise2d_cuda_out(
+Tensor& conv_depthwise2d_cuda_out(
     const Tensor &input_,
     const Tensor &weight_,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias_opt,
+    const std::optional<Tensor> &bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    const Tensor &out) {
+    Tensor &out) {
   TORCH_CHECK(kernel_size.size() == 2);
   TORCH_CHECK(stride.size() == 2);
   TORCH_CHECK(padding.size() == 2);
@@ -556,7 +686,7 @@ Tensor conv_depthwise2d_cuda(
     const Tensor &input,
     const Tensor &weight,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias,
+    const std::optional<Tensor> &bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {
@@ -630,6 +760,6 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
       grad_weight);
 }
 
-REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
+REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda)
 
 } // namespace at::native

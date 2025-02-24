@@ -21,6 +21,16 @@ http_archive(
     urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
 )
 
+http_archive(
+    name = "platforms",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/platforms/releases/download/0.0.10/platforms-0.0.10.tar.gz",
+        # TODO Fix bazel linter to support hashes for release tarballs.
+        # "https://github.com/bazelbuild/platforms/releases/download/0.0.10/platforms-0.0.10.tar.gz",
+    ],
+    # sha256 = "218efe8ee736d26a3572663b374a253c012b716d8af0c07e842e82f238a0a7ee",
+)
+
 load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
 
 rules_cuda_dependencies(with_rules_cc = False)
@@ -88,12 +98,6 @@ new_local_repository(
     name = "onnx",
     build_file = "//third_party:onnx.BUILD",
     path = "third_party/onnx",
-)
-
-new_local_repository(
-    name = "foxi",
-    build_file = "//third_party:foxi.BUILD",
-    path = "third_party/foxi",
 )
 
 local_repository(
@@ -168,14 +172,16 @@ new_local_repository(
     path = "third_party/opentelemetry-cpp",
 )
 
-new_patched_local_repository(
-    name = "tbb",
-    build_file = "//third_party:tbb.BUILD",
-    patch_strip = 1,
-    patches = [
-        "@//third_party:tbb.patch",
-    ],
-    path = "third_party/tbb",
+new_local_repository(
+    name = "cpp-httplib",
+    build_file = "//third_party:cpp-httplib.BUILD",
+    path = "third_party/cpp-httplib",
+)
+
+new_local_repository(
+    name = "nlohmann",
+    build_file = "//third_party:nlohmann.BUILD",
+    path = "third_party/nlohmann",
 )
 
 new_local_repository(
@@ -303,6 +309,12 @@ local_repository(
     path = "third_party/gemmlowp/gemmlowp",
 )
 
+local_repository(
+    name = "kleidiai",
+    path = "third_party/kleidiai",
+    repo_mapping = {"@com_google_googletest": "@com_google_benchmark"},
+)
+
 ### Unused repos start
 
 # `unused` repos are defined to hide bazel files from submodules of submodules.
@@ -353,11 +365,6 @@ local_repository(
 local_repository(
     name = "unused_onnx_benchmark",
     path = "third_party/onnx/third_party/benchmark",
-)
-
-local_repository(
-    name = "unused_onnx_tensorrt_benchmark",
-    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
 )
 
 ### Unused repos end

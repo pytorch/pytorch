@@ -3,9 +3,9 @@
 import os
 import tempfile
 
-import torch
-
 from backend import get_custom_backend_library_path, Model, to_custom_backend
+
+import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 

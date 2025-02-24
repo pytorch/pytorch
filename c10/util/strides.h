@@ -6,7 +6,7 @@
 namespace c10 {
 
 // Computes the contiguous strides of a tensor, given its sizes.
-static inline DimVector contiguous_strides(const IntArrayRef sizes) {
+inline DimVector contiguous_strides(const IntArrayRef sizes) {
   using Int = IntArrayRef::value_type;
   const Int dims = static_cast<Int>(sizes.size());
 

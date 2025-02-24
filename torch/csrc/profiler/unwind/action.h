@@ -1,6 +1,8 @@
 #pragma once
-#include <stdint.h>
+#include <cstdint>
 #include <ostream>
+
+namespace torch::unwind {
 
 enum {
   A_UNDEFINED = 0x0,
@@ -53,3 +55,5 @@ struct Action {
     return out;
   }
 };
+
+} // namespace torch::unwind

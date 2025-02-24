@@ -13,36 +13,28 @@ namespace {
  * Each generator is lazily initialized the first time generator is
  * requested for a device.
  */
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 std::deque<c10::once_flag> xpu_gens_init_flag;
 std::vector<Generator> default_gens_xpu;
 
 void initXPUGenVector() {
-  num_gpus = device_count();
-  xpu_gens_init_flag.resize(num_gpus);
-  default_gens_xpu.resize(num_gpus);
-}
-
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int16_t>(device),
-      ", total number of device is ",
-      static_cast<int16_t>(num_gpus),
-      ".");
+  static bool init_flag [[maybe_unused]] = []() {
+    num_gpus = device_count();
+    xpu_gens_init_flag.resize(num_gpus);
+    default_gens_xpu.resize(num_gpus);
+    return true;
+  }();
 }
 
 } // anonymous namespace
 
 // Get the default generator with a random seed for a specific xpu device.
 const Generator& getDefaultXPUGenerator(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUGenVector);
+  initXPUGenVector();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   c10::call_once(xpu_gens_init_flag[device], [&]() {
     default_gens_xpu[device] = make_generator<XPUGeneratorImpl>(device);
     default_gens_xpu[device].seed();
@@ -52,11 +44,11 @@ const Generator& getDefaultXPUGenerator(DeviceIndex device) {
 
 // Create a generator with a fixed seed for a specific xpu device.
 Generator createXPUGenerator(DeviceIndex device) {
-  c10::call_once(init_flag, initXPUGenVector);
+  initXPUGenVector();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   auto gen = make_generator<XPUGeneratorImpl>(device);
   auto xpu_gen = check_generator<XPUGeneratorImpl>(gen);
   xpu_gen->set_current_seed(default_rng_seed_val);
@@ -104,10 +96,10 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
   auto state_tensor = at::detail::empty_cpu(
       {static_cast<int64_t>(total_size)},
       ScalarType::Byte,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt);
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto offset = this->philox_offset_per_thread();

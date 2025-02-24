@@ -128,17 +128,17 @@ bool isDifferentiable(Graph& g) {
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
 // in this file.
-static c10::optional<std::vector<Value*>> build_script_grad(
+static std::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
   auto maybe_schema = node->maybeSchema();
   if (!maybe_schema) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto compiled_graphs = gradientInfoForSchema(*maybe_schema);
   if (!compiled_graphs) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Use forward graph to replace node in grad_desc.f
   value_list new_outputs;
@@ -167,7 +167,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto grad_inputs = insertGraph(*graph, *bw_graph, grad);
   grad_inputs = unpackOutputs(grad_inputs);
   return grad_inputs;
-};
+}
 
 namespace {
 class GradientHelper {
@@ -206,8 +206,7 @@ class GradientHelper {
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* input_list;
+      Value* input_list = nullptr;
       if (grad_values.size() == 1 &&
           grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
@@ -352,7 +351,7 @@ bool outputRequiresGrad(Value* output) {
   if (output->type()->castRaw<TensorType>() == nullptr) {
     return output->requires_grad();
   }
-  c10::optional<bool> requiresGrad =
+  std::optional<bool> requiresGrad =
       output->type()->expectRef<TensorType>().requiresGrad();
   if (requiresGrad.has_value()) {
     return *requiresGrad;
@@ -575,8 +574,7 @@ static void foldSizeIfNotEqual(Node* node) {
     // insert in front of _grad_sum_to_size
     WithInsertPoint guard(node);
     IValue ival{};
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* size;
+    Value* size = nullptr;
     if (input_size != output_size) {
       size = node->owningGraph()->insertConstant(*input_size);
     } else {

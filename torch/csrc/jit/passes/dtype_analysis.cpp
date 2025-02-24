@@ -3,13 +3,13 @@
 #include <ATen/core/symbol.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/utils/op_registry.h>
 #include <torch/library.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -21,8 +21,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -62,7 +61,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
     }
   }
   return stack;
-};
+}
 
 bool MTensorNodeArgValid(Value* value) {
   auto tensor_type = value->type()->cast<TensorType>();
@@ -99,10 +98,10 @@ static bool canBeInferredWithMetaTensor(Node* n) {
   return true;
 }
 
-c10::optional<Tensor> inferWithMetaTensor(Node* n) {
+std::optional<Tensor> inferWithMetaTensor(Node* n) {
   GRAPH_DEBUG("inferWithMetaTensor", getHeader(n));
   if (!canBeInferredWithMetaTensor(n)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   Operation op = n->getOperation();
   try {
@@ -116,7 +115,7 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
   } catch (...) {
     GRAPH_DEBUG("caught exception with Metatensor run!");
   };
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool setDtype(
@@ -336,5 +335,4 @@ bool DtypePropagation(std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 import numpy as np
 import math
@@ -21,7 +22,7 @@ import itertools
 import tempfile
 
 class Foo(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
@@ -140,7 +141,6 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor_equal(self):
-        # ASAN regression test reported in https://github.com/pytorch/pytorch/issues/116087
         x = torch.rand(5)
         x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
@@ -1348,8 +1348,8 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
-        # Don't test weights_only here as this is loading a Module (legacy)
-        f2 = torch.load(buf)
+        # weights_only=False as this is legacy code that saves the model
+        f2 = torch.load(buf, weights_only=False)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
@@ -1414,7 +1414,7 @@ class TestQuantizedTensor(TestCase):
             class M(torch.jit.ScriptModule):
                 __constants__ = ['fname']
 
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fname = fname
 
@@ -1452,7 +1452,7 @@ class TestQuantizedTensor(TestCase):
                     s = torch.rand(5, dtype=torch.float64) + 0.1
                     zp = torch.randint(5, 15, (5,))
                     x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
-                self.register_buffer('x', x_q)
+                self.x = torch.nn.Buffer(x_q)
 
             @torch.jit.script_method
             def forward(self):
@@ -1614,6 +1614,58 @@ class TestQuantizedTensor(TestCase):
         (s, zp) = torch.ops.quantized_decomposed._choose_qparams_per_token_asymmetric_impl(x, torch.int8)
         out = x.div(s).add(zp).round()
         out.sum().backward()
+
+    def test_decomposed_quantize_per_channel_group(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        group_size = 128
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 2)
+        zp = torch.randint(qmax, size=(100, 2), dtype=torch.int32)
+
+        # simulate fake quantize per channel group with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_channel_group(
+            x, s, zp, qmin, qmax, torch.int8, group_size,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_channel_group(
+            q, s, zp, qmin, qmax, torch.int8, group_size, torch.float32
+        )
+
+        # express per group fake quant using `torch.fake_quantize_per_channel_affine`
+        x_grouped = x.reshape(-1, group_size)
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x_grouped, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        fq = fq.reshape_as(x)
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
+    def test_decomposed_quantize_per_token(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 1)
+        zp = torch.randint(qmax, size=(100, 1), dtype=torch.int32)
+
+        # simulate fake quantize per token with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_token(
+            x, s, zp, qmin, qmax, torch.int8,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_token(
+            q, s, zp, qmin, qmax, torch.int8, torch.float32
+        )
+
+        # express per token fake quant using `torch.fake_quantize_per_channel_affine`
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

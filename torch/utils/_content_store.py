@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This module provides a FAST (on GPU) content addressable store for storages
 # (and tensors on top of them) with VERY WEAK portability guarantees (e.g.,
 # don't expect CPU/CUDA to address to the same hash, don't expect it to be
@@ -33,14 +34,13 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Dict, Optional, Set
+from typing import Optional
 
 import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
 from torch._C import default_generator
-
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -147,7 +147,7 @@ class ContentStoreWriter:
     #     name
     def __init__(self, loc: str, stable_hash: bool = False) -> None:
         self.loc: str = loc
-        self.seen_storage_hashes: Set[str] = set()
+        self.seen_storage_hashes: set[str] = set()
         self.stable_hash = stable_hash
 
     # TODO: offer some sort of non-blocking API to speed things up
@@ -193,7 +193,7 @@ class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
         self.storage_cache: Optional[
-            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+            dict[Optional[torch.device], dict[str, StorageWeakRef]]
         ] = None
         if cache:
             self.storage_cache = defaultdict(dict)

@@ -1,14 +1,13 @@
 #pragma once
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <optional>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct ModuleInstanceInfo;
 constexpr size_t kModuleInstanceInfo = 2;
 
@@ -120,11 +119,11 @@ struct ModuleInstanceInfo {
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry =
-    std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
+    std::tuple<Function*, SourceRange, std::optional<ModuleInstanceInfo>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
-  c10::optional<InlinedCallStackPtr> callee_;
+  std::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
   // Reason for fn_name_ even though we have fn_
   // Serialized callstack is used in circustmances where InlinedCallstack
@@ -137,7 +136,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   const std::string fn_name_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
-  c10::optional<ModuleInstanceInfo> module_instance_info_;
+  std::optional<ModuleInstanceInfo> module_instance_info_;
 
  public:
   // Constructor for a leaf callstack node.
@@ -147,13 +146,13 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   InlinedCallStack(
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info);
+      std::optional<ModuleInstanceInfo> module_instance_info);
 
   // Constructor for a leaf callstack node.
   InlinedCallStack(
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info,
+      std::optional<ModuleInstanceInfo> module_instance_info,
       std::string& function_name);
 
   // Constructor for an inner callstack node.
@@ -166,20 +165,20 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       InlinedCallStackPtr callee,
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info);
+      std::optional<ModuleInstanceInfo> module_instance_info);
 
   InlinedCallStack(
       InlinedCallStackPtr callee,
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info,
+      std::optional<ModuleInstanceInfo> module_instance_info,
       std::string& function_name);
 
   // Return next element in the callstack list.
-  c10::optional<InlinedCallStackPtr> callee() const;
+  std::optional<InlinedCallStackPtr> callee() const;
 
   // Return module instance associated with the current element.
-  c10::optional<ModuleInstanceInfo> module_instance() const;
+  std::optional<ModuleInstanceInfo> module_instance() const;
 
   // Returns the source range of the node
   SourceRange source_range() const;
@@ -191,7 +190,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 
-  void setCallee(c10::optional<InlinedCallStackPtr>);
+  void setCallee(std::optional<InlinedCallStackPtr>);
 
   bool operator==(const InlinedCallStack& rhs) const {
     // No need to compare fn_, since source_range equivalence check
@@ -216,5 +215,4 @@ using DebugInfoTuple =
 constexpr size_t kDebugInfoTupleSourceRangeIndex{0};
 constexpr size_t kDebugInfoTupleNodeNameIndex{1};
 constexpr size_t kDebugInfoTupleInlinedCSIndex{2};
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

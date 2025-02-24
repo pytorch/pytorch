@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import logging
 import math
 
 import torch
+
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -12,8 +14,12 @@ from ..pattern_matcher import (
     joint_fwd_bwd,
 )
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+
+
+_scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -27,10 +33,10 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
 
 def _sfdp_replacement_1(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -49,10 +55,10 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 
 def _sfdp_replacement_2(query, key, value, scale_factor):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -71,10 +77,10 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
 
 def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -91,10 +97,10 @@ def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
 
 def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -112,10 +118,10 @@ def _sfdp_pattern_5(query, key, value, attn_mask):
 
 def _sfdp_replacement_5(query, key, value, attn_mask):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
@@ -132,10 +138,10 @@ def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
 
 def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
         is_causal=False,
@@ -167,7 +173,7 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         q,
         k,
         v,
@@ -194,7 +200,7 @@ def _sfdp_replacement_8(query, key, value):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         q,
         k,
         v,
@@ -222,7 +228,7 @@ def _sfdp_replacement_9(query, key, value, dropout_p):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         q,
         k,
         v,
@@ -250,7 +256,7 @@ def _sfdp_replacement_10(query, key, value):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         q,
         k,
         v,
@@ -270,7 +276,7 @@ def _sfdp_pattern_11(query, key, value, inv_scale):
 
 def _sfdp_replacement_11(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -293,7 +299,7 @@ def _sfdp_pattern_12(query, key, value, inv_scale_factor, dropout_p):
 
 def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -312,7 +318,7 @@ def _sfdp_pattern_13(query, key, value, dropout_p):
 
 def _sfdp_replacement_13(query, key, value, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.unsqueeze(0),
         key.unsqueeze(0),
         value.unsqueeze(0),
@@ -336,7 +342,7 @@ def _sfdp_pattern_14(query, key, value, attn_mask, inv_scale):
 
 def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -369,11 +375,11 @@ def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale):
     n_head = query.size(2)
     q_len = query.size(1)
     k_len = key.size(1)
-    # do attn_mask->logical_not() in aten.scaled_dot_product_attention
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
     attn_mask = (
         (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
     )
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -403,7 +409,7 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -439,11 +445,11 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     n_head = query.size(2)
     q_len = query.size(1)
     k_len = key.size(1)
-    # do attn_mask->logical_not() in aten.scaled_dot_product_attention
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
     attn_mask = (
         (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
     )
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
@@ -488,7 +494,7 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
     permuted_key = key.transpose(1, 2)
     permuted_value = value.transpose(1, 2)
     return (
-        aten.scaled_dot_product_attention(
+        _scaled_dot_product_attention(
             query.transpose(1, 2),
             permuted_key,
             permuted_value,
@@ -525,7 +531,7 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = torch.where(causal_mask, attn_mask, fill_value)
-    return aten.scaled_dot_product_attention(
+    return _scaled_dot_product_attention(
         query,
         key,
         value,
@@ -563,6 +569,13 @@ def _sfdp_params_check(match):
                 or attn_mask.dtype == torch.float
             )
             or query.device != attn_mask.device
+            # When we tensorify floats we end up turning floats
+            # into 0d scalar tensors. It doesn't make any sense
+            # to have a 0d scalar tensor attention mask so
+            # conveniently we can insert this check to get
+            # tests that erroneously passing in a float
+            # attention mask to fail as expected.
+            or attn_mask.dim() == 0
         ):
             return False
     return True
@@ -797,16 +810,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,
@@ -883,6 +894,9 @@ def _get_sfdp_patterns():
                 "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
+                # with dropout turned into clone, we end up with a number of
+                # semantically identical graphs
+                "skip_duplicates": True,
             }
 
 

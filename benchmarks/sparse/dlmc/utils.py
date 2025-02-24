@@ -1,8 +1,9 @@
 import math
 from pathlib import Path
 
-import torch
 from scipy import sparse
+
+import torch
 
 
 def to_coo_scipy(x):
@@ -55,16 +56,12 @@ def load_sparse_matrix(path, device):
 def gen_vector(path, device):
     with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
-        index_pointers = (int(el) for el in file.readline().split())
-        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, dtype=torch.double, device=device)
 
 
 def gen_matrix(path, device):
     with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
-        index_pointers = (int(el) for el in file.readline().split())
-        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, ncols, dtype=torch.double, device=device)
 
 
@@ -97,7 +94,7 @@ def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.
             x_files.append(f.as_posix())
         if size[0] == hidden_size:
             y_files.append(f.as_posix())
-        index += 1
+        index += 1  # noqa: SIM113
     print()
 
     for fx, fy in zip(x_files, y_files):
@@ -139,7 +136,7 @@ def load_spmm_dataset(
             x_files.append(f.as_posix())
         if size[0] == hidden_size:
             y_files.append(f.as_posix())
-        index += 1
+        index += 1  # noqa: SIM113
     print()
 
     for fx, fy in zip(x_files, y_files):

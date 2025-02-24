@@ -1,6 +1,5 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
-from typing import Dict, Tuple
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -33,10 +32,9 @@ def fork_add(t1, t2, dst: str):
 class JitDistAutogradTest(RpcAgentTestFixture):
     @dist_init
     def test_get_gradients(self):
-        dst_rank = self.rank
 
         @torch.jit.script
-        def dist_get_gradients(context_id: int) -> (Dict[Tensor, Tensor]):
+        def dist_get_gradients(context_id: int) -> (dict[Tensor, Tensor]):
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
@@ -94,7 +92,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         @torch.jit.script
         def forward_script(
             context_id: int, dst_worker_name: str, t1: Tensor, t2: Tensor
-        ) -> Tuple[Tensor, Tensor]:
+        ) -> tuple[Tensor, Tensor]:
             res1_fut = rpc.rpc_async(dst_worker_name, local_add, (t1, t1))
             res1 = res1_fut.wait()  # After this, the script runs in a new JIT thread.
             loss1 = res1.sum()

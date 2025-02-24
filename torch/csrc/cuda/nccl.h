@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/Optional.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
@@ -31,8 +31,8 @@ typedef void* ncclComm_t;
 /** redefine nccl unique ID in torch scope. this should be identical to native
  * nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 typedef struct {
+  // NOLINTNEXTLINE(*array*)
   char internal[NCCL_UNIQUE_ID_BYTES];
 } ncclUniqueId;
 
@@ -44,8 +44,9 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6,
-  InProgress = 7
+  RemoteError = 6,
+  InProgress = 7,
+  NumResults = 8
 };
 
 /* Reduction operation selector */
@@ -74,7 +75,7 @@ enum class ncclDataType {
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
-struct AutoNcclGroup {
+struct TORCH_CUDA_CPP_API AutoNcclGroup {
   AutoNcclGroup();
   AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
@@ -88,7 +89,7 @@ namespace detail {
 
 TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
-static inline void NCCL_CHECK(ncclResult status) {
+inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
     throw_nccl_error(status);
   }
@@ -99,19 +100,19 @@ TORCH_CUDA_CPP_API at::ArrayRef<ncclComm_t> get_communicators(
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     const at::Tensor& output,
     int root,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
-using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
+using stream_list = std::vector<std::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
 TORCH_CUDA_CPP_API const char* version_suffix();

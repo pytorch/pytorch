@@ -1,19 +1,18 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Struct storing metadata of an operator that can be useful for versioning
 struct OperatorInfo {
   // The number of arguments within the schema of the op
-  c10::optional<int> num_schema_args;
+  std::optional<int> num_schema_args;
 };
 
 struct RuntimeCompatibilityInfo {
@@ -40,5 +39,4 @@ TORCH_API std::unordered_set<std::string> _get_mobile_supported_types();
 
 TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes();
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

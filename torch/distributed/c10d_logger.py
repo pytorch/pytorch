@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,16 +9,16 @@
 
 import functools
 import logging
-import time
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
-
 from torch.distributed.logging_handlers import _log_handlers
+from torch.monitor import _WaitCounter
 
-__all__: List[str] = []
+
+__all__: list[str] = []
 
 _DEFAULT_DESTINATION = "default"
 
@@ -35,9 +36,11 @@ def _get_or_create_logger(destination: str = _DEFAULT_DESTINATION) -> logging.Lo
     return logger
 
 
-def _get_logging_handler(destination: str = _DEFAULT_DESTINATION) -> Tuple[logging.Handler, str]:
+def _get_logging_handler(
+    destination: str = _DEFAULT_DESTINATION,
+) -> tuple[logging.Handler, str]:
     log_handler = _log_handlers[destination]
-    log_handler_name = type(log_handler).__name__
+    log_handler_name = f"{type(log_handler).__name__}-{destination}"
     return (log_handler, log_handler_name)
 
 
@@ -45,12 +48,11 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
+def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
     if dist.is_initialized():
         group = kwargs.get("group") or kwargs.get("process_group")
         msg_dict = {
             "func_name": f"{func_name}",
-            "args": f"{args}, {kwargs}",
             "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
             "backend": f"{dist.get_backend(group)}",
             "world_size": f"{dist.get_world_size()}",
@@ -64,12 +66,13 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     else:
         msg_dict = {
             "func_name": f"{func_name}",
-            "args": f"{args}, {kwargs}",
         }
     return msg_dict
 
-_T = TypeVar('_T')
-_P = ParamSpec('_P')
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 
 def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
@@ -88,14 +91,8 @@ def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
 def _time_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        t1 = time.time_ns()
-        func_return = func(*args, **kwargs)
-        time_spent = time.time_ns() - t1
-
-        msg_dict = _get_msg_dict(func.__name__, *args, **kwargs)
-        msg_dict["time_spent"] = f"{time_spent}ns"
-        _c10d_logger.debug(msg_dict)
-
+        with _WaitCounter(f"pytorch.wait_counter.c10d.{func.__name__}").guard():
+            func_return = func(*args, **kwargs)
         return func_return
 
     return wrapper

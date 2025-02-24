@@ -12,7 +12,7 @@ from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(10, 10)
         self.relu = torch.nn.ReLU()
@@ -46,7 +46,10 @@ class InPlaceCompilationTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_state_dict_save(self):
@@ -58,7 +61,8 @@ class InPlaceCompilationTests(TestCase):
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(
-                torch.load(os.path.join(tmpdirname, "model.pt"))
+                # weights_only=False as this is a legacy use case that loads a module
+                torch.load(os.path.join(tmpdirname, "model.pt"), weights_only=False)
             )
             loaded_model(torch.randn(1, 10))
 
@@ -94,6 +98,19 @@ class InPlaceCompilationTests(TestCase):
 
         self.assertEqual(printed_output, "Compilation started.\nCompilation ended.")
 
+    def test_compile_eager_options(self):
+        @torch.compile(backend="eager", options={"foo": 2})
+        def f(x):
+            return x + x
+
+        f(torch.randn(3))
+
+        @torch.compile(backend="aot_eager", options={"foo": 2})
+        def g(x):
+            return x + x
+
+        g(torch.randn(3))
+
     def test_compilation_callback_with_graph_break(self):
         torch._dynamo.reset()
         counter = 0
@@ -125,6 +142,75 @@ class InPlaceCompilationTests(TestCase):
         self.assertEqual(
             printed_output, "Counter = 1\nCounter = 2\nCounter = 3\nCounter = 4"
         )
+
+    def test_compilation_constant_hasattr_fail(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(None)
+
+    def test_compilation_evnum_hasattr_fail(self):
+        from enum import Enum
+
+        class TestEnum(Enum):
+            VALID = 1
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(TestEnum.VALID)
+
+    def test_compilation_name_error(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            does_not_exist()  # noqa: F821
+            return x
+
+        x = torch.randn(10, 10)
+        with self.assertRaises(NameError):
+            fn(x)
+
+    def test_compilation_tensor_invalid_method(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = torch.tensor(x)
+            return y.doesnotexist()
+
+        x = torch.randn(10, 10)
+
+        with self.assertRaises(AttributeError):
+            fn(x)
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_compilation_nn_module_invalid_method(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + self.doesnotexist
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(1, 1)
+        with self.assertRaises(AttributeError):
+            opt_mod(x)
+
+    def test_torch_script_compilation(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        a = torch.randn(1, 1)
+        out = torch.compile(fn)(a)
+        self.assertEqual(out, a)
 
 
 # The private variants of the below functions are extensively tested

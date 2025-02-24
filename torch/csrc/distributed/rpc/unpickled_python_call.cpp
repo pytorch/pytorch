@@ -2,9 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
     const SerializedPyObj& serializedPyObj,
@@ -15,6 +13,7 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 UnpickledPythonCall::~UnpickledPythonCall() {
   // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
   // decref on the PyObject again.
@@ -33,6 +32,4 @@ const py::object& UnpickledPythonCall::pythonUdf() const {
   return pythonUdf_;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

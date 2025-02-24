@@ -72,12 +72,13 @@ __m512i pack_saturate_and_clamp(
 
 template <>
 inline __m512i pack_saturate_and_clamp<int32_t>(
-    __m512i first,
-    __m512i second,
-    int32_t min_val,
-    int32_t max_val) {
+    __m512i first [[maybe_unused]],
+    __m512i second [[maybe_unused]],
+    int32_t min_val [[maybe_unused]],
+    int32_t max_val [[maybe_unused]]) {
   // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+  TORCH_CHECK(false, "pack_saturate_and_clamp<int32_t> is not supported");
+  return __m512i{};
 }
 
 template <>
@@ -342,7 +343,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
         const float_vec_return_type& rhs,
         float scale,
         int32_t zero_point,
-        float inverse_scale) {
+        float inverse_scale [[maybe_unused]]) {
       Vectorized<c10::qint32> retval;
       auto rhs_data = (__m512)rhs[0];
       at::native::quantize_vec<c10::qint32, /*precision=*/32>(
@@ -955,7 +956,7 @@ struct VectorizedQuantizedConverter {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point,
-      Vectorized<float> scale_zp_premul) const {
+      Vectorized<float> scale_zp_premul [[maybe_unused]]) const {
     float_vec_return_type rv;
     for (const auto i : c10::irange(float_num_vecs())) {
       float tmp_vals[16];
@@ -1039,7 +1040,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float inverse_scale [[maybe_unused]]) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 
@@ -1183,7 +1184,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float inverse_scale [[maybe_unused]]) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 
@@ -1315,7 +1316,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float inverse_scale [[maybe_unused]]) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 

@@ -25,8 +25,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qcat_nhwc_stub);
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
@@ -49,19 +48,21 @@ bool is_valid_quantization_scheme(const Tensor& t) {
   return (qtype == kPerTensorAffine) || (qtype == kPerTensorSymmetric);
 }
 
+#define QPARAM_THRESHOLD 1e-04
+
 bool all_inputs_sharing_qparams(const MaterializedITensorListRef& qxs) {
   bool is_valid = true;
   for (const auto i : c10::irange(1, qxs.size())) {
-    is_valid |= qxs[0].get().is_quantized();
-    is_valid |= qxs[i].get().is_quantized() == qxs[0].get().is_quantized();
-    is_valid |= qxs[i].get().qscheme() == qxs[0].get().qscheme();
-    is_valid |= qxs[i].get().dtype() == qxs[0].get().dtype();
+    is_valid &= qxs[0].get().is_quantized();
+    is_valid &= qxs[i].get().is_quantized() == qxs[0].get().is_quantized();
+    is_valid &= qxs[i].get().qscheme() == qxs[0].get().qscheme();
+    is_valid &= qxs[i].get().dtype() == qxs[0].get().dtype();
     if (qxs[0].get().qscheme() == kPerTensorAffine) {
-        is_valid |= qxs[i].get().q_scale() == qxs[0].get().q_scale();
-      is_valid |= qxs[i].get().q_zero_point() == qxs[0].get().q_zero_point();
+        is_valid &= fabs(qxs[i].get().q_scale() - qxs[0].get().q_scale()) < QPARAM_THRESHOLD;
+      is_valid &= qxs[i].get().q_zero_point() == qxs[0].get().q_zero_point();
     } else if (qxs[0].get().qscheme() == kPerChannelAffine) {
-        is_valid |= qxs[i].get().q_per_channel_scales().equal(qxs[0].get().q_per_channel_scales());
-      is_valid |= qxs[i].get().q_per_channel_zero_points().equal(qxs[0].get().q_per_channel_zero_points());
+        is_valid &= qxs[i].get().q_per_channel_scales().isclose(qxs[0].get().q_per_channel_scales(), 0, QPARAM_THRESHOLD, false).all().item().to<bool>();
+      is_valid &= qxs[i].get().q_per_channel_zero_points().equal(qxs[0].get().q_per_channel_zero_points());
     } else {
         TORCH_CHECK(false, "Unrecognized qscheme:", toString(qxs[0].get().qscheme()));
     }
@@ -101,7 +102,6 @@ Tensor quantized_cat_impl(
   const Tensor y = at::cat(xs, dim);
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(x_dtype, "qcat", [&]() {
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     qy = at::quantize_per_tensor(y, scale, zero_point, SCALAR_TYPE);
     if (ReLUFused) {
       auto iter = TensorIterator::unary_op(qy, qy);
@@ -126,8 +126,8 @@ template <bool ReLUFused = false>
 Tensor qcat(
     const c10::List<Tensor>& qxs,
     int64_t dim,
-    c10::optional<double> scale,
-    c10::optional<int64_t> zero_point) {
+    std::optional<double> scale,
+    std::optional<int64_t> zero_point) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();
@@ -161,9 +161,11 @@ Tensor cat_quantized_cpu(const ITensorListRef& qxs, int64_t dim) {
   auto materialized = qxs.materialize();
   TORCH_CHECK(is_valid_quantization_scheme(materialized[0]),
               "Only per-tensor quantization is supported in 'cat'!");
-  TORCH_CHECK(
-      all_inputs_sharing_qparams(materialized),
-      "All inputs should share the same quantization parameters.");
+
+  if (!all_inputs_sharing_qparams(materialized)) {
+      // TODO: if possible change this warning to an error T194501002
+      TORCH_WARN("All inputs of this cat operator must share the same quantization parameters. Otherwise large numerical inaccuracies may occur.");
+  }
   check_cat_no_zero_dim(materialized);
   dim = legacy_cat_wrap_dim(dim, materialized);
   double _scale = materialized[0].get().q_scale();
@@ -184,5 +186,4 @@ Tensor& cat_out_quantized_cpu(const ITensorListRef& qxs, int64_t dim, Tensor& ou
   return out;
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

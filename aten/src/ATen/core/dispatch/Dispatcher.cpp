@@ -17,8 +17,22 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar,
+        " valid values are 0 or 1.");
+  }
+
+  return false;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
@@ -53,7 +67,13 @@ public:
 private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
+
+void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
+  auto nesting_value = dispatch_trace_nesting_value();
+  for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
+  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
 }
+} // namespace detail
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
@@ -76,11 +96,11 @@ C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
-  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+std::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return found->second;
   });
@@ -93,7 +113,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != c10::nullopt;
+    return findOp(schema.operator_name()).has_value();
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -103,7 +123,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
     "the same dependencies.");
 }
 
-void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+void Dispatcher::waitForImpl(const OperatorName& op_name, std::optional<c10::DispatchKey> maybe_dk) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
@@ -121,13 +141,13 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::Dis
     "the same dependencies.");
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+std::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
   auto it = findOp(overload_name);
   if (it.has_value()) {
     if (it->hasSchema()) {
       return it;
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   } else {
     return it;
@@ -164,7 +184,7 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != c10::nullopt) {
+  if (found.has_value()) {
     return *found;
   }
 
@@ -275,11 +295,11 @@ PythonModuleMapType& pythonModulesSingleton() {
 
 }
 
-c10::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
+std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = pythonModulesSingleton().find(op_name);
   if (found == pythonModulesSingleton().end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return found->second;
 }
@@ -332,9 +352,9 @@ void Dispatcher::throwIfHasPythonModule(OperatorName op_name) {
 
 RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<impl::CppSignature> cpp_signature,
+  std::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -364,7 +384,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, std::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
@@ -486,7 +506,7 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
-std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(std::optional<DispatchKey> k) const {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
     std::vector<OperatorName> op_names;
     for (const auto& op : operatorLookupTable) {

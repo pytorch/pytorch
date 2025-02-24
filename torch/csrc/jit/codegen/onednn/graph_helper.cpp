@@ -5,10 +5,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 using opkind = dnnl::graph::op::kind;
 
@@ -22,11 +19,11 @@ static void fixConvOptionalBias(Node* node) {
   }
 }
 
-static c10::optional<size_t> getDimensions(Value* v) {
+static std::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -405,8 +402,7 @@ LlgaGraphHelper::LlgaGraphHelper(
     dnnl::graph::partition::policy policy) {
   auto deviceType = inferDevice(graph);
   auto engineKind = getLlgaEngineKind(deviceType);
-  dnnl_graph_ =
-      std::unique_ptr<dnnl::graph::graph>(new dnnl::graph::graph(engineKind));
+  dnnl_graph_ = std::make_unique<dnnl::graph::graph>(engineKind);
   aliasDb_ = std::make_unique<torch::jit::AliasDb>(graph);
   GRAPH_DEBUG("Constructing LLGA graph");
   // TODO: select nodes in top-level block for now
@@ -616,7 +612,4 @@ bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
   return n->is(attr::output_layouts)[offset] == OPAQUE_LAYOUT;
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

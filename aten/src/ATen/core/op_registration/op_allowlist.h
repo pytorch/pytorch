@@ -25,7 +25,7 @@
  * will fail (and the operator will be included in the binary anyway).
  */
 
-#include <c10/util/string_view.h>
+#include <string_view>
 #include <c10/core/DispatchKey.h>
 #include <c10/macros/Macros.h>
 
@@ -34,11 +34,9 @@
 #include <ATen/record_function.h>
 #endif
 
-namespace c10 {
+namespace c10::impl {
 
-namespace impl {
-
-constexpr bool allowlist_contains(string_view allowlist, string_view item);  // Forward Declare
+constexpr bool allowlist_contains(std::string_view allowlist, std::string_view item);  // Forward Declare
 
 /**
  * In selective build mode returns true/false depending on whether a build
@@ -104,14 +102,14 @@ constexpr bool is_build_feature_available(const char* name) {
 
 // returns true iff allowlist contains item
 // allowlist_contains("a;bc;d", "bc") == true
-constexpr bool allowlist_contains(string_view allowlist, string_view item) {
+constexpr bool allowlist_contains(std::string_view allowlist, std::string_view item) {
     //Choose a really big value for next so that if something goes wrong
     //this code will blow up in a hopefully detectable way.
     size_t next = std::numeric_limits<size_t>::max();
     for (size_t cur = 0; cur <= allowlist.size(); cur = next) {
       next = allowlist.find(';', cur);
-      if (next != string_view::npos) {
-        if (allowlist.substr(cur, next - cur).compare(item) == 0) {
+      if (next != std::string_view::npos) {
+        if (allowlist.substr(cur, next - cur) == item) {
           return true;
         }
         next++;
@@ -127,12 +125,12 @@ constexpr bool allowlist_contains(string_view allowlist, string_view item) {
 
 // Returns true iff the given op name is on the allowlist
 // and should be registered
-constexpr bool op_allowlist_check(string_view op_name) {
-  assert(op_name.find("::") != string_view::npos);
+constexpr bool op_allowlist_check(std::string_view op_name [[maybe_unused]]) {
+  assert(op_name.find("::") != std::string_view::npos);
   // Use assert() instead of throw() due to a gcc bug. See:
   // https://stackoverflow.com/questions/34280729/throw-in-constexpr-function
   // https://github.com/fmtlib/fmt/issues/682
-  assert(op_name.find("(") == string_view::npos);
+  assert(op_name.find('(') == std::string_view::npos);
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
@@ -152,21 +150,20 @@ constexpr bool op_allowlist_check(string_view op_name) {
 
 // Returns true iff the given schema string is on the allowlist
 // and should be registered
-constexpr bool schema_allowlist_check(string_view schema) {
+constexpr bool schema_allowlist_check(std::string_view schema) {
 #if defined(TORCH_FORCE_SCHEMA_REGISTRATION)
   return true;
 #else
-  return op_allowlist_check(schema.substr(0, schema.find("(")));
+  return op_allowlist_check(schema.substr(0, schema.find('(')));
 #endif
 }
 
 // Returns true iff the given custom class name is on the allowlist
 // and should be registered
-constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
+constexpr bool custom_class_allowlist_check(std::string_view custom_class_name [[maybe_unused]]) {
 #if !defined(TORCH_CUSTOM_CLASS_ALLOWLIST)
   // If the TORCH_CUSTOM_CLASS_ALLOWLIST parameter is not defined,
   // all custom classes are to be registered
-  (void)custom_class_name;
   return true;
 #else
   return allowlist_contains(
@@ -177,23 +174,8 @@ constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
 
 // schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
 // Add this API to pass arbitrary allowlist.
-constexpr bool op_allowlist_contains_name_in_schema(string_view allowlist, string_view schema) {
-  return allowlist_contains(allowlist, schema.substr(0, schema.find("(")));
+constexpr bool op_allowlist_contains_name_in_schema(std::string_view allowlist, std::string_view schema) {
+  return allowlist_contains(allowlist, schema.substr(0, schema.find('(')));
 }
 
-// Returns true iff the given dispatch key is on the allowlist
-// and should be registered.  When we turn this on, the list of valid
-// mobile dispatch keys is hard coded (but you need to make sure
-// that you have the correct set of dispatch keys for this).
-constexpr bool dispatch_key_allowlist_check(DispatchKey /*k*/) {
-#ifdef C10_MOBILE
-  return true;
-  // Disabled for now: to be enabled later!
-  // return k == DispatchKey::CPU || k == DispatchKey::Vulkan || k == DispatchKey::QuantizedCPU || k == DispatchKey::BackendSelect || k == DispatchKey::CatchAll;
-#else
-  return true;
-#endif
-}
-
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

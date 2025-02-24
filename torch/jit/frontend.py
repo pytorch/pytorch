@@ -1,12 +1,12 @@
+# mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import inspect
 import re
 import string
-import sys
 from collections import namedtuple
 from textwrap import dedent
-from typing import List, Tuple  # noqa: F401
 
 import torch
 import torch.jit.annotations
@@ -71,6 +71,7 @@ from torch._sources import (
 )
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
+
 
 _IS_ASTUNPARSE_INSTALLED = False
 try:
@@ -249,7 +250,16 @@ def get_class_assigns(ctx, cls_ast):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method within the current class independently
+    """Get definitions for each method within the current class independently.
+
+    Args:
+        cls: The class to get definition of.
+        self_name: The name of the class that the properties should belong to.
+
+    Returns:
+        torch._C._jit_tree_views.ClassDef: A representation of the class,
+            the methods in the class and their definition as a tree.
+    """
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
         cls,
@@ -333,10 +343,10 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     fn_def = parsed_def.ast.body[0]
 
     if is_classmethod:
-        arg_name = fn_def.args.args[0].arg
+        arg_name = fn_def.args.args[0].arg  # type:ignore[union-attr]
         # Insert a statement that assigns the first argument to the class
         assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
-        fn_def.body.insert(0, assign_stmt)
+        fn_def.body.insert(0, assign_stmt)  # type:ignore[union-attr]
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
@@ -350,16 +360,16 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
                 f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}"
             )
         unused_def = unused_fn_def.body[0]
-        fn_def.body = unused_def.body
+        fn_def.body = unused_def.body  # type:ignore[union-attr]
         # kwarg/vararg not supported by `build_def`
-        fn_def.args.kwarg = fn_def.args.vararg = None
-        for arg in fn_def.args.args + fn_def.args.kwonlyargs:
+        fn_def.args.kwarg = fn_def.args.vararg = None  # type:ignore[union-attr]
+        for arg in fn_def.args.args + fn_def.args.kwonlyargs:  # type:ignore[union-attr]
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_def.args.args[0].annotation
         if _is_drop_fn(fn):
             # Dropping potentially unsupported return type annotation for jit._drop
-            fn_def.returns = None
-            fn_def.type_comment = None
+            fn_def.returns = None  # type:ignore[union-attr]
+            fn_def.type_comment = None  # type:ignore[union-attr]
 
     # If MonkeyType is installed, get all the consolidated type traces
     # for the arguments from type_trace_db
@@ -541,7 +551,7 @@ def build_ignore_context_manager(ctx, stmt):
             return_type_ann = " -> " + outputs[0].ann
             return_statement_str += outputs[0].name
         if len(outputs) > 1:
-            return_type_ann = " -> Tuple"
+            return_type_ann = " -> tuple"
             return_type_ann += "[" + ", ".join([var.ann for var in outputs]) + "]"
             return_statement_str += ", ".join([var.name for var in outputs])
         return return_type_ann, return_statement_str
@@ -571,10 +581,18 @@ def build_ignore_context_manager(ctx, stmt):
     return_stmt = ast.parse(return_stmt).body[0]
     ignore_function.body.append(return_stmt)  # type: ignore[attr-defined]
 
+    ignore_func_str = f"""\
+# Backward compat: These used to be imported into the outer global scope so some
+# code may still expect them.
+from typing import List, Dict, Tuple
+
+@torch.jit.ignore
+{astunparse.unparse(ignore_function)}
+"""
+    g = copy.copy(globals())
+    exec(ignore_func_str, g)  # noqa: P204
     # registers the custom function in the global context
-    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
-    ignore_func_str += f'\nglobals()["{ignore_function_name}"] = {ignore_function_name}'
-    exec(ignore_func_str)  # noqa: P204
+    globals()[ignore_function_name] = g[ignore_function_name]
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
@@ -593,6 +611,15 @@ def build_ignore_context_manager(ctx, stmt):
 
 
 def get_default_args(fn):
+    """
+    Get a dictionary of default arguments for a function.
+
+    Args:
+        fn: Callable - The function to inspect for default arguments.
+    Returns:
+        (Dict[str, Any]): mapping argument names to their default values if
+        :attr:`fn` is not None, else empty dictionary.
+    """
     if fn is None:
         return {}
 
@@ -1108,10 +1135,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        elif sys.version_info >= (
-            3,
-            9,
-        ):  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -1130,8 +1154,6 @@ class ExprBuilder(Builder):
                     indices.append(tup)
                 return Subscript(base, indices)
             return Subscript(base, [build_expr(ctx, expr.slice)])
-        else:  # Ellipsis (can only happen in Python 2)
-            raise NotSupportedError(base.range(), "ellipsis is not supported")
 
     @staticmethod
     def build_List(ctx, expr):

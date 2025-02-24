@@ -28,7 +28,7 @@
 #endif
 
 namespace {
-  void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
+  void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet [[maybe_unused]], torch::jit::Stack* stack) {
     const auto& schema = op.schema();
     // NB: auto_functionalize handles the case where outputs do not have alias info.
     // This error message therefore suggests users to modify their custom op to the
@@ -125,7 +125,7 @@ namespace {
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet [[maybe_unused]], const at::Tensor & self, at::IntArrayRef size, std::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -169,14 +169,14 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   // We have to emulate this "slicing" with an as_strided call.
   auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
+    [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
       if (reapply_views) {
         return base.as_strided(size, c10::contiguous_strides(size));
       } else {
         return at::as_strided_copy(base, size, c10::contiguous_strides(size));
       }
     },
-    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
       return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     },
     /*has_symbolic_inputs=*/false
@@ -216,8 +216,8 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
     // in the local include TLS. As a result, when we redispatch here,
     // we will end up hitting PreDispatch stack first. So, we should
     // directly redispatch to the functionalize key manually.
-    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, c10::optional<at::MemoryFormat>)>();
-    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
+    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, std::optional<at::MemoryFormat>)>();
+    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, std::nullopt);
   }
 
   at::AutoDispatchSkipFunctionalize guard;
@@ -225,7 +225,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-static bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+static bool device_opted_into_functionalization(c10::Device self_device, std::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
     return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
@@ -235,12 +235,12 @@ static bool device_opted_into_functionalization(c10::Device self_device, c10::op
 // We should probably get rid of this though.
 static at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
-        c10::optional<at::ScalarType> dtype,
-        c10::optional<at::Layout> layout,
-        c10::optional<at::Device> device,
-        c10::optional<bool> pin_memory,
+        std::optional<at::ScalarType> dtype,
+        std::optional<at::Layout> layout,
+        std::optional<at::Device> device,
+        std::optional<bool> pin_memory,
         bool non_blocking,
-        c10::optional<at::MemoryFormat> memory_format) {
+        std::optional<at::MemoryFormat> memory_format) {
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
     // sync any pending updates
@@ -302,10 +302,10 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   bool has_symbolic_inputs = std::any_of(size.begin(), size.end(), [=](auto& s) { return s.is_symbolic(); });
 
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
+    [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
       return at::_unsafe_view_symint(base, size);
     },
-    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
       return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
     },
     /*has_symbolic_inputs=*/has_symbolic_inputs

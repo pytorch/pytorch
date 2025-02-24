@@ -24,11 +24,11 @@ PyObject* THPMemoryFormat_New(
   return self.release();
 }
 
-PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
+static PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
   return THPUtils_packString(self->name);
 }
 
-PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
   auto* self = (THPMemoryFormat*)_self;
   return THPUtils_packString(self->name);
 }
@@ -40,7 +40,8 @@ static PyMethodDef THPMemoryFormat_methods[] = {
 };
 
 PyTypeObject THPMemoryFormatType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.memory_format", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.memory_format", /* tp_name */
     sizeof(THPMemoryFormat), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

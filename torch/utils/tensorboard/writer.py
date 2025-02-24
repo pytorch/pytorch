@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 """Provide an API for writing protocol buffers to event files to be consumed by TensorBoard for visualization."""
 
 import os
 import time
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -722,7 +723,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", List["Figure"]],
+        figure: Union["Figure", list["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
         walltime: Optional[float] = None,
@@ -916,7 +917,7 @@ class SummaryWriter:
                     "warning: Embedding dir exists, did you set global_step for add_embedding()?"
                 )
             else:
-                raise FileExistsError(
+                raise NotADirectoryError(
                     f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:

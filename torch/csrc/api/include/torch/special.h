@@ -3,8 +3,7 @@
 #include <ATen/ATen.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace special {
+namespace torch::special {
 
 /// Computes the natural logarithm of the absolute value of the gamma function
 /// See https://pytorch.org/docs/main/special.html#torch.special.gammaln.
@@ -596,7 +595,7 @@ inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
 inline Tensor log_softmax(
     const Tensor& self,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::special_log_softmax(self, dim, dtype);
 }
 
@@ -611,7 +610,7 @@ inline Tensor log_softmax(
 inline Tensor softmax(
     const Tensor& self,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::special_softmax(self, dim, dtype);
 }
 
@@ -1401,5 +1400,4 @@ inline Tensor spherical_bessel_j0(const Tensor& x) {
 inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
 }
-} // namespace special
-} // namespace torch
+} // namespace torch::special

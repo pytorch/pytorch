@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import functools
 import math
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 
 from . import _dtypes_impl, _util
 from ._normalizations import ArrayLike, KeepDims, normalizer
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class LinAlgError(Exception):
@@ -38,7 +42,7 @@ def linalg_errors(func):
         try:
             return func(*args, **kwds)
         except torch._C._LinAlgError as e:
-            raise LinAlgError(*e.args)  # noqa: TRY200
+            raise LinAlgError(*e.args)  # noqa: B904
 
     return wrapped
 

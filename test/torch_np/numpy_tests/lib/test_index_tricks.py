@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-
 from unittest import expectedFailure as xfail, skipIf
 
 from pytest import raises as assert_raises  # , assert_raises_regex,
@@ -12,8 +11,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 skip = functools.partial(skipIf, True)
 
@@ -49,7 +49,7 @@ else:
     )
 
 
-@xpassIfTorchDynamo  # (reason="unravel_index not implemented")
+@xpassIfTorchDynamo_np  # (reason="unravel_index not implemented")
 @instantiate_parametrized_tests
 class TestRavelUnravelIndex(TestCase):
     def test_basic(self):
@@ -451,7 +451,7 @@ class TestIx_(TestCase):
 
 
 class TestC(TestCase):
-    @xpassIfTorchDynamo  # (reason="c_ not implemented")
+    @xpassIfTorchDynamo_np  # (reason="c_ not implemented")
     def test_c_(self):
         a = np.c_[np.array([[1, 2, 3]]), 0, 0, np.array([[4, 5, 6]])]
         assert_equal(a, [[1, 2, 3, 0, 0, 4, 5, 6]])

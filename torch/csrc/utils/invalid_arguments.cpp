@@ -27,7 +27,7 @@ struct Type {
 };
 
 struct SimpleType : public Type {
-  SimpleType(std::string& name) : name(name){};
+  SimpleType(std::string& name) : name(name) {}
 
   bool is_matching(PyObject* object) override {
     return py_typename(object) == name;
@@ -38,7 +38,7 @@ struct SimpleType : public Type {
 
 struct MultiType : public Type {
   MultiType(std::initializer_list<std::string> accepted_types)
-      : types(accepted_types){};
+      : types(accepted_types) {}
 
   bool is_matching(PyObject* object) override {
     auto it = std::find(types.begin(), types.end(), py_typename(object));
@@ -49,7 +49,7 @@ struct MultiType : public Type {
 };
 
 struct NullableType : public Type {
-  NullableType(std::unique_ptr<Type> type) : type(std::move(type)){};
+  NullableType(std::unique_ptr<Type> type) : type(std::move(type)) {}
 
   bool is_matching(PyObject* object) override {
     return object == Py_None || type->is_matching(object);
@@ -60,7 +60,7 @@ struct NullableType : public Type {
 
 struct TupleType : public Type {
   TupleType(std::vector<std::unique_ptr<Type>> types)
-      : types(std::move(types)){};
+      : types(std::move(types)) {}
 
   bool is_matching(PyObject* object) override {
     if (!PyTuple_Check(object))
@@ -79,7 +79,7 @@ struct TupleType : public Type {
 };
 
 struct SequenceType : public Type {
-  SequenceType(std::unique_ptr<Type> type) : type(std::move(type)){};
+  SequenceType(std::unique_ptr<Type> type) : type(std::move(type)) {}
 
   bool is_matching(PyObject* object) override {
     if (!PySequence_Check(object))
@@ -99,7 +99,7 @@ struct SequenceType : public Type {
 
 struct Argument {
   Argument(std::string name, std::unique_ptr<Type> type)
-      : name(std::move(name)), type(std::move(type)){};
+      : name(std::move(name)), type(std::move(type)) {}
 
   std::string name;
   std::unique_ptr<Type> type;
@@ -109,14 +109,14 @@ struct Option {
   Option(std::vector<Argument> arguments, bool is_variadic, bool has_out)
       : arguments(std::move(arguments)),
         is_variadic(is_variadic),
-        has_out(has_out){};
+        has_out(has_out) {}
   Option(bool is_variadic, bool has_out)
-      : arguments(), is_variadic(is_variadic), has_out(has_out){};
+      : is_variadic(is_variadic), has_out(has_out) {}
   Option(const Option&) = delete;
-  Option(Option&& other) noexcept
-      : arguments(std::move(other.arguments)),
-        is_variadic(other.is_variadic),
-        has_out(other.has_out){};
+  Option(Option&& other) noexcept = default;
+  Option& operator=(const Option&) = delete;
+  Option& operator=(Option&&) = delete;
+  ~Option() = default;
 
   std::vector<Argument> arguments;
   bool is_variadic;
@@ -380,9 +380,11 @@ std::string format_invalid_args(
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
+    Py_BEGIN_CRITICAL_SECTION(given_kwargs);
     while (PyDict_Next(given_kwargs, &pos, &key, &value)) {
       kwargs.emplace(THPUtils_unpackString(key), value);
     }
+    Py_END_CRITICAL_SECTION();
   }
 
   if (options.size() == 1) {

@@ -15,9 +15,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
-#include <unordered_set>
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 void removePrintOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
@@ -165,7 +164,6 @@ void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
-  auto constant_value_map = ConstantValueMap::getInstance();
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   py::dict env;
@@ -216,6 +214,13 @@ py::dict BlockToONNX(
       env[py::cast(input)] = py_n;
       values_in_env.add(py_n);
     }
+  }
+
+  // Determine if all inputs are static. This is used for each node to
+  // determine whether or not to propagate shapes.
+  if (!is_sub_block) {
+    bool static_input_shape = AllGraphInputsStatic(ctx.block->owningGraph());
+    ConstantValueMap::SetAllGraphInputsStatic(static_input_shape);
   }
 
   // Finally, visit all nodes in the graph
@@ -303,14 +308,25 @@ void NodeToONNX(
         if (old->hasDebugName() && !exist_in_env) {
           auto old_name = outputs[i]->debugName();
           auto new_name = old->debugNameBase();
-          auto debug_names = new_block->owningGraph()->debugNames();
-          auto exist_name = debug_names.find(new_name);
+          Value* found_value = nullptr;
+          bool exists = false;
+          // In this scope, we fetch debug_names as a const reference and then
+          // construct an iterator exist_name based on it. This iterator will
+          // be corrupted if the underlying map of debug_names changes. This
+          // will happen as a side-effect of setDebugName. For these reasons,
+          // we make an explicit scope for exist_name and make sure that
+          // setDebugName is never called with this scope.
+          {
+            const auto& debug_names = new_block->owningGraph()->debugNames();
+            auto exist_name = debug_names.find(new_name);
+            exists = exist_name != debug_names.end();
+            if (exists) {
+              found_value = exist_name->second;
+            }
+          }
           outputs[i]->setDebugName(new_name);
-          if (exist_name != debug_names.end()) {
-            // setDebugName changes name of existing value with same name.
-            // Set again to revert the changes, but update name for new value
-            // with suffix.
-            exist_name->second->setDebugName(new_name);
+          if (exists) {
+            found_value->setDebugName(new_name);
           }
           ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
         }
@@ -613,5 +629,4 @@ void NodeToONNX(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

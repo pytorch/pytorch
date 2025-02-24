@@ -2,7 +2,7 @@
 
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_methods_invocations import wrapper_set_seed
+from torch.testing._utils import wrapper_set_seed
 import torch.utils._pytree as pytree
 
 

@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Introduction
 //
@@ -28,7 +27,6 @@ namespace jit {
 // the subblock of a new placeholder node. The outputs of the new placeholder
 // node are used in place of the original nodes instead. The category of the
 // pattern is stored as attr::name.
-TORCH_API c10::optional<Node*> EncapsulatePatternIntoSubblock(Node* n);
+TORCH_API std::optional<Node*> EncapsulatePatternIntoSubblock(Node* n);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

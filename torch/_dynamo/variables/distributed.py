@@ -1,10 +1,32 @@
 # mypy: ignore-errors
+
+"""
+Distributed computing variable tracking classes for PyTorch Dynamo.
+
+This module implements variable tracking for distributed computing components:
+- Process Groups (for collective communication)
+- Device Meshes (for distributed tensor sharding)
+- Placement Types (for specifying distribution strategies)
+- Distributed Tensors and their operations
+- Backward hooks for distributed module operations
+
+These classes are responsible for tracking distributed operations during graph
+compilation while maintaining proper guards and handling distributed-specific
+behaviors. They ensure correct handling of distributed components like process
+groups, device meshes, and placement strategies while preserving proper semantics
+for distributed tensor operations in the compiled code.
+
+The implementation provides special handling for distributed package availability
+checks and proper tracking of distributed state and operations across processes.
+"""
+
 import functools
 import inspect
-from typing import Dict, List
+from typing import TYPE_CHECKING
 
 import torch
-from ...fx.experimental._backward_state import BackwardState
+from torch.fx.experimental._backward_state import BackwardState
+
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
@@ -13,7 +35,11 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class DistributedVariable(VariableTracker):
@@ -27,7 +53,7 @@ class DistributedVariable(VariableTracker):
     and hold the tracking value for the corresponding distributed object.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
@@ -45,7 +71,7 @@ class DistributedVariable(VariableTracker):
 def is_from_local(value):
     if not DistributedVariable.is_available():
         return False
-    from torch.distributed._tensor import DTensor
+    from torch.distributed.tensor import DTensor
 
     return inspect.isfunction(value) and value is DTensor.from_local
 
@@ -88,11 +114,15 @@ class WorldMetaClassVariable(DistributedVariable):
 
         return type(value) is _WorldMeta
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return ProcessGroupVariable(self.value.WORLD)
+        elif name == "NON_GROUP_MEMBER":
+            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return EnumVariable(self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
@@ -103,7 +133,7 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
 
@@ -111,7 +141,10 @@ class PlacementClassVariable(DistributedVariable):
         return self.value
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
@@ -135,14 +168,14 @@ class PlacementVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return isinstance(value, Placement)
 
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "dim":
             return ConstantVariable.create(self.value.dim)
         return super().var_getattr(tx, name)
@@ -151,8 +184,8 @@ class PlacementVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
 
@@ -206,7 +239,7 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
@@ -217,8 +250,8 @@ class DeviceMeshVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
@@ -227,7 +260,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ConstantVariable.create(self.value.get_group())
+            return ProcessGroupVariable(self.value.get_group())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
@@ -259,17 +292,19 @@ class ProcessGroupVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "rank":
             return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
             return variables.ConstantVariable.create(self.value.size())
+        if name == "_get_backend_name":
+            return variables.ConstantVariable.create(self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
@@ -354,7 +389,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
         **options,
-    ):
+    ) -> None:
         super().__init__(**options)
         self.proxy = proxy
         self.module = module
@@ -368,14 +403,14 @@ class BackwardHookVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("setup_input_hook", "setup_output_hook"):
             return self._setup_hook(tx, name, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def _setup_hook(self, tx, hook_method_name, args):
+    def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
         from .builder import wrap_fx_proxy
 
         return wrap_fx_proxy(

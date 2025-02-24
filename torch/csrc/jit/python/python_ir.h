@@ -42,7 +42,7 @@ struct ConcretePythonOp : public PythonOp {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  c10::optional<THPObjectPtr> autogradFunction() const override;
+  std::optional<THPObjectPtr> autogradFunction() const override;
   void writeScalars(std::ostream& out) const override;
   void lint_python() const override;
 };

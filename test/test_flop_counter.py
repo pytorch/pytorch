@@ -1,15 +1,28 @@
 # Owner(s): ["module: unknown"]
+# ruff: noqa: F841
+import functools
+import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-import torch.utils.flop_counter
 import torch.nn.functional as F
-import unittest
-import functools
+import torch.utils.flop_counter
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
+)
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+    skipIfRocm,
+)
 
 try:
     from torchvision import models as torchvision_models
+
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -17,16 +30,22 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
+
 def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
+
 
 def get_total_flops(mode):
     return str(sum(v for _, v in mode.flop_counts["Global"].items()))
 
+
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
 
-@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now")
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
@@ -109,6 +128,7 @@ class TestFlopCounter(TestCase):
     def test_torchscript(self):
         def foo(x):
             return torch.mm(x, x)
+
         with FlopCounterMode() as mode:
             foo(T(5, 5))
         unscripted_flops = get_total_flops(mode)
@@ -125,7 +145,9 @@ class TestFlopCounter(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
-                return torch.mm(grad_output, grad_output) + torch.mm(grad_output, grad_output)
+                return torch.mm(grad_output, grad_output) + torch.mm(
+                    grad_output, grad_output
+                )
 
         a = T(5, 5, requires_grad=True)
         with FlopCounterMode() as mode:
@@ -160,11 +182,13 @@ class TestFlopCounter(TestCase):
                     return grad_inp, grad_weight, None
                 else:
                     grad_inp = F.conv1d(grad_out, weight)
-                    grad_weight = F.conv1d(grad_out.transpose(1, 0), inp.transpose(1, 0))
+                    grad_weight = F.conv1d(
+                        grad_out.transpose(1, 0), inp.transpose(1, 0)
+                    )
                     return grad_inp, grad_weight.transpose(1, 0), None
 
-
         from torch.func import grad
+
         x = torch.randn(2, 3, 16, dtype=torch.float64)
         weight = torch.randn(3, 4, 4, dtype=torch.float64)
 
@@ -182,13 +206,16 @@ class TestFlopCounter(TestCase):
 
         self.assertEqual(boring_grads, fun_grads)
 
-
     def test_convs(self):
         def assert_equivalence(f, expected_forward=None):
             with FlopCounterMode() as mode:
                 f()
-            conv_forward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution]
-            conv_backward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution_backward]
+            conv_forward_flops = mode.get_flop_counts()["Global"][
+                torch.ops.aten.convolution
+            ]
+            conv_backward_flops = mode.get_flop_counts()["Global"][
+                torch.ops.aten.convolution_backward
+            ]
 
             self.assertEqual(conv_forward_flops * 2, conv_backward_flops)
             if expected_forward is not None:
@@ -213,8 +240,12 @@ class TestFlopCounter(TestCase):
             x = torch.rand(1, in_channels, 4, 4, requires_grad=True)
             weight = torch.randn(out_channels, in_channels, 2, 2, requires_grad=True)
             assert_equivalence(lambda: F.conv2d(x, weight).sum().backward())
-            transposed_weight = torch.randn(in_channels, out_channels, 2, 2, requires_grad=True)
-            assert_equivalence(lambda: F.conv_transpose2d(x, transposed_weight).sum().backward())
+            transposed_weight = torch.randn(
+                in_channels, out_channels, 2, 2, requires_grad=True
+            )
+            assert_equivalence(
+                lambda: F.conv_transpose2d(x, transposed_weight).sum().backward()
+            )
 
     @skipIfNoTorchVision
     def test_module(self):
@@ -224,11 +255,14 @@ class TestFlopCounter(TestCase):
             resnet18(a).sum().backward()
 
         self.assertExpectedInline(get_total_flops(mode), """10884440064""")
-        layer1_conv_flops = mode.flop_counts['ResNet.layer1'][torch.ops.aten.convolution]
-        layer1_conv_back_flops = mode.flop_counts['ResNet.layer1'][torch.ops.aten.convolution_backward]
+        layer1_conv_flops = mode.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        layer1_conv_back_flops = mode.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution_backward
+        ]
         self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
         self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
-
 
     def test_conv_transpose_loop(self):
         x = torch.rand(1, 4, 30, 2)
@@ -241,7 +275,9 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
 
     def test_custom(self):
-        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5})
+        mode = FlopCounterMode(
+            custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5}
+        )
         with mode:
             a = T(4, 5)
             a + a
@@ -250,6 +286,7 @@ class TestFlopCounter(TestCase):
 
         def count(*args, out_val):
             return out_val.numel()
+
         count._get_raw = True
 
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
@@ -264,8 +301,12 @@ class TestFlopCounter(TestCase):
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-                     "Does not support all SDPA backends (pre-SM80 hardware on CUDA)")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION
+        or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8
@@ -277,73 +318,182 @@ class TestFlopCounter(TestCase):
 
         torch.manual_seed(0)
 
-        def get_flops(batch_size, n_heads, seq_len_q, seq_len_k, head_dim, head_dim_v, dtype, backend, with_backward=False):
-            query = torch.randn(batch_size, n_heads, seq_len_q, head_dim, device='cuda', dtype=dtype, requires_grad=True)
-            key = torch.randn(batch_size, n_heads, seq_len_k, head_dim, device='cuda', dtype=dtype, requires_grad=True)
-            value = torch.randn(batch_size, n_heads, seq_len_k, head_dim_v, device='cuda', dtype=dtype, requires_grad=True)
+        def get_flops(
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_k,
+            head_dim,
+            head_dim_v,
+            dtype,
+            backend,
+            with_backward=False,
+        ):
+            query = torch.randn(
+                batch_size,
+                n_heads,
+                seq_len_q,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=True,
+            )
+            key = torch.randn(
+                batch_size,
+                n_heads,
+                seq_len_k,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=True,
+            )
+            value = torch.randn(
+                batch_size,
+                n_heads,
+                seq_len_k,
+                head_dim_v,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=True,
+            )
 
             if backend == "math":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=True,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
+                )
             elif backend == "flash":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
+                )
             elif backend == "mem_efficient":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=True,
+                    enable_cudnn=False,
+                )
+            elif backend == "cudnn":
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=True,
+                )
 
             mode = FlopCounterMode()
             with backend, mode:
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=0, is_causal=True)
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=0, is_causal=True
+                )
                 if with_backward:
                     out.sum().backward()
             return int(get_total_flops(mode))
 
         # Sets seq_len_q == seq_len_k and dim_q == dim_v
-        run_uniform_flops = functools.partial(get_flops, batch_size, n_heads, seq_len_q, seq_len_q, head_dim, head_dim, dtype)
+        run_uniform_flops = functools.partial(
+            get_flops,
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_q,
+            head_dim,
+            head_dim,
+            dtype,
+        )
 
-        flops = [run_uniform_flops(backend, with_backward=False) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient = flops
+        flops = [
+            run_uniform_flops(backend, with_backward=False)
+            for backend in ["math", "flash", "mem_efficient", "cudnn"]
+        ]
+        flops_fw_math, flops_fw_flash, flops_fw_efficient, flops_fw_cudnn = flops
         self.assertEqual(flops_fw_math, flops_fw_flash)
         self.assertEqual(flops_fw_math, flops_fw_efficient)
+        self.assertEqual(flops_fw_math, flops_fw_cudnn)
 
         self.assertExpectedInline(str(flops_fw_math), """134217728""")
 
-        flops = [run_uniform_flops(backend, with_backward=True) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient = flops
+        flops = [
+            run_uniform_flops(backend, with_backward=True)
+            for backend in ["math", "flash", "mem_efficient", "cudnn"]
+        ]
+        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn = flops
         self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
+        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_cudnn)
 
-
-        run_nonuniform_flops = functools.partial(get_flops, batch_size, n_heads, seq_len_q, seq_len_k, head_dim, head_dim_v, dtype)
+        run_nonuniform_flops = functools.partial(
+            get_flops,
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_k,
+            head_dim,
+            head_dim_v,
+            dtype,
+        )
         # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
         non_uniform_backends = ["math", "mem_efficient"]
-        flops = [run_nonuniform_flops(backend, with_backward=False) for backend in non_uniform_backends]
+        flops = [
+            run_nonuniform_flops(backend, with_backward=False)
+            for backend in non_uniform_backends
+        ]
         flops_fw_math, flops_fw_efficient = flops
         self.assertEqual(flops_fw_math, flops_fw_efficient)
 
         self.assertExpectedInline(str(flops_fw_math), """268435456""")
 
-        flops = [run_nonuniform_flops(backend, with_backward=True) for backend in non_uniform_backends]
+        flops = [
+            run_nonuniform_flops(backend, with_backward=True)
+            for backend in non_uniform_backends
+        ]
         flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
+    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-                     "Does not support all SDPA backends (pre-SM80 hardware on CUDA)")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION
+        or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
     def test_sdpa_nested_tensor(self):
-
         def get_flops(q, k, v, backend, with_backward=False):
             mode = FlopCounterMode()
 
             if backend == "math":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=True,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
+                )
             elif backend == "flash":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
+                )
             elif backend == "mem_efficient":
-                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True)
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=True,
+                    enable_cudnn=False,
+                )
 
             with backend, mode:
-                out = F.scaled_dot_product_attention(q, k, v, dropout_p=0, is_causal=True)
+                out = F.scaled_dot_product_attention(
+                    q, k, v, dropout_p=0, is_causal=True
+                )
                 if with_backward:
                     if out.is_nested:
                         out.values().sum().backward()
@@ -361,25 +511,47 @@ class TestFlopCounter(TestCase):
             head_dim_v,
             dtype,
         ):
-            q_lengths = torch.tensor([
-                max_seq_len_q // 4,
-                max_seq_len_q // 4 * 2,
-                max_seq_len_q // 4 * 3,
-                max_seq_len_q // 4 * 4
-            ])
-            k_lengths = torch.tensor([
-                max_seq_len_k // 4,
-                max_seq_len_k // 4 * 2,
-                max_seq_len_k // 4 * 3,
-                max_seq_len_k // 4 * 4
-            ])
+            q_lengths = torch.tensor(
+                [
+                    max_seq_len_q // 4,
+                    max_seq_len_q // 4 * 2,
+                    max_seq_len_q // 4 * 3,
+                    max_seq_len_q // 4 * 4,
+                ]
+            )
+            k_lengths = torch.tensor(
+                [
+                    max_seq_len_k // 4,
+                    max_seq_len_k // 4 * 2,
+                    max_seq_len_k // 4 * 3,
+                    max_seq_len_k // 4 * 4,
+                ]
+            )
             q_offsets, k_offsets = (
                 torch.cat((torch.tensor([0]), torch.cumsum(lengths, dim=0))).cuda()
                 for lengths in (q_lengths, k_lengths)
             )
-            q_values = torch.randn(q_offsets[-1], head_dim * n_heads, dtype=dtype, requires_grad=True, device="cuda")
-            k_values = torch.randn(k_offsets[-1], head_dim * n_heads, dtype=dtype, requires_grad=True, device="cuda")
-            v_values = torch.randn(k_offsets[-1], head_dim_v * n_heads, dtype=dtype, requires_grad=True, device="cuda")
+            q_values = torch.randn(
+                q_offsets[-1],
+                head_dim * n_heads,
+                dtype=dtype,
+                requires_grad=True,
+                device="cuda",
+            )
+            k_values = torch.randn(
+                k_offsets[-1],
+                head_dim * n_heads,
+                dtype=dtype,
+                requires_grad=True,
+                device="cuda",
+            )
+            v_values = torch.randn(
+                k_offsets[-1],
+                head_dim_v * n_heads,
+                dtype=dtype,
+                requires_grad=True,
+                device="cuda",
+            )
 
             q = torch.nested.nested_tensor_from_jagged(q_values, q_offsets)
             k = torch.nested.nested_tensor_from_jagged(k_values, k_offsets)
@@ -397,13 +569,16 @@ class TestFlopCounter(TestCase):
                     y.unsqueeze(0).transpose(1, 2).detach().requires_grad_(True)
                     for y in x.transpose(1, 2).unbind(0)
                 )
+
             q_tensors = split_tensor(q)
             k_tensors = split_tensor(k)
             v_tensors = split_tensor(v)
 
             flops = 0
             for q_i, k_i, v_i in zip(q_tensors, k_tensors, v_tensors):
-                flops += get_flops(q_i, k_i, v_i, backend=backend, with_backward=with_backward)
+                flops += get_flops(
+                    q_i, k_i, v_i, backend=backend, with_backward=with_backward
+                )
 
             return flops
 
@@ -429,30 +604,125 @@ class TestFlopCounter(TestCase):
         }
 
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
-            get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
+            get_dense_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="flash",
+                with_backward=False,
+            ),
+            get_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="flash",
+                with_backward=False,
+            ),
         )
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
-            get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
+            get_dense_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="mem_efficient",
+                with_backward=False,
+            ),
+            get_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="mem_efficient",
+                with_backward=False,
+            ),
         )
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
-            get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
+            get_dense_flops(
+                *get_nested_inputs(**differing_config),
+                backend="mem_efficient",
+                with_backward=False,
+            ),
+            get_flops(
+                *get_nested_inputs(**differing_config),
+                backend="mem_efficient",
+                with_backward=False,
+            ),
         )
 
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
-            get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
+            get_dense_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="flash",
+                with_backward=True,
+            ),
+            get_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="flash",
+                with_backward=True,
+            ),
         )
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
-            get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
+            get_dense_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="mem_efficient",
+                with_backward=True,
+            ),
+            get_flops(
+                *get_nested_inputs(**uniform_config),
+                backend="mem_efficient",
+                with_backward=True,
+            ),
         )
         self.assertEqual(
-            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
-            get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
+            get_dense_flops(
+                *get_nested_inputs(**differing_config),
+                backend="mem_efficient",
+                with_backward=True,
+            ),
+            get_flops(
+                *get_nested_inputs(**differing_config),
+                backend="mem_efficient",
+                with_backward=True,
+            ),
         )
+
+    @skipIfRocm  # Nested tensor
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
+    def test_nested_attention_fake_tensors(self):
+        x = torch.randn(123, 4, 16, device="cuda", dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 30, 60, 90, 123], device="cuda")
+        max_seqlen = 40
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_offsets = fake_mode.from_tensor(offsets)
+
+            with FlopCounterMode() as fake_flop_counter_mode:
+                torch.ops.aten._flash_attention_forward(
+                    fake_x,
+                    fake_x,
+                    fake_x,
+                    fake_offsets,
+                    fake_offsets,
+                    max_seqlen,
+                    max_seqlen,
+                    0.0,
+                    False,
+                    False,
+                )
+
+        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device="cuda").transpose(1, 2)
+
+        with FlopCounterMode() as real_flop_counter_mode:
+            torch.ops.aten._flash_attention_forward(
+                dense_x,
+                dense_x,
+                dense_x,
+                None,
+                None,
+                max_seqlen,
+                max_seqlen,
+                0.0,
+                False,
+                False,
+            )
+
+        self.assertEqual(int(get_total_flops(fake_flop_counter_mode)), int(get_total_flops(real_flop_counter_mode)))
+
 
     def test_addmm_out(self):
         def f(x):
@@ -479,11 +749,11 @@ class TestFlopCounter(TestCase):
     def test_pytrees(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
-                x = x['a'].relu_()
-                return {'a': torch.mm(x, x)}
+                x = x["a"].relu_()
+                return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = Foo()
@@ -493,8 +763,12 @@ class TestFlopCounter(TestCase):
 
         mod = Mod()
         with FlopCounterMode() as mode:
-            mod({'a': torch.randn(10, 10, requires_grad=True).clone()})['a'].sum().backward()
-        self.assertExpectedInline((mode.flop_counts['Mod'][torch.ops.aten.mm]), """12000""")
+            mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
+                "a"
+            ].sum().backward()
+        self.assertExpectedInline(
+            (mode.flop_counts["Mod"][torch.ops.aten.mm]), """12000"""
+        )
 
         class Mod2(torch.nn.Module):
             def forward(self, x):
@@ -503,13 +777,82 @@ class TestFlopCounter(TestCase):
         mod = Mod2()
         with FlopCounterMode() as mode:
             mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
-        self.assertExpectedInline((mode.flop_counts['Mod2'][torch.ops.aten.mm]), """6000""")
+        self.assertExpectedInline(
+            (mode.flop_counts["Mod2"][torch.ops.aten.mm]), """6000"""
+        )
 
     def test_warning(self):
         mod = torch.nn.Linear(2, 2)
         with self.assertWarnsRegex(UserWarning, "not needed"):
             FlopCounterMode(mod)
 
+    def test_custom_op(self):
+        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
 
-if __name__ == '__main__':
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        called = 0
+
+        with self.assertRaisesRegex(ValueError, "expected each target to be OpOverloadPacket"):
+            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
+
+        @register_flop_formula(torch.ops.mylib.foo)
+        def formula(*args, **kwargs):
+            nonlocal called
+            called += 1
+            return 9001
+
+        x = torch.randn(3)
+        with FlopCounterMode(display=False) as mode:
+            y = foo(x)
+
+        self.assertEqual(called, 1)
+        self.assertExpectedInline(get_total_flops(mode), """9001""")
+
+    @skipIfNoTorchVision
+    def test_inference_mode(self):
+        def get_flops(model):
+            with FlopCounterMode(model) as mode:
+                a = T(1, 3, 224, 224)
+                model(a).sum()
+            return mode
+
+        resnet18 = torchvision_models.resnet18()
+
+        mode_standard = get_flops(resnet18)
+
+        with torch.inference_mode():
+            mode_inference = get_flops(resnet18)
+
+        self.assertEqual(get_total_flops(mode_standard), get_total_flops(mode_inference))
+
+        layer1_conv_flops_standard = mode_standard.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        layer1_conv_flops_inference = mode_inference.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm(self):
+        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        with FlopCounterMode() as mode:
+            torch._scaled_mm(
+                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
+                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
+                scale_a=torch.ones((), device="cuda"),
+                scale_b=torch.ones((), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        self.assertExpectedInline(get_total_flops(mode), """860160""")
+
+if __name__ == "__main__":
     run_tests()

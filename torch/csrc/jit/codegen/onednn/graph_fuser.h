@@ -3,10 +3,7 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
@@ -39,7 +36,7 @@ class GraphRewriter {
   std::pair<graph_node_list::iterator, bool> scanNode(
       Node* consumer,
       graph_node_list::iterator workblock_begin);
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer);
+  std::optional<Node*> tryMerge(Node* consumer, Node* producer);
 };
 
 // This pass creates the subgraphs for oneDNN Graph Fusion Nodes.
@@ -47,7 +44,4 @@ class GraphRewriter {
 // torch/csrc/jit/passes/create_autodiff_subgraphs.cpp
 void CreateLlgaSubgraphs(std::shared_ptr<Graph>& graph);
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

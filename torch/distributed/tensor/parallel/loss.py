@@ -1,21 +1,24 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Optional
 
 import torch
 import torch._prims_common as utils
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
-from torch.distributed._tensor.ops.math_ops import (
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,
 )
-from torch.distributed._tensor.placement_types import Placement, TensorMeta
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.placement_types import Placement
+
 
 aten = torch.ops.aten
 
@@ -74,7 +77,7 @@ def loss_parallel():
 
 # Currently only needs to support one dimensional DeviceMesh; in general return
 # the mesh_dim with placements[mesh_dim].is_shard(dim)
-def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> int:
+def _find_all_reduce_mesh_dim(placements: tuple[Placement, ...], dim: int) -> int:
     if not len(placements) == 1:
         raise ValueError(
             "Currently loss_parallel() only supports input on one-dimensional DeviceMesh."
@@ -87,7 +90,7 @@ def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> in
 
 
 def _cast_to_dtensor(
-    tensor, placements: Tuple[Placement, ...], mesh: DeviceMesh
+    tensor, placements: tuple[Placement, ...], mesh: DeviceMesh
 ) -> DTensor:
     if isinstance(tensor, DTensor):
         if tensor.placements == placements:
@@ -104,8 +107,8 @@ def _cast_to_dtensor(
 
 def _propagate_tensor_meta(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
@@ -150,8 +153,8 @@ def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
 
 def _log_softmax_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
     dim = cast(int, args[1])
@@ -164,14 +167,16 @@ def _log_softmax_handler(
 
     res = _log_softmax(x._local_tensor, dim, half_to_float, spec.mesh, mesh_dim)
 
-    return DTensor(
-        res,
+    res_spec = DTensorSpec(
         spec.mesh,
         spec.placements,
-        shape=output_tensor_meta.shape,
-        dtype=output_tensor_meta.dtype,
+        tensor_meta=output_tensor_meta,
+    )
+
+    return DTensor(
+        res,
+        res_spec,
         requires_grad=res.requires_grad,
-        stride=output_tensor_meta.stride,
     )
 
 
@@ -179,8 +184,8 @@ def _log_softmax_handler(
 # _log_softmax_backward_handler does not actually do any computation.
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
     input_dtype = cast(torch.dtype, args[3])
@@ -196,10 +201,11 @@ def _nll_loss_forward(
     local_weight: Optional[Tensor],
     reduction: int,
     ignore_index: int,
-    channel_dim_size: int,
+    input_shape: torch.Size,
+    channel_dim: int,
     mesh: DeviceMesh,
     mesh_dim: int,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     n_dims = x.dim()
     channel_dim = 1
     if n_dims < 2:
@@ -226,7 +232,7 @@ def _nll_loss_forward(
 
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-    partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target_partial_ = partial_placement._partition_value(
         safe_target_, mesh, mesh_dim
     )
@@ -263,8 +269,8 @@ def _nll_loss_forward(
 
 def _nll_loss_forward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
     target = args[1]
@@ -273,7 +279,6 @@ def _nll_loss_forward_handler(
     ignore_index = cast(int, args[4])
 
     channel_dim = 1 if x.dim() >= 2 else 0
-    channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
@@ -313,20 +318,18 @@ def _nll_loss_forward_handler(
         local_weight,
         reduction,
         ignore_index,
-        channel_dim_size,
+        x.shape,
+        channel_dim,
         spec.mesh,
         mesh_dim,
     )
+    out_spec = DTensorSpec(spec.mesh, output_placements, tensor_meta=output_tensor_meta)
 
     return (
         DTensor(
             result,
-            spec.mesh,
-            output_placements,
-            shape=output_tensor_meta.shape,
-            dtype=output_tensor_meta.dtype,
+            out_spec,
             requires_grad=result.requires_grad,
-            stride=output_tensor_meta.stride,
         ),
         total_weight,
     )
@@ -347,7 +350,8 @@ def _nll_loss_and_log_softmax_backward(
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,
-    channel_dim_size: int,
+    input_shape: torch.Size,
+    channel_dim: int,
     mesh: DeviceMesh,
     mesh_dim: int,
 ) -> Tensor:
@@ -361,12 +365,12 @@ def _nll_loss_and_log_softmax_backward(
 
     # The following code block is a distributed version of
     # grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
-    partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target = safe_target.squeeze(channel_dim).flatten()
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked
     assert partial_placement.mask_buffer.data is not None
-    grad_update = partial_placement.mask_buffer.data.float() - 1.0
+    grad_update = partial_placement.mask_buffer.data.to(grad_input.dtype) - 1.0
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device
     )
@@ -409,8 +413,8 @@ def _nll_loss_and_log_softmax_backward(
 
 def _nll_loss_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
     x = cast(DTensor, args[1])
@@ -421,7 +425,6 @@ def _nll_loss_backward_handler(
     total_weight = cast(Tensor, args[6])
 
     channel_dim = 1 if x.dim() >= 2 else 0
-    channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
@@ -448,20 +451,22 @@ def _nll_loss_backward_handler(
         reduction,
         ignore_index,
         total_weight,
-        channel_dim_size,
+        x.shape,
+        channel_dim,
         spec.mesh,
         mesh_dim,
+    )
+    # the output sharding is the same as input sharding: Shard(channel_dim) on mesh_dim
+    out_spec = DTensorSpec(
+        spec.mesh,
+        spec.placements,
+        tensor_meta=output_tensor_meta,
     )
 
     return DTensor(
         result,
-        spec.mesh,
-        # the output sharding is the same as input sharding: Shard(channel_dim) on mesh_dim
-        spec.placements,
-        shape=output_tensor_meta.shape,
-        dtype=output_tensor_meta.dtype,
+        out_spec,
         requires_grad=result.requires_grad,
-        stride=output_tensor_meta.stride,
     )
 
 

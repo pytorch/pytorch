@@ -10,9 +10,10 @@ import itertools
 import unittest
 import unittest.mock
 import warnings
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import numpy as np
+
 import onnx
 import onnx.numpy_helper
 import pytorch_test_common
@@ -20,14 +21,18 @@ import pytorch_test_common
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import OperatorExportTypes, symbolic_helper, utils
+from torch.onnx import symbolic_helper, utils
 from torch.onnx._internal import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
-    input: Union[torch.Tensor, Tuple[torch.Tensor]],
+    input: Union[torch.Tensor, tuple[torch.Tensor]],
     custom_ops: Optional[
         Iterable[Union[contextlib.AbstractContextManager, contextlib.ContextDecorator]]
     ] = None,
@@ -82,7 +87,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         x = torch.ones(3, 3)
         f = io.BytesIO()
-        torch.onnx.export(AddmmModel(), x, f, verbose=False)
+        torch.onnx.export(AddmmModel(), x, f)
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
@@ -96,7 +101,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return x.contiguous().transpose(0, 1).sum()
 
         class TraceMe(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo()
 
@@ -110,21 +115,23 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x[0].clone().detach().cpu() + x
+            return x[0].detach().clone().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
 
-        torch.onnx.export_to_pretty_string(traced, (torch.rand([2]),))
+        f = io.BytesIO()
+        torch.onnx.export(traced, (torch.rand([2]),), f)
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                y = x - x
+                y = x - x  # noqa: F841
                 return x + x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     @common_utils.suppress_warnings
     def test_onnx_export_func_with_warnings(self):
@@ -137,9 +144,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return func_with_warning(x)
 
         # no exception
-        torch.onnx.export_to_pretty_string(
-            WarningTest(), torch.randn(42), verbose=False
-        )
+        f = io.BytesIO()
+        torch.onnx.export(WarningTest(), torch.randn(42), f)
 
     def test_onnx_export_script_python_fail(self):
         class PythonModule(torch.jit.ScriptModule):
@@ -148,7 +154,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = PythonModule()
 
@@ -160,7 +166,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         mte = ModuleToExport()
         f = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "Couldn't export Python"):
-            torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+            torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.nn.Module):
@@ -168,7 +174,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.jit.trace(ModuleToInline(), torch.zeros(1, 2, 3))
 
@@ -178,7 +184,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return y + y
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -187,7 +194,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
 
@@ -197,7 +204,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return y + y
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -211,7 +219,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     @common_utils.suppress_warnings
     def test_onnx_export_script_truediv(self):
@@ -223,9 +232,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         mte = ModuleToExport()
 
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3, dtype=torch.float),), verbose=False
-        )
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3, dtype=torch.float),), f)
 
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -235,7 +243,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return bs - 1
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.rand(3, 4),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.rand(3, 4),), f)
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -246,11 +255,12 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.Parameter(torch.ones(3, 3))
                 self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
@@ -260,7 +270,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.mm(x, self.m)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
                 self.param = torch.nn.Parameter(torch.ones(3, 4))
@@ -276,7 +286,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4)
         )
         self.assertEqual(result, reference)
-        torch.onnx.export_to_pretty_string(mte, (torch.ones(2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.ones(2, 3),), f)
 
     def test_onnx_export_speculate(self):
         class Foo(torch.jit.ScriptModule):
@@ -311,8 +322,10 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         f1 = Foo(transpose)
         f2 = Foo(linear)
 
-        torch.onnx.export_to_pretty_string(f1, (torch.ones(1, 10, dtype=torch.float),))
-        torch.onnx.export_to_pretty_string(f2, (torch.ones(1, 10, dtype=torch.float),))
+        f = io.BytesIO()
+        torch.onnx.export(f1, (torch.ones(1, 10, dtype=torch.float),), f)
+        f = io.BytesIO()
+        torch.onnx.export(f2, (torch.ones(1, 10, dtype=torch.float),), f)
 
     def test_onnx_export_shape_reshape(self):
         class Foo(torch.nn.Module):
@@ -325,21 +338,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return reshaped
 
         foo = torch.jit.trace(Foo(), torch.zeros(1, 2, 3))
-        torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)))
-
-    def test_listconstruct_erasure(self):
-        class FooMod(torch.nn.Module):
-            def forward(self, x):
-                mask = x < 0.0
-                return x[mask]
-
-        torch.onnx.export_to_pretty_string(
-            FooMod(),
-            (torch.rand(3, 4),),
-            add_node_names=False,
-            do_constant_folding=False,
-            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        )
+        f = io.BytesIO()
+        torch.onnx.export(foo, (torch.zeros(1, 2, 3)), f)
 
     def test_export_dynamic_slice(self):
         class DynamicSliceExportMod(torch.jit.ScriptModule):
@@ -350,31 +350,30 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                     retval += torch.sum(x[0:i], dim=0)
                 return retval
 
-        mod = DynamicSliceExportMod()
-
         input = torch.rand(3, 4, 5)
 
-        torch.onnx.export_to_pretty_string(
-            DynamicSliceExportMod(), (input,), opset_version=10
-        )
+        f = io.BytesIO()
+        torch.onnx.export(DynamicSliceExportMod(), (input,), f, opset_version=10)
 
     def test_export_dict(self):
         class DictModule(torch.nn.Module):
-            def forward(self, x_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+            def forward(self, x_in: torch.Tensor) -> dict[str, torch.Tensor]:
                 return {"test_key_out": x_in}
 
         x_in = torch.tensor(1)
         mod = DictModule()
         mod.train(False)
 
-        torch.onnx.export_to_pretty_string(mod, (x_in,))
+        f = io.BytesIO()
+        torch.onnx.export(mod, (x_in,), f)
 
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
-            torch.onnx.export_to_pretty_string(torch.jit.script(mod), (x_in,))
+            f = io.BytesIO()
+            torch.onnx.export(torch.jit.script(mod), (x_in,), f)
 
     def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Will be expanded during ONNX export
                 self.ln = torch.nn.LayerNorm([1])
@@ -394,7 +393,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         for node in graph.nodes():
             self.assertTrue(node.sourceRange())
 
-    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_due_exception(self):
         def bad_clamp(g, self, min, max):
             return symbolic_helper._onnx_unsupported("Bad boy!")
@@ -411,7 +409,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
 
-    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_explicit_request(self):
         class MyClip(torch.nn.Module):
             def forward(self, x):
@@ -473,7 +470,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             def __init__(self, bbox_xform_clip: float) -> None:
                 self.bbox_xform_clip = bbox_xform_clip
 
-            def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
+            def decode(self, rel_codes: Tensor, boxes: list[Tensor]) -> Tensor:
                 boxes = torch.cat(boxes, dim=0)
                 pred_ctr_x = (
                     torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip)
@@ -486,23 +483,23 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 "box_coder": BoxCoder,
             }
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.box_coder = BoxCoder(1.4)
 
-            def forward(self, box_regression: Tensor, proposals: List[Tensor]):
+            def forward(self, box_regression: Tensor, proposals: list[Tensor]):
                 return self.box_coder.decode(box_regression, proposals)
 
         model = torch.jit.script(MyModule())
         box_regression = torch.randn([4, 4])
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
 
-        with self.assertRaises(RuntimeError) as cm:
-            onnx_model = io.BytesIO()
+        with self.assertRaises(RuntimeError):
+            f = io.BytesIO()
             torch.onnx.export(
                 model,
                 (box_regression, proposal),
-                onnx_model,
+                f,
             )
 
     def test_initializer_sequence(self):
@@ -601,33 +598,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             + ")."
         )
 
-    def test_onnx_checker_invalid_graph(self):
-        class CustomAddModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.add(x, y)
-
-        def symbolic_custom_invalid_add(g, input, other, alpha=None):
-            return g.op("Add", input, other, invalid_attr_i=1)
-
-        torch.onnx.register_custom_op_symbolic(
-            "::add", symbolic_custom_invalid_add, opset_version=9
-        )
-
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
-
-        test_model = CustomAddModule()
-        f = io.BytesIO()
-
-        try:
-            with self.assertRaises(torch.onnx.errors.CheckerError):
-                torch.onnx.export(test_model, (x, y), f, opset_version=9)
-        finally:
-            torch.onnx.unregister_custom_op_symbolic("::add", 9)
-
-        self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
-        loaded_model = onnx.load_from_string(f.getvalue())
-
     def test_shape_value_map(self):
         class RSoftMax(torch.nn.Module):
             def __init__(self, radix, cardinality):
@@ -665,7 +635,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(1, 2, 3, requires_grad=True)
         f = io.BytesIO()
-        torch.onnx.export(Model(), x, f)
+        torch.onnx.export(Model(), (x,), f)
         model = onnx.load(f)
         model.ir_version = 0
 
@@ -675,7 +645,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertRaises(RuntimeError, check_proto)
 
     def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+        def symbolic_pythonop(g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
 
         torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
@@ -772,7 +742,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         f = io.BytesIO()
         with warnings.catch_warnings(record=True):
-            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
+            torch.onnx.export(MyDrop(), (eg,), f)
 
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -819,7 +789,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertEqual(grad, grad_traced)
 
         f = io.BytesIO()
-        torch.onnx.export(m, (x, seq_lens), f, verbose=False)
+        torch.onnx.export(m, (x, seq_lens), f)
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @common_utils.suppress_warnings
@@ -879,7 +849,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             self.assertEqual(grad, grad_traced)
 
             f = io.BytesIO()
-            torch.onnx.export(m, (x, seq_lens), f, verbose=False)
+            torch.onnx.export(m, (x, seq_lens), f)
 
     def test_pushpackingpastrnn_in_peephole_create_own_gather_input(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -889,7 +859,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         mask_start_point = 0
 
         class LSTMTraceWrapper(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.rnn = torch.nn.LSTM(
@@ -959,62 +929,9 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             def forward(self, x, w):
                 return torch.matmul(x, w).detach()
 
-        torch.onnx.export_to_pretty_string(Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
+        f = io.BytesIO()
+        torch.onnx.export(Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f)
 
-    @common_utils.skipIfNoCaffe2
-    def test_caffe2_aten_fallback_must_fallback(self):
-        class ModelWithAtenNotONNXOp(torch.nn.Module):
-            def forward(self, x, y):
-                abcd = x + y
-                defg = torch.linalg.qr(abcd)
-                return defg
-
-        # TODO: Refactor common_utils._decide_skip_caffe2 to support parametrize
-        for operator_export_type in (
-            OperatorExportTypes.ONNX_ATEN,
-            OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        ):
-            x = torch.rand(3, 4)
-            y = torch.rand(3, 4)
-            f = io.BytesIO()
-            torch.onnx.export(
-                ModelWithAtenNotONNXOp(),
-                (x, y),
-                f,
-                do_constant_folding=False,
-                operator_export_type=operator_export_type,
-                # support for linalg.qr was added in later op set versions.
-                opset_version=9,
-            )
-            onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-            self.assertAtenOp(onnx_model, "linalg_qr")
-
-    @common_utils.skipIfNoCaffe2
-    def test_caffe2_onnx_aten_must_not_fallback(self):
-        class ModelWithAtenFmod(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.fmod(x, y)
-
-        # TODO: Refactor common_utils._decide_skip_caffe2 to support parametrize
-        for operator_export_type in (
-            OperatorExportTypes.ONNX_ATEN_FALLBACK,
-            OperatorExportTypes.ONNX_ATEN,
-        ):
-            x = torch.randn(3, 4, dtype=torch.float32)
-            y = torch.randn(3, 4, dtype=torch.float32)
-            f = io.BytesIO()
-            torch.onnx.export(
-                ModelWithAtenFmod(),
-                (x, y),
-                f,
-                do_constant_folding=False,
-                operator_export_type=operator_export_type,
-                opset_version=10,  # or higher
-            )
-            onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-            assert onnx_model.graph.node[0].op_type == "Mod"
-
-    @common_utils.skipIfCaffe2
     def test_aten_fallback_must_fallback(self):
         class ModelWithAtenNotONNXOp(torch.nn.Module):
             def forward(self, x, y):
@@ -1037,7 +954,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         self.assertAtenOp(onnx_model, "linalg_qr")
 
-    @common_utils.skipIfCaffe2
     def test_onnx_aten(self):
         class ModelWithAtenFmod(torch.nn.Module):
             def forward(self, x, y):
@@ -1056,11 +972,10 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         self.assertAtenOp(onnx_model, "fmod", "Tensor")
 
-    @common_utils.skipIfCaffe2
     def test_onnx_aten_fallback_must_not_fallback(self):
         # For BUILD_CAFFE2=0, aten fallback only when not exportable
         class ONNXExportable(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.fc1 = torch.nn.Linear(12, 8)
@@ -1172,12 +1087,12 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         torch.onnx.register_custom_op_symbolic(
             "torch_scatter::scatter_max", sym_scatter_max, 1
         )
+        f = io.BytesIO()
         with torch.no_grad():
             torch.onnx.export(
                 m,
                 (src, idx),
-                "mymodel.onnx",
-                verbose=False,
+                f,
                 opset_version=13,
                 custom_opsets={"torch_scatter": 1},
                 do_constant_folding=True,
@@ -1234,26 +1149,6 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
         _export_to_onnx(model, data, input_names)
 
     @common_quantization.skipIfNoFBGEMM
-    @common_utils.skipIfNoCaffe2
-    def test_lower_graph_linear(self):
-        model = torch.ao.quantization.QuantWrapper(
-            torch.nn.Linear(5, 10, bias=True)
-        ).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @common_quantization.skipIfNoFBGEMM
-    @common_utils.skipIfNoCaffe2
-    def test_lower_graph_conv2d(self):
-        model = torch.ao.quantization.QuantWrapper(
-            torch.nn.Conv2d(3, 5, 2, bias=True)
-        ).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @common_quantization.skipIfNoFBGEMM
     @unittest.skip(
         "onnx opset9 does not support quantize_per_tensor and caffe2 \
     does not support conv3d"
@@ -1280,7 +1175,7 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
         model = Net(C).cuda().half()
         x = torch.randn(N, C).cuda().half()
         f = io.BytesIO()
-        torch.onnx.export(model, x, f, opset_version=14)
+        torch.onnx.export(model, (x,), f, opset_version=14)
         onnx_model = onnx.load_from_string(f.getvalue())
         const_node = [n for n in onnx_model.graph.node if n.op_type == "Constant"]
         self.assertNotEqual(len(const_node), 0)

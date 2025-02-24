@@ -70,7 +70,7 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
 }
 
 
-Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
   // so let's try to catch this here already
   const auto input_dim = input.dim();
@@ -121,7 +121,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
-Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, Tensor& output) {
   TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
@@ -252,7 +252,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // If a path is specified, we reduce in the order specified by the path, else we
 // default to going left => right. The path is a list of indices processed the same
 // way as opt-einsum: https://optimized-einsum.readthedocs.io/en/stable/path_finding.html#format-of-the-path
-Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
+Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   const auto num_ops = operands.size();
 
@@ -278,10 +278,12 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     return std::isupper(label) ? label - 'A' : label - 'a' + NUM_OF_LETTERS;
   };
 
+#ifndef STRIP_ERROR_MESSAGES
   // Convert subscript in [0, TOTAL_LABELS) to label in [A-Za-z]
   auto subscript_to_label = [=](uint8_t s) -> unsigned char {
     return s < NUM_OF_LETTERS ? s + 'A' : s + 'a' - NUM_OF_LETTERS;
   };
+#endif
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
@@ -707,7 +709,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;

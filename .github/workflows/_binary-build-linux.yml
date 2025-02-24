@@ -11,11 +11,28 @@ on:
         required: true
         type: string
         description: The build environment
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
-          required: false
-          default: linux.12xlarge
-          type: string
-          description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
+        required: false
+        default: linux.12xlarge.memory.ephemeral
+        type: string
+        description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
+      timeout-minutes:
+        required: false
+        default: 210
+        type: number
+        description: timeout for the job
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
       ALPINE_IMAGE:
         required: false
         type: string
@@ -25,10 +42,6 @@ on:
         required: true
         type: string
         description: Root directory for the pytorch/pytorch repository
-      BUILDER_ROOT:
-        required: true
-        type: string
-        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -77,11 +90,10 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 210
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
-      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -95,9 +107,7 @@ jobs:
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
-      # Needed for conda builds
       ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
-      ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
@@ -105,13 +115,13 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
         run: |
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
-            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
@@ -124,7 +134,6 @@ jobs:
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
             echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ env.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}"
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
-            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
@@ -132,6 +141,7 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -174,33 +184,18 @@ jobs:
           fi
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
 
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-
-      - name: Checkout pytorch/builder to builder dir
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
 
       - name: Check if the job is disabled
         id: filter
@@ -227,7 +222,6 @@ jobs:
           mkdir -p artifacts/
           container_name=$(docker run \
             -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
@@ -241,19 +235,19 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            -e USE_SPLIT_BUILD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
-            docker exec -t "${container_name}" bash -c "bash /builder/aarch64_linux/aarch64_ci_build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
           else
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           fi
 
       - name: Chown artifacts
@@ -263,7 +257,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}

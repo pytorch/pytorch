@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
-
 from functorch._C import dim as _C
+
 from ._parsing import (
     _ellipsis,
     AnonymousAxis,
@@ -13,6 +13,10 @@ from ._parsing import (
     parse_pattern,
     validate_rearrange_expressions,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["rearrange"]
 
@@ -64,9 +68,9 @@ def _create_rearrange_callable(
         # an identity rearrangement on a 0-dimension tensor
         return lambda tensor: tensor
 
-    first_class_dims: Tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
-    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[str, ...]] = {}
-    anon_axes: List[AnonymousAxis] = []
+    first_class_dims: tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
+    identifier_dim_map: dict[Union[str, AnonymousAxis], tuple[str, ...]] = {}
+    anon_axes: list[AnonymousAxis] = []
 
     # map the left-hand side identifiers to strings representing first class dims
     dims_i = 0
@@ -94,11 +98,11 @@ def _create_rearrange_callable(
             raise ValueError(f"Unexpected dimension: {dimension}")
 
     def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
-    ) -> List[Union[str, Tuple[str, ...]]]:
+        composition: Sequence[Union[list[Union[str, AnonymousAxis]], str]],
+    ) -> list[Union[str, tuple[str, ...]]]:
         """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
         class dims."""
-        dim_composition: List[Union[str, Tuple[str, ...]]] = []
+        dim_composition: list[Union[str, tuple[str, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
                 dim_composition.append(
@@ -147,7 +151,7 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    tensor: Union[torch.Tensor, list[torch.Tensor], tuple[torch.Tensor, ...]],
     pattern: str,
     **axes_lengths: int,
 ) -> torch.Tensor:
@@ -170,31 +174,31 @@ def rearrange(
         >>> images = torch.randn((32, 30, 40, 3))
 
         >>> # stack along first (batch) axis, output is a single array
-        >>> rearrange(images, 'b h w c -> b h w c').shape
+        >>> rearrange(images, "b h w c -> b h w c").shape
         torch.Size([32, 30, 40, 3])
 
         >>> # concatenate images along height (vertical axis), 960 = 32 * 30
-        >>> rearrange(images, 'b h w c -> (b h) w c').shape
+        >>> rearrange(images, "b h w c -> (b h) w c").shape
         torch.Size([960, 40, 3])
 
         >>> # concatenated images along horizontal axis, 1280 = 32 * 40
-        >>> rearrange(images, 'b h w c -> h (b w) c').shape
+        >>> rearrange(images, "b h w c -> h (b w) c").shape
         torch.Size([30, 1280, 3])
 
         >>> # reordered axes to "b c h w" format for deep learning
-        >>> rearrange(images, 'b h w c -> b c h w').shape
+        >>> rearrange(images, "b h w c -> b c h w").shape
         torch.Size([32, 3, 30, 40])
 
         >>> # flattened each image into a vector, 3600 = 30 * 40 * 3
-        >>> rearrange(images, 'b h w c -> b (c h w)').shape
+        >>> rearrange(images, "b h w c -> b (c h w)").shape
         torch.Size([32, 3600])
 
         >>> # split each image into 4 smaller (top-left, top-right, bottom-left, bottom-right), 128 = 32 * 2 * 2
-        >>> rearrange(images, 'b (h1 h) (w1 w) c -> (b h1 w1) h w c', h1=2, w1=2).shape
+        >>> rearrange(images, "b (h1 h) (w1 w) c -> (b h1 w1) h w c", h1=2, w1=2).shape
         torch.Size([128, 15, 20, 3])
 
         >>> # space-to-depth operation
-        >>> rearrange(images, 'b (h h1) (w w1) c -> b h w (c h1 w1)', h1=2, w1=2).shape
+        >>> rearrange(images, "b (h h1) (w w1) c -> b h w (c h1 w1)", h1=2, w1=2).shape
         torch.Size([32, 15, 20, 12])
     """
     if not isinstance(tensor, torch.Tensor):

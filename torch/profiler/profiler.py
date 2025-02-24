@@ -1,15 +1,16 @@
+# mypy: allow-untyped-defs
 import gzip
 import json
 import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from warnings import warn
-
+from typing import Any, Callable, Optional
 from typing_extensions import Self
+from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
@@ -21,6 +22,7 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_trace_observer,
 )
+from torch._environment import is_fbcode
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -34,6 +36,28 @@ __all__ = [
     "ExecutionTraceObserver",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
+
+
+class _NumpyEncoder(json.JSONEncoder):
+    """
+    Json encoder for numpy types (np.int, np.float, np.array etc.)
+    Returns default encoder if numpy is not available
+    """
+
+    def default(self, obj):
+        """Encode NumPy types to JSON"""
+        try:
+            import numpy as np
+        except ImportError:
+            return json.JSONEncoder.default(self, obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return json.JSONEncoder.default(self, obj)
 
 
 def supported_activities():
@@ -95,6 +119,8 @@ class _KinetoProfile:
             representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler.
+        acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
+
 
     .. note::
         This API is experimental and subject to change in the future.
@@ -116,6 +142,8 @@ class _KinetoProfile:
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
+        acc_events: bool = False,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -125,6 +153,8 @@ class _KinetoProfile:
         self.with_modules = with_modules
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
+        self.acc_events = acc_events
+        self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
@@ -132,11 +162,13 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
+        elif ProfilerActivity.MTIA in self.activities:
+            self.use_device = "mtia"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = dict()
+        self.preset_metadata: dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -146,11 +178,9 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        if self.profiler is None:
+        if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
-                use_cuda=(ProfilerActivity.CUDA in self.activities),
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_mtia=(ProfilerActivity.MTIA in self.activities),
                 use_device=self.use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
@@ -159,6 +189,8 @@ class _KinetoProfile:
                 with_modules=self.with_modules,
                 use_kineto=True,
                 experimental_config=self.experimental_config,
+                acc_events=self.acc_events,
+                custom_trace_id_callback=self.custom_trace_id_callback,
             )
         self.profiler._prepare_trace()
 
@@ -182,7 +214,9 @@ class _KinetoProfile:
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
-                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+                self.add_metadata_json(
+                    "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
+                )
 
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
@@ -213,11 +247,11 @@ class _KinetoProfile:
         """
         assert self.profiler
         if path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
+            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
             fp.close()
             retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name) as fin:
-                with gzip.open(path, "wt") as fout:
+            with open(fp.name, "rb") as fin:
+                with gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
             return retvalue
@@ -233,6 +267,39 @@ class _KinetoProfile:
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
+
+    def toggle_collection_dynamic(
+        self, enable: bool, activities: Iterable[ProfilerActivity]
+    ):
+        """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
+        (CPU) and CUDA activity supported in Kineto
+
+        Args:
+            activities (iterable): list of activity groups to use in profiling, supported values:
+                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+        Examples:
+
+        .. code-block:: python
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                code_to_profile_0()
+                // turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_1()
+                // turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_2()
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+        """
+        if not self.profiler:
+            return
+        self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
         self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
@@ -329,11 +396,11 @@ class _KinetoProfile:
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
         # Default to device 0, if unset. Fallback on cpu.
-        if device is None and self.use_device and self.use_device != "cuda":
-            device = self.use_device + ":0"
-
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if self.use_device and self.use_device != "cuda":
+                device = self.use_device + ":0"
+            else:
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
@@ -369,7 +436,13 @@ class ProfilerAction(Enum):
 
 
 def schedule(
-    *, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0
+    *,
+    wait: int,
+    warmup: int,
+    active: int,
+    repeat: int = 0,
+    skip_first: int = 0,
+    skip_first_wait: int = 0,
 ) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
@@ -377,6 +450,13 @@ def schedule(
     then do the active recording for the next ``active`` steps and then repeat the cycle starting with ``wait`` steps.
     The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
     the cycles will continue until the profiling is finished.
+
+    The ``skip_first_wait`` parameter controls whether the first ``wait`` stage should be skipped.
+    This can be useful if a user wants to wait longer than ``skip_first`` between cycles, but not
+    for the first profile. For example, if ``skip_first`` is 10 and ``wait`` is 20, the first cycle will
+    wait 10 + 20 = 30 steps before warmup if ``skip_first_wait`` is zero, but will wait only 10
+    steps if ``skip_first_wait`` is non-zero. All subsequent cycles will then wait 20 steps between the
+    last active and warmup.
     """
 
     def schedule_fn(step: int) -> ProfilerAction:
@@ -385,6 +465,9 @@ def schedule(
             return ProfilerAction.NONE
         else:
             step -= skip_first
+        # If wait >> skip_first and we want to grab profiling early, shift left by wait if skip_first_wait is True
+        if skip_first_wait != 0:
+            step += wait
         num_steps = wait + warmup + active
         if repeat > 0 and step / num_steps >= repeat:
             return ProfilerAction.NONE
@@ -478,6 +561,7 @@ class profile(_KinetoProfile):
             representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler. See the examples section below for a code sample.
+        acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -595,12 +679,18 @@ class profile(_KinetoProfile):
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
+        acc_events: bool = False,
         # deprecated:
         use_cuda: Optional[bool] = None,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
-            warn("use_cuda is deprecated, use activities argument instead")
+            warn(
+                "`use_cuda` is deprecated, use `activities` argument instead",
+                FutureWarning,
+                stacklevel=2,
+            )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
@@ -615,7 +705,11 @@ class profile(_KinetoProfile):
             with_flops=with_flops,
             with_modules=with_modules,
             experimental_config=experimental_config,
-            execution_trace_observer=execution_trace_observer,
+            execution_trace_observer=execution_trace_observer
+            if execution_trace_observer
+            else ExecutionTraceObserver.build_execution_trace_obs_from_env(),
+            acc_events=acc_events,
+            custom_trace_id_callback=custom_trace_id_callback,
         )
 
         if schedule:
@@ -630,8 +724,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map: Dict[
-            Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+        self.action_map: dict[
+            tuple[ProfilerAction, Optional[ProfilerAction]], list[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
@@ -729,13 +823,30 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
-        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
+        if os.environ.get("KINETO_USE_DAEMON", "") or (
+            is_fbcode() and os.environ.get("KINETO_FORCE_STEP_HOOK", "")
+        ):
+            prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
                 "ProfilerStep#" + str(self.step_num)
             )
             self.step_rec_fn.__enter__()
+
+    def set_custom_trace_id_callback(self, callback):
+        """
+        Sets a callback to be called when a new trace ID is generated.
+        """
+        self.custom_trace_id_callback = callback
+
+    def get_trace_id(self):
+        """
+        Returns the current trace ID.
+        """
+        if self.profiler is None:
+            return None
+        return self.profiler.trace_id
 
     def _trace_ready(self):
         if self.on_trace_ready:
@@ -768,12 +879,16 @@ class ExecutionTraceObserver(_ITraceObserver):
     incurring any overheads.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the default states.
         """
         self._registered = False
         self._execution_trace_running = False
+        self.extra_resources_collection = False
+        self.resources_dir: str = ""
+        self.output_file_path: str = ""
+        self.output_file_path_observer: str = ""
 
     def __del__(self):
         """
@@ -781,51 +896,163 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         self.unregister_callback()
 
+    @staticmethod
+    def build_execution_trace_obs_from_env() -> Optional["ExecutionTraceObserver"]:
+        """
+        Returns an ExecutionTraceObserver instance if the environment variable
+        ENABLE_PYTORCH_EXECUTION_TRACE is set to 1, otherwise returns None.
+
+        Configures the observer to also collect extra resources if the environment variable
+        ``ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS=1``. These are resources such as generated kernels,
+        index tensor data etc. that are required to make the Execution Trace replayable.
+        """
+        if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
+            try:
+                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+            except Exception as e:
+                warn(
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                )
+                return None
+            fp.close()
+            et = ExecutionTraceObserver()
+            et.register_callback(fp.name)
+            # additionally, check if the env requires us to collect extra resources
+            if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS", "0") == "1":
+                et.set_extra_resource_collection(True)
+            else:
+                et.set_extra_resource_collection(False)
+            return et
+        return None
+
+    def set_extra_resource_collection(self, val) -> None:
+        """
+        Collects extra resources such as generated kernels, index tensor data, and any other
+        metadata that is required to complete the Execution Trace content.
+
+        The caller should call this method with val=True after calling register_callback() if they want
+        to collect the extra resources.
+        """
+        self.extra_resources_collection = val
+        if self.extra_resources_collection:
+            self.get_resources_dir(can_create=True)
+        return
+
     def register_callback(self, output_file_path: str) -> Self:
         """
         Adds ET observer to record function callbacks. The data will be
         written to output_file_path.
         """
+
+        def get_temp_uncompressed_file() -> str:
+            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
+            fp.close()
+            return fp.name
+
         if not self._registered:
-            self._output_file_path = output_file_path
+            self.output_file_path = output_file_path
+            if output_file_path.endswith(".gz"):
+                output_file_path = get_temp_uncompressed_file()
+            self.output_file_path_observer = output_file_path
             self._registered = _add_execution_trace_observer(output_file_path)
         return self
+
+    def get_resources_dir(self, can_create=False) -> Optional[str]:
+        """
+        Generates the resources directory for the generated kernels,
+        or index tensor data or any other metadata that is required
+        to complete the Execution Trace content.
+
+        The directory is created right where the ET file is being output.
+
+        Only works if the observer has called set_extra_resource_collection(val=True).
+
+        Returns None if the observer is not configured with extra resource collection.
+        """
+        if not self.extra_resources_collection:
+            return None
+        if self.resources_dir:
+            # already created
+            return self.resources_dir
+        generated_path = ExecutionTraceObserver.get_resources_dir_for_et_path(
+            self.output_file_path, create_dir=can_create
+        )
+        if not generated_path:
+            # could not find of create the resources dir
+            return None
+        self.resources_dir = generated_path
+        return self.resources_dir
+
+    @staticmethod
+    def get_resources_dir_for_et_path(
+        trace_path, create_dir: bool = False
+    ) -> Optional[str]:
+        work_dir, file_name = os.path.split(trace_path)
+        resource_dir = os.path.join(
+            work_dir, os.path.splitext(file_name)[0] + "_resources"
+        )
+        if not os.path.exists(resource_dir):
+            if create_dir:
+                try:
+                    os.mkdir(resource_dir)
+                except Exception:
+                    warn(f"Execution trace exception when creating {resource_dir}")
+                    return None
+            else:
+                return None
+        return resource_dir
 
     def unregister_callback(self):
         """
         Removes ET observer from record function callbacks.
         """
 
-        def _save_triton_kernels():
+        def _save_triton_kernels() -> None:
+            try:
+                resource_dir = self.get_resources_dir()
+            except Exception as e:
+                warn(
+                    f"Execution trace exception when generating resource directory: {e}"
+                )
+                return
+            if not resource_dir:
+                return
+
             # Save the kernel paths for the generated kernels
             from torch._inductor.codecache import PyCodeCache as PyCodeCache
 
             kernel_files = [
                 v.__file__
-                for v in PyCodeCache.cache.values()
+                for v in PyCodeCache.modules
                 if getattr(v, "__file__", None) is not None
             ]
-            work_dir, file_name = os.path.split(self._output_file_path)
-            resource_dir = os.path.join(
-                work_dir, os.path.splitext(file_name)[0] + "_resources"
-            )
-            if not os.path.exists(resource_dir):
-                os.mkdir(resource_dir)
 
             for kernel_file in kernel_files:
                 if kernel_file is None:
                     continue
-                path, name = os.path.split(kernel_file)
+                name = os.path.basename(kernel_file)
                 dst = os.path.join(resource_dir, name)
                 shutil.copyfile(kernel_file, dst)
 
+        def _save_gz_file(uncompressed_file: str, output_file: str) -> None:
+            print(f"Execution Trace: compressing {uncompressed_file} to {output_file}")
+            with open(uncompressed_file, "rb") as fin:
+                with gzip.open(output_file, "wb") as fout:
+                    fout.writelines(fin)
+            os.remove(uncompressed_file)
+
         if self._registered:
             self.stop()
+
             try:
                 _save_triton_kernels()
             except Exception as e:
                 warn(f"Execution trace failed to save kernels: {e}")
+
             _remove_execution_trace_observer()
+            if self.output_file_path.endswith("gz"):
+                _save_gz_file(self.output_file_path_observer, self.output_file_path)
+
             self._registered = False
 
     @property
@@ -848,6 +1075,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         if self._registered and not self._execution_trace_running:
             _enable_execution_trace_observer()
             self._execution_trace_running = True
+            self._record_pg_config()
 
     def stop(self):
         """
@@ -863,14 +1091,25 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         self.unregister_callback()
 
-    def get_output_file_path(self) -> str:
+    def get_output_file_path(self) -> Optional[str]:
         """
-        Returns the output file name.
+        Returns the output file name or None.
         """
-        if self.is_registered:
-            return self._output_file_path
+        if self.output_file_path:
+            return self.output_file_path
         else:
-            raise RuntimeError(
-                "A callback to the ET profiler needs to be registered "
-                "first before getting the output file path"
+            return None
+
+    def _record_pg_config(self) -> None:
+        # Records the PG config info to the trace as node:
+        #  ## process_group:init ##
+        if (
+            self.is_registered
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
+            torch.autograd._record_function_with_args_enter(
+                "## process_group:init ##",
+                json.dumps(pg_config_info, cls=_NumpyEncoder),
             )

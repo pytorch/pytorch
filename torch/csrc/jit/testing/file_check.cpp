@@ -10,23 +10,20 @@
 // API modified from llvm::FileCheck
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <optional>
 
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-
-namespace testing {
+namespace torch::jit::testing {
 
 enum CheckType {
   CHECK,
@@ -43,17 +40,17 @@ struct Check {
   Check(
       CheckType type,
       std::string str,
-      c10::optional<size_t> count = c10::nullopt)
+      std::optional<size_t> count = std::nullopt)
       : type_(type), count_(count), search_str_(std::move(str)) {}
 
   Check(
       CheckType type,
-      c10::string_view str,
-      c10::optional<size_t> count = c10::nullopt)
+      std::string_view str,
+      std::optional<size_t> count = std::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 
   CheckType type_;
-  c10::optional<size_t> count_;
+  std::optional<size_t> count_;
   const std::string search_str_;
 
   friend std::ostream& operator<<(std::ostream& out, const Check& c);
@@ -88,7 +85,7 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
   }
   out << ": " << c.search_str_;
   return out;
-};
+}
 
 namespace {
 
@@ -103,8 +100,8 @@ size_t assertFind(
     std::stringstream ss;
     ss << "Expected to find ";
     c10::printQuotedString(ss, sub);
-    ss << " but did not find it" << std::endl;
-    ss << "Searched string:" << std::endl;
+    ss << " but did not find it" << '\n';
+    ss << "Searched string:" << '\n';
     found_range.highlight(ss);
     if (extra_msg) {
       extra_msg(ss);
@@ -142,8 +139,8 @@ size_t assertFindRegex(
     std::stringstream ss;
     ss << "Expected to find regex ";
     c10::printQuotedString(ss, sub);
-    ss << " but did not find it" << std::endl;
-    ss << "Searched string:" << std::endl;
+    ss << " but did not find it" << '\n';
+    ss << "Searched string:" << '\n';
     if (extra_msg) {
       extra_msg(ss);
     }
@@ -228,13 +225,14 @@ struct FileCheckImpl {
         groups.push_back({check});
       }
     }
+    checks.push_back(check);
     has_run = false;
   }
 
   TORCH_API void addCheck(
       CheckType type,
       const std::string& s,
-      c10::optional<size_t> count = c10::nullopt) {
+      std::optional<size_t> count = std::nullopt) {
     addCheck(Check(type, s, count));
   }
 
@@ -264,7 +262,7 @@ struct FileCheckImpl {
       }
       size_t end_check_string = suffix_pos + check_suffix.size();
       CheckType type = check_pair.first;
-      c10::optional<size_t> count = c10::nullopt;
+      std::optional<size_t> count = std::nullopt;
       auto end_line = source->text_str().find("\n", end_check_string);
       bool exactly = false;
       if (type == CHECK_COUNT) {
@@ -365,7 +363,7 @@ struct FileCheckImpl {
       std::stringstream ss;
       ss << "Expected to find ";
       c10::printQuotedString(ss, check.search_str_);
-      ss << "highlighted but it is not." << std::endl;
+      ss << "highlighted but it is not." << '\n';
       error_range.highlight(ss);
       throw std::runtime_error(ss.str());
     };
@@ -505,13 +503,10 @@ struct FileCheckImpl {
         end_range = start_range + check.search_str_.size();
         break;
       }
-      case CHECK_DAG: {
-        AT_ERROR();
-      } break;
-      case CHECK_NOT: {
-        AT_ERROR();
-      } break;
+      default:
+        TORCH_CHECK(false);
     }
+
     return SourceRange(source, start_range, end_range);
   }
 
@@ -543,7 +538,7 @@ struct FileCheckImpl {
   std::vector<std::vector<Check>> groups;
 };
 
-FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
+FileCheck::FileCheck() : fcImpl(new FileCheckImpl()) {}
 
 std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
   out << "FileCheck checks:\n";
@@ -551,7 +546,7 @@ std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
     out << "\t" << c << "\n";
   }
   return out;
-};
+}
 
 FileCheck::~FileCheck() {
   if (!fcImpl->has_run) {
@@ -559,17 +554,17 @@ FileCheck::~FileCheck() {
     std::cout << *fcImpl;
   }
   fcImpl.reset();
-};
+}
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);
-};
+}
 
 void FileCheck::run(const Graph& graph) {
   std::stringstream graph_str;
   graph_str << graph;
   fcImpl->run(graph_str.str());
-};
+}
 
 void FileCheck::run(
     const std::string& input_checks_string,
@@ -635,6 +630,4 @@ FileCheck* FileCheck::check_regex(const std::string& str) {
   return this;
 }
 
-} // namespace testing
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::testing

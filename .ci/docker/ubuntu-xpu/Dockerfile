@@ -30,6 +30,7 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 ARG ANACONDA_PYTHON_VERSION
 ARG CONDA_CMAKE
 ARG DOCS
+ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
@@ -62,7 +63,7 @@ RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_d
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
 # Install XPU Dependencies
-ARG BASEKIT_VERSION
+ARG XPU_VERSION
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 

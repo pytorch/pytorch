@@ -11,10 +11,10 @@
 #include <cstring>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 using size_t = std::size_t;
 
@@ -29,7 +29,7 @@ class TORCH_API hash_t : public c10::uint128 {
   hash_t(uint64_t val) : uint128(val) {}
   hash_t(uint128 val) : uint128(val) {}
   hash_t(uint64_t top, uint64_t bottom) : uint128(top, bottom) {}
-  hash_t() : uint128() {}
+  hash_t() = default;
 };
 
 // Std* functions use 64-bit hash
@@ -60,9 +60,7 @@ static inline hash_t StringHash(const char* data) {
 }
 
 // Automatic templated implementation for 'arithmetic' types
-template <
-    typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+template <typename T, std::enable_if_t<std::is_arithmetic_v<T>>* = nullptr>
 hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
@@ -135,6 +133,12 @@ static inline hash_t TensorHash(const at::Tensor& tensor) {
       return DataHash(ctensor.const_data_ptr<c10::complex<float>>(), size);
     case at::ScalarType::ComplexDouble:
       return DataHash(ctensor.const_data_ptr<c10::complex<double>>(), size);
+    case at::ScalarType::UInt16:
+      return DataHash(ctensor.const_data_ptr<uint16_t>(), size);
+    case at::ScalarType::UInt32:
+      return DataHash(ctensor.const_data_ptr<uint32_t>(), size);
+    case at::ScalarType::UInt64:
+      return DataHash(ctensor.const_data_ptr<uint64_t>(), size);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unsupported scalar type:", ctensor.scalar_type());
@@ -145,7 +149,7 @@ static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
 
-static inline hash_t Hash(const c10::string_view& value) {
+static inline hash_t Hash(const std::string_view& value) {
   return DataHash(value.data(), value.size());
 }
 
@@ -161,13 +165,14 @@ static inline hash_t Hash(const at::Generator& value) {
 // Use an arbitrary randomly-selected 64-bit integer rather than a
 // small constant that we then hash at runtime so we don't have to
 // repeatedly hash a constant at runtime.
+// NOLINTNEXTLINE(*-narrowing-conversions)
 static const int64_t kNullOpt = 0x8655d738f3678dda;
 
-// Hashing for c10::optional types contributes to hash
+// Hashing for std::optional types contributes to hash
 // for optionals with null value, important to distinguish
 // between <nullopt, non-nullopt> and <non-nullopt, nullopt> cases
 template <typename T>
-hash_t Hash(const c10::optional<T>& value) {
+hash_t Hash(const std::optional<T>& value) {
   if (value.has_value()) {
     return Hash(value.value());
   } else {
@@ -185,9 +190,9 @@ hash_t Hash(const std::vector<T>& values) {
   return ContainerHash(values);
 }
 
-// Need a special case for optional<container>?
+// Need a special case for std::optional<container>?
 template <typename T>
-hash_t Hash(const c10::optional<std::vector<T>>& value) {
+hash_t Hash(const std::optional<std::vector<T>>& value) {
   if (value.has_value()) {
     return ContainerHash(value.value());
   } else {
@@ -234,5 +239,4 @@ hash_t MHash(T value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

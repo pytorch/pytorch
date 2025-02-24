@@ -1,9 +1,12 @@
+# mypy: allow-untyped-defs
 import inspect
+import types
 import warnings
+from collections.abc import Sequence
 from functools import wraps
-from itertools import chain
-
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
+from types import GenericAlias
+from typing import Callable, NamedTuple, Optional, overload, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -18,6 +21,10 @@ from torch._prims_common import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @overload
@@ -55,7 +62,9 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    raise ValueError(
+        f"Received unsupported type {type(a)}. Expected TensorLike, Number, or Sequence."
+    )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -112,6 +121,9 @@ class elementwise_type_promotion_wrapper:
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
 
+        # TorchDynamo tracing of inspect causes fake tensor dynamo_wrapped tests to fail
+        # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_fake_tensor.py FakeTensorTest.test_basic
+        @torch._disable_dynamo
         @wraps(fn)
         def _fn(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
@@ -181,16 +193,25 @@ def _maybe_resize_out(
         return out
 
 
-def _safe_copy_out(
-    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
-):
-    # Checks same device
+def is_cpu_scalar(x: TensorLikeType) -> bool:
+    return x.dim() == 0 and x.device.type == "cpu"
+
+
+def check_copy_devices(*, copy_from: TensorLikeType, copy_to: TensorLikeType) -> None:
     if copy_from.device != copy_to.device:
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
+
+
+def _safe_copy_out(
+    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+):
+    # Checks same device
+    if not is_cpu_scalar(copy_from):
+        check_copy_devices(copy_from=copy_from, copy_to=copy_to)
 
     # Checks safe cast
     if exact_dtype:
@@ -213,8 +234,8 @@ def out_wrapper(
     *out_names: str,
     exact_dtype: bool = False,
     pass_is_out: bool = False,
-    preserve_memory_format=False,
-):
+    preserve_memory_format: bool = False,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
@@ -231,14 +252,25 @@ def out_wrapper(
     def maybe_compute_memory_format(t):
         return utils.suggest_memory_format(t) if preserve_memory_format else None
 
-    def _out_wrapper(fn: Callable) -> Callable:
+    def _out_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         """
         Adds the out parameter to a Python reference.
         """
         out_type = (
             TensorLikeType
             if is_tensor
-            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+            else GenericAlias(
+                tuple, tuple(TensorLikeType for _ in range(len(out_names)))
+            )
+        )
+        # For backward compatibility - should be able to remove once PEP585
+        # conversion is complete.
+        bc_out_type = (
+            TensorLikeType
+            if is_tensor
+            else types.GenericAlias(
+                tuple, tuple(TensorLikeType for _ in range(len(out_names)))
+            )
         )
         return_type = (
             TensorLikeType
@@ -253,22 +285,39 @@ def out_wrapper(
         is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
 
         @wraps(fn)
-        def _fn(*args, out=None, **kwargs):
+        def _fn(*args: _P.args, out=None, **kwargs: _P.kwargs):
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
+
+            def maybe_check_copy_devices(out):
+                if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
+                    check_copy_devices(copy_from=args[0], copy_to=out)
+
+            if isinstance(out, (tuple, list)):
+                for o in out:
+                    maybe_check_copy_devices(o)
+            else:
+                maybe_check_copy_devices(out)
+
             if pass_is_out:
-                result = fn(*args, is_out=(out is not None), **kwargs)
+                result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
             assert (
-                isinstance(result, TensorLike)
-                and is_tensor
-                or isinstance(result, Tuple)  # type: ignore[arg-type]
-                and len(result) == len(out_names)
+                (isinstance(result, TensorLike) and is_tensor)
+                or (
+                    isinstance(result, tuple)  # type: ignore[arg-type]
+                    and len(result) == len(out_names)  # type: ignore[arg-type]
+                )
+                or (
+                    fn.__name__ == "unbind"
+                    and isinstance(result, (list, tuple))  # type: ignore[arg-type]
+                )
             )
+            # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
             if out is not None:
                 # Naively you might expect this assert to be true, but
                 # it's not:
@@ -286,20 +335,23 @@ def out_wrapper(
                 # the output tensor, but not the result--which will
                 # be a normal meta tensor, but this is perfectly
                 # harmless.
-                if is_tensor:
+                if is_tensor and fn.__name__ != "unbind":
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
-                        out, result.shape, maybe_compute_memory_format(result)
+                        out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
-                    assert isinstance(out, Tuple)  # type: ignore[arg-type]
+                    if fn.__name__ != "unbind":
+                        assert isinstance(out, tuple)  # type: ignore[arg-type]
+                    else:
+                        assert isinstance(out, (list, tuple))  # type: ignore[arg-type]
                     torch._check_type(
-                        len(out) == len(result),
-                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
+                        len(out) == len(result),  # type: ignore[arg-type]
+                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]
                     )
-                    for r, o in zip(result, out):
+                    for r, o in zip(result, out):  # type: ignore[arg-type]
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
@@ -318,13 +370,20 @@ def out_wrapper(
         assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
             sig.empty,
             out_type,
+            bc_out_type,
         )
-        params = chain(sig.parameters.values(), (out_param,))
+        params = *sig.parameters.values(), out_param
+
+        # If there's a Parameter.VAR_KEYWORD parameter (like **kwds), it must appear
+        # after the out= parameter, which is Parameter.KEYWORD_ONLY. Sorting by
+        # Parameter.kind guarantees that all the parameters are in legal order.
+        params = sorted(params, key=lambda p: p.kind)
+
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
 
-        _fn.__annotations__ = fn.__annotations__
+        _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
 
@@ -353,9 +412,6 @@ def _maybe_remove_out_wrapper(fn: Callable):
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.ADInplaceOrView
-            )
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):

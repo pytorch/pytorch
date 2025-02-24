@@ -1,17 +1,16 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <optional>
 
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 using NodeIdMap = std::unordered_map<const Node*, size_t>;
@@ -28,7 +27,7 @@ std::string::size_type SkipTagSeparator(
   return node_string.compare(pos, 2, ", ") == 0 ? pos + 2 : pos;
 }
 
-c10::optional<AttrTag> ParseAttrTag(
+std::optional<AttrTag> ParseAttrTag(
     const std::string& node_string,
     std::string::size_type pos) {
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
@@ -36,21 +35,25 @@ c10::optional<AttrTag> ParseAttrTag(
   std::smatch match;
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   if (!std::regex_search(
-          node_string.begin() + pos, node_string.end(), match, tag_regex)) {
-    return c10::nullopt;
+          node_string.begin() + static_cast<std::ptrdiff_t>(pos),
+          node_string.end(),
+          match,
+          tag_regex)) {
+    return std::nullopt;
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
-  char nested_open = -1;
-  char nested_close = -1;
+  std::optional<char> nested_open;
+  std::optional<char> nested_close;
   size_t nest_count = 1;
   AttrTag tag;
   tag.name = match[1].str();
   for (pos = vpos; pos < node_string.size(); ++pos) {
-    if (nested_open < 0) {
+    if (!nested_open.has_value()) {
       if (SkipTagSeparator(node_string, pos) != pos) {
         break;
       }
+      // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
       switch (node_string[pos]) {
         case '(':
           nested_open = node_string[pos];
@@ -69,7 +72,8 @@ c10::optional<AttrTag> ParseAttrTag(
       --nest_count;
       if (nest_count == 0) {
         nest_count = 1;
-        nested_open = nested_close = -1;
+        nested_open.reset();
+        nested_close.reset();
       }
     } else if (node_string[pos] == nested_open) {
       ++nest_count;
@@ -97,12 +101,12 @@ std::unordered_map<const Node*, size_t> GetRootsIds(
   return roots_ids;
 }
 
-c10::optional<size_t> GetRootNodeId(
+std::optional<size_t> GetRootNodeId(
     const Node* node,
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   auto it = roots_ids.find(node);
   if (it == roots_ids.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return it->second;
 }
@@ -255,5 +259,4 @@ std::string DumpUtil::ToBackend(
   return getBackend()->GetComputationBackendText(computation);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -1,4 +1,5 @@
-from typing import List, Optional
+# mypy: allow-untyped-defs
+from typing import cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -13,35 +14,33 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
+
 __all__ = ["ASGD", "asgd"]
-
-
-def _to_tensor(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return torch.tensor(x, device=device)
-
-    return x
 
 
 class ASGD(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1e-2,
-        lambd=1e-4,
-        alpha=0.75,
-        t0=1e6,
-        weight_decay=0,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 1e-2,
+        lambd: float = 1e-4,
+        alpha: float = 0.75,
+        t0: float = 1e6,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
@@ -136,12 +135,12 @@ class ASGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            mus = []
-            axs = []
-            etas = []
-            state_steps = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            mus: list[Tensor] = []
+            axs: list[Tensor] = []
+            etas: list[Tensor] = []
+            state_steps: list[Tensor] = []
 
             has_complex = self._init_group(
                 group, params_with_grad, grads, mus, axs, etas, state_steps
@@ -175,9 +174,8 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
     averaging`_.
 
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         lambd (float, optional): decay term (default: 1e-4)
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
@@ -194,12 +192,12 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
 
 
 def _single_tensor_asgd(
-    params: List[Tensor],
-    grads: List[Tensor],
-    axs: List[Tensor],
-    mus: List[Tensor],
-    etas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    axs: list[Tensor],
+    mus: list[Tensor],
+    etas: list[Tensor],
+    state_steps: list[Tensor],
     *,
     lambd: float,
     lr: float,
@@ -220,7 +218,7 @@ def _single_tensor_asgd(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type
@@ -263,19 +261,19 @@ def _single_tensor_asgd(
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:
             step = _get_value(step_t)
-            new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
+            new_eta = torch.as_tensor(lr / ((1 + lambd * lr * step) ** alpha))
             eta.copy_(new_eta)
-            new_mu = _to_tensor(1 / max(1, step - t0))
+            new_mu = torch.as_tensor(1 / max(1, step - t0))
             mu.copy_(new_mu)
 
 
 def _multi_tensor_asgd(
-    params: List[Tensor],
-    grads: List[Tensor],
-    axs: List[Tensor],
-    mus: List[Tensor],
-    etas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    axs: list[Tensor],
+    mus: list[Tensor],
+    etas: list[Tensor],
+    state_steps: list[Tensor],
     *,
     lambd: float,
     lr: float,
@@ -293,7 +291,7 @@ def _multi_tensor_asgd(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -304,30 +302,37 @@ def _multi_tensor_asgd(
         ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, axs, mus, etas, state_steps]
+        [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
-            grouped_params,
-            grouped_grads,
-            grouped_axs,
-            grouped_mus,
-            grouped_etas,
-            grouped_state_steps,
+            grouped_params_,
+            grouped_grads_,
+            grouped_axs_,
+            grouped_mus_,
+            grouped_etas_,
+            grouped_state_steps_,
         ),
         _,
     ) in grouped_tensors.items():
+        grouped_params = cast(list[Tensor], grouped_params_)
+        grouped_grads = cast(list[Tensor], grouped_grads_)
+        grouped_axs = cast(list[Tensor], grouped_axs_)
+        grouped_mus = cast(list[Tensor], grouped_mus_)
+        grouped_etas = cast(list[Tensor], grouped_etas_)
+        grouped_state_steps = cast(list[Tensor], grouped_state_steps_)
+
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_axs)
 
         if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -335,6 +340,7 @@ def _multi_tensor_asgd(
             torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
+        intermediate: Union[tuple[Tensor, ...], list[Tensor]]
         if weight_decay != 0:
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
@@ -369,6 +375,8 @@ def _multi_tensor_asgd(
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
         del intermediate
 
+        new_etas: Union[tuple[Tensor, ...], list[Tensor]]
+        new_mus: Union[tuple[Tensor, ...], list[Tensor]]
         if capturable:
             # update grouped_mus
             new_mus = torch._foreach_sub(grouped_state_steps, t0)
@@ -377,39 +385,35 @@ def _multi_tensor_asgd(
             torch._foreach_copy_(grouped_mus, new_mus)
             del new_mus
 
-            # update eta = lr / (1 + lambd * lr * step^alpha)
-            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
-            torch._foreach_mul_(new_etas, lambd)
+            # update eta = lr / ((1 + lambd * lr * step)^alpha)
+            new_etas = torch._foreach_mul(grouped_state_steps, lambd)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_add_(new_etas, 1)
+            torch._foreach_pow_(new_etas, alpha)
             torch._foreach_reciprocal_(new_etas)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
         else:
-            step = grouped_state_steps[0].item()
-            new_etas = []
-            new_mus = []
-
-            for i in range(len(grouped_mus)):
-                new_eta = _to_tensor(
-                    lr / (1 + lambd * lr * step**alpha), device=device
-                )
-                new_etas.append(new_eta)
-                new_mu = _to_tensor(1 / max(1, step - t0), device=device)
-                new_mus.append(new_mu)
-
+            new_etas = [
+                torch.as_tensor(lr / ((1 + lambd * lr * step) ** alpha), device=device)
+                for step in grouped_state_steps
+            ]
+            new_mus = [
+                torch.as_tensor(1 / max(1, _get_value(step) - t0), device=device)
+                for step in grouped_state_steps
+            ]
             torch._foreach_copy_(grouped_etas, new_etas)
             torch._foreach_copy_(grouped_mus, new_mus)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_asgd)
 def asgd(
-    params: List[Tensor],
-    grads: List[Tensor],
-    axs: List[Tensor],
-    mus: List[Tensor],
-    etas: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    axs: list[Tensor],
+    mus: list[Tensor],
+    etas: list[Tensor],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,

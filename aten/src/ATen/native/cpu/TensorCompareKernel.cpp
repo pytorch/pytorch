@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
@@ -14,7 +15,6 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
@@ -83,7 +83,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
-    for (const auto i C10_UNUSED : c10::irange(n)) {
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
       f((scalar_t*)result1_data_bytes,
         (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes,
@@ -115,7 +115,7 @@ static void min_kernel_impl(
         scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
@@ -178,6 +178,7 @@ static void aminmax_kernel(
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
   if (self.numel() == 1 && self.ndimension() == 0) {
+    TORCH_CHECK(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
     min_result.resize_({});
     max_result.resize_({});
     min_result.fill_(self);
@@ -212,14 +213,15 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
+  AT_DISPATCH_V2(
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 static void isposinf_kernel_impl(TensorIteratorBase& iter) {
@@ -252,7 +254,7 @@ static void mode_kernel_impl(
 
           std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-          for (const auto k C10_UNUSED : c10::irange(n)) {
+          for ([[maybe_unused]] const auto k : c10::irange(n)) {
             scalar_t* values_data = (scalar_t*)values_data_bytes;
             int64_t* indices_data = (int64_t*)indices_data_bytes;
             const scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -324,7 +326,7 @@ static void isin_default_kernel_cpu(
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
@@ -399,17 +401,17 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
-REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
+REGISTER_DISPATCH(max_stub, &max_kernel_impl)
+REGISTER_DISPATCH(min_stub, &min_kernel_impl)
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel)
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(mode_stub, &mode_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
+REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu)
 
 } // namespace at::native

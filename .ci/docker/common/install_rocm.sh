@@ -39,7 +39,8 @@ install_ubuntu() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev
+                   roctracer-dev \
+                   amd-smi-lib
 
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
         DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
@@ -60,6 +61,22 @@ install_ubuntu() {
     do
         sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
     done
+
+    # ROCm 6.3 had a regression where initializing static code objects had significant overhead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+        # clr build needs CppHeaderParser but can only find it using conda's python
+        /opt/conda/bin/python -m pip install CppHeaderParser
+        git clone https://github.com/ROCm/HIP -b rocm-6.3.x
+        HIP_COMMON_DIR=$(readlink -f HIP)
+        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-6.3-statco-hotfix
+        mkdir -p clr/build
+        pushd clr/build
+        cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        make -j
+        cp hipamd/lib/libamdhip64.so.6.3.* /opt/rocm/lib/libamdhip64.so.6.3.*
+        popd
+        rm -rf HIP clr
+    fi
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -106,7 +123,8 @@ install_centos() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev
+                   roctracer-dev \
+                   amd-smi-lib
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails

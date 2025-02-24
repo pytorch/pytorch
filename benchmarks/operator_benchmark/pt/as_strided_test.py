@@ -1,8 +1,6 @@
-from typing import List
+import operator_benchmark as op_bench
 
 import torch
-
-import operator_benchmark as op_bench
 
 
 """Microbenchmarks for as_strided operator"""
@@ -44,7 +42,7 @@ class As_stridedBenchmark(op_bench.TorchBenchmarkBase):
         self.set_module_name("as_strided")
 
     def forward(
-        self, input_one, size: List[int], stride: List[int], storage_offset: int
+        self, input_one, size: list[int], stride: list[int], storage_offset: int
     ):
         return torch.as_strided(input_one, size, stride, storage_offset)
 

@@ -6,6 +6,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -23,6 +24,11 @@
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/native/mps/operations/RMSNorm.h>
+#include <c10/core/GradMode.h>
 #endif
 
 #include <array>
@@ -50,7 +56,7 @@ static void layer_norm_with_mean_rstd_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -74,7 +80,7 @@ void layer_norm_cpu_out(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -96,10 +102,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
 
   Tensor Y = at::native::empty_like(
       *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
   const auto dtype = param_scalar_type(input, mixed_type);
   Tensor mean = at::empty({M}, X->options().dtype(dtype));
@@ -115,8 +121,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -139,42 +145,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   if (grad_input_mask[0]) {
     dX = at::native::empty_like(
         *X,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          at::MemoryFormat::Contiguous)
                    : at::native::zeros_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
     dbeta = M > 0 ? at::native::empty_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         at::MemoryFormat::Contiguous)
                   : at::native::zeros_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
@@ -186,16 +192,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
 
 Tensor layer_norm_symint(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
@@ -204,7 +204,7 @@ DEFINE_DISPATCH(LayerNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -240,7 +240,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  at::Tensor out = std::get<0>(outputs);
+  auto& [out, mean, rstd] = outputs;
   out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
@@ -249,32 +249,42 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   } else if (bias.defined()) {
     out = out.add(bias);
   }
-  at::Tensor mean = std::get<1>(outputs);
-  at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  return outputs;
 }
 
-Tensor rms_norm(
+Tensor rms_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    c10::optional<double> eps) {
-
+    c10::SymIntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  auto bias_opt = at::optional<Tensor>();
-  const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
-  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+#ifdef USE_MPS
+  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
+    const Tensor weight = weight_opt.value();
+    const bool any_nested = input.is_nested() || weight.is_nested();
+    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
+    const bool is_input_fp = isFloatingType(input.scalar_type());
+    const bool is_weight_fp = isFloatingType(weight.scalar_type());
+
+    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
+      auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
+      return mps::rms_norm_mps_kernel(input.contiguous(), normalized_shape, weight.contiguous(), eps_val);
+    }
+  }
+#endif
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
@@ -288,14 +298,24 @@ Tensor rms_norm(
         input.scalar_type(),
         "rms_norm",
         [&] {
-    scalar_t eps_val;
-    if (!eps.has_value()) {
-      eps_val = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon();
+    // upcast is needed for fp16 and bf16
+    c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
+    Tensor upcasted_input = input.to(opmath_t);
+
+    Tensor rqrst_input;
+
+    // opmath_t would be one of [Double, Float, ComplexFloat, ComplexDouble]
+    if (opmath_t == at::ScalarType::Float || opmath_t == at::ScalarType::ComplexFloat) {
+      using limits = std::numeric_limits<float>;
+      float eps_val = eps.value_or(limits::epsilon());
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     } else {
-      eps_val = eps.value();
+      using limits = std::numeric_limits<double>;
+      double eps_val = eps.value_or(limits::epsilon());
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     }
 
-    auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
+    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());

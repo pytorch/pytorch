@@ -1,7 +1,8 @@
+from torchvision import models
+
 import torch
 from torch.utils.bundled_inputs import augment_model_with_bundled_inputs
 from torch.utils.mobile_optimizer import optimize_for_mobile
-from torchvision import models
 
 
 class MobileNetV2Module:

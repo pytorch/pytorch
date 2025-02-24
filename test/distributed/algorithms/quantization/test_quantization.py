@@ -14,7 +14,7 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
@@ -83,7 +84,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
@@ -99,7 +99,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
@@ -111,13 +110,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16"
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_fp16(self):
             store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -136,13 +134,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16"
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_bfp16(self):
             store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -166,7 +163,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -190,7 +186,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -225,10 +220,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                if tensors[0].dtype == torch.complex64:
-                    tensor_shapes = [torch.view_as_real(tensors[0]).shape]
-                else:
-                    tensor_shapes = [tensors[0].shape]
                 allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
                 allgather(tensors, tensor, group=group_id, async_op=False)
 

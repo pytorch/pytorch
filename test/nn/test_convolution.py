@@ -6,24 +6,19 @@ import warnings
 from itertools import product
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    TEST_CUDA,
-    TEST_CUDNN,
-    tf32_is_not_fp32,
-    tf32_on_and_off,
-)
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
     disableMkldnn,
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -39,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm,
     skipCUDAIfRocmVersionLessThan,
     skipMeta,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -52,6 +48,7 @@ from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
     instantiate_parametrized_tests,
+    MACOS_VERSION,
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
@@ -62,7 +59,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+
+AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 
 if TEST_SCIPY:
@@ -88,7 +86,8 @@ class TestConvolutionNN(NNTestCase):
         path = download_file("https://download.pytorch.org/test_data/legacy_conv2d.pt")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SourceChangeWarning)
-            m = torch.load(path, encoding="utf-8")
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, encoding="utf-8", weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -475,7 +474,6 @@ class TestConvolutionNN(NNTestCase):
 
     def test_Conv2d_1x1(self):
         in_channels = 2
-        out_channels = 2
         mod = torch.nn.Conv2d(2, 2, 1, bias=False).to(dtype=torch.double)
         input = torch.randn(
             1, in_channels, 5, 5, requires_grad=True, dtype=torch.double
@@ -524,7 +522,38 @@ class TestConvolutionNN(NNTestCase):
         m = torch.nn.Conv1d(
             in_channels=16, out_channels=32, kernel_size=2, bias=True
         ).cuda()
-        result = m(x)
+        m(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    def test_cudnn_not_mutate_stride(self):
+        weight = torch.randn(64, 64, 1, 1)
+        x = torch.randn(2, 64, 10, 10).to(memory_format=torch.channels_last)
+        weight_stride = weight.stride()
+
+        def conv(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+                bias=None,
+            )
+
+        # should have run in nhwc without mutating input strides
+        out_nhwc = conv(x, weight)
+        self.assertEqual(weight.stride(), weight_stride)
+        self.assertTrue(out_nhwc.is_contiguous(memory_format=torch.channels_last))
+
+        x = x.contiguous(memory_format=torch.contiguous_format)
+        out_c = conv(x, weight)
+        self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertEqual(out_c, out_nhwc)
+        self.assertEqual(weight.stride(), weight_stride)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
@@ -665,7 +694,7 @@ class TestConvolutionNN(NNTestCase):
         # Check that ConvTranspose3d can take a 5d output_size.
         m = nn.ConvTranspose3d(2, 2, 2)
         i = torch.rand(1, 2, 1, 1, 1)
-        out = m(i, output_size=(1, 2, 2, 2, 2))
+        m(i, output_size=(1, 2, 2, 2, 2))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_ConvTranspose2d_half_cublas_gemm(self):
@@ -681,7 +710,8 @@ class TestConvolutionNN(NNTestCase):
 
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @tf32_on_and_off(0.001)
     @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
@@ -726,7 +756,8 @@ class TestConvolutionNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @tf32_on_and_off(0.001)
     @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
@@ -872,15 +903,11 @@ class TestConvolutionNN(NNTestCase):
         weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        out = torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
         input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        out_transpose = torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
 
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -1338,7 +1365,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
@@ -1400,7 +1427,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @tf32_on_and_off(0.01)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
@@ -1646,7 +1673,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
     @dtypes(torch.float, torch.cfloat)
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
         test_args = [
@@ -1685,6 +1715,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual)
 
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
@@ -1737,6 +1770,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 10, device=device, dtype=dtype)
@@ -1746,6 +1782,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype)
@@ -1764,6 +1803,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)
     def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
         x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
@@ -1793,6 +1833,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     @tf32_on_and_off(0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
@@ -1824,6 +1867,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -1884,6 +1931,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             )
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
         x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
@@ -1899,6 +1949,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 10), device=device, dtype=dtype)
@@ -1938,6 +1991,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 10), device=device, dtype=dtype)
@@ -1977,6 +2033,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @skipMPS  # Results in CI are inconsistent, forced to skip
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
@@ -2015,7 +2072,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             if mode == "same":
                 actual = actual[:5, :5, :10]
 
-            if tf32_is_not_fp32() and (
+            if torch.cuda.is_tf32_supported() and (
                 dtype == torch.float or dtype == torch.complex64
             ):
                 self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
@@ -2030,6 +2087,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @dtypes(torch.float, torch.complex64)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
@@ -2044,6 +2104,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, gy_actual)
 
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -2070,7 +2134,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check_fwd_over_rev=check_forward_ad,
         )
 
-    @parametrize_test("N", range(2, 4), name_fn=lambda N: f"ConvTranspose{N}d")
+    @parametrize_test(
+        arg_str="N",
+        arg_values=[
+            subtest(arg_values=(2), name="ConvTranspose2d"),
+            subtest(
+                arg_values=(3), name="ConvTranspose3d", decorators=[expectedFailureMPS]
+            ),
+        ],
+    )
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
         # See https://github.com/pytorch/pytorch/issues/75889
@@ -2931,17 +3003,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
             x = torch.transpose(x, 1, 4)
             x2 = x[..., 0]
-            inputs = [
-                x2,
-                conv.weight,
-                conv.bias,
-                (2, 1),
-                (0, 1),
-                (1, 1),
-                False,
-                (0, 1),
-                1,
-            ]
             if torch.backends.mkldnn.is_available():
                 y = conv(x2)
                 # Disable MKLDNN explicitly
@@ -3036,6 +3097,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         input_large = torch.randn(1, 1, 2048, 1024, dtype=dtype, device=device)
         conv2(input_large)
 
+    @expectedFailureMPS  # ConvTranspose 3D is not supported on MPS
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
@@ -3179,7 +3241,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             .half()
         )
         output = model(input_tensor)
-        model_cpu = model.cpu().float()
+        _model_cpu = model.cpu().float()
         output_cpu = model(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
@@ -3307,7 +3369,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
     @dtypes(torch.float)
-    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @tf32_on_and_off(0.001)
     @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
@@ -3352,6 +3415,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float, torch.cfloat)
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
         weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
@@ -3850,7 +3915,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     inp, w, None, (1, 1), (0, 0), (1, 1), 1
                 )
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            if tf32_is_not_fp32() and dtype == torch.float:
+            if torch.cuda.is_tf32_supported() and dtype == torch.float:
                 self.assertEqual(conv2d_out.relu(), cudnn_out, atol=4e-3, rtol=0.006)
             else:
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
@@ -3888,7 +3953,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            if tf32_is_not_fp32() and dtype == torch.float:
+            if torch.cuda.is_tf32_supported() and dtype == torch.float:
                 self.assertEqual(
                     F.relu(conv2d_out + alpha * z), cudnn_out, atol=2e-3, rtol=0.006
                 )
@@ -4001,7 +4066,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y)
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals())
+instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":

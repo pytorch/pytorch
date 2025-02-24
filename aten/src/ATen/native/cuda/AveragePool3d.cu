@@ -351,7 +351,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& output
 ) {
   TensorArg output_arg{ output, "output", 1 };
@@ -451,7 +451,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
   // See Note [Writing Nondeterministic Operations]

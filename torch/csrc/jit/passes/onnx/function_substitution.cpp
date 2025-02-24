@@ -4,19 +4,18 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/naming.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
-const std::string kTopModuleVariableName = "";
+const std::string kTopModuleVariableName;
 
 std::string TidyClassNameFromTorchScript(
-    const c10::optional<c10::QualifiedName>& class_name) {
+    const std::optional<c10::QualifiedName>& class_name) {
   if (!class_name) {
     return "UNKNOWN_CLASS";
   }
-  std::string out = "";
+  std::string out;
   for (const auto& atom : class_name->atoms()) {
     bool is_internal_torch_atom = (atom == "__torch__");
     bool is_mangle_atom = (atom.find("__torch_mangle") != std::string::npos);
@@ -193,5 +192,4 @@ void ONNXFunctionCallSubstitution(Graph& graph) {
   GRAPH_DUMP("After function call substitution calls: ", &graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

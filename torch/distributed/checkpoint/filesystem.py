@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import io
@@ -7,30 +8,26 @@ import pickle
 import queue
 import threading
 import uuid
+import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from io import UnsupportedOperation
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    IO,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, IO, Optional, Union
+
+# introduced as collections.abc.Buffer in Python 3.12
+from typing_extensions import Buffer
 
 import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-
+from torch.distributed.checkpoint._extension import (
+    ExtensionRegistry,
+    StreamTransformExtension,
+)
 from torch.distributed.checkpoint.metadata import (
     Metadata,
     MetadataIndex,
@@ -56,7 +53,10 @@ from torch.distributed.checkpoint.storage import (
 from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
-__all__ = ["FileSystemWriter", "FileSystemReader"]
+
+__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
+
+_metadata_fn: str = ".metadata"
 
 
 @dataclass
@@ -66,6 +66,10 @@ class _StorageInfo:
     relative_path: str
     offset: int
     length: int
+    transform_descriptors: Optional[Sequence[str]] = None
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
 @dataclass
@@ -90,14 +94,14 @@ class _TensorLoader(ABC):
         pass
 
     @abstractmethod
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
     def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
 
     def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
@@ -105,7 +109,7 @@ class _SerialCpuLoader(_TensorLoader):
     def start_loading(self) -> None:
         pass
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -125,7 +129,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -145,7 +149,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self) -> List[Tuple[torch.Tensor, object]]:
+    def _drain(self) -> list[tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -179,7 +183,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self) -> Iterable[Tuple[torch.Tensor, object]]:
+    def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
@@ -197,7 +201,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()
@@ -205,6 +209,57 @@ class _OverlappingCpuLoader(_TensorLoader):
             yield from drained
 
         yield from self._finish()
+
+
+class _StorageWriterTransforms:
+    """
+    This is experimental, and will likely move elsewhere in the
+    future.  It lives here to minimize changes while we are still
+    learning and gathering feedback.
+    """
+
+    def __init__(
+        self, extensions: Optional[Sequence[StreamTransformExtension]] = None
+    ) -> None:
+        """
+        If the extensions arg is None, this means the implementation
+        should provide whatever defaults it chooses.  An empty
+        sequence indicates no extensions should be used.  At this
+        time, the default extensions sequence is empty.
+        """
+        self.extensions = () if extensions is None else extensions
+
+    def transform_save_stream(
+        self, write_item: WriteItem, raw_stream: io.IOBase
+    ) -> tuple[IO[bytes], list[str]]:
+        # In order to avoid leaking fds, transformers' close must
+        # cascade to wrapped streams, but since this function can
+        # append to the raw stream, we can't close the actual stream.
+        # So, we use this to put a wrapper around the raw stream's
+        # close() to make it a noop, and it gets closed once all files
+        # are appended.
+
+        class NoCloseWriter(io.IOBase):
+            def __init__(self, raw: io.IOBase):
+                self.raw = raw
+
+            def writeable(self) -> bool:
+                return True
+
+            def write(self, b: Buffer) -> int:
+                return self.raw.write(b)
+
+            def close(self):
+                self.flush()
+                self.raw.flush()
+                # but not close.
+
+        transform_to = cast(IO[bytes], NoCloseWriter(raw_stream))
+
+        for ex in self.extensions:
+            transform_to = ex.transform_to(transform_to)
+
+        return (transform_to, [ex.get_descriptor() for ex in reversed(self.extensions)])
 
 
 def _item_size(item: WriteItem) -> int:
@@ -218,14 +273,14 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[WriteItem]]:
     if bins == 1:
         return [items]
 
     bytes_w = [wi for wi in items if wi.type == WriteItemType.BYTE_IO]
     tensor_w = [wi for wi in items if wi.type != WriteItemType.BYTE_IO]
 
-    buckets: List[List[WriteItem]] = [[] for _ in range(bins)]
+    buckets: list[list[WriteItem]] = [[] for _ in range(bins)]
     bucket_sizes = [0 for _ in range(bins)]
 
     tensor_w.sort(key=_item_size, reverse=True)
@@ -243,6 +298,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
 
 def _write_item(
+    transforms: _StorageWriterTransforms,
     stream: io.IOBase,
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
@@ -250,19 +306,36 @@ def _write_item(
 ) -> WriteResult:
     offset = stream.tell()
 
+    (transform_to, transform_descriptors) = transforms.transform_save_stream(
+        write_item, stream
+    )
+
     if write_item.type == WriteItemType.BYTE_IO:
         assert isinstance(data, io.BytesIO)
-        stream.write(data.getbuffer())
+        transform_to.write(data.getbuffer())
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, cast(IO[bytes], stream))
+        torch.save(data, transform_to)
+    transform_to.close()
+
     length = stream.tell() - offset
+
+    # For consistency with earlier versions, leave this field out of the
+    # metadata if there are no extensions.
+    info_transform_descriptors = (
+        None if len(transform_descriptors) == 0 else transform_descriptors
+    )
 
     return WriteResult(
         index=write_item.index,
         size_in_bytes=length,
-        storage_data=_StorageInfo(storage_key, offset, length),
+        storage_data=_StorageInfo(
+            storage_key,
+            offset,
+            length,
+            transform_descriptors=info_transform_descriptors,
+        ),
     )
 
 
@@ -271,6 +344,7 @@ def _write_files_from_queue(
     file_queue: queue.Queue,
     result_queue: queue.Queue,
     planner: SavePlanner,
+    transforms: _StorageWriterTransforms,
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
@@ -315,20 +389,21 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
+                        _write_item(transforms, stream, data, write_item, storage_key)
                     )
 
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
+                        _write_item(transforms, stream, tensor, write_item, storage_key)
                     )
 
                 if use_fsync:
                     try:
                         os.fsync(stream.fileno())
-                    except AttributeError:
+                    except (AttributeError, UnsupportedOperation):
                         os.sync()
+                stream.close()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -367,19 +442,31 @@ class FileSystemBase(ABC):
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         ...
 
+    @abstractmethod
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        ...
+
+    @abstractmethod
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        with cast(Path, path).open(mode) as stream:
+        if not isinstance(path, Path):
+            path = Path(path)
+        with path.open(mode) as stream:
             yield cast(io.IOBase, stream)
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
     ) -> Union[str, os.PathLike]:
-        return cast(Path, path) / suffix
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path / suffix
 
     def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         if not isinstance(path, Path):
@@ -389,10 +476,15 @@ class FileSystem(FileSystemBase):
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
     ) -> None:
-        cast(Path, path).rename(cast(Path, new_path))
+        if not isinstance(path, Path):
+            path = Path(path)
+
+        path.rename(cast(Path, new_path))
 
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
-        cast(Path, path).mkdir(parents=True, exist_ok=True)
+        if not isinstance(path, Path):
+            path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -408,8 +500,19 @@ class FileSystem(FileSystemBase):
 
         return False
 
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path.exists()
+
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        if not isinstance(path, Path):
+            path = Path(path)
+        path.unlink()
+
 
 class _FileSystemWriter(StorageWriter):
+
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -430,6 +533,8 @@ class _FileSystemWriter(StorageWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
+        overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -442,6 +547,8 @@ class _FileSystemWriter(StorageWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -453,6 +560,8 @@ class _FileSystemWriter(StorageWriter):
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
         self.save_id = _generate_uuid()
+        self.overwrite = overwrite
+        self.transforms = _StorageWriterTransforms(_extensions)
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
@@ -464,9 +573,19 @@ class _FileSystemWriter(StorageWriter):
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
+        if self.fs.exists(self.metadata_path):
+            if self.overwrite:
+                warnings.warn(
+                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
+                    " maintain this functionality or False to raise when an existing checkpoint is found."
+                )
+            else:
+                raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
+
         return plan
 
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(plans)
@@ -477,7 +596,7 @@ class _FileSystemWriter(StorageWriter):
         self,
         plan: SavePlan,
         planner: SavePlanner,
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -510,6 +629,7 @@ class _FileSystemWriter(StorageWriter):
                     file_queue,
                     result_queue,
                     planner,
+                    self.transforms,
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
@@ -523,6 +643,7 @@ class _FileSystemWriter(StorageWriter):
             file_queue=file_queue,
             result_queue=result_queue,
             planner=planner,
+            transforms=self.transforms,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
@@ -536,34 +657,39 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            pass
-
-            fut: Future[List[WriteResult]] = Future()
+            fut: Future[list[WriteResult]] = Future()
             fut.set_result(res)
             return fut
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
-        storage_md = dict()
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+        storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
 
         metadata.storage_meta = self.storage_meta()
 
-        tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
-        meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
+        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
                 try:
                     os.fsync(metadata_file.fileno())
-                except AttributeError:
+                except (AttributeError, UnsupportedOperation):
                     os.sync()
 
-        self.fs.rename(tmp_path, meta_path)
+        # delete in-case other checkpoints were present.
+        if self.fs.exists(self.metadata_path):
+            self.fs.rm_file(self.metadata_path)
+
+        self.fs.rename(tmp_path, self.metadata_path)
 
     def storage_meta(self) -> Optional[StorageMeta]:
         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
+
+    @property
+    def metadata_path(self) -> Union[str, os.PathLike]:
+        return cast(Path, self.fs.concat_path(self.path, _metadata_fn))
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
@@ -577,26 +703,57 @@ class _FileSystemWriter(StorageWriter):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
+class _StorageReaderTransforms:
+    """
+    This is experimental, and will likely move elsewhere in the
+    future.  It lives here to minimize changes while we are still
+    learning and gathering feedback.
+    """
+
+    def __init__(self, extension_registry: Optional[ExtensionRegistry] = None) -> None:
+        self.extension_registry = (
+            ExtensionRegistry() if extension_registry is None else extension_registry
+        )
+
+    def transform_load_stream(
+        self,
+        read_item: ReadItem,
+        transform_descriptors: Sequence[str],
+        raw_stream: IO[bytes],
+    ) -> IO[bytes]:
+        extensions = self.extension_registry.from_descriptor_list(transform_descriptors)
+        transform_from = raw_stream
+        for ex in extensions:
+            if isinstance(ex, StreamTransformExtension):
+                transform_from = ex.transform_from(transform_from)
+        return transform_from
+
+
 class FileSystemReader(StorageReader):
-    def __init__(self, path: Union[str, os.PathLike]) -> None:
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
+        _extension_registry: Optional[ExtensionRegistry] = None,  # EXPERIMENTAL
+    ) -> None:
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.storage_data: dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
+        self.transforms = _StorageReaderTransforms(_extension_registry)
 
-    def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
-        return _create_file_view(file, sinfo.offset, sinfo.length)
+    def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
+        return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
-        self.storage_data = dict()
+        self.storage_data = {}
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = dict()
+        per_file: dict[str, list[ReadItem]] = {}
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
@@ -609,14 +766,34 @@ class FileSystemReader(StorageReader):
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
+                    transform_from = self.transforms.transform_load_stream(
+                        req,
+                        # This field wasn't present in older
+                        # implementations so provide a fallback.
+                        item_md.transform_descriptors or (),
+                        file_slice,
+                    )
+
                     if req.type == LoadItemType.BYTE_IO:
-                        read_bytes = io.BytesIO(file_slice.read(item_md.length))
+                        read_bytes = io.BytesIO(transform_from.read(-1))
                         read_bytes.seek(0)
                         planner.load_bytes(req, read_bytes)
                     else:
+                        if transform_from.seekable():
+                            seekable = transform_from
+                        else:
+                            # torch.load requires a seekable input, so read the transform
+                            # stream now and store the output if needed
+                            seekable = io.BytesIO(transform_from.read(-1))
+                            seekable.seek(0)
+
                         tensor = cast(
                             Tensor,
-                            torch.load(cast(IO[bytes], file_slice), map_location="cpu"),
+                            torch.load(
+                                seekable,
+                                map_location="cpu",
+                                weights_only=True,
+                            ),
                         )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
@@ -652,13 +829,13 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         return plans
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
         """
-        return the checkpoint_id that will be used to save the checkpoint.
+        return the checkpoint_id that will be used to load the checkpoint.
         """
         return self.path
 
@@ -689,6 +866,8 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
+        overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -702,15 +881,23 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
-        super().__init__(
+        _FileSystemWriter.__init__(
+            self,
             path=path,
             single_file_per_rank=single_file_per_rank,
             sync_files=sync_files,
             thread_count=thread_count,
             per_thread_copy_ahead=per_thread_copy_ahead,
+            overwrite=overwrite,
+            _extensions=_extensions,
+        )
+        BlockingAsyncStager.__init__(
+            self,
             cache_staged_state_dict=cache_staged_state_dict,
         )
 
