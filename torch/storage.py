@@ -9,11 +9,11 @@ import io
 import threading
 import warnings
 from typing import Any, cast, Optional as _Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -43,7 +43,9 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    # Used when
+    # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
+    # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
     _fake_device: _Optional[torch.device] = None
 
     def __init__(self, *args, **kwargs):
