@@ -582,11 +582,7 @@ class TestDecomp(TestCase):
             func = partial(op.get_op(), **kwargs)
             with (
                 self.DecompCrossRefMode(
-                    self,
-                    self.precision,
-                    self.rel_tol,
-                    dtype,
-                    run_all=False,
+                    self, self.precision, self.rel_tol, dtype, run_all=False
                 ) as mode,
                 enable_python_dispatcher(),
             ):
@@ -686,11 +682,7 @@ class TestDecomp(TestCase):
             )
             with (
                 self.DecompCrossRefMode(
-                    self,
-                    self.precision,
-                    self.rel_tol,
-                    dtype,
-                    run_all=True,
+                    self, self.precision, self.rel_tol, dtype, run_all=True
                 ),
                 enable_python_dispatcher(),
             ):
@@ -971,11 +963,7 @@ def forward(self, scores_1, mask_1, value_1):
                 # for each region
                 with (
                     self.DecompCrossRefMode(
-                        self,
-                        self.precision,
-                        self.rel_tol,
-                        dtype,
-                        run_all,
+                        self, self.precision, self.rel_tol, dtype, run_all
                     ) as mode,
                     enable_python_dispatcher(),
                 ):
@@ -997,11 +985,7 @@ def forward(self, scores_1, mask_1, value_1):
 
                     with (
                         self.DecompCrossRefMode(
-                            self,
-                            self.precision,
-                            self.rel_tol,
-                            dtype,
-                            run_all,
+                            self, self.precision, self.rel_tol, dtype, run_all
                         ) as mode,
                         enable_python_dispatcher(),
                     ):
@@ -1023,11 +1007,7 @@ def forward(self, scores_1, mask_1, value_1):
                 # decomposition used by the particular op is wrong.
                 with (
                     self.DecompCrossRefMode(
-                        self,
-                        self.precision,
-                        self.rel_tol,
-                        dtype,
-                        run_all,
+                        self, self.precision, self.rel_tol, dtype, run_all
                     ) as mode,
                     enable_python_dispatcher(),
                 ):

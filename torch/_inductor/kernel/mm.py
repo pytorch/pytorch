@@ -53,6 +53,7 @@ from .mm_common import (
     persistent_mm_configs,
     persistent_mm_grid,
     persistent_mm_options,
+    should_fallback_to_aten,
     triton_config,
 )
 
@@ -463,12 +464,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     for k in inductor_config.external_matmul:
@@ -513,10 +509,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    if len(choices) == 0:
-        log.warning(
-            "No choices for integer GEMM avaialbe using configured backends, using ATen backend as fallback"
-        )
+
+    if should_fallback_to_aten(choices):
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
 
     try:
@@ -652,12 +646,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    add_aten_fallback = False
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
-        add_aten_fallback = True
-
-    if add_aten_fallback:
+    if should_fallback_to_aten(choices):
         choices.append(
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
