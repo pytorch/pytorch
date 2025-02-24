@@ -1,5 +1,5 @@
 name: BC Lint
-
+mangle
 on:
   pull_request:
     types:
