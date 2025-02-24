@@ -568,37 +568,36 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
 
     def size_args(self):
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
+        x, w = self.input_nodes[0], self.input_nodes[1]
+        y = self.output_node
 
-        GroupCount = self.groups
-        NBatch = X.shape[0]
-        NOutChannels = Y.shape[1]
-        NInChannels = X.shape[1]
+        group_count = self.groups
+        n_batch = x.shape[0] # type: ignore
+        n_out_channels = y.shape[1] # type: ignore
+        n_in_channels = x.shape[1] # type: ignore
 
-        FilterSize_0, FilterSize_1 = W.shape[2:4]
-        InputSize_0, InputSize_1 = X.shape[2:4]
-        ConvolutionStrides_0, ConvolutionStrides_1 = self.stride
-        Dilations_0, Dilations_1 = self.dilation
-        LeftPads_0, LeftPads_1 = self.padding
-        RightPads_0, RightPads_1 = self.padding
+        filter_size_0, filter_size_1 = w.shape[2:4] # type: ignore
+        input_size_0, input_size_1 = x.shape[2:4] # type: ignore
+        convolution_strides_0, convolution_strides_1 = self.stride
+        dilations_0, dilations_1 = self.dilation
+        left_pads_0, left_pads_1 = self.padding
+        right_pads_0, right_pads_1 = self.padding
 
         return (
-            GroupCount,
-            NBatch,
-            NOutChannels,
-            NInChannels,
-            FilterSize_0,
-            FilterSize_1,
-            InputSize_0,
-            InputSize_1,
-            ConvolutionStrides_0,
-            ConvolutionStrides_1,
-            Dilations_0,
-            Dilations_1,
-            LeftPads_0,
-            LeftPads_1,
-            RightPads_0,
-            RightPads_1,
-        )
-
+            group_count,
+            n_batch,
+            n_out_channels,
+            n_in_channels,
+            filter_size_0,
+            filter_size_1,
+            input_size_0,
+            input_size_1,
+            convolution_strides_0,
+            convolution_strides_1,
+            dilations_0,
+            dilations_1,
+            left_pads_0,
+            left_pads_1,
+            right_pads_0,
+            right_pads_1,
+            )
