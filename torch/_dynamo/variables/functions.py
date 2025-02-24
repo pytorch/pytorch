@@ -41,7 +41,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
-    IncorrectUsage,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -640,12 +639,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # * If the generator exits without yielding, raise StopIteration
             # * If the generator function does not catch the passed-in exception,
             # or raises a different exception, then that exception propagates to the caller.
-
-            if len(args) > 1:
-                raise IncorrectUsage(
-                    "the (type, exc, tb) signature of throw() is deprecated, "
-                    "use the single-arg signature instead."
-                )
 
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
