@@ -825,7 +825,7 @@ class _PipelineStageBase(ABC):
         # stage_output is freed after this function returns and
         # the output given to the user was detached, so there is no ref to the graph anymore and it is freed
         # for the loss however, it was not detached yet, so we need to do it here
-        if self.is_last:
+        if self.is_last and full_backward:
             loss.detach_()
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
