@@ -265,10 +265,10 @@ jobs:
     name: verify-cachebench-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_9-gcc11-build
+      - verify-cachebench-cpu-build
       - target-determination
     with:
       build-environment: linux-jammy-py3.9-gcc11
-      docker-image: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.test-matrix }}
+      docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit
