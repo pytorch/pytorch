@@ -572,12 +572,12 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         y = self.output_node
 
         group_count = self.groups
-        n_batch = x.shape[0] # type: ignore
-        n_out_channels = y.shape[1] # type: ignore
-        n_in_channels = x.shape[1] # type: ignore
+        n_batch = x.shape[0]  # type: ignore[index]
+        n_out_channels = y.shape[1]  # type: ignore[index]
+        n_in_channels = x.shape[1]  # type: ignore[index]
 
-        filter_size_0, filter_size_1 = w.shape[2:4] # type: ignore
-        input_size_0, input_size_1 = x.shape[2:4] # type: ignore
+        filter_size_0, filter_size_1 = w.shape[2:4]  # type: ignore[index]
+        input_size_0, input_size_1 = x.shape[2:4]  # type: ignore[index]
         convolution_strides_0, convolution_strides_1 = self.stride
         dilations_0, dilations_1 = self.dilation
         left_pads_0, left_pads_1 = self.padding
