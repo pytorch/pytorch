@@ -803,7 +803,7 @@ class TestFP8MatmulCuda(TestCase):
             prof.export_chrome_trace(f.name)
             no_carveout, carveout_0, carveout_66, no_carveout_again = [
                 math.prod(evt.get("args", {}).get("grid", []))
-                for evt in json.load(open(f.name, "rt"))["traceEvents"]
+                for evt in json.load(open(f.name))["traceEvents"]
                 if evt.get("cat", "") == "kernel"
             ]
 
