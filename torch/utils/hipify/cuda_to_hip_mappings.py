@@ -3863,6 +3863,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUDA_C_64I", ("HIP_C_64I", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_64U", ("HIP_R_64U", CONV_TYPE, API_RUNTIME)),
         ("CUDA_C_64U", ("HIP_C_64U", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E4M3", ("HIP_R_8F_E4M3", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E5M2", ("HIP_R_8F_E5M2", CONV_TYPE, API_RUNTIME)),
         (
             "MAJOR_VERSION",
             ("hipLibraryMajorVersion", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
