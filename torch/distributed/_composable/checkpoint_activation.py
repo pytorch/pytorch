@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections.abc import Generator
-from contextlib import contextmanager, nullcontext
-from typing import Any, ContextManager, Optional
+from contextlib import AbstractContextManager, contextmanager, nullcontext
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -14,7 +14,7 @@ from .contract import _State, contract
 
 
 @contextmanager
-def _no_hook(module: nn.Module, user_ctx: Optional[ContextManager] = None):
+def _no_hook(module: nn.Module, user_ctx: Optional[AbstractContextManager] = None):
     r"""
     Disable hooks installed by checkpoint to avoid unintentional recursion
     during backward recomputation.
