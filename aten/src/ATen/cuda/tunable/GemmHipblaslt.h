@@ -82,7 +82,7 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 // Return a dummy value to satisfy linker.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
-  return static_cast<hipDataType>(100000);
+  return static_cast<hipDataType>(500);
 }
 
 template <typename T>
