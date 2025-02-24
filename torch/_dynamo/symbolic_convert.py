@@ -373,9 +373,11 @@ class BlockStackEntry:
             and hasattr(self.with_context, "target_values")
             and self.with_context.target_values
         ):
-            return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
+            return ReenterWith(
+                self.stack_index - 1, tuple(self.with_context.target_values)
+            )
         else:
-            return ReenterWith(self.stack_index)
+            return ReenterWith(self.stack_index - 1)
 
     def exit(self, tx, is_graph_break):
         assert self.with_context is not None
@@ -1797,26 +1799,13 @@ class InstructionTranslatorBase(
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
-                # if block_stack_entry.inst.opname != "SETUP_FINALLY":
-                #     unimplemented(
-                #         "exception is raised when top of the block stack "
-                #         "is not exception handler (e.g. try .. with .. except). "
-                #         f"Current TOS is {block_stack_entry.inst}"
-                #     )
-
                 exception_var = self.exn_vt_stack.get_current_exception()
                 self.exn_vt_stack.move_current_exception_to_stack()
 
                 # 1) pop values from the stack until it matches the stack depth
                 # for the handler
-                delta = 0
-                if block_stack_entry.inst.opname == "SETUP_WITH":
-                    delta = 1
-                while len(self.stack) > block_stack_entry.stack_index + delta:
+                while len(self.stack) > block_stack_entry.stack_index:
                     self.pop()
-
-                # while len(self.stack) > block_stack_entry.stack_index:
-                #     self.pop()
 
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
@@ -2759,6 +2748,8 @@ class InstructionTranslatorBase(
         else:
             target = inst.target
 
+        self.push(exit)
+
         if target:
             if isinstance(self, InstructionTranslator):
                 self.block_stack.append(
@@ -2767,7 +2758,6 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        self.push(exit)
         self.push(ctx.enter(self))
 
     def append_prefix_inst(self, inst):
