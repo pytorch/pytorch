@@ -1809,8 +1809,14 @@ class InstructionTranslatorBase(
 
                 # 1) pop values from the stack until it matches the stack depth
                 # for the handler
-                while len(self.stack) > block_stack_entry.stack_index:
+                delta = 0
+                if block_stack_entry.inst.opname == "SETUP_WITH":
+                    delta = 1
+                while len(self.stack) > block_stack_entry.stack_index + delta:
                     self.pop()
+
+                # while len(self.stack) > block_stack_entry.stack_index:
+                #     self.pop()
 
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
@@ -2753,8 +2759,6 @@ class InstructionTranslatorBase(
         else:
             target = inst.target
 
-        self.push(exit)
-
         if target:
             if isinstance(self, InstructionTranslator):
                 self.block_stack.append(
@@ -2763,6 +2767,7 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
+        self.push(exit)
         self.push(ctx.enter(self))
 
     def append_prefix_inst(self, inst):
