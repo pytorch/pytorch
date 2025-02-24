@@ -17,7 +17,6 @@ from torch._C._functorch import (
 )
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -43,7 +42,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-from .utils import _from_fun, create_fw_bw_graph
+from .utils import _from_fun, _maybe_fake_prop_ignore_unbacked, create_fw_bw_graph
 
 
 log = logging.getLogger(__name__)
@@ -205,7 +204,9 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         with disable_proxy_modes_tracing():
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
-            fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))
+            fw_outputs_true = pytree.tree_map(
+                _from_fun, _maybe_fake_prop_ignore_unbacked(true_fn, fw_inputs)
+            )
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in fw_outputs_true
@@ -215,7 +216,9 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
                     "Expect outputs of true_fn to only contains tensors or None. "
                     f"Got types {[type(out) for out in fw_outputs_true]}."
                 )
-            fw_outputs_false = pytree.tree_map(_from_fun, false_fn(*fw_inputs))
+            fw_outputs_false = pytree.tree_map(
+                _from_fun, _maybe_fake_prop_ignore_unbacked(false_fn, fw_inputs)
+            )
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in fw_outputs_false
@@ -331,29 +334,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         "call_function", func_overload, proxy_args, {}
     )
 
-    # At this point, we're *guaranteed* that whether an output came from the
-    # true or false branch is indistinguishable. So, as this is just for tracing
-    # purposes, choose the true branch.
-
-    # TODO: the unbacked symbol allocations MUST NOT leak out, if you want to
-    # support this we need to arrange for the reenter_make_fx unbacked SymInts
-    # to be used, AND we need to arrange for some sort of unification between
-    # the two branches (but not really unification; e.g., if one branch
-    # returns [u0] and the other returns [5] this is OK but you MUST NOT
-    # conclude the result is 5.  Also if one branch returns [3] and another
-    # branch returns [5] you can make it work by immediately allocating a new
-    # unbacked SymInt here).
-    ignore_fresh_unbacked = contextlib.nullcontext()
-    if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
-        ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-
-    # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
-    # a FakeTensorMode error :
-    # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
-    # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
-    # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
-    with ignore_fresh_unbacked:
-        out = false_fn(*operands)
+    out = func_overload(pred, true_graph, false_graph, operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 

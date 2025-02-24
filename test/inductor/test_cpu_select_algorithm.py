@@ -2051,6 +2051,29 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_weight_prune(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 128, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(2, 32).to(torch.bfloat16)
+        mod = M().eval().to(torch.bfloat16)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_weight_prune"], 1)
+
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -2074,6 +2097,36 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bs", (2,))
+    @parametrize("Mdim", (16, 32))
+    @parametrize("Kdim", (32,))
+    @parametrize("Ndim", (3, 16, 32, 48, 128, 1024, 1025))
+    @dtypes(torch.bfloat16, torch.half)
+    def test_bmm_amx(self, dtype, bs, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x @ y
+
+        counters.clear()
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        # Currently brgemm config is only added for half
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @patches
     @torch.no_grad
@@ -2142,7 +2195,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
-        dtype = torch.float
         bs = 12
         Mdim = 10
         Kdim = 62
