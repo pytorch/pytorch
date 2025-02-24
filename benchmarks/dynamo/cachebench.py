@@ -115,6 +115,10 @@ def _run_torchbench_model(
 
 
 def _write_results_to_json(results: list[RunResult], output_filename: str) -> None:
+    if len(results) == 0:
+        # do not write empty results
+        return
+
     records = []
     for result in results:
         for metric_name, value in [
