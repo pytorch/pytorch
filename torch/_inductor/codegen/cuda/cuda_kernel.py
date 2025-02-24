@@ -8,6 +8,10 @@ from sympy import Expr, symbols
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
+
+if TYPE_CHECKING:
+    from .cuda_template import ArgInfo
+
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -153,7 +157,12 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name, runtime_arg_info, runtime_arg_values) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
+    ) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
