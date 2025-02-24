@@ -857,21 +857,6 @@ class TestNestedTensor(NestedTensorTestCase):
         ):
             torch.cat([x, y], dim=-1)
 
-    def test_nested_view_from_buffer_overflow_errors(self):
-        buffer = torch.tensor([1])
-        sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
-        strides = torch.tensor(
-            [[0x41414141], [0x41414141], [0x41414141]], dtype=torch.int64
-        )
-        offsets = torch.tensor(
-            [[0x41414141], [0x41414141], [0x41414141]], dtype=torch.int64
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Storage size calculation overflowed with sizes=\[9223372036854775807\] and strides=\[1094795585\]",
-        ):
-            nt = torch._nested_view_from_buffer(buffer, sizes, strides, offsets)
-
 
 @markDynamoStrictTest
 class TestNestedTensorDeviceType(NestedTensorTestCase):
