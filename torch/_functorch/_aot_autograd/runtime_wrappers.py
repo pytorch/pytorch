@@ -218,9 +218,7 @@ class AliasOfIntermediateHandler:
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
-            aliased_base_tensor.alias
-            if isinstance(aliased_base_tensor, TensorAlias)
-            else aliased_base_tensor,
+            aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
             self.functional_tensor,
