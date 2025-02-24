@@ -227,6 +227,4 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       philox_offset,
       debug_attn_mask);
 }
-
-REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);
 } // namespace at::native
