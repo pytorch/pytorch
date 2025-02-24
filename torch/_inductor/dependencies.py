@@ -723,11 +723,13 @@ def extract_loop_body_with_args(
         )
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     # detect indirect broadcast
-    repl_reverse = {v: k for k, v in repl.items()}  # type: ignore[assignment]
+    repl_reverse = {v: k for k, v in repl.items()}
     replacement_mem_dep = {}
     name_to_node = {node.target: node for node in fn.get_nodes()}
     for read in inner._reads:
         if isinstance(read, MemoryDep) and read.replacement:
+            # find out the indirect var in memdep's indexing expr, e.g. indirect0 in
+            # index0 = 4096*indirect0 + p1
             indirect_load_dim_indexing_expr = None
             indirect_vars = [
                 free_symbol
@@ -737,6 +739,7 @@ def extract_loop_body_with_args(
             if len(indirect_vars) != 1:
                 continue
             indirect_var = indirect_vars[0]
+            # find out its corresponding set_indirect node, e.g. set_indirect0
             set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
             if (
                 len(set_indirect_node.args) == 1
@@ -744,6 +747,7 @@ def extract_loop_body_with_args(
                 and "load_seed" not in set_indirect_node.args[0].target
             ):
                 the_load_node = set_indirect_node.args[0]
+                # example args: (ops, 'primals_2', get_index)
                 arg_pattern = [str(arg) for arg in the_load_node.args]
                 if (
                     len(arg_pattern) == 3
@@ -752,6 +756,9 @@ def extract_loop_body_with_args(
                 ):
                     the_load_index_node = the_load_node.args[2]
                     if len(the_load_index_node.args) == 1:
+                        # we require the get_index node should use indexX as its
+                        # argument and the indexX's expression should be in
+                        # fn.iter_vars, e.g. index0 = p0
                         indexing = fn.indexing_exprs.get(the_load_index_node.args[0])
                         # do we need to consider cases like index0 = p0 + 32*p1?
                         if indexing is not None and indexing in fn.iter_vars:
@@ -766,6 +773,8 @@ def extract_loop_body_with_args(
             ]
             if len(other_free_symbols) != 1:
                 continue
+            # find out the only free symbol in memdep's indexing expr, e.g. p1 in
+            # index0 = 4096*indirect0 + p1
             other_free_symbol = other_free_symbols[0]
             replacement = dict(read.replacement)
             replacement_reverse = {v: k for k, v in replacement.items()}
@@ -773,6 +782,7 @@ def extract_loop_body_with_args(
             d_symbol = replacement_reverse[other_free_symbol]
             d_p_replacement = {v: k for k, v in fn.replacement.items()}
             broadcast_dim_indexing = d_p_replacement[d_symbol]
+            # add this indirect broadcast dimension pair, e.g., (p0, p1) to the memdep
             read_new = read.set_indirect_broadcast(
                 (indirect_load_dim_indexing_expr, broadcast_dim_indexing)
             )
