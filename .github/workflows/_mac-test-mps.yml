@@ -41,7 +41,7 @@ jobs:
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/checkout_more_procs
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
 
