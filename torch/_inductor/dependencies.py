@@ -500,9 +500,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             sizes.pop()
 
     @classmethod
-    def _normalize(
-        cls, index: sympy.Expr, var_ranges: VarRanges
-    ) -> tuple[
+    def _normalize(cls, index: sympy.Expr, var_ranges: VarRanges) -> tuple[
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
@@ -530,9 +528,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
         return index, tuple(new_vars), tuple(new_sizes), tuple(replacement.items())  # type: ignore[arg-type]
 
-    def canonicalize(
-        self, index: sympy.Expr
-    ) -> tuple[
+    def canonicalize(self, index: sympy.Expr) -> tuple[
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
@@ -729,7 +725,7 @@ def extract_loop_body_with_args(
     # detect indirect broadcast
     repl_reverse = {v: k for k, v in repl.items()}  # type: ignore[assignment]
     replacement_mem_dep = {}
-    name_to_node = {node.name: node for node in fn.root_block.graph.nodes}
+    name_to_node = {node.target: node for node in fn.get_nodes()}
     for read in inner._reads:
         if isinstance(read, MemoryDep) and read.replacement:
             indirect_load_dim_indexing_expr = None
@@ -742,9 +738,11 @@ def extract_loop_body_with_args(
                 continue
             indirect_var = indirect_vars[0]
             set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
-            if len(set_indirect_node.args) == 1 and set_indirect_node.args[
-                0
-            ].name.startswith("load"):
+            if (
+                len(set_indirect_node.args) == 1
+                and set_indirect_node.args[0].target.startswith("load")
+                and "load_seed" not in set_indirect_node.args[0].target
+            ):
                 the_load_node = set_indirect_node.args[0]
                 arg_pattern = [str(arg) for arg in the_load_node.args]
                 if (
