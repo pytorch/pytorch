@@ -58,9 +58,9 @@ sycl::event woq_matmul_int4(
   m2_usr_strides = {1, compressed_k}; // k dim contiguous, 4bit pack into s32
 
   scale_usr_dims = {num_groups, n};
-  scale_usr_strides = {scale_.stride(0), scale_.stride(1)};
+  scale_usr_strides = {n, 1};
   zp_usr_dims = {num_groups, n};
-  zp_usr_strides = {zp.stride(0), zp.stride(1)};
+  zp_usr_strides = {n, 1};
   dst_usr_dims = {m, n};
   dst_usr_strides = {dst.stride(0), dst.stride(1)};
 
@@ -102,8 +102,8 @@ sycl::event woq_matmul_int4(
   m2_strides = {n, 1};
   scale_dims = scale_usr_dims; // {k//group_size, n}
   scale_strides = scale_usr_strides;
-  zp_dims = {num_groups, n};
-  zp_strides = {zp.stride(0), zp.stride(1)};
+  zp_dims = zp_usr_dims;
+  zp_strides = zp_usr_strides;
   dst_dims = dst_usr_dims;
   dst_strides = dst_usr_strides;
 

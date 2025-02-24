@@ -697,6 +697,13 @@ if(ANDROID
   endif()
 endif()
 
+if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
+    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
+      set(USE_KLEIDIAI OFF)
+      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
+    endif()
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
