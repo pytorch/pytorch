@@ -46,10 +46,6 @@ echo import sys
 python -c "import sys; print(sys.path)"
 if ERRORLEVEL 1 exit /b 1
 
-echo Checking that torch is installed...
-python -c "import torch"
-if ERRORLEVEL 1 exit /b 1
-
 echo Running python rnn_smoke.py...
 python .\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
