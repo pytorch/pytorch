@@ -522,9 +522,4 @@ def register_dataclass(
         print(ep)
 
     """
-
-    from torch._export.utils import register_dataclass_as_pytree_node
-
-    return register_dataclass_as_pytree_node(
-        cls, serialized_type_name=serialized_type_name
-    )
+    pytree.register_dataclass(cls, serialized_type_name=serialized_type_name)
