@@ -1169,11 +1169,10 @@ void Reducer::initialize_buckets(
       // Check if we can use comm-optimized memory pool to allocate tensor
       c10::intrusive_ptr<Backend> backend = nullptr;
       // An environment variable to disable comm-optimized memory pool.
-      // Default is 0, which means comm-optimized memory pool is enabled.
-      // Users can set it to 1 in case of seeing regression or OOM (because this
-      // comm MemPool may not share space with regular compute MemPool).
+      // Default is 1 for now (disabled).
+      // TODO: turn it on by default once we have more confidence on it.
       bool ddpDisableCommMem =
-          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "0") == "1");
+          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "1") == "1");
       try {
         backend = process_group_->getDefaultBackend();
       } catch (...) {

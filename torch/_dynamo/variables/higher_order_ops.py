@@ -1329,6 +1329,54 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
+
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+
+        from torch._higher_order_ops.utils import (
+            _has_potential_branch_input_alias,
+            _has_potential_branch_input_mutation,
+            _maybe_fake_tracing,
+        )
+        from torch._inductor.utils import is_pointwise_use
+
+        with tx.fake_mode:
+            xs_fake = [
+                first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
+                for leaf in itertools.chain(xs.items, xs.items)
+            ]
+            additional_fake = [
+                leaf.proxy.node.meta["example_value"].clone()
+                for leaf in additional_inputs.items
+            ]
+            sub_args_fake = xs_fake + additional_fake
+            pre_dispatch = False
+
+            fx = _maybe_fake_tracing(
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
+            )
+
+            for node in fx.graph.nodes:
+                # Check that the combine_fn is pointwise, if combine_mode='pointwise'
+                if not all(
+                    is_pointwise_use(use) or use.op == "output" for use in node.users
+                ):
+                    raise RuntimeError(
+                        "For combine_mode='pointwise', the combine_fn needs to be pointwise"
+                    )
+
+            if _has_potential_branch_input_mutation(
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
+            ):
+                raise RuntimeError(
+                    "Combine_fn might be modifying the input!"
+                )  # noqa: F541
+            if _has_potential_branch_input_alias(
+                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
+            ):
+                raise RuntimeError(
+                    "Combine_fn might be aliasing the input!"
+                )  # noqa: F541
+
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
@@ -1345,7 +1393,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "combine_fn_output",
         )
 
-        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
         )
@@ -2944,6 +2991,9 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
+    def python_type(self):
+        return type(self.value)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2959,7 +3009,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
         ) = self.create_wrapped_node(
-            tx, args[0], args[1].items, {}, self.value._name, subgraph_name="subgraph"
+            tx, args[0], args[1:], {}, self.value._name, subgraph_name="subgraph"
         )
         assert len(p_kwargs) == 0
 
@@ -2980,10 +3030,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
-        )
-        p_args = (
-            p_args[0],
-            p_args[1:],
         )
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
