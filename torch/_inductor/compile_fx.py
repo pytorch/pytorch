@@ -15,21 +15,12 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from collections import namedtuple
+from collections import defaultdict, namedtuple
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Mapping,
-    Optional,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import (
     Never,
     override,
@@ -149,7 +140,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Generator, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
@@ -500,7 +491,7 @@ def is_tf32_warning_applicable(gm: GraphModule) -> bool:
 
 def maybe_disable_comprehensive_padding(
     example_inputs: Sequence[InputType],
-) -> contextlib.AbstractContextManager[None, None]:
+) -> AbstractContextManager[None, None]:
     """
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
@@ -860,11 +851,22 @@ def _compile_fx_inner(
     return compiled_graph
 
 
+class _FxCompileStat:
+    # Count of successful compiles of this type
+    codegen_and_compile: int = 0
+
+    def __repr__(self) -> str:
+        return f"codegen_and_compile: {self.codegen_and_compile}"
+
+
 class FxCompile(ABC):
     """
     An FxCompile represents a mechanism that can turn a GraphModule into an
     OutputCode.
     """
+
+    # Some stats for logging/debugging
+    _compile_stats: dict[type[FxCompile], _FxCompileStat] = defaultdict(_FxCompileStat)
 
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
@@ -878,6 +880,10 @@ class FxCompile(ABC):
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
         ...
+
+    @classmethod
+    def _reset_stats(cls) -> None:
+        cls._compile_stats.clear()
 
 
 class _InProcessFxCompile(FxCompile):
@@ -893,6 +899,7 @@ class _InProcessFxCompile(FxCompile):
         # to propagate it further on
         # TODO: _CompileFxKwargs actually has stronger types than in the
         # signature, need to tighten it up
+
         assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
@@ -1206,6 +1213,8 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
+                    self._compile_stats[type(self)].codegen_and_compile += 1
+
                     return CompiledFxGraph(
                         compiled_fn,
                         graph,
@@ -1300,6 +1309,59 @@ class _VirtualizedSerializerContextManager(contextlib.ExitStack):
         return self
 
 
+def _is_fallback_handler(op: object) -> bool:
+    try:
+        return op._is_fallback_handler  # type: ignore[attr-defined]
+    except AttributeError:
+        return False
+
+
+class _LoweringSerializer:
+    """
+    This handles the data for serializing lowering.lowering
+    """
+
+    # A full implementation would make sure that all lowerings are copied over
+    # (or at least detected and raise a bypass when a non-standard lowering is
+    # used). For now we just handle tests by looking for lowerings that were
+    # overridden with a forced fallback.
+    fallbacks: OrderedSet[str]
+
+    def __init__(self) -> None:
+        from . import lowering
+
+        self.fallbacks = OrderedSet(
+            str(k) for k, v in lowering.lowerings.items() if _is_fallback_handler(v)
+        )
+
+    def patch(self) -> _LoweringSerializerContextManager:
+        return _LoweringSerializerContextManager(self)
+
+
+class _LoweringSerializerContextManager(contextlib.ExitStack):
+    """
+    Helper for _LoweringSerializer.patch()
+    """
+
+    def __init__(self, lowering: _LoweringSerializer) -> None:
+        super().__init__()
+        self.lowering = lowering
+
+    @override
+    def __enter__(self) -> Self:
+        super().__enter__()
+
+        from . import lowering
+
+        for k, v in lowering.lowerings.items():
+            name = str(k)
+            if name in self.lowering.fallbacks:
+                if not _is_fallback_handler(v):
+                    self.enter_context(lowering.force_fallback(k))  # type: ignore[arg-type]
+
+        return self
+
+
 @dataclass
 class _WireProtocolInput:
     """
@@ -1318,6 +1380,7 @@ class _WireProtocolInput:
         torch.testing._internal.common_utils.DeterministicGuard
     ]
     logger_state: _LoggerState
+    lowering: _LoweringSerializer
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -1443,7 +1506,7 @@ class _LoggerState:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_value: Optional[BaseException],
         traceback: Optional[types.TracebackType],
     ) -> None:
@@ -1530,6 +1593,7 @@ class _SerializedFxCompile(FxCompile):
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
         logger_state = _LoggerState()
+        lowering = _LoweringSerializer()
 
         # If we're running tests then grab the DeterministicGuard (don't want to
         # import this if it isn't already imported because it has side-effects)
@@ -1554,6 +1618,7 @@ class _SerializedFxCompile(FxCompile):
                 _VirtualizedSerializer.serialize(),
                 deterministic_guard_for_testing,
                 logger_state,
+                lowering,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
@@ -1567,6 +1632,7 @@ class _SerializedFxCompile(FxCompile):
         output = self._send_to_child(input).deserialize(constants)
 
         self._postprocess(output)
+        self._compile_stats[type(self)].codegen_and_compile += 1
 
         # TODO: Do we need to figure out what changed in TracingContext in the
         # child and plumb that back up to the parent?
@@ -1608,6 +1674,7 @@ class _SerializedFxCompile(FxCompile):
             input = pickled_input.deserialize()
 
             stack.enter_context(input.virtualized.patch())
+            stack.enter_context(input.lowering.patch())
             stack.enter_context(config.patch(input.config))
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
@@ -2198,7 +2265,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
     """
