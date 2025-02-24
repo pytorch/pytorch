@@ -90,9 +90,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _generate_temporary_array_pointer(c_type: str, elements: Sequence[str]) -> str:
         """Get a pointer to an array that only exists for the duration of the C++
         statement it's used in."""
-        # cbegin() returns const c_type*.
+        # If the c_type is already a const pointer, return a mutable pointer to the
+        # array.  Otherwise, return a const pointer.  This works around an inconsistency
+        # in the C-shim interface, where both Optional[List[c_type]] and
+        # List[Optional[c_type]] map to the same type, const c_type**, while
+        # representing different underlying concepts and storages.
+        ptr_call = (
+            "data()"
+            if c_type.startswith("const") and c_type.endswith("*")
+            else "cbegin()"
+        )
         return (
-            f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.cbegin()"
+            f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
     def generate_kernel_call(
@@ -2387,6 +2396,11 @@ if (custom_op_wrapper.get() == NULL) {
                 result = [f"{t}.get()" for t in result]
 
             c_type = self.c_type_for_prim_type(val[0], element_type)
+            # see the comment in self._generate_temporary_array_pointer for an
+            # explanation of why this c_type gets modified
+            if isinstance(element_type, torch.OptionalType):
+                c_type = f"const {c_type}"
+
             # need to pass the array length, because we can't use the std::array member
             # function
             return (
