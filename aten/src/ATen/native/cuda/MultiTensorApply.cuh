@@ -38,17 +38,6 @@ __device__ __forceinline__ void load_store(
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
-template <typename dT, typename sT>
-__device__ __forceinline__ void load_store(
-    dT* dst,
-    sT* src,
-    int64_t dst_offset,
-    int64_t src_offset) {
-  using dLT = at::native::memory::aligned_vector<dT, kILP>;
-  using sLT = at::native::memory::aligned_vector<sT, kILP>;
-  ((dLT*)dst)[dst_offset] = static_cast<dLT>(((sLT*)src)[src_offset]);
-}
-
 template <int n>
 struct TensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n - 1]];

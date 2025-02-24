@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
+#include <cuda/std/type_traits>
 #include <utility>
 
 namespace at::native {
@@ -270,14 +271,46 @@ struct FusedAdamMathFunctorMP {
       for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
-        load_store<scalar_type, param_type>(
-            r_args[kParamIdx], param_args, 0, i_start);
-        load_store<scalar_type, grad_type>(
-            r_args[kGradIdx], grad_args, 0, i_start);
-        load_store<scalar_type, exp_avg_type>(
-            r_args[kExpAvgIdx], exp_avg_args, 0, i_start);
-        load_store<scalar_type, exp_avg_sq_type>(
-            r_args[kExpAvgSqIdx], exp_avg_sq_args, 0, i_start);
+        if (!std::is_same_v<scalar_type, param_type>) {
+          scalar_type casted_param_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_param_args[ii] = static_cast<scalar_type>(param_args[ii]);
+          }
+          load_store(r_args[kParamIdx], casted_param_args, 0, i_start);
+        } else {
+          load_store(r_args[kParamIdx], (scalar_type*)param_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, grad_type>) {
+          scalar_type casted_grad_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_grad_args[ii] = static_cast<scalar_type>(grad_args[ii]);
+          }
+          load_store(r_args[kGradIdx], casted_grad_args, 0, i_start);
+        } else {
+          load_store(r_args[kGradIdx], (scalar_type*)grad_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+          scalar_type casted_exp_avg_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_exp_avg_args[ii] =
+                static_cast<scalar_type>(exp_avg_args[ii]);
+          }
+          load_store(r_args[kExpAvgIdx], casted_exp_avg_args, 0, i_start);
+        } else {
+          load_store(
+              r_args[kExpAvgIdx], (scalar_type*)exp_avg_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+          scalar_type casted_exp_avg_sq_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_exp_avg_sq_args[ii] =
+                static_cast<scalar_type>(exp_avg_sq_args[ii]);
+          }
+          load_store(r_args[kExpAvgSqIdx], casted_exp_avg_sq_args, 0, i_start);
+        } else {
+          load_store(
+              r_args[kExpAvgSqIdx], (scalar_type*)exp_avg_sq_args, 0, i_start);
+        }
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_double,
@@ -290,15 +323,50 @@ struct FusedAdamMathFunctorMP {
             found_inf_ptr,
             bias_correction1,
             bias_correction2_sqrt);
-        load_store<param_type, scalar_type>(
-            param_args, r_args[kParamIdx], i_start, 0);
-        load_store<exp_avg_type, scalar_type>(
-            exp_avg_args, r_args[kExpAvgIdx], i_start, 0);
-        load_store<exp_avg_sq_type, scalar_type>(
-            exp_avg_sq_args, r_args[kExpAvgSqIdx], i_start, 0);
+        if (!std::is_same_v<scalar_type, param_type>) {
+          param_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] = static_cast<param_type>(r_args[kParamIdx][ii]);
+          }
+          load_store(param_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(param_args, (param_type*)r_args[kParamIdx], i_start, 0);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+          exp_avg_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] =
+                static_cast<exp_avg_type>(r_args[kExpAvgIdx][ii]);
+          }
+          load_store(exp_avg_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(
+              exp_avg_args, (exp_avg_type*)r_args[kExpAvgIdx], i_start, 0);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+          exp_avg_sq_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] =
+                static_cast<exp_avg_sq_type>(r_args[kExpAvgSqIdx][ii]);
+          }
+          load_store(exp_avg_sq_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(
+              exp_avg_sq_args,
+              (exp_avg_sq_type*)r_args[kExpAvgSqIdx],
+              i_start,
+              0);
+        }
         if (grad_scale_ptr) {
-          load_store<grad_type, scalar_type>(
-              grad_args, r_args[kGradIdx], i_start, 0);
+          if (!std::is_same_v<scalar_type, grad_type>) {
+            grad_type casted_r_args[kILP];
+            for (int ii = 0; ii < kILP; ii++) {
+              casted_r_args[ii] = static_cast<grad_type>(r_args[kGradIdx][ii]);
+            }
+            load_store(grad_args, casted_r_args, i_start, 0);
+          } else {
+            load_store(grad_args, (grad_type*)r_args[kGradIdx], i_start, 0);
+          }
         }
       }
     } else {
