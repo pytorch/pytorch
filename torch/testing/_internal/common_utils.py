@@ -102,7 +102,7 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+MI300_ARCH = ("gfx942",)
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1293,14 +1293,9 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
-        if not RERUN_DISABLED_TESTS:
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            sys.exit(0 if exit_code == 5 else exit_code)
-        else:
-            # Only record the test report and always return a success code when running under rerun
-            # disabled tests mode
-            sys.exit(0)
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        sys.exit(0 if exit_code == 5 else exit_code)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -2705,6 +2700,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
+            # Probably test has disable issue but not for this platform
             skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
