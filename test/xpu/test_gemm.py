@@ -23,23 +23,23 @@ from torch.testing._internal.common_utils import iter_indices, run_tests, TestCa
 
 @contextlib.contextmanager
 def tf32_off():
-    old_matmul_precision = torch.get_float32_matmul_precision()
+    old_matmul_precision = torch.backends.xpu.matmul.allow_tf32
     try:
         yield
     finally:
-        torch.set_float32_matmul_precision(old_matmul_precision)
+        torch.backends.xpu.matmul.allow_tf32 = old_matmul_precision
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_matmul_precision = torch.get_float32_matmul_precision()
+    old_matmul_precision = torch.backends.xpu.matmul.allow_tf32
     old_precision = self.precision
     try:
-        torch.set_float32_matmul_precision("high")
+        torch.backends.xpu.matmul.allow_tf32 = True
         self.precision = tf32_precision
         yield
     finally:
-        torch.set_float32_matmul_precision(old_matmul_precision)
+        torch.backends.xpu.matmul.allow_tf32 = old_matmul_precision
         self.precision = old_precision
 
 

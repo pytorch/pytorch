@@ -10,6 +10,7 @@ __all__ = [
     "matmul",
 ]
 
+
 class XPUModule:
     def __getattr__(self, name):
         if name == "allow_tf32":
@@ -18,7 +19,9 @@ class XPUModule:
 
     def __setattr__(self, name, value):
         if name == "allow_tf32":
-            assert isinstance(value, bool), "allow_tf32 should be a boolean, but got {}".format(type(value))
+            assert isinstance(
+                value, bool
+            ), f"allow_tf32 should be a boolean, but got {type(value)}"
             if value:
                 torch.set_float32_matmul_precision("high")
             else:
