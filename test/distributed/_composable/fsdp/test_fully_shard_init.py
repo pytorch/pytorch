@@ -1089,8 +1089,7 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
         torch.nn.init.constant_(model.in_proj.weight, 1.0 * rank_group)
         torch.nn.init.constant_(model.out_proj.weight, 2.0 * rank_group)
 
-        fully_shard(model, mesh=mesh)
-        model = cast(FSDPModule, model)
+        model = fully_shard(model, mesh=mesh)
 
         hook_called: bool = False
 
