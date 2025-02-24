@@ -2341,6 +2341,48 @@ class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
     @make_mutation_test
+    def test_branch_with_multiple_yield_args():
+        @triton.jit
+        def branch_with_multiple_yield_args(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            conditional = (n_elements % 2) == 0
+            if conditional:
+                in0 = in_ptr0 + 1
+                in1 = in_ptr1 + 1
+                out = out_ptr + 1
+            else:
+                in0 = in_ptr0
+                in1 = in_ptr1
+                out = out_ptr
+            x = tl.load(in0 + offsets, mask=mask)
+            y = tl.load(in1 + offsets, mask=mask)
+            tl.store(out + offsets, x + y, mask=mask)
+
+        x = torch.randn(15)
+        y = torch.randn(15)
+        out = torch.zeros(15)
+        return (
+            branch_with_multiple_yield_args,
+            {
+                "in_ptr0": x,
+                "in_ptr1": y,
+                "out_ptr": out,
+                "n_elements": 14,
+                "BLOCK_SIZE": 16,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
     def test_out_of_order_kernel():
         @triton.jit
         def add_kernel_out_of_order(
