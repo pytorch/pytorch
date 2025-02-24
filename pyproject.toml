@@ -150,12 +150,12 @@ select = [
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
     "SLOT",
+    "S324",
     "TCH",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
-    "S324",
 ]
 
 [tool.ruff.lint.per-file-ignores]
