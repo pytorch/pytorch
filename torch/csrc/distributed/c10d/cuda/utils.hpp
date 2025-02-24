@@ -1,6 +1,7 @@
 #pragma once
 
-// This file contains utility functions common for CUDA, which can be used by ProcessGroupNCCL or SymmetricMemory.
+// This file contains utility functions common for CUDA, which can be used by
+// ProcessGroupNCCL or SymmetricMemory.
 
 namespace c10d::cuda {
 
