@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import functools
 import itertools
@@ -9,9 +11,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from types import ModuleType
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -30,7 +30,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
 )
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -42,7 +41,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SympyBoolean,
     SymTypes,
 )
-from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
@@ -58,7 +56,6 @@ from .codegen.common import (
     init_backend_registration,
     WorkspaceArg,
 )
-from .codegen.wrapper import PythonWrapperCodegen
 from .exc import (
     CppWrapperCodegenError,
     LoweringException,
@@ -91,7 +88,6 @@ from .lowering import (
 )
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
     convert_shape_to_inductor,
@@ -108,7 +104,14 @@ from .virtualized import NullHandler, V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
+    from types import ModuleType
+
     from torch._higher_order_ops.effects import _EffectType
+    from torch.fx import GraphModule
+    from torch.fx.graph import Graph
+    from .codegen.wrapper import PythonWrapperCodegen
+    from .scheduler import BaseSchedulerNode
 
 from torch._inductor.codecache import output_code_log
 
@@ -268,7 +271,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_const_graph: bool = False,
         const_output_index: Optional[dict[str, int]] = None,
         const_code: Optional[str] = None,
-        const_module: Optional["GraphLowering"] = None,
+        const_module: Optional[GraphLowering] = None,
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
     ) -> None:
@@ -707,7 +710,7 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: list[torch.Tensor],
         subgraph_name: str,
-    ) -> "SubgraphLowering":
+    ) -> SubgraphLowering:
         """
         Make a subgraph of the current graph with all inherited parts, except
         the graph module (`gm`) and `example_inputs`.  The subgraphs are lowered
@@ -1961,7 +1964,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code.pop_codegened_graph()
             return result
 
-    def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
+    def codegen_subgraph(self, parent_graph: GraphLowering) -> None:
         """
         This is a more compact version of the `codegen()` above
         where we codegen this graph as a subgraph of some parent
