@@ -3220,7 +3220,7 @@ def native_group_norm(
         )
         b = b + bias_reshaped
 
-    if weight is not None:
+    if input.device.type == "cpu" and weight is not None:
         w = w.as_strided([batch_size, num_channels], [w.stride()[0], w.stride()[2]])
         b = b.as_strided([batch_size, num_channels], [b.stride()[0], b.stride()[2]])
         broadcast_dims = list(range(2, input.ndim))
