@@ -1507,6 +1507,36 @@ def checks_to_markdown_bullets(
     ]
 
 
+def post_starting_merge_comment(
+    repo: GitRepo,
+    pr: GitHubPR,
+    explainer: TryMergeExplainer,
+    dry_run: bool,
+    ignore_current_checks_info: Optional[
+        list[tuple[str, Optional[str], Optional[int]]]
+    ] = None,
+) -> None:
+    """Post the initial merge starting message on the PR. Also post a short
+    message on all PRs in the stack."""
+    gh_post_pr_comment(
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        explainer.get_merge_message(ignore_current_checks_info),
+        dry_run=dry_run,
+    )
+    if pr.is_ghstack_pr():
+        for additional_prs, _ in get_ghstack_prs(repo, pr):
+            if additional_prs.pr_num != pr.pr_num:
+                gh_post_pr_comment(
+                    additional_prs.org,
+                    additional_prs.project,
+                    additional_prs.pr_num,
+                    f"Starting merge as part of PR stack under #{pr.pr_num}",
+                    dry_run=dry_run,
+                )
+
+
 def manually_close_merged_pr(
     pr: GitHubPR,
     additional_merged_prs: list[GitHubPR],
@@ -2130,13 +2160,7 @@ def merge(
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks:
-        gh_post_pr_comment(
-            pr.org,
-            pr.project,
-            pr.pr_num,
-            explainer.get_merge_message(),
-            dry_run=dry_run,
-        )
+        post_starting_merge_comment(repo, pr, explainer, dry_run)
         return pr.merge_into(
             repo,
             dry_run=dry_run,
@@ -2159,12 +2183,12 @@ def merge(
         )
         ignore_current_checks_info = failing
 
-    gh_post_pr_comment(
-        pr.org,
-        pr.project,
-        pr.pr_num,
-        explainer.get_merge_message(ignore_current_checks_info),
-        dry_run=dry_run,
+    post_starting_merge_comment(
+        repo,
+        pr,
+        explainer,
+        dry_run,
+        ignore_current_checks_info=ignore_current_checks_info,
     )
 
     start_time = time.time()
