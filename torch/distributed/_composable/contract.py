@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
-from collections.abc import Sequence
 from functools import wraps
-from typing import Callable, Generic, Optional, overload, Protocol, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Callable, Generic, Optional, Protocol
+from typing_extensions import Concatenate, ParamSpec, TypeVar
 
 import torch
 import torch.nn as nn
@@ -33,6 +32,7 @@ class RegistryItem:
 
 
 _TState = TypeVar("_TState", bound="_State", covariant=True)
+_M = TypeVar("_M", nn.Module, list[nn.Module])
 
 
 class _ContractFn(Protocol, Generic[_P, _T, _TState]):
@@ -43,35 +43,11 @@ class _ContractFn(Protocol, Generic[_P, _T, _TState]):
         ...
 
 
-@overload
-def contract() -> (
-    Callable[
-        [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
-        _ContractFn[Concatenate[nn.Module, _P], _T, _State],
-    ]
-):
-    ...
-
-
-@overload
 def contract(
-    state_cls: type[_TState],
+    state_cls: type[_TState] = _State,  # type: ignore[assignment]
 ) -> Callable[
-    [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
-    _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
-]:
-    ...
-
-
-def contract(
-    state_cls: type = _State,
-) -> Callable[
-    [
-        Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
-    ],
-    _ContractFn,
+    [Callable[Concatenate[_M, _P], _M]],
+    _ContractFn[Concatenate[_M, _P], _M, _TState],
 ]:
     r"""
     Decorate a function as a composable distributed API, where the first
@@ -116,19 +92,16 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
-    ) -> _ContractFn[
-        Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T, _TState
-    ]:
+        func: Callable[Concatenate[_M, _P], _M]
+    ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(
-            module: Union[nn.Module, Sequence[nn.Module]],
+            module: _M,
             *args: _P.args,
             **kwargs: _P.kwargs,
-        ) -> Optional[nn.Module]:
+        ) -> _M:
             inp_module = module
+            modules: list[nn.Module]
             if isinstance(module, nn.Module):
                 modules = [module]
             else:
@@ -179,10 +152,11 @@ def contract(
             updated = func(inp_module, *args, **kwargs)
             if updated is None:
                 updated = inp_module  # type: ignore[assignment]
+            updated_modules: list[nn.Module]
             if isinstance(updated, nn.Module):
                 updated_modules = [updated]
             else:
-                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
+                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type, call-overload]
 
             all_new_named_params: list[dict[str, nn.Parameter]] = []
             all_new_named_buffers: list[dict[str, torch.Tensor]] = []
@@ -266,7 +240,7 @@ def contract(
 
         return wrapper  # type: ignore[return-value]
 
-    return inner
+    return inner  # type: ignore[return-value]
 
 
 def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
