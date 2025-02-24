@@ -494,8 +494,19 @@ test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode training --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_training.json"
-  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode training \
+      --device cuda \
+      --benchmark torchbench \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_training.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode inference \
+      --device cuda \
+      --benchmark torchbench \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_inference.json"
 }
 
 test_verify_cachebench() {
