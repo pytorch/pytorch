@@ -686,9 +686,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
-        return (
-            f"tl_math.log2(({self._print(expr.args[0])}).to(tl.float32)).to(tl.float32)"
-        )
+        return f"libdevice.log2(({self._print(expr.args[0])}).to(tl.float32))"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
