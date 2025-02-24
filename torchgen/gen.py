@@ -2416,6 +2416,7 @@ def gen_source_files(
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
             new_header = gen_aoti_c_shim(
                 fallback_native_functions,
+                inductor_fallback_ops,
                 structured_func_group_dict,
                 dispatch_key,
                 backend_indices,
@@ -2441,14 +2442,14 @@ indicates an AOTInductor fallback operator ABI backward compatibility breakage!!
 Only in a limited number of situations, this is allowed:
 
 1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
-If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim header files.
+If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to add a new entry to
+existing C shim header files.
 
 2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
-change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
-number of that fallback op in the newly generated C shim files, and update the cpp wrapper
-codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
+change in the AOTInductor land. You need to annotate the new default argument in
+torchgen/aoti/fallback_ops.py, and then run `python torchgen/gen.py --update-aoti-c-shim` to
+update the C shim header files by creating different versions of the fallback op. See
+TO_BE_CREATED_PR for an example.
 
                         """
                 except FileNotFoundError:
@@ -2479,6 +2480,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                 f"c_shim_{dispatch_key.lower()}.cpp",
                 lambda: gen_aoti_c_shim(
                     fallback_native_functions,
+                    inductor_fallback_ops,
                     structured_func_group_dict,
                     dispatch_key,
                     backend_indices,
