@@ -498,7 +498,7 @@ test_cachebench() {
   $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
 }
 
-test_cachebench_verify() {
+test_verify_cachebench() {
   TMP_TEST_REPORTS_DIR=$(mktemp -d)
   TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
 
