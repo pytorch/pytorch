@@ -1255,6 +1255,12 @@ def flex_attention(
         )
 
     # below is cuda path if device is not cpu
+    if query.size(-1) < 16 or key.size(-1) < 16 or value.size(-1) < 16:
+        raise NotImplementedError(
+            f"NYI: embedding dimension of the query, key, and value must be "
+            f"at least 16 but got E={query.size(-1)} and Ev={value.size(-1)}"
+        )
+
     (
         _,  # q_length
         _,  # kv_length
