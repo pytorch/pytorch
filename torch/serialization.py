@@ -16,6 +16,7 @@ import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
 from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
+from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -23,7 +24,6 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
-from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -1954,6 +1954,7 @@ def _load(
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
+            storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)

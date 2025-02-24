@@ -1620,6 +1620,8 @@ class FakeTensorPropTest(TestCase):
                 self.assertEqual(sd["weight"].device.type, "cpu")
                 sd = torch.load(state_dict_file, map_location="cuda")
                 self.assertEqual(sd["weight"].device.type, "cuda")
+                self.assertEqual(sd["weight"].untyped_storage()._checkpoint_offset, 704)
+                self.assertEqual(sd["bias"].untyped_storage()._checkpoint_offset, 1024)
 
         model = model.cuda()
         with TemporaryFileName() as state_dict_file:
@@ -1631,6 +1633,8 @@ class FakeTensorPropTest(TestCase):
                 self.assertEqual(sd["weight"].device.type, "cuda")
                 sd = torch.load(state_dict_file, map_location="cpu")
                 self.assertEqual(sd["weight"].device.type, "cpu")
+                self.assertEqual(sd["weight"].untyped_storage()._checkpoint_offset, 704)
+                self.assertEqual(sd["bias"].untyped_storage()._checkpoint_offset, 1024)
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)
