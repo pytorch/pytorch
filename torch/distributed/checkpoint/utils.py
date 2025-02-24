@@ -135,7 +135,7 @@ class _DistWrapper:
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
                 group=self.group,
             )
 
