@@ -395,7 +395,6 @@ class TestFSDPWrap(FSDPTest):
             loss.backward()
             optim.step()
 
-    @skip_if_lt_x_gpu(2)
     def test_zero_argument(self):
         class ZeroArguModel(nn.Module):
             def __init__(self) -> None:
