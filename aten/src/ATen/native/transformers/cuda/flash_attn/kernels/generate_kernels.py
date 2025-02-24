@@ -103,7 +103,7 @@ if __name__ == "__main__":
         "-o",
         "--output_dir",
         required=False,
-        help="Where to generate the kernels " " will default to the current directory ",
+        help="Where to generate the kernels will default to the current directory",
     )
     args = parser.parse_args()
     main(args.output_dir)
