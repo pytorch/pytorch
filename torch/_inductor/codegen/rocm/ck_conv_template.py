@@ -600,4 +600,4 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             left_pads_1,
             right_pads_0,
             right_pads_1,
-            )
+        )
