@@ -71,6 +71,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
+    Max,
     Mod,
     PythonMod,
 )
@@ -102,7 +103,7 @@ DimList = list
 log = logging.getLogger(__name__)
 
 import sympy
-from sympy import S
+from sympy import Add, S
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -5677,7 +5678,7 @@ class ShapeEnv:
 
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
-        expr = self.simplify(expr)
+        expr = self.simplify(expr, size_oblivious)
 
         if compute_hint:
             expr = expr.xreplace(self.var_to_val).xreplace(self.unbacked_var_to_val)
@@ -5767,10 +5768,29 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: _SympyT) -> _SympyT:
+    def simplify(self, expr: _SympyT, size_oblivious: bool = False) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
+
+        if size_oblivious and expr.has(Max):
+            max_replacements = {}
+            for atom in expr.atoms(Max):
+                a, b = atom.args
+                if b == 1 or b == 0:
+                    a, b = b, a
+                if a == 1 or a == 0:
+                    if (
+                        isinstance(b, Add)
+                        and len(b.free_symbols) == 2  # TODO: expand to N?
+                        and b.free_symbols == set(b.atoms())
+                        and all(x in self.size_like for x in b.free_symbols)
+                    ):
+                        max_replacements[atom] = b
+            if max_replacements:
+                expr = expr.xreplace(max_replacements)
+                expr = safe_expand(expr)
+
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
         # the non-recursive replacement doesn't work, and
@@ -5903,7 +5923,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
-        expr_sym_node: Optional[SymNode] = None,
+        expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5949,7 +5969,7 @@ class ShapeEnv:
             metadata_fn=lambda: {
                 "expr": repr(expr),
                 "unhinted_expr": repr(unhinted_expr),
-                "expr_id": id(expr_sym_node),
+                "expr_id": expr_sym_node_id,
                 "stack": structured.from_traceback(
                     CapturedTraceback.extract(skip=1).summary()
                 ),
@@ -6572,9 +6592,9 @@ class ShapeEnv:
         hint: Optional[Union[int, bool, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
@@ -6582,8 +6602,8 @@ class ShapeEnv:
                 hint,
                 fx_node,
                 size_oblivious,
+                expr_sym_node_id,
                 forcing_spec=forcing_spec,
-                expr_sym_node=expr_sym_node,
             )
         except Exception:
             self.log.warning(
@@ -6601,9 +6621,9 @@ class ShapeEnv:
         hint: Optional[Union[bool, int, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -6757,7 +6777,7 @@ class ShapeEnv:
                         and not (
                             unsound_result := orig_expr.xreplace(
                                 self.unbacked_var_to_val
-                            )
+                            ).xreplace(self.var_to_val)
                         ).free_symbols
                     ):
                         log.warning(
@@ -6773,7 +6793,6 @@ class ShapeEnv:
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
-                                "expr_node_id": id(expr_sym_node),
                             },
                         )
                         dtrace_structured(
@@ -6781,7 +6800,7 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
+                                "expr_node_id": expr_sym_node_id,
                                 "user_stack": structured.get_user_stack(3),
                                 "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
@@ -6801,7 +6820,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
-                            expr_sym_node=expr_sym_node,
+                            expr_sym_node_id=expr_sym_node_id,
                         )
                 else:
                     expr = new_expr
