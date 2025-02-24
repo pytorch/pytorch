@@ -1239,7 +1239,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_with_finally(self):
         z = 0
 
@@ -1402,7 +1401,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_try_except_finally(self):
         z = 0
 
@@ -1620,7 +1618,6 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_exception_context_with_yield_inside_generator(self):
         # Check that the context is also available from inside the generator
         # with yield, as opposed to outside.
