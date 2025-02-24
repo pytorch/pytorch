@@ -1,21 +1,21 @@
 # Python dependencies required for development
-astunparse
-expecttest>=0.2.1
-hypothesis
-numpy
-psutil
-pyyaml
-requests
-setuptools
-types-dataclasses
-typing-extensions>=4.10.0
+astunparse==1.6.3
+expecttest==0.2.1
+hypothesis==5.35.1
+numpy==1.22.4 ; python_version <=
+psutil==7.0.0
+pyyaml====6.0.2
+requests==2.32.3
+setuptools ?
+types-dataclasses?
+typing_extensions==4.12.2
 sympy==1.13.1 ; python_version >= "3.9"
-filelock
-networkx
-jinja2
-fsspec
-lintrunner
-ninja
-packaging
-optree>=0.13.0
-cmake
+filelock==3.17.0
+networkx==2.8.8
+Jinja2==3.1.4
+fsspec==2025.2.0
+lintrunner==0.12.5
+ninja ?
+packaging==24.2
+optree==0.13.0
+cmake?
