@@ -9,14 +9,13 @@ import textwrap
 import traceback
 import typing
 from collections.abc import Generator, Iterable, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
     Any,
     Callable,
     ClassVar,
-    ContextManager,
     Literal,
     Optional,
     overload,
@@ -2391,22 +2390,32 @@ def as_storage_and_layout(
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-    if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
+    if isinstance(x, StorageBox):
+        _, layout = as_storage_and_layout(
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
+            allow_padding=allow_padding,
+            exact_strides=exact_strides,
+        )
+        return x, x.data.get_layout()
+    if isinstance(x, Buffer):
         if freeze:
             if want_contiguous:
-                x.data.freeze_layout()
-                assert x.data.get_layout().is_contiguous()
+                x.freeze_layout()
+                assert x.get_layout().is_contiguous()
             elif stride_order is not None:
-                x.data.freeze_layout_with_stride_order(
+                x.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
                 )
             elif exact_strides is not None:
-                x.data.freeze_layout_with_exact_strides(
+                x.freeze_layout_with_exact_strides(
                     exact_strides, allow_padding=allow_padding
                 )
             else:
-                x.data.decide_layout()
-        return x, x.data.get_layout()
+                x.decide_layout()
+        return StorageBox(x), x.get_layout()
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
@@ -2777,7 +2786,9 @@ class View(GenericView):
                 # TODO: unbacked should not diverge from backed in determining striding
                 # Need to require contiguous here instead of realize, see:
                 # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_contiguous(x)
+                x = ExternKernel.require_exact_strides(
+                    x, FlexibleLayout.contiguous_strides(x.get_size())
+                )
 
             storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
@@ -4950,6 +4961,7 @@ class ExternKernel(InputsKernel):
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
+        # tensor_args can be either tensor or torchbind objects
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
@@ -4999,6 +5011,8 @@ class ExternKernel(InputsKernel):
                 and x.get_name() in V.graph.torchbind_constants
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
+            elif isinstance(x, TorchBindObject):
+                example_args.append(x.get_real_obj())
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -5791,6 +5805,7 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
+
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
             raw_args = [
@@ -6570,12 +6585,14 @@ class FallbackKernel(ExternKernelAlloc):
             self.get_kwargs_value(key, **kwargs)
             for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        target = self.op_overload
+
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(target, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):  # type: ignore[no-untyped-def]
@@ -6601,7 +6618,6 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
@@ -6655,7 +6671,6 @@ class FallbackKernel(ExternKernelAlloc):
             self.use_runtime_dispatch = True
 
         def do_runtime_dispatch() -> None:
-            exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
 
@@ -6714,7 +6729,7 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel, *args, **kwargs):  # type: ignore[no-untyped-def]
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        context: ContextManager[None] = (
+        context: AbstractContextManager[None] = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()  # type: ignore[assignment]
         )
         with context:
@@ -7520,7 +7535,10 @@ class EffectfulKernel(FallbackKernel):
 
         from torch._higher_order_ops.effects import get_effect_key
 
-        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        uncovered_args = [
+            a.value if isinstance(a, TorchBindObject) else a for a in tensor_args
+        ]
+        effect_type = get_effect_key(kernel, (*nontensor_args, *uncovered_args), kwargs)
         assert effect_type is not None
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
@@ -7542,14 +7560,37 @@ class EffectfulKernel(FallbackKernel):
 
 @ir_dataclass
 class TorchBindObject(IRNode):
+    from torch._library.fake_class_registry import FakeScriptObject
+
     name: str
-    value: torch._C.ScriptObject
+    value: Union[FakeScriptObject, torch.ScriptObject]
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
+
+    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
+        return self.value
+
+    def get_real_obj(self) -> torch.ScriptObject:
+        if isinstance(self.value, torch.ScriptObject):
+            return self.value
+        else:
+            return self.value.real_obj
+
+    def get_buf_bytes(self) -> int:
+        # Returns the sum of all tensors in the flattened object
+        real_script_obj = self.get_real_obj()
+        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+        flat_elems = pytree.tree_flatten(flat_dict)[0]
+        flat_sizes = [
+            x.element_size() * x.numel()
+            for x in flat_elems
+            if isinstance(x, torch.Tensor)
+        ]
+        return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
 
 
 class _CollectiveKernel(FallbackKernel):
