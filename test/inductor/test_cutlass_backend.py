@@ -823,58 +823,6 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "mixed mm path deleted. TODO: prologue path")
-    @unittest.skipIf(not SM80OrLater, "need sm_8x exactly")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-
-        NOTE: For SM90, special alignemnt is needed, since in gemm_template.py,
-        set_alignment has arch specific logic.
-        """
-
-        def mm(a, b):
-            return torch.mm(a, b.to(torch.half))
-
-        # CUTLASS only supports row-major/column-major combination of
-        # layouts for this operation, thus the transpose of tensor b.
-        # Also, for CUTLASS alignment requirements, number of columns
-        # of the first tensor has to be divisible by 16.
-        m, n, k = 128, 16, 128
-        a = torch.randn(m, k).cuda().half()
-        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_local_cache": True,
-                "autotune_fallback_to_aten": False,
-                "use_mixed_mm": True,
-                "mixed_mm_choice": "aten",  # to disable Triton
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
-
-        cache = torch._inductor.codecache.LocalCache().lookup("mixed_mm")
-        assert cache is not None
-        high = cache[
-            f"[('cuda', 'torch.float16', {m}, {k}, {k}, 1, 0), "
-            f"('cuda', 'torch.int8', {k}, {n}, 1, {k}, 0)]"
-        ]["high"]
-        cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
-                cutlass_kernels_count += 1
-        assert cutlass_kernels_count > 0
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
