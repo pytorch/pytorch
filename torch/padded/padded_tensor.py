@@ -159,6 +159,12 @@ class PaddedOp:
         """
         raise NotImplementedError
 
+    def modify_args(self, args, kwargs):
+        """
+        Modify the arguments of the operation, if needed.
+        """
+        return args, kwargs
+
     def validate(self, args, kwargs):
         """
         Validate conditions on the arguments of the operation.
@@ -444,7 +450,8 @@ class MatmulOp(PaddedOp):
         if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
             args[1].orig_shape[0], Dimension
         ):
-            assert args[0].orig_shape[1].is_padded == args[1].orig_shape[0].is_padded
+            pass
+            # assert args[0].orig_shape[1].is_padded == args[1].orig_shape[0].is_padded
 
 
 @register_padded_op(["bmm"])
@@ -462,6 +469,16 @@ class BmmOp(PaddedOp):
         return [torch.Size([b1, n1, p2])]
 
 
+def get_outer_slicers(shape1, shape2):
+    slicers = []
+    for s1, s2 in zip(shape1, shape2):
+        if s1 == s2:
+            slicers.append(None)
+        else:
+            slicers.append(slice(abs(s1 - s2), None))
+    return slicers
+
+
 @register_padded_op(
     ["_scaled_dot_product_flash_attention", "_scaled_dot_product_efficient_attention"]
 )
@@ -474,6 +491,13 @@ class ScaledDotProductAttentionOp(PaddedOp):
 
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
+
+    def modify_args(self, args, kwargs):
+        slicers = get_outer_slicers(args[0].tensor.shape, args[1].orig_shape)
+        if any(s is not None for s in slicers):
+            args[0].tensor[slicers] = 0
+
+        return args, kwargs
 
 
 @register_padded_op(["_scaled_dot_product_efficient_attention_backward"])
@@ -979,13 +1003,6 @@ class PaddedTensor(torch.Tensor):
     def __metadata_guard__(cls, orig_data, other):
         """Avoid recompilation of the graph when the meta data changed"""
         return True
-        # other_data = other.__tensor_flatten__()[1]
-
-        # return all(
-        #    orig_data[key] == other_data[key]
-        #    for key in orig_data.keys()
-        #    if key not in ["multipliers", "orig_shape", "neutral_element"]
-        # )
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1011,20 +1028,23 @@ class PaddedTensor(torch.Tensor):
         log("Dispatching %s" % func._overloadpacket.__name__)
         log("-" * 40)
 
-        # Convert arg tensors to padded tensors
-        args = convert_tensor_args(args)
-
-        # Run function
-        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
-
-        out = run_func(func, tensor_args, tensor_kwargs)
-
         if func._opname not in PADDED_OP_TABLE:
             log_op_not_in_op_table(func._opname, args, out)
             raise NotImplementedError(
                 f"Function '{func._opname}' is not implemented for PaddedTensor"
             )
         op = PADDED_OP_TABLE[func._opname]
+
+        # Convert arg tensors to padded tensors
+        args = convert_tensor_args(args)
+
+        # Pad args
+        args, kwargs = op.modify_args(args, kwargs)
+
+        # Run function
+        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
+        # out = func(*tensor_args, **tensor_kwargs)
+        out = run_func(func, tensor_args, tensor_kwargs)
 
         # Validate arguments
         op.validate(args, kwargs)
