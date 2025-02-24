@@ -995,7 +995,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         _multi_optim_kwargs = {
             "params": [
                 {"params": [model.fc.weight]},
-                {"params": [model.fc1.weight], "lr": 0.2},  # empty pg group here
+                {"params": [model.fc1.weight], "lr": 0.2},
             ],
             "lr": 0.1,
         }
