@@ -1365,8 +1365,8 @@ def _sync_state(src, dst):
     # This ensures that state mutations are visible across them.
     # Since tensor constants are not mutable, copying (without sharing) is OK.
     # Also, primitive constants are specialized, so copying (without sharing) is OK.
-    self._params = method.__self__._params
-    self._buffers = method.__self__._buffers
+    dst._parameters = src._parameters
+    dst._buffers = src._buffers
 
 
 def sync_state(*wrapped_method_modules):
