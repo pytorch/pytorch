@@ -87,19 +87,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return CppWrapperCpu()
 
     @staticmethod
-    def _generate_temporary_array_pointer(c_type: str, elements: Sequence[str]) -> str:
+    def _generate_temporary_array_pointer(
+        c_type: str, elements: Sequence[str], *, force_mutable: bool = False
+    ) -> str:
         """Get a pointer to an array that only exists for the duration of the C++
         statement it's used in."""
-        # If the c_type is already a const pointer, return a mutable pointer to the
-        # array.  Otherwise, return a const pointer.  This works around an inconsistency
-        # in the C-shim interface, where both Optional[List[c_type]] and
-        # List[Optional[c_type]] map to the same type, const c_type**, while
-        # representing different underlying concepts and storages.
-        ptr_call = (
-            "data()"
-            if c_type.startswith("const") and c_type.endswith("*")
-            else "cbegin()"
-        )
+        # If the c_type is already a pointer, return a mutable pointer to the array.
+        # Otherwise, return a const pointer.  In the C-shim API, pointer types are only
+        # const-qualified with respect to the underlying value, not any nested pointers.
+        # e.g. const double** is possible, but not const double* const*.  This means
+        # that an array containing pointers must _already_ be properly const-qualified
+        # by the c_type, and not add additional const-ness.
+        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
@@ -2245,15 +2244,23 @@ if (custom_op_wrapper.get() == NULL) {
             output_args,
             raw_outputs,
         )
+        # force both temporary arrays to generate mutable data pointers, since the proxy
+        # executor signature requires that datatype
+        int_call_str = self._generate_temporary_array_pointer(
+            "int64_t", int_call_args, force_mutable=True
+        )
+        tensor_call_str = self._generate_temporary_array_pointer(
+            "AtenTensorHandle", tensor_call_args, force_mutable=True
+        )
 
         extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
         self.writeline(
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
-            f"{self._generate_temporary_array_pointer('int64_t', int_call_args)}, "
+            f"{int_call_str}, "
             f"{len(tensor_call_args)}, "
-            f"{self._generate_temporary_array_pointer('AtenTensorHandle', tensor_call_args)});"
+            f"{tensor_call_str});"
         )
 
     def generate_reset_kernel_saved_flags(self):
@@ -2398,7 +2405,9 @@ if (custom_op_wrapper.get() == NULL) {
             c_type = self.c_type_for_prim_type(val[0], element_type)
             # see the comment in self._generate_temporary_array_pointer for an
             # explanation of why this c_type gets modified
-            if isinstance(element_type, torch.OptionalType):
+            if isinstance(element_type, torch.OptionalType) and not c_type.startswith(
+                "const"
+            ):
                 c_type = f"const {c_type}"
 
             # need to pass the array length, because we can't use the std::array member
