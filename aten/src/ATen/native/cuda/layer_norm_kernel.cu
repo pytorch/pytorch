@@ -1175,7 +1175,7 @@ void LaunchLayerNormBackwardKernel(
     // This is the short (and potentially wide) case.
     // Here we totally avoid a local reduction and only use 1 warp per block.
     ConfigureAndLaunchLayerNormBackwardKernel<T, T_ACC, 32, 1, 32>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-  } else if (M > 64 * 1024 && N / 32 < 64) {
+  } else if (M > 64 * 1024 && N / kWarpSize < 64) {
     // Two kernels are better if we have large M and small N.
     constexpr int block_dim_x = 32;
     constexpr int block_dim_y = 1;
