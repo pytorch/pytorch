@@ -445,10 +445,8 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
 
     base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] = {}
 
-    counter = 0
-    for set_of_related_ops in sets_of_related_ops:
+    for counter, set_of_related_ops in enumerate(sets_of_related_ops):
         base_name = str(counter)
-        counter += 1
         base_name_to_sets_of_related_ops[base_name] = set_of_related_ops
 
     return base_name_to_sets_of_related_ops
