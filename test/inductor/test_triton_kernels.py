@@ -22,6 +22,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
+    skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -3362,6 +3363,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
+    @skipIfWindows(msg="AOTI/Cpp_Wrapper have not enabled on Windows")
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
