@@ -4,7 +4,6 @@ import ast
 import io
 import itertools
 import math
-import os
 import random
 import sys
 import tempfile
@@ -31,7 +30,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
     SM80OrLater,
-    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -59,7 +57,6 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
-    serialTest,
     skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -1997,7 +1994,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
-    @tf32_on_and_off(0.005)
     def test_bmm_cuda(self, device, dtype):
         self._test_bmm(device, dtype)
 
@@ -2022,7 +2018,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
 
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.005)
     def test_matmul_with_bmm_path(self, device, dtype):
         def unbind_rebind_matmul(nt1, nt2):
             t1s = nt1.unbind()
@@ -2647,7 +2642,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             nt_noncont.narrow(dim=0, start=0, length=1)
 
     @parametrize("input_dim", [3, 4])
-    @tf32_on_and_off(0.005)
     def test_scaled_dot_product_attention(self, device, input_dim):
         def rand_tensor(*shape):
             return torch.randn(shape, device=device)
@@ -3055,7 +3049,6 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
         data = (a, b, c, d)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
-    @tf32_on_and_off(0.008)
     def test_nested_tensor_bmm_backward(self, device):
         nt0 = torch.nested.nested_tensor(
             [torch.randn((2, 6)), torch.randn((3, 6))],
@@ -3801,13 +3794,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
     @onlyCUDA
     @dtypes(torch.float32)
-    @serialTest()
     def test_linear_backward_memory_usage(self, device, dtype):
         # Verify that linear_backward() doesn't use more memory than it should
         # for higher dim input sizes.
         # See https://github.com/pytorch/pytorch/issues/141112
         B, D, max_seq_len = 64, 512, 100
-        torch._C._cuda_clearCublasWorkspaces()
         m = torch.nn.Linear(D, D, device=device)
         nt = torch.nested.as_nested_tensor(
             [
@@ -6469,7 +6460,6 @@ torch.cuda.synchronize()
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
     )
-    @tf32_on_and_off(0.005)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -6654,24 +6644,10 @@ torch.cuda.synchronize()
         )
         self.assertEqual(attn_out.shape, q_nt_3.shape)
 
-        @parametrize("skip_backward", [True, False])
-        def check_forward_backward(skip_backward=False):
-            if not skip_backward:
-                attn_nt = torch.nn.functional.scaled_dot_product_attention(
-                    q_nt_t, k_nt_t, v_nt_t
-                ).transpose(1, 2)
-            else:
-                x_nt.requires_grad = False
-                q_nt.requires_grad = False
-                k_nt.requires_grad = False
-                v_nt.requires_grad = False
-                tq = q_nt_t.detach()
-                tk = k_nt_t.detach()
-                tv = v_nt_t.detach()
-                with torch.no_grad():
-                    attn_nt = torch.nn.functional.scaled_dot_product_attention(
-                        tq, tk, tv
-                    ).transpose(1, 2)
+        def check_forward_backward():
+            attn_nt = torch.nn.functional.scaled_dot_product_attention(
+                q_nt_t, k_nt_t, v_nt_t
+            ).transpose(1, 2)
 
             attn_nts = attn_nt.unbind()
             self.assertEqual(
@@ -6687,26 +6663,23 @@ torch.cuda.synchronize()
                 rtol=output_ref_rtol,
             )
 
-            if not skip_backward:
-                nt_grads = torch.autograd.grad(
-                    attn_nt.values().sum(), (q_nt, k_nt, v_nt)
+            nt_grads = torch.autograd.grad(attn_nt.values().sum(), (q_nt, k_nt, v_nt))
+            for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(
+                nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols
+            ):
+                unbound_nt_grads = nt_grad.unbind()
+                self.assertEqual(
+                    d1_grad,
+                    unbound_nt_grads[0].unsqueeze(0),
+                    atol=grad_atol,
+                    rtol=grad_rtol,
                 )
-                for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(
-                    nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols
-                ):
-                    unbound_nt_grads = nt_grad.unbind()
-                    self.assertEqual(
-                        d1_grad,
-                        unbound_nt_grads[0].unsqueeze(0),
-                        atol=grad_atol,
-                        rtol=grad_rtol,
-                    )
-                    self.assertEqual(
-                        d2_grad,
-                        unbound_nt_grads[1].unsqueeze(0),
-                        atol=grad_atol,
-                        rtol=grad_rtol,
-                    )
+                self.assertEqual(
+                    d2_grad,
+                    unbound_nt_grads[1].unsqueeze(0),
+                    atol=grad_atol,
+                    rtol=grad_rtol,
+                )
 
         # Default
         check_forward_backward()
@@ -6725,17 +6698,6 @@ torch.cuda.synchronize()
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
-        check_cudnn = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED", "0") == "1"
-        if (
-            "cuda" in str(device)
-            and check_cudnn
-            and (dtype == torch.float16 or dtype == torch.bfloat16)
-        ):
-            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
-                with torch.nn.attention.sdpa_kernel(
-                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-                ):
-                    check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
@@ -8626,7 +8588,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
-    @tf32_on_and_off(0.005)
     @sample_skips_and_xfails(FORWARD_SKIPS_AND_XFAILS)
     def test_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8655,7 +8616,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
     )
-    @tf32_on_and_off(0.005)
     @sample_skips_and_xfails(BACKWARD_SKIPS_AND_XFAILS)
     def test_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
