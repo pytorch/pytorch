@@ -1318,6 +1318,12 @@ def flex_attention(
         kernel_options,
     )
 
+    if query.size(-1) < 16 or key.size(-1) < 16 or value.size(-1) < 16:
+        raise NotImplementedError(
+            f"NYI: embedding dimension of the query, key, and value must be "
+            f"at least 16 but got E={query.size(-1)} and Ev={value.size(-1)}"
+        )
+
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
         for x in [query, key, value]:
