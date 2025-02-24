@@ -4705,11 +4705,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
 
-    @testing.expectedFailureCppSerDes  # TODO(avik): serdes doesn't sync state
-    @testing.expectedFailureSerDer  # TODO(avik): serdes doesn't sync state
-    @testing.expectedFailureSerDerNonStrict  # TODO(avik): serdes doesn't sync state
     def test_export_method(self):
-        from torch._export.utils import wrap_method
+        from torch._export.utils import sync_state, wrap_method
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -4731,22 +4728,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ex = torch.randn(4)
 
         # ...foo
-        ep_foo = export(
+        epm_foo = export(
             wrap_method(em.foo),
             (ex,),
             dynamic_shapes={"x": (Dim.DYNAMIC,)},
-        )
-        print("FOO", ep_foo)
-        epm_foo = ep_foo.module()
+        ).module()
 
         # ...bar
-        ep_bar = export(
+        epm_bar = export(
             wrap_method(em.bar),
             (ex,),
             dynamic_shapes=((Dim.DYNAMIC,),),
-        )
-        print("BAR", ep_bar)
-        epm_bar = ep_bar.module()
+        ).module()
+
+        if is_serdes_test(self._testMethodName):
+            sync_state(epm_foo, epm_bar)
 
         # running...
         m = M()
