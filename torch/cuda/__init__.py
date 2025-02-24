@@ -17,7 +17,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C
@@ -79,13 +79,13 @@ try:
             # already loaded version of amdsmi, or any version in the processes
             # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
             # of the .so.
-            class amdsmi_cdll_hook:
+            class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
-                    self.paths: List[str] = paths
+                    self.paths: list[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any
@@ -104,7 +104,7 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with amdsmi_cdll_hook():
+            with _amdsmi_cdll_hook():
                 import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
@@ -1363,7 +1363,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
