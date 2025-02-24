@@ -1152,12 +1152,18 @@ class TestCutlassBackend(TestCase):
                 )
                 command = command.replace(link_str, " ")
 
+            repro_message = (
+                f"Reproduce with: {command}\n"
+                f"exe_file.name: {exe_file.name}\n"
+                f"cu_file.name: {cu_file.name}\n"
+            )
+
             retcode = os.system(command)
-            assert retcode == 0
+            assert retcode == 0, repro_message
 
             # Run the executable generated.
             retcode = os.system(exe_file.name)
-            assert retcode == 0
+            assert retcode == 0, repro_message
 
             # Remove temporary files.
             os.remove(cu_file.name)
