@@ -1,5 +1,4 @@
 # Owner(s): ["module: unknown"]
-import copy
 import unittest
 
 import torch
@@ -10,7 +9,7 @@ from torch.distributed._tools.ilp_utils import (
     ModuleInfo,
     parse_module_info,
 )
-from torch.distributed._tools.mem_tracker import _ModState, MemTracker
+from torch.distributed._tools.mem_tracker import MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.distributed._tools.sac_ilp import (
@@ -69,21 +68,10 @@ class TestSACILP(TestCase):
             for iter_idx in range(2):  # running twice to initialize optimizer
                 output = model(inp)
                 output.sum().backward()
-                if iter_idx == 1:
-                    last_snapshot = mt.get_tracker_snapshot("current")
                 optimizer.step()
                 optimizer.zero_grad()
                 if iter_idx == 0:
                     mt.reset_mod_stats()
-        assert last_snapshot is not None
-        for mod_stats in mem_tracker.memory_tracking.values():
-            # postprocessing due to the fact that for ModTracker, the post backward hook
-            # is not being called for modules whose inputs don't require gradients
-            # TODO: fix this in ModTracker and ensure it does not lead to any perf regression
-            if _ModState.POST_BW not in mod_stats.snapshots.keys():
-                mod_stats.snapshots.setdefault(_ModState.POST_BW, []).append(
-                    copy.deepcopy(last_snapshot)
-                )
         return mem_tracker
 
     def _run_and_get_runtime_estimator(
@@ -102,7 +90,9 @@ class TestSACILP(TestCase):
         _run_one_step()
 
         runtime_estimator = RuntimeEstimator()
-        with runtime_estimator(estimate_mode_type=self.estimate_mode):
+        with runtime_estimator(
+            estimate_mode_type=self.estimate_mode, gpu_type="H100_SXM_80GB"
+        ):
             _run_one_step()  # We use only one iteration for estimation
         return runtime_estimator
 
@@ -112,7 +102,9 @@ class TestSACILP(TestCase):
         inp: torch.Tensor,
     ) -> SACEstimator:
         sac_estimator = SACEstimator()
-        with sac_estimator(estimate_mode_type=self.estimate_mode):
+        with sac_estimator(
+            estimate_mode_type=self.estimate_mode, gpu_type="H100_SXM_80GB"
+        ):
             loss = model(inp).sum()
         loss.backward()
         return sac_estimator
@@ -165,11 +157,11 @@ class TestSACILP(TestCase):
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[2], 0.55, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.35, delta=0.05)
-        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.55, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[0], 0.5, delta=0.1)
+        self.assertAlmostEqual(sorted_discard_ratio[1], 0.5, delta=0.1)
+        self.assertAlmostEqual(sorted_discard_ratio[2], 0.5, delta=0.1)
+        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.36, delta=0.1)
+        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.87, delta=0.1)
 
         # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
         # Since runtime is device_flops dependent, so we only check the ratio

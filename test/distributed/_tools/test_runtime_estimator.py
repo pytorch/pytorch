@@ -99,7 +99,7 @@ class TestRuntimeEstimator(TestCase):
         runtime_estimator = RuntimeEstimator()
         with runtime_estimator(estimate_mode_type=estimate_mode):
             func(*args)
-        return runtime_estimator.total_runtime
+        return runtime_estimator.total_compute_time
 
     def _init_model_and_args(
         self,
