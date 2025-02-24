@@ -17,6 +17,7 @@ from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp_template import CppTemplate
+from .cpp_utils import GemmBlocking
 
 
 log = logging.getLogger(__name__)
@@ -1120,19 +1121,13 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
-
-        GemmBlocking.block_m = 4
-        GemmBlocking.block_n = 16
-        GemmBlocking.block_k = 1
-
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
             self.input_dtype,
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking,
+            GemmBlocking(4, 16, 1),
             1,
             True,
             True,
