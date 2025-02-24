@@ -464,15 +464,6 @@ void f8f8bf16_rowwise_impl_sm89(
     output_arguments          // Output
   };                          // EVTOutput
 
-  int availSms = -1;
-
-  // Ensure persistent kernels leave enough free SMs for NCCL background ops.
-  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
-    availSms =
-        at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount -
-        at::globalContext()._SMCarveout_EXPERIMENTAL().value();
-  }
-
   typename Gemm::Arguments arguments(
     cutlass::gemm::GemmUniversalMode::kGemm,
     problem_size,
@@ -489,8 +480,7 @@ void f8f8bf16_rowwise_impl_sm89(
     problem_size.k(),             // stride A
     problem_size.k(),             // stride B
     0,                            // stride C (unused)
-    0,                            // stride D (unused)
-    availSms);
+    0);                           // stride D (unused)
 
   Gemm gemm;
 

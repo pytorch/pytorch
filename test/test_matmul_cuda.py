@@ -21,6 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
+    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8
 )
@@ -254,7 +255,7 @@ class TestMatmulCuda(TestCase):
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
-if torch.version.hip:
+if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
@@ -771,7 +772,10 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support row-wise scaling")
+    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_honor_sm_carveout(self) -> None:
         torch.manual_seed(42)
 
