@@ -166,6 +166,7 @@ partition create_sdpa_graph_partition(
         {masked_qk_out.value()},
         "mask_add"};
   } else if (is_causal) {
+#if (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 7)
     mask_row_idx = {lt_id++, data_type::s32};
     mask_gen_idx_row = {
         op_id++,
@@ -199,6 +200,11 @@ partition create_sdpa_graph_partition(
         {mask_gt_out.value(), scaled_qk_out, params.neg_inf.value()},
         {masked_qk_out.value()},
         "mask_select"};
+#else
+    TORCH_CHECK(
+        false,
+        "OneDNN v3.7 or later is required for implicit causal mask support.");
+#endif
   }
 
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
