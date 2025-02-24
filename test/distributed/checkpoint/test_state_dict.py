@@ -52,7 +52,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MultiProcessTestCase,
     with_comms,
 )
-from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
+from torch.testing._internal.distributed.common_state_dict import (
+    FusionEmbedding,
+    FusionEmbeddingWithHook,
+    FusionEmbeddingWithModifier,
+    VerifyStateDictMixin,
+)
 from torch.utils._pytree import tree_all, tree_all_only
 
 
@@ -923,6 +928,20 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True, strict=False
                 ),
             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_hook_on_keys(self) -> None:
+        with torch.device("meta"):
+            metamodel = FusionEmbedding(4, 4, 4)
+        with torch.device("cuda"):
+            gpumodel = FusionEmbeddingWithHook(4, 4, 4)
+        gpumodel_state_dict = get_model_state_dict(gpumodel)
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            set_model_state_dict(metamodel, gpumodel_state_dict)
+        with torch.device("meta"):
+            metamodel_modified = FusionEmbeddingWithModifier(4, 4, 4)
+        set_model_state_dict(metamodel_modified, gpumodel_state_dict)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
