@@ -1,6 +1,6 @@
 name: Lint
 # Workflow that runs lint checks and also unittests for tools, and scripts.
-
+mangle
 on:
   pull_request:
     branches-ignore:
