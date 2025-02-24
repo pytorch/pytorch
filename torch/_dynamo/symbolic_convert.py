@@ -74,7 +74,13 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    unimplemented,
+    unimplemented_v2,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
@@ -488,7 +494,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"  # noqa: UP031
+        "Graph break in user code at %s:%s\nGraph Break Reason: %s\nUser code traceback:\n%s"  # noqa: UP031
         % (
             frame_loc[0],
             frame_loc[1],
@@ -523,7 +529,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         # exercised by
         #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
         graph_break_log.debug(
-            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
             frame_loc[0],
             frame_loc[1],
             reason,
@@ -762,7 +768,7 @@ def break_graph_if_unsupported(*, push):
                 log_graph_break(
                     self.code_options,
                     exc_info=True,
-                    reason=f"Unsupported: {excp}",
+                    reason=str(excp),
                     user_stack=excp.real_stack,
                 )
 
@@ -1159,7 +1165,9 @@ class InstructionTranslatorBase(
                 if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
-                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                        + torch.fx.GraphModule(
+                            self.output.nn_modules, self.output.graph
+                        ).print_readable(
                             print_output=False, include_stride=True, include_device=True
                         ),
                         file=sys.stderr,
@@ -1562,7 +1570,12 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
-            unimplemented("re-raise")
+            # duplicate the top of the stack and re-raise it
+            if sys.version_info < (3, 11):
+                unimplemented("re-raise")
+            assert isinstance(self.stack[-1], ExceptionVariable)
+            self.stack.append(self.stack[-1])
+            self._raise_exception_variable(inst)
         elif inst.arg == 1:
             self._raise_exception_variable(inst)
         else:
@@ -1587,6 +1600,31 @@ class InstructionTranslatorBase(
             # RERAISE is currently supported in a narrow case of `raise ... from None`
             self._raise_exception_variable(inst)
         unimplemented("RERAISE")
+
+    def WITH_EXCEPT_START(self, inst):
+        if sys.version_info >= (3, 11):
+            # At the top of the stack are 4 values:
+            #    - TOP = exc_info()
+            #    - SECOND = previous exception
+            #    - THIRD: lasti of exception in exc_info()
+            #    - FOURTH: the context.__exit__ bound method
+            #    We call FOURTH(type(TOP), TOP, GetTraceback(TOP)).
+            #    Then we push the __exit__ return value.
+            assert len(self.stack) >= 4
+            fn = self.stack[-4]
+            val = self.stack[-1]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
+        else:
+            assert len(self.stack) >= 7
+            fn = self.stack[-7]
+            val = self.stack[-4]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
+
+        self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -2514,7 +2552,16 @@ class InstructionTranslatorBase(
         if not isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
         ):
-            unimplemented(f"{inst.opname} {ctx}")
+            unimplemented_v2(
+                gb_type="Unsupported context manager",
+                context=f"Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
+                explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+                hints=[
+                    "Avoid using the unsupported context manager.",
+                    "File an issue to PyTorch. Simple context managers can potentially be supported, "
+                    "but note that context managers can't be supported in general",
+                ],
+            )
 
         if (
             isinstance(ctx, GenericContextWrappingVariable)
@@ -3257,15 +3304,36 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     False, "allowlist in dynamo known function"
                 )
             fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
-            unimplemented(
-                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+            hints = [
+                f"Avoid calling the function `{fn_qualname}`.",
+            ]
+            if "_dynamo" not in func.get_filename():
+                hints += [
+                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
+                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
+                    "attempting to trace into the function.",
+                    "Please file an issue to PyTorch.",
+                    # TODO suggest mark_force_inline when implemented
+                ]
+            unimplemented_v2(
+                gb_type="Attempted to inline function marked as skipped",
+                context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
+                f"filename: `{func.get_filename()}`, skip reason: {result.reason}",
+                explanation=f"Dynamo developers have intentionally marked that the function `{fn_qualname}` "
+                "should not be traced.",
+                hints=hints,
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
-            unimplemented(
-                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
             )
         else:
             return result

@@ -955,7 +955,7 @@ class NamedTupleVariable(TupleVariable):
         )
 
 
-class SliceVariable(BaseListVariable):
+class SliceVariable(VariableTracker):
     def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
@@ -973,14 +973,15 @@ class SliceVariable(BaseListVariable):
             stop, variables.TensorVariable
         ):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
+        self.items = (start, stop, step)
 
-        super().__init__([start, stop, step], **kwargs)
+        super().__init__(**kwargs)
 
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
 
     def as_proxy(self):
-        return slice(*self._as_proxy())
+        return slice(*[x.as_proxy() for x in self.items])
 
     def python_type(self):
         return slice
