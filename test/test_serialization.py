@@ -456,7 +456,7 @@ class SerializationMixin:
                 self.tensor = tensor
 
             def __reduce_ex__(self, proto):
-                indices = self.tensor._indices()
+                indices = self.tensor._indices().clone()
                 indices[0][0] = 3
                 return (torch.sparse.FloatTensor, (indices, self.tensor._values(), x.size()))
 
