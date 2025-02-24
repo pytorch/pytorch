@@ -247,8 +247,8 @@ jobs:
       cuda-arch-list: '8.0'
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-build:
-    name: linux-jammy-py3.9-gcc11
+  verify-cachebench-cpu-build:
+    name: verify-cachebench-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -261,8 +261,8 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-test:
-    name: linux-jammy-py3.9-gcc11
+  verify-cachebench-cpu-test:
+    name: verify-cachebench-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-py3_9-gcc11-build
