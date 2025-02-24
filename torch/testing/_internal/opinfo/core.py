@@ -112,12 +112,17 @@ class DecorateInfo:
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
+        # Validate device_type
+        if self.device_type is not None:
+            if isinstance(self.device_type, str) == False:
+                assert isinstance(self.device_type, list)
+
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
-            and (self.device_type is None or self.device_type == device_type)
+            and (self.device_type is None or device_type in self.device_type)
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (
