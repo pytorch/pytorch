@@ -17,7 +17,14 @@ TIMEOUT: int = 2000
 
 
 # Keep in sync with .ci/pytorch/test.sh
-TORCHBENCH_MODELS: list[str] = ["nanogpt", "BERT_pytorch", "resnet50"]
+TORCHBENCH_MODELS: list[str] = [
+    "nanogpt",
+    "BERT_pytorch",
+    "resnet50",
+    "moco",
+    "llama",
+    "hf_T5",
+]
 HUGGINGFACE_MODELS: list[str] = [
     "AllenaiLongformerBase",
     "BertForMaskedLM",
