@@ -18,6 +18,11 @@ TIMEOUT: int = 2000
 
 # Keep in sync with .ci/pytorch/test.sh
 TORCHBENCH_MODELS: list[str] = ["nanogpt", "BERT_pytorch", "resnet50"]
+HUGGINGFACE_MODELS: list[str] = [
+    "AllenaiLongformerBase",
+    "BertForMaskedLM",
+    "GPT2ForSequenceClassification",
+]
 
 
 @dataclasses.dataclass
@@ -74,13 +79,21 @@ MODE_ARGS_DICT = {
 }
 
 
+BENCHMARK_FILE = {
+    "torchbench": "torchbench.py",
+    "huggingface": "huggingface.py",
+}
+
+
 def _run_torchbench_model(
     cmd_args: argparse.Namespace,
     results: list[RunResult],
     model: str,
 ) -> None:
     cur_file = os.path.abspath(__file__)
-    torchbench_file = os.path.join(os.path.dirname(cur_file), "torchbench.py")
+    torchbench_file = os.path.join(
+        os.path.dirname(cur_file), BENCHMARK_FILE[cmd_args.benchmark]
+    )
     assert os.path.exists(
         torchbench_file
     ), f"Torchbench does not exist at {torchbench_file}"
@@ -112,7 +125,7 @@ def _run_torchbench_model(
             RunResult(
                 model=model,
                 mode=cmd_args.mode,
-                benchmark="torchbench",
+                benchmark=cmd_args.benchmark,
                 dynamic=dynamic,
                 device=cmd_args.device,
                 cold_compile_s=cold_compile_t,
@@ -180,7 +193,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--benchmark",
-        choices=("torchbench"),
+        choices=("torchbench", "huggingface"),
         required=True,
         help="Name of benchmark suite to run",
     )
@@ -217,7 +230,8 @@ def main() -> None:
     cmd_args = parse_cmd_args()
 
     dispatcher: dict[str, tuple[Dispatch_fn_t, list[str]]] = {
-        "torchbench": (_run_torchbench_model, TORCHBENCH_MODELS)
+        "torchbench": (_run_torchbench_model, TORCHBENCH_MODELS),
+        "huggingface": (_run_torchbench_model, HUGGINGFACE_MODELS),
     }
     fn, models = dispatcher[cmd_args.benchmark]
     if cmd_args.model is not None:
