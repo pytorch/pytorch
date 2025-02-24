@@ -88,7 +88,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def _generate_temporary_array_pointer(c_type: str, elements: Sequence[str]) -> str:
-        """Get a const T* to an array that only exists for the duration of the C++
+        """Get a pointer to an array that only exists for the duration of the C++
         statement it's used in."""
         # cbegin() returns const c_type*.
         return (
@@ -2255,7 +2255,7 @@ if (custom_op_wrapper.get() == NULL) {
 
     def c_type_for_prim_type(self, val, type_) -> str:
         if isinstance(type_, torch.OptionalType):
-            return f"const {self.c_type_for_prim_type(val, type_.getElementType())}*"
+            return f"{self.c_type_for_prim_type(val, type_.getElementType())}*"
         elif isinstance(type_, torch.TensorType):
             return "AtenTensorHandle"
         elif isinstance(type_, (torch.IntType, torch.SymIntType)):
