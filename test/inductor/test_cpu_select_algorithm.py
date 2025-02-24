@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
-import ctypes
 import functools
 import sys
 import unittest
-from collections import namedtuple
 from typing import Optional
 from unittest.mock import patch
 
@@ -14,12 +12,9 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
-from torch._inductor import cpu_vec_isa, test_operators
-from torch._inductor.codecache import CppCodeCache
-from torch._inductor.codegen.cpp_utils import value_to_cpp
+from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import IndentedBuffer
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
