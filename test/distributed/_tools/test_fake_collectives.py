@@ -46,66 +46,72 @@ class TestFakeCollectives(TestCase):
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_collectives(self):
-        self._setup_distributed()
-        with FakeTensorMode(), CollectiveTest(test=self):
-            test_tensor_list = [torch.randn(100, device="cuda") for _ in range(4)]
-            test_tensor_list_2 = [torch.randn(400, device="cuda") for _ in range(4)]
-            test_tensor = torch.randn(100, device="cuda")
-            # Used as gather output or scatter input
-            test_tensor2 = torch.randn(400, device="cuda")
+        try:
+            self._setup_distributed()
+            with FakeTensorMode(), CollectiveTest(test=self):
+                test_tensor_list = [torch.randn(100, device="cuda") for _ in range(4)]
+                test_tensor_list_2 = [torch.randn(400, device="cuda") for _ in range(4)]
+                test_tensor = torch.randn(100, device="cuda")
+                # Used as gather output or scatter input
+                test_tensor2 = torch.randn(400, device="cuda")
 
-            # Testing non-functional collective operations
-            dist.broadcast(test_tensor, src=0)
-            dist.all_reduce(test_tensor)
-            dist.reduce(test_tensor, dst=0)
-            dist.send(test_tensor, dst=1)
-            dist.recv(test_tensor, src=1)
-            dist.all_gather(test_tensor_list, test_tensor)
-            dist.reduce_scatter(test_tensor, test_tensor_list)
-            dist.reduce_scatter_tensor(test_tensor, test_tensor2)
-            dist.scatter(test_tensor, scatter_list=test_tensor_list, src=0)
-            dist.gather(test_tensor, gather_list=test_tensor_list, dst=0)
-            dist.all_gather_into_tensor(test_tensor2, test_tensor)
-            dist.all_to_all(test_tensor_list, test_tensor_list)
-            dist.all_to_all_single(test_tensor2, test_tensor2)
-            dist.barrier()
+                # Testing non-functional collective operations
+                dist.broadcast(test_tensor, src=0)
+                dist.all_reduce(test_tensor)
+                dist.reduce(test_tensor, dst=0)
+                dist.send(test_tensor, dst=1)
+                dist.recv(test_tensor, src=1)
+                dist.all_gather(test_tensor_list, test_tensor)
+                dist.reduce_scatter(test_tensor, test_tensor_list)
+                dist.reduce_scatter_tensor(test_tensor, test_tensor2)
+                dist.scatter(test_tensor, scatter_list=test_tensor_list, src=0)
+                dist.gather(test_tensor, gather_list=test_tensor_list, dst=0)
+                dist.all_gather_into_tensor(test_tensor2, test_tensor)
+                dist.all_to_all(test_tensor_list, test_tensor_list)
+                dist.all_to_all_single(test_tensor2, test_tensor2)
+                dist.barrier()
 
-            # Testing functional collectives
-            wait_tensor(test_tensor)
-            broadcast(test_tensor, src=0, group=dist.group.WORLD)
-            all_reduce(test_tensor, reduceOp="avg", group=dist.group.WORLD)
-            all_gather_tensor(test_tensor, gather_dim=0, group=dist.group.WORLD)
-            all_gather_tensor_autograd(
-                test_tensor, gather_dim=0, group=dist.group.WORLD
-            )
-            reduce_scatter_tensor(
-                test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
-            )
-            reduce_scatter_tensor_autograd(
-                test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
-            )
-            all_to_all_single(
-                test_tensor,
-                output_split_sizes=[0],
-                input_split_sizes=[1],
-                group=dist.group.WORLD,
-            )
-            all_reduce_coalesced(
-                test_tensor_list, reduceOp="avg", group=dist.group.WORLD
-            )
-            all_gather_into_tensor_coalesced(test_tensor_list, group=dist.group.WORLD)
-            reduce_scatter_tensor_coalesced(
-                test_tensor_list_2,
-                scatter_dim=[0] * 4,
-                reduceOp="sum",
-                group=dist.group.WORLD,
-            )
-            all_to_all_single_autograd(
-                test_tensor,
-                output_split_sizes=[0],
-                input_split_sizes=[1],
-                group=dist.group.WORLD,
-            )
+                # Testing functional collectives
+                wait_tensor(test_tensor)
+                broadcast(test_tensor, src=0, group=dist.group.WORLD)
+                all_reduce(test_tensor, reduceOp="avg", group=dist.group.WORLD)
+                all_gather_tensor(test_tensor, gather_dim=0, group=dist.group.WORLD)
+                all_gather_tensor_autograd(
+                    test_tensor, gather_dim=0, group=dist.group.WORLD
+                )
+                reduce_scatter_tensor(
+                    test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
+                )
+                reduce_scatter_tensor_autograd(
+                    test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
+                )
+                all_to_all_single(
+                    test_tensor,
+                    output_split_sizes=[0],
+                    input_split_sizes=[1],
+                    group=dist.group.WORLD,
+                )
+                all_reduce_coalesced(
+                    test_tensor_list, reduceOp="avg", group=dist.group.WORLD
+                )
+                all_gather_into_tensor_coalesced(
+                    test_tensor_list, group=dist.group.WORLD
+                )
+                reduce_scatter_tensor_coalesced(
+                    test_tensor_list_2,
+                    scatter_dim=[0] * 4,
+                    reduceOp="sum",
+                    group=dist.group.WORLD,
+                )
+                all_to_all_single_autograd(
+                    test_tensor,
+                    output_split_sizes=[0],
+                    input_split_sizes=[1],
+                    group=dist.group.WORLD,
+                )
+        finally:
+            if dist.group.WORLD is not None:
+                dist.destroy_process_group()
 
 
 class CollectiveTest(TorchDispatchMode):
@@ -207,7 +213,4 @@ class CollectiveTest(TorchDispatchMode):
 
 
 if __name__ == "__main__":
-    try:
-        run_tests()
-    finally:
-        dist.destroy_process_group()
+    run_tests()

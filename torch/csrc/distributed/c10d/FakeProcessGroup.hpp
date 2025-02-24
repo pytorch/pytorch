@@ -178,7 +178,7 @@ class FakeProcessGroup : public Backend {
   }
 
   void startCoalescing() override {
-  // No-op
+    // No-op
   }
 
   c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
