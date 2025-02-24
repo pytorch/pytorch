@@ -1126,7 +1126,7 @@ void dispatch_host_softmax_backward(int64_t dim_size, dim3 grid, Tensor &grad, T
   auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
     smem_reduction_sz) / sizeof(output_t);
   bool can_use_smem = static_cast<size_t>(dim_size) < max_elements_per_smem;
-  can_use_smem &= (!(reinterpret_cast<const uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
+  can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
   can_use_smem &= (!(reinterpret_cast<uintptr_t>(output.const_data_ptr<output_t>()) % ALIGN_BYTES));
   can_use_smem &= !(reinterpret_cast<uintptr_t>(grad.const_data_ptr<output_t>()) % ALIGN_BYTES);
   can_use_smem &= !(dim_size % ILP);
