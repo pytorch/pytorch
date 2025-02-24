@@ -1480,8 +1480,6 @@ def _remove_symbols_without_guarding(x: torch.Tensor) -> torch.Tensor:
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
-    print(shape)
-    print(stride)
     return x.new_empty_strided(shape, stride=stride)
 
 
