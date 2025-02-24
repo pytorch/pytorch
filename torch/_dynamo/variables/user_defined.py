@@ -849,9 +849,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
-        # if name == "__init__":
-        #     breakpoint()
-
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
