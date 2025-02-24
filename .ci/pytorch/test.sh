@@ -494,7 +494,8 @@ test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" --output "$TEST_REPORTS_DIR/cachebench.json"
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode training --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_training.json"
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
 }
 
 test_perf_for_dashboard() {
