@@ -403,12 +403,14 @@ static PyObject* THPStorage_releaseIPCCounter(
   END_HANDLE_TH_ERRORS
 }
 
-static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
+static std::string THPStorage_bytesAsHandleString(
+    PyObject* handle,
+    size_t ipc_handle_size) {
   HANDLE_TH_ERRORS
   char* buffer = nullptr;
   Py_ssize_t handle_size = 0;
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
-    TORCH_CHECK(false, "incorrect handle");
+    TORCH_CHECK(handle_size == ipc_handle_size, "incorrect handle");
   }
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
@@ -450,19 +452,21 @@ static PyObject* THPStorage_newSharedDevice(PyObject* _unused, PyObject* args) {
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   auto device = at::Device(device_type, device_index);
   at::DeviceGuard device_guard(device);
+  auto ipc_handle_size =
+      at::globalContext().getAcceleratorHooksInterface().getIpcHandleSize();
   std::string s_ipc_event_handle =
-      THPStorage_bytesAsHandleString(_event_handle);
+      THPStorage_bytesAsHandleString(_event_handle, ipc_handle_size);
   bool event_sync_required = PyObject_IsTrue(_event_sync_required);
   if (event_sync_required && s_ipc_event_handle.empty())
     return nullptr;
-  std::string s_handle = THPStorage_bytesAsHandleString(_handle);
+  std::string s_handle =
+      THPStorage_bytesAsHandleString(_handle, ipc_handle_size);
   std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
   ptrdiff_t ref_counter_offset =
       (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
 
   auto data_ptr =
       at::globalContext().getAcceleratorHooksInterface().StorageNewSharedDevice(
-          device_index,
           event_sync_required,
           s_ipc_event_handle,
           s_handle,

@@ -511,13 +511,13 @@ CUDAHooks::StorageShareDevice(const c10::Storage& storage) const {
 }
 
 
-c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
-                                               bool event_sync_required,
+c10::DataPtr CUDAHooks::StorageNewSharedDevice(bool event_sync_required,
                                                std::string s_ipc_event_handle,
                                                std::string s_handle,
                                                std::string ref_counter_handle,
                                                ptrdiff_t ref_counter_offset,
                                                ptrdiff_t storage_offset_bytes) const {
+  auto cur_device = at::cuda::current_device();
   c10::DataPtr data_ptr;
   if (event_sync_required) {
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
@@ -526,7 +526,7 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
     cudaEvent_t event = nullptr;
     C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
     C10_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(cur_device), event, 0));
     cudaEventDestroy(event);
   }
   if (s_handle.empty()) return data_ptr;
@@ -547,10 +547,8 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
   auto ctx = std::make_unique<IpcDeleterContext>();
   ctx->ref_counter_handle = std::move(ref_counter_handle);
   ctx->ref_counter_offset = ref_counter_offset;
-  ctx->device = device;
+  ctx->device = cur_device;
   ctx->received_data.shared_ptr_ = std::move(basePtr);
-
-  auto cur_device = at::cuda::current_device();
 
   data_ptr = c10::DataPtr(
       devPtr,
@@ -594,6 +592,10 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
 
 int64_t CUDAHooks::getIpcRefCounterFileSize() const {
   return at::cuda::ipc::CUDA_IPC_REF_COUNTER_FILE_SIZE;
+}
+
+size_t CUDAHooks::getIpcHandleSize() const {
+  return CUDA_IPC_HANDLE_SIZE;
 }
 
 // Sigh, the registry doesn't support namespaces :(

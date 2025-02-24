@@ -80,8 +80,7 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
   }
 
-  virtual c10::DataPtr StorageNewSharedDevice(c10::DeviceIndex device,
-                                              bool event_sync_required,
+  virtual c10::DataPtr StorageNewSharedDevice(bool event_sync_required,
                                               std::string s_ipc_event_handle,
                                               std::string s_handle,
                                               std::string ref_counter_handle,
@@ -93,6 +92,10 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual int64_t getIpcRefCounterFileSize() const {
     TORCH_CHECK(false, "Backend doesn't support getIpcRefCounterFileSize");
     return -1;
+  }
+
+  virtual size_t getIpcHandleSize() const {
+    TORCH_CHECK(false, "Backend doesn't support getIpcHandleSize");
   }
 };
 
