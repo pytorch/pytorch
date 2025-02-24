@@ -395,6 +395,21 @@ class TestFSDPWrap(FSDPTest):
             loss.backward()
             optim.step()
 
+    @skip_if_lt_x_gpu(2)
+    def test_zero_argument(self):
+        class ZeroArguModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor([1.0]))
+
+            def forward(self):
+                return self.a
+
+        device = torch.device("cuda")
+        model = ZeroArguModel().to(device)
+        model = FSDP(model)
+        model()
+
 
 class TestAutoWrap(TestCase):
     def setUp(self) -> None:
