@@ -3185,10 +3185,8 @@ def _as_posix_path(path):
 
 
 def _strip_init_py(s):
-    # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
-    if s.endswith(suffix):
-        s = s[: -len(suffix)]
+    s = s.removesuffix(suffix)
     return _as_posix_path(s)
 
 
@@ -3765,7 +3763,7 @@ def lookup_inner(
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
         elif name == "__torch_function__" or (
-            obj and obj.__name__ == "__torch_function__"
+            obj and getattr(obj, "__name__", None) == "__torch_function__"
         ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
