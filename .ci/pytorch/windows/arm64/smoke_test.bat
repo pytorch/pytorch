@@ -10,51 +10,19 @@ echo "unknown package type"
 exit /b 1
 
 :wheel
-:: change to source directory
-cd %PYTORCH_ROOT%
+call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
-:: activate visual studio
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
-where cl.exe
-
-:: create virtual environment
-python -m venv .venv
-echo * > .venv\.gitignore
-call .\.venv\Scripts\activate
-where python
-
-:: install dependencies
-echo Installing dependencies...
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install pytest numpy protobuf
-
-:: find file name for pytorch wheel
-echo Searching for PyTorch wheel...
-for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
-
-echo Installing PyTorch wheel...
-pip install %TORCH_WHEEL_FILENAME%
-
-echo pip list
-pip list 
-
-echo pip show torch
-python -m pip show torch
-
-echo import sys
-python -c "import sys; print(sys.path)"
-if ERRORLEVEL 1 exit /b 1
+call  %PYTORCH_ROOT%\.venv\Scripts\activate
 
 echo Running python rnn_smoke.py...
-python .\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
+python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
 echo Checking that basic CNN works...
-python .\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
+python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
-cd test
+push %PYTORCH_ROOT%\test
 
 set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
 
