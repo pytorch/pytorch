@@ -581,7 +581,6 @@ class AutogradCompilerInstance:
     def unpack_hook(self, hook_id, data_id):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        # move this out of hooks
         data = self.packed_data_proxy[data_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,

@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from copy import deepcopy
 from importlib.machinery import SourceFileLoader
@@ -48,11 +49,17 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
-    assert backend in ["inductor", "aot_eager"]
+def make_compiler_fn(
+    fullgraph=True, dynamic=True, backend="inductor", gm_hook=lambda gm: None
+):
+    assert backend in ["inductor", "aot_eager", "ca_eager"]
 
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
+        gm_hook(gm)
+
+        if backend == "ca_eager":
+            return gm
 
         def _inner_compiler(gm_, example_inputs_):
             counters["compiled_autograd"]["compiles"] += 1
@@ -3543,7 +3550,7 @@ class CompiledAutograd0(torch.nn.Module):
             loss = out_test.sum()
             loss.register_hook(
                 tensor_hook
-            )  # schedueld to fire before any saved activations
+            )  # scheduled to fire before any saved activations
             loss.backward()
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
@@ -3567,12 +3574,68 @@ class CompiledAutograd0(torch.nn.Module):
             )
         else:
             # dynamo issues, just run the CA graph directly for now
+            def check(gm):
+                graph_code = normalize_gm(gm.print_readable(print_output=False))
+                self.assertExpectedInline(
+                    graph_code,
+                    """\
+class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_2 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_2], [True], [10, 10]);  getitem_2 = None
+        getitem_3 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_3], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_3 = None
+        getitem_4 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_5 = hooks[0]
+        getitem_6 = packed_data[0]
+        getitem_7 = hooks[1]
+        getitem_8 = packed_data[1]
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_5, getitem_6, hook_type = 'unpack_hook');  getitem_5 = getitem_6 = None
+        call_hook_1 = torch__dynamo_external_utils_call_hook(getitem_7, getitem_8, hook_type = 'unpack_hook');  getitem_7 = getitem_8 = None
+        mul_backward0 = torch__dynamo_compiled_autograd_ops_MulBackward0([getitem_4], [True, True], call_hook, 6, call_hook_1, 6);  getitem_4 = call_hook = call_hook_1 = None
+        getitem_9 = mul_backward0[0]
+        getitem_10 = mul_backward0[1];  mul_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_9, getitem_10], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False), ((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_9 = getitem_10 = None
+        getitem_11 = validate_outputs_2[0]
+        getitem_12 = validate_outputs_2[1];  validate_outputs_2 = None
+
+        getitem_13 = hooks[2]
+        getitem_14 = packed_data[2]
+        call_hook_2 = torch__dynamo_external_utils_call_hook(getitem_13, getitem_14, hook_type = 'unpack_hook');  getitem_13 = getitem_14 = None
+        cos_backward0 = torch__dynamo_compiled_autograd_ops_CosBackward0([getitem_12], [True], call_hook_2);  getitem_12 = call_hook_2 = None
+        getitem_15 = cos_backward0[0];  cos_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_15 = None
+        getitem_16 = validate_outputs_3[0];  validate_outputs_3 = None
+        add = torch.add(getitem_11, getitem_16);  getitem_11 = getitem_16 = None
+
+        getitem_17 = hooks[3];  hooks = None
+        getitem_18 = packed_data[3];  packed_data = None
+        call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_17, getitem_18, hook_type = 'unpack_hook');  getitem_17 = getitem_18 = None
+        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
+        getitem_19 = sin_backward0[0];  sin_backward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_19], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_19 = None
+        getitem_20 = validate_outputs_4[0];  validate_outputs_4 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_20);  getitem_1 = getitem_20 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+                )
+
             self.check_output_and_recompiles(
-                fn, count=[1, 0], compiler_fn=lambda gm: gm
+                fn,
+                count=[1, 0],
+                compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_offloading(self):
+    def test_cpu_offloading(self):
         def fn():
             def pack(x):
                 return x.cpu()
@@ -3591,13 +3654,152 @@ class CompiledAutograd0(torch.nn.Module):
                     (x,) = ctx.saved_tensors
                     return grad_out * x
 
-            x = torch.randn(5, requires_grad=True).cuda()
             with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                MyMatMul.apply(x).sum().backward()
+                for i in [10, 100, 10, 20, 30]:
+                    x = torch.randn(i, requires_grad=True).cuda()
+                    MyMatMul.apply(x).sum().backward()
+                    yield x.grad
 
-            yield x.grad
+        i = 0
 
-        self.check_output_and_recompiles(fn)
+        def check(gm):
+            nonlocal i
+            if i == 0:
+                i += 1
+                return
+
+            graph_code = normalize_gm(gm.print_readable(print_output=False))
+            self.assertExpectedInline(
+                graph_code,
+                """\
+class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0];  getitem_2 = None
+        getitem_3 = sizes[1]
+        getitem_4 = sizes[2];  sizes = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0]
+        getitem_9 = packed_data[0];  packed_data = None
+        getitem_10 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
+        getitem_12 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
+
+        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
+        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
+        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+            )
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(gm_hook=check)
+        )
+
+    @skipIfWindows(msg="temp dir not compatible")
+    def test_disk_offloading(self):
+        with tempfile.TemporaryDirectory() as d:
+
+            def fn():
+                pack_count = 0
+
+                def pack(x):
+                    nonlocal pack_count
+                    path = f"{d}/{pack_count}.pt"
+                    torch.save(x, path)
+                    return path
+
+                def unpack(path):
+                    x = torch.load(path)
+                    return x
+
+                class MyMatMul(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        ctx.save_for_backward(x)
+                        return torch.matmul(x, x)
+
+                    @staticmethod
+                    def backward(ctx, grad_out):
+                        (x,) = ctx.saved_tensors
+                        return grad_out * x
+
+                with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                    for i in [10, 100, 10, 20, 30]:
+                        x = torch.randn(i, requires_grad=True).cuda()
+                        MyMatMul.apply(x).sum().backward()
+                        yield x.grad
+
+            i = 0
+
+            def check(gm):
+                nonlocal i
+                if i == 0:
+                    i += 1
+                    return
+
+                graph_code = normalize_gm(gm.print_readable(print_output=False))
+                self.assertExpectedInline(
+                    graph_code,
+                    """\
+class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0];  getitem_2 = None
+        getitem_3 = sizes[1]
+        getitem_4 = sizes[2];  sizes = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0]
+        getitem_9 = packed_data[0];  packed_data = None
+        getitem_10 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
+        getitem_12 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
+
+        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
+        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
+        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+                )
+
+            # 1 graph break on torch.load -> 2 dynamo graphs
+            self.check_output_and_recompiles(
+                fn,
+                count=[2, 4],
+                compiler_fn=make_compiler_fn(fullgraph=False, gm_hook=check),
+            )
 
     @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering_partial(self):
