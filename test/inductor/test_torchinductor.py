@@ -4604,6 +4604,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -4628,6 +4629,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4927,6 +4929,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -6368,7 +6371,6 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6417,7 +6419,6 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6438,7 +6439,6 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -10043,9 +10043,6 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
-    @skip_if_cpp_wrapper(
-        "cannot currently handle fallback ops with return types containing list[Tensor]"
-    )
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
