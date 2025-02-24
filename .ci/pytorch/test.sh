@@ -490,6 +490,14 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
+test_cachebench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode training --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_training.json"
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
+}
+
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1509,6 +1517,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
+elif [[ "${TEST_CONFIG}" == cachebench ]]; then
+  install_torchaudio cuda
+  install_torchvision
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50
+  PYTHONPATH=$(pwd)/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     install_torchaudio cpu
