@@ -7189,7 +7189,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
-    @onlyCUDA
     def test_layer_norm_backwards_eps(self):
         dtype = torch.float
         m_x_n_list = [(32, 32), (1024, 32), (1024, 1024),
@@ -7199,7 +7198,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             grad_output = torch.rand_like(x)
             x_cuda = x.clone().detach().to("cuda").requires_grad_()
             grad_output_cuda = grad_output.clone().detach().to("cuda")
-            ln = nn.LayerNorm(n, device="cpu", dtype=dtype)
+            ln = nn.LayerNorm(n, dtype=dtype)
             ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype)
             ln_out = ln(x)
             ln_out_cuda = ln_cuda(x_cuda)
