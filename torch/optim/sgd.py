@@ -6,11 +6,13 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
+    _capturable_doc,
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
     _fused_doc,
+    _get_capturable_supported_devices,
     _maximize_doc,
     _params_doc,
     _to_scalar,
@@ -36,6 +38,7 @@ class SGD(Optimizer):  # noqa: D101
         *,
         maximize: bool = False,
         foreach: Optional[bool] = None,
+        capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):  # noqa: D107
@@ -56,6 +59,7 @@ class SGD(Optimizer):  # noqa: D101
             nesterov=nesterov,
             maximize=maximize,
             foreach=foreach,
+            capturable=capturable,
             differentiable=differentiable,
             fused=fused,
         )
@@ -77,6 +81,7 @@ class SGD(Optimizer):  # noqa: D101
             group.setdefault("nesterov", False)
             group.setdefault("maximize", False)
             group.setdefault("foreach", None)
+            group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
             group.setdefault("fused", False)
 
@@ -109,6 +114,7 @@ class SGD(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -138,6 +144,7 @@ class SGD(Optimizer):  # noqa: D101
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                capturable=group["capturable"],
             )
 
             if group["momentum"] != 0:
@@ -196,6 +203,7 @@ SGD.__doc__ = (
             when momentum is non-zero. (default: False)
         {_maximize_doc}
         {_foreach_doc}
+        {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
     """
@@ -257,6 +265,7 @@ def sgd(
     fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
+    capturable: bool = False,
     *,
     weight_decay: float,
     momentum: float,
@@ -313,6 +322,7 @@ def sgd(
         maximize=maximize,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        capturable=capturable,
     )
 
 
@@ -330,6 +340,7 @@ def _single_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
+    capturable: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -337,12 +348,19 @@ def _single_tensor_sgd(
         lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch.compiler.is_compiling() and capturable:
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params must be on supported devices: {capturable_supported_devices}."
+
         grad = grads[i] if not maximize else -grads[i]
 
         if weight_decay != 0:
             # Nested if is necessary to bypass jitscript rules
             if isinstance(weight_decay, Tensor):
-                if weight_decay.requires_grad:
+                if weight_decay.requires_grad or capturable:
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
@@ -366,7 +384,7 @@ def _single_tensor_sgd(
 
         # Nested if is necessary to bypass jitscript rules
         if isinstance(lr, Tensor):
-            if lr.requires_grad:
+            if lr.requires_grad or capturable:
                 param.addcmul_(grad, lr, value=-1)
             else:
                 param.add_(grad, alpha=-lr)
@@ -388,6 +406,7 @@ def _multi_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
+    capturable: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -395,6 +414,12 @@ def _multi_tensor_sgd(
         return
 
     lr = _to_scalar(lr)
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch.compiler.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices()
+        assert all(
+            p.device.type in capturable_supported_devices for p in params
+        ), f"If capturable=True, params must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
@@ -482,6 +507,7 @@ def _fused_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
+    capturable: bool,
 ) -> None:
     if not params:
         return
