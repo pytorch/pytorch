@@ -12,7 +12,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -639,14 +639,16 @@ class DistributedDataParallel(Module, Joinable):
     def __init__(
         self,
         module: Module,
-        device_ids: Optional[
-            Union[List[int], List[device], List[Union[int, device]]]
-        ] = None,
-        output_device: Optional[Union[int, device]] = None,
+        device_ids: list[int]
+        | list[str]
+        | list[device]
+        | list[int | str | device]
+        | None = None,
+        output_device: int | str | device | None = None,
         dim: int = 0,
         broadcast_buffers: bool = True,
         init_sync: bool = True,
-        process_group: "Optional[ProcessGroup]" = None,
+        process_group: "ProcessGroup | None" = None,
         bucket_cap_mb: float = 25,
         find_unused_parameters: bool = False,
         check_reduction: bool = False,
@@ -654,8 +656,8 @@ class DistributedDataParallel(Module, Joinable):
         static_graph: bool = False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
-        mixed_precision: Optional[_MixedPrecision] = None,
-        device_mesh: "Optional[DeviceMesh]" = None,
+        mixed_precision: _MixedPrecision | None = None,
+        device_mesh: "DeviceMesh | None" = None,
     ) -> None:
         super().__init__()
         Joinable.__init__(self)
