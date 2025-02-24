@@ -12,7 +12,8 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.checkpoint.metadata import MetadataIndex
-from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.checkpoint.utils import find_state_dict_object, _DistWrapper
+import torch.distributed as dist
 
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -20,6 +21,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.distributed_utils import with_fake_comms
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    skip_if_lt_x_gpu,
+    with_comms,
+)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -121,6 +127,54 @@ class TestMedatadaIndex(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Could not find shard"):
             find_state_dict_object(state_dict, MetadataIndex("st", [1]))
+
+
+class TestDistWrapper(DTensorTestBase):
+    @property
+    def world_size(self):
+        return min(4, torch.cuda.device_count())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_gather_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        rank = mesh_2d.get_rank()
+        half_world_size = self.world_size // 2
+        gathered_objects = dist_wrapper.gather_object(rank)
+        expected_objects = (
+            list(range(rank, rank + half_world_size))
+            if rank % half_world_size == 0
+            else None
+        )
+        assert gathered_objects == expected_objects
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_scatter_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        rank = mesh_2d.get_rank()
+        half_world_size = self.world_size // 2
+
+        objects = (
+            list(range(rank, rank + half_world_size))
+            if rank % half_world_size == 0
+            else None
+        )
+        scattered_objects = dist_wrapper.scatter_object(objects)
+        expected_objects = rank
+        assert scattered_objects == expected_objects
 
 
 if __name__ == "__main__":
