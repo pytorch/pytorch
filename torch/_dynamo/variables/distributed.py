@@ -260,7 +260,9 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ProcessGroupVariable(self.value.get_group())
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ProcessGroupVariable(self.value.get_group(*const_args, **const_kwargs))
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
