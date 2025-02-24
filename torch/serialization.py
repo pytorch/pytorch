@@ -15,7 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Generic, IO, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -274,9 +274,9 @@ def add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]) 
     (function/class, string) where string is the full path of the function/class.
 
     Within the serialized format, each function is identified with its full
-    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    path as ``{__module__}.{__qualname__}``. When calling this API, you can provide this
     full path that should match the one in the checkpoint otherwise the default
-    ``{fn.__module__}.{fn.__name__}`` will be used.
+    ``{fn.__module__}.{fn.__qualname__}`` will be used.
 
     Args:
         safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
@@ -1606,9 +1606,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 return saved_id[0]
             return deserialized_objects[int(saved_id)]
 
-        with closing(
-            tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
-        ) as tar, mkdtemp() as tmpdir:
+        with (
+            closing(
+                tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
+            ) as tar,
+            mkdtemp() as tmpdir,
+        ):
             if pickle_module is _weights_only_unpickler:
                 raise RuntimeError(
                     "Cannot use ``weights_only=True`` with files saved in the "
@@ -1749,13 +1752,6 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 ) from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
-
-    if not hasattr(f, "readinto") and (3, 8, 0) <= sys.version_info < (3, 8, 2):
-        raise RuntimeError(
-            "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            f'Received object of type "{type(f)}". Please update to Python 3.8.2 or newer to restore this '
-            "functionality."
-        )
 
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:
@@ -1905,7 +1901,7 @@ def _load(
     data_descripter_size64 = 24
     data_descripter_size32 = 16
     mz_uint32_max = 0xFFFFFFFF
-    offsets: Dict[str, int] = dict()
+    offsets: dict[str, int] = dict()
 
     def _get_offset(key, name, numel):
         """
