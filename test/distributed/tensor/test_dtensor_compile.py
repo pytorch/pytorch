@@ -170,7 +170,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape([2, 1]))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
         opt_fn = fn(mesh)
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
