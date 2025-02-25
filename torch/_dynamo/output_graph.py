@@ -490,7 +490,7 @@ class OutputGraph:
                     gb_type="backward_state does not support export",
                     context="",
                     explanation="Compiled autograd doesn't work with `torch.export`.",
-                    hints=[*graph_break_hints.FUNDAMENTAL],
+                    hints=[],
                 )
             example_value = BackwardState()
             self.backward_state_proxy = self.root_tracer.create_graph_input(
@@ -1004,7 +1004,6 @@ class OutputGraph:
                 context="",
                 explanation="Dynamo cannot compile traced graphs while in a try block.",
                 hints=[
-                    *graph_break_hints.FUNDAMENTAL,
                     *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                 ],
             )
@@ -2139,6 +2138,7 @@ class SubgraphTracer(fx.Tracer):
             ]
         elif kind == "call_module":
             if self.parent is not None:
+                # TODO can remove once inline_inbuilt_nn_modules is always True
                 unimplemented_v2(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
@@ -2172,6 +2172,7 @@ class SubgraphTracer(fx.Tracer):
                     ]
                 elif kind == "call_module":
                     if self.parent is not None:
+                        # TODO can remove once inline_inbuilt_nn_modules is always True
                         unimplemented_v2(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",

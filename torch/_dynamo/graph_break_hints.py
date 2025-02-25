@@ -1,6 +1,6 @@
 USER_ERROR = [
-    "Dynamo has detected that tracing the code will result in an error. "
-    "Please double check that your code doesn't contain a similar error when running eager/uncompiled.",
+    "Dynamo has detected that tracing the code will result in an error when running in eager. "
+    "Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.",
 ]
 DYNAMO_BUG = [
     "This is likely to be a Dynamo bug. Please report an issue to PyTorch.",

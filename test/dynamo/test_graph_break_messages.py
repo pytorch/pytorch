@@ -511,7 +511,7 @@ Attempted to call function marked as skipped
             """\
 Dynamic slicing with Tensor arguments
   Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: TensorVariable(), step: ConstantVariable(NoneType: None)
 
@@ -530,9 +530,9 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Observed exception
-  Explanation: Dynamo found no exception handler at the top-level compiled function when encounterin an exception. Exception will propagate outside the compiled region.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Dynamo has detected that tracing the code will result in an error. Please double check that your code doesn't contain a similar error when running eager/uncompiled.
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: raised exception ExceptionVariable(<class 'RuntimeError'>)
 
@@ -556,7 +556,7 @@ from user code:
             """\
 Uninitialized nn.Module
   Explanation: Attempted to trace an uninitialized nn.Module of type Foo.
-  Hint: Dynamo has detected that tracing the code will result in an error. Please double check that your code doesn't contain a similar error when running eager/uncompiled.
+  Hint: Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.
   Hint: Ensure your nn.Module instance has called `super().__init__()`.
 
   Developer debug context: Foo
@@ -621,7 +621,7 @@ Graph break under GenericContextWrappingVariable
   Hint: Move the offending context manager(s) to outside the compiled region.
   Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
 
-  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
+  Developer debug context:
 
 
 from user code:

@@ -978,7 +978,7 @@ class SliceVariable(VariableTracker):
                 explanation="Creating slices with Tensor arguments is not supported. "
                 "e.g. `l[:x]`, where `x` is a 1-element tensor.",
                 hints=[
-                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         self.items = (start, stop, step)
