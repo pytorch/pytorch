@@ -1060,7 +1060,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+        if config.graph_partition:
             if hasattr(self, "all_partition_names"):
                 all_partition_name_list = ", ".join(self.all_partition_names) + (
                     "," if len(self.all_partition_names) == 1 else ""
@@ -1232,7 +1232,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if config.graph_partition and not V.graph.aot_mode and not V.graph.cpp_wrapper:
+        if config.graph_partition:
             return 2
         else:
             return 1
