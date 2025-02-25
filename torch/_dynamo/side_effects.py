@@ -186,6 +186,7 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
+            # TODO plumb HOP information here
             unimplemented_v2(
                 gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
                 context="",
@@ -218,7 +219,7 @@ class SideEffects:
             unimplemented_v2(
                 gb_type="Write to immutable cell",
                 context=f"cellvar: {cellvar}, value: {value}",
-                explanation="Dynamo doesn't support writing to immutable cell variables.",
+                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
                 hints=[],
             )
         assert isinstance(cellvar, variables.CellVariable)
@@ -234,7 +235,7 @@ class SideEffects:
         unimplemented_v2(
             gb_type="Read uninitialized cell",
             context=str(cellvar),
-            explanation="Cannot read uninitialized cell.",
+            explanation="Attempted to read a cell variable that has not been populated yet.",
             hints=[],
         )
 
