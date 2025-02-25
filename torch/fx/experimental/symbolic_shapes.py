@@ -6589,6 +6589,7 @@ class ShapeEnv:
     # not effect the results. When needed its read directly.
     _expr_sym_node_id: Optional[int] = None
 
+    @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_sym_node(
         self,
         sym_node: SymNode,

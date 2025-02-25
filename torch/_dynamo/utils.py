@@ -59,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -1393,7 +1392,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -3648,7 +3647,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False

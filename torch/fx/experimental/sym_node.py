@@ -23,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, Set, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._logging.structured as structured
@@ -1224,7 +1224,7 @@ def _make_node_magic(method, func):
     else:
         method_attr = method
 
-    def uninteresting_files() -> Set[str]:
+    def uninteresting_files() -> set[str]:
         import torch
 
         mods = [

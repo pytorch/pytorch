@@ -11,8 +11,8 @@ import sys
 import types
 import typing
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView
-from typing import Callable, Sequence, TYPE_CHECKING, Union
+from collections.abc import KeysView, Sequence
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -669,6 +669,14 @@ class BuiltinVariable(VariableTracker):
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
                         return ConstantVariable.create(op.__name__ != "is_")
+                    if left is right:
+                        return ConstantVariable.create(op(left, right))
+                    if (
+                        istype(left, variables.ExceptionVariable)
+                        and istype(right, variables.ExceptionVariable)
+                        and left.exc_type is not right.exc_type
+                    ):
+                        return ConstantVariable.create(op(left, right))
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
