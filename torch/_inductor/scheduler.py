@@ -4109,6 +4109,11 @@ class Scheduler:
         )
 
     def _codegen_partitions(self) -> None:
+        """
+        Split nodes into partitions and codegen each partition into separate functions.
+        This allows further applying different optimizations (e.g., cudagraph) to
+        each function.
+        """
         partitions, signatures = self.graph_partition()
 
         for partition, signature in zip(partitions, signatures):
