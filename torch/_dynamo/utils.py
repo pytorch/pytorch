@@ -59,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -1405,7 +1404,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -2988,6 +2987,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)
@@ -3010,6 +3015,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     from .exc import (
         TorchRuntimeError,
         unimplemented,
+        unimplemented_v2,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3069,23 +3075,50 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(
-                f"data dependent operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            # capture_scalar_outputs only works for these ops right now
+            # see torch/_subclasses/fake_impls.py
+            if cause.func in (
+                torch.ops.aten.item.default,
+                torch.ops.aten._local_scalar_dense.default,
+            ):
+                # does this actually get triggered?
+                hints = [
+                    "Enable tracing of data-dependent output operators with "
+                    "`torch._dynamo.config.capture_scalar_outputs = True`",
+                ]
+            else:
+                hints = [
+                    "Consider wrapping the operator into a PyTorch-understood custom operator "
+                    "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
+                ]
+            unimplemented_v2(
+                gb_type="Data dependent operator",
+                context=str(cause.func),
+                explanation=f"Operator `{cause.func}` has a non-Tensor output "
+                "whose value is dependent on the data of Tensor inputs.",
+                hints=hints,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
+                    hints=[
+                        "Enable tracing of dynamic shape operators with "
+                        "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
+                    ],
                 )
             else:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "Operator does not have a meta kernel that supports dynamic output shapes, "
-                    "please report an issue to PyTorch"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator (no meta kernel)",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
+                    hints=[
+                        "Please report an issue to PyTorch",
+                    ],
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -3626,7 +3659,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4324,3 +4357,27 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    return mode

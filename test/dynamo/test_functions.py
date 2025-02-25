@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import collections.abc
 import contextlib
 import functools
 import inspect
@@ -10,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
@@ -1111,6 +1113,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         from torch import sub
 
         return sub(torch.add(x, y), y)
+
+    @make_test
+    def test_isinstance(x):
+        results = []
+        if isinstance([x], list):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], collections.abc.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], typing.Sequence):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        if isinstance([x], (tuple, list, typing.Sequence)):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
+        # TODO: add sourceless builder for types.UnionType
+        # if sys.version_info >= (3, 10):
+        #     if isinstance([x], list | tuple):
+        #         results.append(x.sin())
+        #     else:
+        #         results.append(x.cos())
+        return results
 
     @make_test
     def test_return_dict(x, y):
@@ -2359,6 +2392,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
+    def test_is(x, y):
+        exc = ValueError("abcd")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is exc
+            return x + y
+
+    @make_test
+    def test_is_not(x, y):
+        exc = ValueError("abcd")
+        exc1 = TypeError("abc")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is not exc1
+            return x + y
+
+    @make_test
     def test_are_functorch_transforms_active(x):
         if torch._C._are_functorch_transforms_active():
             return x + 1
@@ -2594,6 +2646,35 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
+
+    @make_test
+    def test_getattr(x):
+        def fn(y):
+            return y + 1
+
+        try:
+            _exit = type(fn).__exit__
+        except AttributeError:
+            return x.sin()
+        else:
+            return x.cos()
+
+    @unittest.expectedFailure
+    def test_getattr_metaclass(self):
+        class Meta(type):
+            def __getattr__(cls, name):
+                return len(name)
+
+        class C(metaclass=Meta):
+            attr = 123
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t + C.attr + C.dynamic_attr
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 123 + 12)
 
     def test_two_point_iter(self):
         def fn(x, y):
@@ -4455,7 +4536,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             immutable_inputs = torch.fx.immutable_collections.immutable_list(inputs)
             try:
                 immutable_inputs.append(x)
-            except NotImplementedError:
+            except TypeError:
                 pass
             return torch.fx.node.map_aggregate(immutable_inputs, f)
 
