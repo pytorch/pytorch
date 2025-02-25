@@ -416,7 +416,7 @@ def same_two_models(
             log.warning("Could not generate fp64 outputs")
 
     try:
-        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd, disable_clone=True)
     except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
