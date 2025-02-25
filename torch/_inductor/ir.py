@@ -5805,6 +5805,7 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
+
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
             raw_args = [
