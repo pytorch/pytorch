@@ -93,11 +93,11 @@ __device__ bool init_args_mixed_prec(
     const int64_t tensor_loc) {
   *param_args =
       (param_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
-  *grad_args = (grad_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+  *grad_args = (grad_type*)tl.addresses[1][tensor_loc] + chunk_idx * chunk_size;
   *exp_avg_args =
-      (exp_avg_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+      (exp_avg_type*)tl.addresses[2][tensor_loc] + chunk_idx * chunk_size;
   *exp_avg_sq_args =
-      (exp_avg_sq_type*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+      (exp_avg_sq_type*)tl.addresses[3][tensor_loc] + chunk_idx * chunk_size;
 
   bool all_aligned = is_aligned(*param_args) && is_aligned(*grad_args) &&
       is_aligned(*exp_avg_args) && is_aligned(*exp_avg_sq_args);
