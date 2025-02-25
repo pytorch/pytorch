@@ -4,6 +4,7 @@ import struct
 import unittest
 
 import torch
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -235,6 +236,9 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
@@ -391,12 +395,17 @@ class TestFloat8Dtype(TestCase):
             x1_save_load = torch.load(fname)
             torch.testing.assert_close(x1, x1_save_load, atol=0, rtol=0)
 
-    @dtypes(torch.float8_e8m0fnu)
-    def test_uint8_roundtrip_pt2(self, dtype, device):
+    @dtypes(*FLOAT8_DTYPES)
+    def test_torch_logs(self, dtype):
         # this is needed for TORCH_LOGS="+dynamo" to properly render this dtype
         assert (
             dtype in torch.fx.graph.dtype_abbrs
         ), f"{dtype} not found in `torch.fx.graph.dtype_abbrs`"
+
+    @dtypes(*FLOAT8_DTYPES)
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    def test_uint8_roundtrip_pt2(self, dtype, device):
+        # test that roundtrip from uint8 to `dtype` and back via `view` works in PT2
 
         def foo(x0):
             x1 = x0.view(dtype)
@@ -411,33 +420,66 @@ class TestFloat8Dtype(TestCase):
             y_ref = foo(x0)
 
         self.assertEqual(y_ref, y_c, atol=0, rtol=0)
-        print("done")
 
-    @dtypes(torch.float8_e8m0fnu)
-    def test_float32_cast_roundtrip_pt2(self, dtype, device):
-        # TODO also test bf16
+    @dtypes(*FLOAT8_DTYPES)
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    def test_uint8_to_dtype_pt2(self, dtype, device):
+        # test that returning a tensor of dtype `dtype` works in PT2
 
-        # this is needed for TORCH_LOGS="+dynamo" to properly render this dtype
-        assert (
-            dtype in torch.fx.graph.dtype_abbrs
-        ), f"{dtype} not found in `torch.fx.graph.dtype_abbrs`"
+        if dtype in (
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ):
+            # error message: https://gist.github.com/vkuzo/f533f9b4db82119f90a88c39ffdbdd56
+            # TODO(TODO issue): implement for e8m0 dtype
+            # TODO(later): implement for fnuz dtypes
+            return unittest.skip(f"not yet implemented for {dtype}")
 
         def foo(x0):
-            x1 = x0.to(torch.float8_e8m0fnu)
-            x2 = x1.to(torch.float32)
+            x1 = x0 + 1
+            x2 = x1.view(dtype)
             return x2
 
-        x0 = torch.randn(16, 16, device=device, dtype=torch.float32)
+        x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
         foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
 
         with torch.no_grad():
             y_c = foo_c(x0)
             y_ref = foo(x0)
 
-        print(y_c)
-        print(y_ref)
-        self.assertEqual(y_ref, y_c, atol=0, rtol=0)
-        print("done")
+        self.assertEqual(y_ref.view(torch.uint8), y_c.view(torch.uint8), atol=0, rtol=0)
+
+    @dtypes(*FLOAT8_DTYPES)
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    def test_float32_cast_roundtrip_pt2(self, dtype, device):
+        # test that casting from float32|bfloat16 to dtype and back works in PT2
+
+        if dtype in (
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ):
+            # error message: https://gist.github.com/vkuzo/cabe066c5be5e0659638f925b04b94f4
+            # TODO(TODO issue): implement for e8m0 dtype
+            # TODO(later): implement for fnuz dtypes
+            return unittest.skip(f"not yet implemented for {dtype}")
+
+        for hp_dtype in (torch.float32, torch.bfloat16):
+
+            def foo(x0):
+                x1 = x0.to(dtype)
+                x2 = x1.to(hp_dtype)
+                return x2
+
+            x0 = torch.randn(16, 16, device=device, dtype=hp_dtype)
+            foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
+
+            with torch.no_grad():
+                y_c = foo_c(x0)
+                y_ref = foo(x0)
+
+            self.assertEqual(y_ref, y_c, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestFloat8Dtype, globals())
