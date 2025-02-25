@@ -1436,7 +1436,7 @@ class AotCodeCompiler:
         fbcode_aot_cpu_re = (
             config.is_fbcode() and device_type == "cpu" and graph.aot_mode
         )
-        use_relative_path = fbcode_aot_cpu_re
+        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1521,7 +1521,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1650,7 +1650,7 @@ class AotCodeCompiler:
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
@@ -1708,7 +1708,7 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
             )
 
             so_builder = CppBuilder(
