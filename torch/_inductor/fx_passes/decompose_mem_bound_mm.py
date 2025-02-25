@@ -78,7 +78,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
         check_device(mat1, mat2, device="cpu")
         and mat1.shape[0] == 1
         and mat2.shape[0] <= 64
-        and mat2.shape[1] <= 16
+        and mat2.shape[1] <= 512
     )
 
 

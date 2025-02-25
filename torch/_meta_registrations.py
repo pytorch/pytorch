@@ -411,6 +411,11 @@ def meta_randint(
     device=None,
     pin_memory=None,
 ):
+    low = 0
+    torch._check(
+        high > low,
+        lambda: f"random_ expects 'from' to be less than 'to', but got from={low} >= to={high}",
+    )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -428,6 +433,10 @@ def meta_randint_low(
     device=None,
     pin_memory=None,
 ):
+    torch._check(
+        high > low,
+        lambda: f"random_ expects 'from' to be less than 'to', but got from={low} >= to={high}",
+    )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -2583,7 +2592,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2614,7 +2623,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -4448,8 +4457,7 @@ def pool3d_shape_check(
     torch._check(
         dT > 0 and dW > 0 and dH > 0,
         lambda: (
-            f"stride should be greater than zero, but got "
-            f"dT: {dT}, dH: {dH}, dW: {dW}"
+            f"stride should be greater than zero, but got dT: {dT}, dH: {dH}, dW: {dW}"
         ),
     )
     torch._check(
@@ -5724,7 +5732,14 @@ def meta__scaled_dot_product_efficient_attention(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    if torch.version.hip and torch.cuda.is_available():
+        """Please see: https://github.com/pytorch/pytorch/issues/146848
+        longsumexp last dim should be seq length
+        """
+        logsumexp_dim = M if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
