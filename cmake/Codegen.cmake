@@ -389,6 +389,12 @@ if(INTERN_BUILD_ATEN_OPS)
       else(MSVC)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
+
+      # Only parallelize the SortingKernel for now to avoid side effects
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
+      endif()
+
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))

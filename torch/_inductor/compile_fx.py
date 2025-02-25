@@ -12,19 +12,11 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Mapping,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -127,7 +119,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
@@ -480,7 +472,7 @@ def is_tf32_warning_applicable(gm: GraphModule) -> bool:
 
 def maybe_disable_comprehensive_padding(
     example_inputs: Sequence[InputType],
-) -> contextlib.AbstractContextManager[None, None]:
+) -> AbstractContextManager[None, None]:
     """
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
@@ -670,7 +662,9 @@ def _compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
-    with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+    with _WaitCounter(
+        "pytorch.wait_counter.fx_codegen_and_compile"
+    ).guard() as _, _WaitCounter("pytorch.wait_counter.all_compilation_types").guard():
         use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
@@ -821,10 +815,13 @@ def _compile_fx_inner(
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-
         compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # Clear Compiled Triton Kernels per inductor compile, as the future objects
+    # may not be valid for use after they are run/autotuned
+    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
         logging.INFO,
@@ -1084,6 +1081,10 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
+                        # We are going to start code generating runtime asserts, so make sure
+                        # you don't start adding new ones in the lowering process
+                        graph.freeze_runtime_asserts()
+
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
@@ -1771,7 +1772,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
     """
@@ -1787,7 +1788,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
-        for arg in output_node(gm).args[0]
+        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(

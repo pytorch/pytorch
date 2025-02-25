@@ -81,6 +81,7 @@ def mps_ops_grad_modifier(ops):
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
+        '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
@@ -88,9 +89,9 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'lu': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor_ex': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        'linalg.solve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
+        'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
+        'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
@@ -102,6 +103,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for zeta is not implemented
+        'special.zeta': None,
         # derivative for aten::nextafter is not implemented on CPU
         'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
@@ -330,7 +333,11 @@ def mps_ops_modifier(ops):
         'scalar_tensor',
         'select',
         'sgn',
+        'sinc',
         'slice',
+        'special.spherical_bessel_j0',
+        'special.xlog1py',
+        'special.zeta',
         'split',
         'split_with_sizes',
         'split_with_sizes_copy',
@@ -670,9 +677,6 @@ def mps_ops_modifier(ops):
         'linalg.eigvals': None,
         'put': None,
         'nn.functional.conv_transpose3d': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
@@ -695,7 +699,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
@@ -712,15 +715,11 @@ def mps_ops_modifier(ops):
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
         'linalg.slogdet': None,
-        'linalg.solve': None,
-        'linalg.solve_ex': None,
         'linalg.svdvals': None,
-        'linalg.tensorsolve': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
         'logdet': None,
         'lu_solve': None,
-        'lu_unpack': None,
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
@@ -764,7 +763,6 @@ def mps_ops_modifier(ops):
         '_segment_reduce_lengths': None,
         '_segment_reducelengths': None,
         '_segment_reduceoffsets': None,
-        'sinc': None,
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
@@ -789,9 +787,6 @@ def mps_ops_modifier(ops):
         'special.ndtri': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
-        'special.spherical_bessel_j0': None,
-        'special.xlog1py': None,
-        'special.zeta': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -800,7 +795,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'segment_reduce_': None,
-        '_upsample_bilinear2d_aa': None,
+        '_upsample_bilinear2d_aa': [torch.uint8],  # uint8 is for CPU only
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -840,6 +835,10 @@ def mps_ops_modifier(ops):
         'atan2': [torch.int64],
         'angle': [torch.int64],
 
+        # Operations not supported for integral types
+        'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addmmdecomposed': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -860,6 +859,7 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16 and bfloat16
         'round': [torch.float16, torch.bfloat16],
+        'rounddecimals_0': [torch.bfloat16],
 
         # bfloat16 have weird issues with rounding
         'divfloor_rounding': [torch.bfloat16],
@@ -2721,16 +2721,16 @@ class TestMPS(TestCaseMPS):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
 
-        def run_lu_factor_ex_test(size, *batch_dims, check_errors):
+        def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
             input_mps = input_cpu.to('mps')
             out_cpu = torch.linalg.lu_factor_ex(input_cpu, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
             out_cpu = torch.linalg.lu_factor_ex(input_cpu.mT, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps.mT, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
         # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4]
@@ -2743,7 +2743,85 @@ class TestMPS(TestCaseMPS):
                     run_lu_factor_ex_test(size, batch_size, check_errors=check_errors)
         # test >3D matrices
         run_lu_factor_ex_test(32, 10, 10, check_errors=False)
-        run_lu_factor_ex_test(32, 2, 2, 2, 2, 10, 10, check_errors=True)
+        run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
+        # big matrix check with batch size > 1
+        run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
+
+    def test_linalg_solve(self):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        def run_linalg_solve_test(size, *batch_dims):
+            A_cpu = make_arg(*batch_dims, size, size)
+            A_mps = A_cpu.to('mps')
+
+            for left in [True, False]:
+                if left:
+                    b_cpu = torch.randn(*batch_dims, size, 3, device='cpu', dtype=torch.float32)
+                else:
+                    b_cpu = torch.randn(*batch_dims, 3, size, device='cpu', dtype=torch.float32)
+
+                b_mps = b_cpu.to('mps')
+
+                # Solve the system
+                X_cpu = torch.linalg.solve(A_cpu, b_cpu, left=left)
+                X_mps = torch.linalg.solve(A_mps, b_mps, left=left)
+                self.assertEqual(X_cpu, X_mps)
+
+                # Test with transposed matrices
+                X_cpu_t = torch.linalg.solve(A_cpu.mT, b_cpu, left=left)
+                X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
+                self.assertEqual(X_cpu_t, X_mps_t)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4]
+
+        for size in matrix_sizes:
+            for batch_size in batch_sizes:
+                run_linalg_solve_test(size, batch_size)
+
+        # test >3D matrices
+        run_linalg_solve_test(32, 10, 10)
+        run_linalg_solve_test(32, 2, 2, 2, 2, 10, 10)
+
+    def test_linalg_solve_with_broadcasting(self):
+        from functools import partial
+        import torch
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values
+        )
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        batch_size = 4
+        size = 3
+
+        A_cpu = make_arg(batch_size, size, size)
+        A_mps = A_cpu.to('mps')
+
+        for left in [True, False]:
+            b_cpu = torch.randn(batch_size, size, device='cpu', dtype=torch.float32)
+            b_mps = b_cpu.to('mps')
+
+            if left:
+                b_cpu = b_cpu.unsqueeze(-1)
+                b_mps = b_mps.unsqueeze(-1)
+            else:
+                b_cpu = b_cpu.view(batch_size, 1, size)
+                b_mps = b_mps.view(batch_size, 1, size)
+
+            X_cpu = torch.linalg.solve(A_cpu, b_cpu, left=left)
+            X_mps = torch.linalg.solve(A_mps, b_mps, left=left)
+            self.assertEqual(X_cpu, X_mps)
+
+            X_cpu_t = torch.linalg.solve(A_cpu.mT, b_cpu, left=left)
+            X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
+            self.assertEqual(X_cpu_t, X_mps_t)
 
     def test_linalg_det(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -6448,14 +6526,23 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
-    def test_cholesky(self):
+    def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_cholesky_test(size, *batch_dims, upper):
+        def run_cholesky_test(size, *batch_dims, upper=False, check_errors=False):
+            if check_errors:
+                # expect failure for non-positive definite matrix
+                input_mps = torch.eye(size, dtype=torch.float32, device="mps")
+                input_mps[0, 0] = -1
+                error_msg = r'The factorization could not be completed because the input is not positive-definite'
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
+                return
+            # output checks for positive definite matrix
             input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
             input_mps = input_cpu.to('mps')
-            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
-            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
             self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
 
         # test with different even/odd matrix sizes
@@ -6471,6 +6558,18 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_cholesky_test(128, 10, 10, upper=False)
         run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
+        run_cholesky_test(32, 2, upper=False, check_errors=True)
+        run_cholesky_test(32, 2, upper=True, check_errors=True)
+
+    def test_linalg_cholesky_info(self):
+        # non psd matrix with leading minor of order 2 being not positive definite
+        A = torch.tensor([
+            [4.0, 1.0, 0.0],
+            [1.0, -2.0, 1.0],
+            [0.0, 1.0, 3.0]
+        ], device="mps")
+        with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
@@ -8326,6 +8425,15 @@ class TestMPS(TestCaseMPS):
             x.random_()
             self.assertNotEqual(x.max().item(), 0)
 
+    def test_random_5d(self):
+        # See https://github.com/pytorch/pytorch/issues/147624 / FB16550905
+        shape = (2, 3, 4, 5, 6)
+        x = torch.rand(shape, device="mps")
+        self.assertNotEqual(x[0], x[1])
+        # Check that normal distributino is not affected by the same
+        y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
+        self.assertNotEqual(y[0], y[1])
+
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
@@ -9814,6 +9922,39 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
+
+    def _test_sdpa_3d_input(self, dtype):
+        head_num, seq_len, embed_dim = 16, 16, 80
+
+        q = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        k = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        v = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        attention_mask = torch.ones(1, seq_len, seq_len, dtype=dtype)
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q.to("mps"),
+                k.to("mps"),
+                v.to("mps"),
+                attention_mask.to("mps"),
+                dropout_p=0.0
+            )
+
+            y_ref = F.scaled_dot_product_attention(
+                q.to("cpu"),
+                k.to("cpu"),
+                v.to("cpu"),
+                attention_mask.to("cpu"),
+                dropout_p=0.0
+            )
+
+            self._compare_tensors(y.cpu(), y_ref)
+
+    def test_sdpa_3d_input_fp32(self):
+        self._test_sdpa_3d_input(torch.float32)
+
+    def test_sdpa_3d_input_fp16(self):
+        self._test_sdpa_3d_input(torch.float16)
 
 
 class TestGatherScatter(TestCaseMPS):
@@ -12408,6 +12549,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
+        'special.xlog1py',
     }
 
     FP32_LOW_PRECISION_LIST = {
@@ -12500,6 +12642,10 @@ class TestConsistency(TestCaseMPS):
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
+
+            if op.name == "_upsample_bilinear2d_aa" and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+                # Similar to the above, float vs double precision aresults in slight error
+                atol, rtol = 2e-5, 2e-6
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
@@ -12778,6 +12924,11 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
+        # Exceeing thread group size asserts
+        max_thread_group_size = lib.full.max_threads_per_threadgroup
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, group_size=max_thread_group_size + 5))
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
+                                                       group_size=(3, max_thread_group_size)))
 
     def test_metal_include(self):
         # Checks that includes embedding works

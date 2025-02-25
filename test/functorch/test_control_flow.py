@@ -490,23 +490,21 @@ class TestControlFlow(TestCase):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
 
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -534,22 +532,20 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -645,25 +641,21 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x, y, x)
+        gm = make_fx(f)(pred, x, y, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1, y_1, z_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1, sym_size_int, sym_size_int_1));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1, sym_size_int, sym_size_int_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = sym_size_int = sym_size_int_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  getitem_2 = None
-    getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
+    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -1190,22 +1182,20 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
+        gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -1295,6 +1285,7 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -1396,6 +1387,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile"])
@@ -1544,6 +1536,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
@@ -1781,6 +1774,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(out, exp_out)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -1882,6 +1876,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, result_exp)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -2180,6 +2175,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2214,6 +2210,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2417,6 +2414,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             )
             self.assertEqual(cnt.frame_count, 6)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_scanned_0(self, compile_mode):
@@ -2454,6 +2452,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_non_tensor(self, compile_mode):
@@ -2478,6 +2477,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_shape(self, compile_mode):
@@ -2510,6 +2510,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_pytree(self, compile_mode):
@@ -2544,6 +2545,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(add_one_carry, init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -3151,9 +3153,6 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # This test is expected to fail, as there may be an issue with the underlying triton implementation
-    # See https://github.com/pytorch/pytorch/issues/137943
-    @unittest.expectedFailure
     def test_associative_scan_dim_shape_failure(self):
         num_dims = [2]
         for num_dim in num_dims:
@@ -3800,6 +3799,302 @@ class AssociativeScanTests(TestCase):
             )
 
     @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_simple(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.rand(2, device=device)
+
+        def fct_freevars1(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * 2
+
+        def fct_freevars2(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * H
+
+        H1 = torch.rand(1, device=device)
+        H2 = torch.rand(1, device=device)
+
+        def fct_freevars3(x: torch.Tensor, y: torch.Tensor):
+            return x * H1 + y * H2
+
+        inp = torch.randn(3, 2, 2, device=device)
+
+        for fct, param in [
+            (fct_freevars1, (H,)),
+            (fct_freevars2, (H,)),
+            (fct_freevars3, (H1, H2)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_nested(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H1 = torch.rand(4, 5, device=device)
+        H2 = torch.rand(4, 1, device=device)
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+
+            ret = inner(y)
+            return x + ret * H1
+
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+
+            ret = inner(y)
+            return x + ret * H1
+
+        H1_i = torch.rand(4, 5, device=device)
+
+        # TODO: Using random tensors in the `combine_fn` triggers the vmap randomness error:
+        # RuntimeError: vmap: called random operation while in randomness error mode.
+        # Please either use the 'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap
+        def fct_nested_inside(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+
+            def inner(xi):
+                return xi * H2_i
+
+            ret = inner(y)
+            return x + ret * H1
+
+        def fct_nested_inside_fake(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+
+            def inner(xi):
+                return xi * H2_i
+
+            ret = inner(y)
+            return x + ret * H1
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        for fct, fct_fake, param in [
+            (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
+            (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            kwargs_fake["combine_fn"] = fct_fake
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_fct(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = additional_fct_no_add_inp(y, y)
+            return x + ret
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_freevars_fct_generic(self, compile_mode, reverse, device):
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = associative_scan(
+                additional_fct_no_add_inp, y, 1, combine_mode="generic"
+            )
+            return x + ret
+
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            ret = _fake_associative_scan(additional_fct_no_add_inp, y, 1)
+            return x + ret
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        kwargs_fake["combine_fn"] = fct_nested_outside_fake
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_shape_check(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.eye(2, device=device, requires_grad=True)
+
+        def fct_freevars(x: torch.Tensor, y: torch.Tensor):
+            return x @ H + y
+
+        inp = torch.randn(2, 2, 3, device=device, requires_grad=True)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_freevars,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_pytree(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        xf = torch.randn(2, 2, device=device, requires_grad=True)
+        yf = torch.randn(2, 2, device=device, requires_grad=True)
+        zf = torch.randn(2, 2, device=device, requires_grad=True)
+        inpf = {"i": xf, "j": ([yf], [{"o": zf}])}
+
+        def fct_pointwise(x, y):
+            return {
+                "i": (x["i"] * y["i"]) + inpf["i"],
+                "j": (
+                    [(x["j"][0][0] * y["j"][0][0]) + inpf["j"][0][0]],
+                    [
+                        {
+                            "o": (x["j"][1][0]["o"] + y["j"][1][0]["o"])
+                            + inpf["j"][1][0]["o"]
+                        }
+                    ],
+                ),
+            }
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_pointwise,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
@@ -3844,7 +4139,6 @@ class AssociativeScanTests(TestCase):
                 associative_scan(fct, x, 0)
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     def test_associative_scan_wrong_pytree(self):
         def fct_wrong_pytree(x, y):
             return {
@@ -3859,9 +4153,9 @@ class AssociativeScanTests(TestCase):
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the output of the operator
-            # needs to match the lenght of the pytree of the input",
+            # Should be:
+            # RuntimeError,
+            # r"The number of leaves of the pytree of the output of the operator.*",
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
@@ -3870,11 +4164,12 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_non_pointwise(self):
-        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
-        # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
+        device = torch.device("cuda")
+        x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(
-            Exception,
-            "For combine_mode='pointwise', the combine_fn needs to be pointwise",
+            # Should be:
+            RuntimeError,
+            r"For combine_mode='pointwise', the combine_fn needs to be pointwise",
         ):
             associative_scan(
                 get_scan_combine_fn("non_pointwise", True),
@@ -3882,6 +4177,41 @@ class AssociativeScanTests(TestCase):
                 0,
                 combine_mode="pointwise",
             )
+
+    @requires_cuda
+    def test_associative_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y
+
+        x = torch.randn(3, 2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be modifying the input!",
+        ):
+            associative_scan(fct_input_mutation, x, 0)
+
+    @requires_cuda
+    def test_associative_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return x[0], x[1] + y[1]
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be aliasing the input!",
+        ):
+            associative_scan(fct_input_output_alias, inp, 0)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -4707,7 +5037,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -4748,7 +5078,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -4782,7 +5112,7 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -4810,7 +5140,7 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -4843,7 +5173,7 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException, "One of torch.cond branch"
+                torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -4861,12 +5191,10 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
@@ -4884,7 +5212,7 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException,
+                torch._dynamo.exc.TorchRuntimeError,
                 "One of torch.cond branch might be aliasing",
             ):
                 f(example_input_func)
@@ -4915,7 +5243,7 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
+            torch._dynamo.exc.TorchRuntimeError,
             "One of torch.cond branch might be aliasing",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
@@ -7064,6 +7392,161 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(while_loop_nodes), 1)
         self.assertEqual(len(while_loop_nodes[0].meta.get("unbacked_bindings")), 5)
 
+    # Return the .module() graph str result of non-strict export
+    def _check_export_ret_graph_str(self, fn, args, dynamic_shapes=None) -> str:
+        strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        non_strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=False
+        )
+        eager_res = fn(*args)
+        self.assertEqual(strict_ep.module()(*args), eager_res)
+        self.assertEqual(non_strict_ep.module()(*args), eager_res)
+        return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
+
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_eager_run_with_item(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        x = torch.randn(10, requires_grad=True)
+        args = (
+            torch.tensor(True),
+            torch.tensor([3]),
+            torch.tensor([4]),
+            x,
+        )
+        model = M()
+        torch.export.export(model, args, strict=True)
+        graph_str = self._check_export_ret_graph_str(model, args, None)
+        self.assertExpectedInline(
+            graph_str,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a, b1, b2, c):
+        a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
+
+        a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+        getitem: "f32[10]" = cond[0];  cond = None
+
+        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+        return pytree.tree_unflatten((mul,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+""",  # noqa: B950
+        )
+
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
+    def test_cond_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        non_strict_graph_str = self._check_export_ret_graph_str(
+            model, args, dynamic_shapes
+        )
+        self.assertExpectedInline(
+            non_strict_graph_str,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x, y, z):
+        x: "f32[s0, 3]"; y: "f32[s1]"; z: "f32[s0, 3]";
+
+        x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
+        sym_size_int_3: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+        sym_size_int_4: "Sym(s1)" = torch.ops.aten.sym_size.int(y, 0);  y = None
+
+        gt: "Sym(s0 > 5)" = sym_size_int_3 > 5
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
+        getitem: "f32[s0, 3]" = cond[0];  cond = None
+        return pytree.tree_unflatten((getitem,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
+            return (add,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
+
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+    # unbacked symint inputs are created during non-strict export,
+    # which causes a graph break
+    @unittest.expectedFailure
+    def test_cond_unbacked_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+                # c is an unbacked symint in non-strict export
+                c = y.sum().item()
+
+                def true_fn(x):
+                    return x + a + c
+
+                def false_fn(x):
+                    return x + b * z * c
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5, dtype=torch.int32), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -7078,6 +7561,7 @@ _hop_schema_test_schema_types = [
 ]
 
 
+@skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
@@ -7197,159 +7681,6 @@ class TestHopSchema(TestCase):
             """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
         )
         self.assertEqual(schema.parse(str(schema)), schema)
-
-    # Return the .module() graph str result of non-strict export
-    def _check_export(self, fn, args, dynamic_shapes=None) -> str:
-        strict_ep = torch.export.export(
-            fn, args, dynamic_shapes=dynamic_shapes, strict=True
-        )
-        non_strict_ep = torch.export.export(
-            fn, args, dynamic_shapes=dynamic_shapes, strict=False
-        )
-        eager_res = fn(*args)
-        self.assertEqual(strict_ep.module()(*args), eager_res)
-        self.assertEqual(non_strict_ep.module()(*args), eager_res)
-        return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
-
-    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_cond_eager_run_with_item(self):
-        class M(torch.nn.Module):
-            def forward(self, a, b1, b2, c):
-                def true_fn(x):
-                    return x * b1.item()
-
-                def false_fn(x):
-                    return x * b2.item()
-
-                r = torch.cond(a, true_fn, false_fn, (c,))
-                return r * 2
-
-        x = torch.randn(10, requires_grad=True)
-        args = (
-            torch.tensor(True),
-            torch.tensor([3]),
-            torch.tensor([4]),
-            x,
-        )
-        model = M()
-        torch.export.export(model, args, strict=True)
-        graph_str = self._check_export(model, args, None)
-        self.assertExpectedInline(
-            graph_str,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, a, b1, b2, c):
-        a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
-
-        a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
-        getitem: "f32[10]" = cond[0];  cond = None
-
-        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
-        return pytree.tree_unflatten((mul,), self._out_spec)
-
-    class true_graph_0(torch.nn.Module):
-        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
-            item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
-
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
-            return (mul,)
-
-    class false_graph_0(torch.nn.Module):
-        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
-            item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
-
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
-            return (mul,)
-""",  # noqa: B950
-        )
-
-    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    def test_cond_symint_closure(self):
-        from torch.export import Dim
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                a = y.shape[0]
-                b = z.shape[0]
-
-                def true_fn(x):
-                    return x + a
-
-                def false_fn(x):
-                    return x + b * z
-
-                # When exporting with non-strict: a and b are symints,
-                # so torch.compile need to wrap and trace symint inputs.
-                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
-
-        args = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        model = M()
-        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
-        non_strict_graph_str = self._check_export(model, args, dynamic_shapes)
-        self.assertExpectedInline(
-            non_strict_graph_str,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, x, y, z):
-        x: "f32[s0, 3]"; y: "f32[s1]"; z: "f32[s0, 3]";
-
-        x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
-        sym_size_int_3: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
-        sym_size_int_4: "Sym(s1)" = torch.ops.aten.sym_size.int(y, 0);  y = None
-
-        gt: "Sym(s0 > 5)" = sym_size_int_3 > 5
-
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
-        getitem: "f32[s0, 3]" = cond[0];  cond = None
-        return pytree.tree_unflatten((getitem,), self._out_spec)
-
-    class true_graph_0(torch.nn.Module):
-        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
-            return (add,)
-
-    class false_graph_0(torch.nn.Module):
-        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
-
-            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
-            return (add,)
-""",  # noqa: B950
-        )
-
-    # unbacked symint inputs are created during non-strict export,
-    # which causes a graph break
-    @unittest.expectedFailure
-    def test_cond_unbacked_symint_closure(self):
-        from torch.export import Dim
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                a = y.shape[0]
-                b = z.shape[0]
-                # c is an unbacked symint in non-strict export
-                c = y.sum().item()
-
-                def true_fn(x):
-                    return x + a + c
-
-                def false_fn(x):
-                    return x + b * z * c
-
-                # When exporting with non-strict: a and b are symints,
-                # so torch.compile need to wrap and trace symint inputs.
-                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
-
-        args = (torch.ones(3, 3), torch.ones(5, dtype=torch.int32), torch.ones(3, 3))
-        model = M()
-        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
-        _ = self._check_export(model, args, dynamic_shapes)
 
 
 instantiate_parametrized_tests(TestHopSchema)

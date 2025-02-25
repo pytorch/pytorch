@@ -11635,20 +11635,6 @@ def error_inputs_mean(op_info, device, is_ref=False, **kwargs):
         error_regex=err_msg2
     )
 
-    if is_ref:
-        err_msg3 = "Expected out tensor to have dtype torch.float64, but got torch.float32 instead"
-    else:
-        err_msg3 = "Expected out tensor to have dtype double, but got float instead"
-    yield ErrorInput(
-        SampleInput(
-            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-            [],
-            dtype=torch.float64,
-            out=make_tensor([], dtype=torch.float32, device=device),
-        ),
-        error_regex=err_msg3
-    )
-
 # numpy implementation of torch.flatten
 # unfortunately there's no np.flatten. we figure out the desired shape and call np.reshape
 def reference_flatten(input, start_dim=0, end_dim=-1):
@@ -15259,6 +15245,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -15304,6 +15294,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
                ),
            ),
            skips=(

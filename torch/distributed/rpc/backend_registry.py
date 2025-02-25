@@ -188,9 +188,7 @@ def _validate_device_maps(
     for node in all_names:
         devices = all_devices[node]
         if len(set(devices)) != len(devices):
-            raise ValueError(
-                f"Node {node} has duplicated devices\n" f"devices = {devices}"
-            )
+            raise ValueError(f"Node {node} has duplicated devices\ndevices = {devices}")
         if not _tensorpipe_validate_devices(devices, all_device_counts[node]):
             raise ValueError(
                 f"Node {node} has devices with invalid indices\n"
