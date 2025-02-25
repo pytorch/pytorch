@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
-    TEST_WITH_ASAN,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -115,7 +114,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA:
 
     def get_all_cudagraph_segments():
         segments = torch.cuda.memory_snapshot()
