@@ -87,14 +87,15 @@ inline void checkInBoundsForStorage(
     const Storage& new_storage) {
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  T storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
+  T storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+      size, stride, data_type.itemsize(), storage_offset);
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
   TORCH_CHECK(
-      storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
+      storage_size_plus_offset_bytes <= new_storage_size_bytes,
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -105,7 +106,7 @@ inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes + storage_offset_bytes,
+      storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }
