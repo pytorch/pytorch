@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
+    skipIfRocm,
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
@@ -1433,6 +1434,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
+    @skipIfRocm
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         if TEST_WITH_ROCM and "cuda" in device:

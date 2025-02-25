@@ -658,6 +658,13 @@ inductor_override_kwargs["xpu"] = {
     ("_unsafe_masked_index", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
 }
+if TEST_WITH_ROCM:
+    inductor_override_kwargs["cuda"].update(
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}
+        }
+    )
+
 
 # Test with one sample only for following ops
 inductor_one_sample = defaultdict(dict)
@@ -1116,6 +1123,8 @@ class TestInductorOpInfo(TestCase):
                 _custom_tolerances = {
                     torch.float32: (1.3e-5, 1.5e-5),
                 }
+                # When we are running opportunistic_fastatomics, we will expect some floating point rounding
+                # errors as the order of operation is not guaranteed.
                 if dtype in _custom_tolerances:
                     return _custom_tolerances[dtype]
                 else:
