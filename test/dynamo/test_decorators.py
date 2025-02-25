@@ -490,6 +490,33 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_on_method(self):
+        class Num:
+            def __init__(self, n):
+                self.n = n
+
+            @torch._dynamo.nonstrict_trace
+            def trace_me(self, t):
+                torch._dynamo.graph_break()
+                return t + self.n
+
+        torch.utils._pytree.register_pytree_node(
+            Num,
+            lambda num: ((num.n,), ()),
+            lambda n, _: Num(n[0]),
+        )
+
+        def fn(x, n):
+            num = Num(n)
+            return num.trace_me(x)
+
+        x, n = torch.randn(10), 42
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, n)
+        res = opt_fn(x, n)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_no_action_at_a_distance(self):
         def trace_me(x):
             torch._dynamo.graph_break()
