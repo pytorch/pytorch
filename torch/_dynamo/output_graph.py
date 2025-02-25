@@ -2136,6 +2136,7 @@ class SubgraphTracer(fx.Tracer):
             ]
         elif kind == "call_module":
             if self.parent is not None:
+                # TODO can remove once inline_inbuilt_nn_modules is always True
                 unimplemented_v2(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
@@ -2169,6 +2170,7 @@ class SubgraphTracer(fx.Tracer):
                     ]
                 elif kind == "call_module":
                     if self.parent is not None:
+                        # TODO can remove once inline_inbuilt_nn_modules is always True
                         unimplemented_v2(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",
