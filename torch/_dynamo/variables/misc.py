@@ -1,4 +1,22 @@
 # mypy: ignore-errors
+
+"""
+This module contains miscellaneous variable tracker implementations for various Python types
+and features used in Dynamo's symbolic execution. These classes help track and propagate
+information about different kinds of variables during graph capture.
+
+Key classes include:
+- SuperVariable: Handles super() calls and method resolution
+- ExceptionVariable: Tracks exception objects
+- RandomVariable: Manages random number generators
+- GetAttrVariable: Tracks attribute access
+- MethodWrapperVariable: Handles method wrappers
+- PythonModuleVariable: Tracks Python modules
+- NumpyVariable: Handles numpy functions and types
+- StringFormatVariable: Manages string formatting
+- DebuggingVariable: Handles print and logging
+"""
+
 import dataclasses
 import functools
 import inspect
@@ -26,6 +44,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    list_methods,
     proxy_args_kwargs,
     set_example_value,
     tuple_methods,
@@ -219,6 +238,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in tuple_methods
         ):
             return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedListVariable)
+            and inner_fn in list_methods
+        ):
+            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.

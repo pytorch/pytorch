@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
@@ -53,7 +53,7 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
-def eager_prepare_softmax(x: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
+def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
 

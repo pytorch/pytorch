@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal.exporter import _constants
 
 
 if TYPE_CHECKING:
@@ -28,6 +30,64 @@ def rename_outputs(model: ir.Model, new_names: Sequence[str]) -> None:
     for output, new_name in zip(model.graph.outputs, new_names):
         output.metadata_props["pkg.torch.onnx.original_node_name"] = str(output.name)
         output.name = new_name
+
+
+def _all_values(model: ir.Model):
+    """Yield all values in a model."""
+    # Yield all values in the model
+    yield from model.graph.inputs
+    yield from model.graph.initializers.values()
+    for node in ir.traversal.RecursiveGraphIterator(model.graph):
+        yield from node.outputs
+    # Yield all values in functions
+    for function in model.functions.values():
+        yield from function.inputs
+        for node in ir.traversal.RecursiveGraphIterator(function):
+            yield from node.outputs
+
+
+def _replace_names(shape_expr: str, rename_mapping: dict[str, str]) -> str:
+    """Replace all known names in a shape expression with new names."""
+    for old_name, new_name in rename_mapping.items():
+        shape_expr = re.sub(
+            rf"(?<!\w){re.escape(old_name)}(?!\w)", new_name, shape_expr
+        )
+    return shape_expr
+
+
+def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
+    """Rename dynamic axes in a model according to the specified dynamic_axes names."""
+
+    # NOTE: Mapping needs to be srted by length because the shape expression
+    # could have multiple ways to be expressed, for example,
+    # {"s1": sequence_length, "s11": "past_sequence_length", "s1 + s11": "masked_sequence_length"}
+    # We prefer the replacement starts from the longest match.
+    sorted_rename_mapping = dict(
+        sorted(rename_mapping.items(), key=lambda item: len(item[0]), reverse=True)
+    )
+    for value in _all_values(model):
+        if value.shape is None:
+            continue
+        new_shape = []
+        changed = False
+        for dim in value.shape:
+            if not isinstance(dim, ir.SymbolicDim):
+                new_shape.append(dim)
+                continue
+            dim_name = dim.value
+            if dim_name in sorted_rename_mapping:
+                new_shape.append(sorted_rename_mapping[dim_name])
+                changed = True
+            elif dim_name is not None:
+                # For example: "2*s1", "s1+1", "s1-1", "s1*s2", "s1/s2"
+                new_name = _replace_names(dim_name, sorted_rename_mapping)
+                new_shape.append(new_name)
+                if new_name != dim_name:
+                    changed = True
+            else:
+                new_shape.append(None)
+        if changed:
+            value.shape = ir.Shape(new_shape)
 
 
 def add_torchlib_common_imports(model: ir.Model) -> None:
@@ -56,8 +116,7 @@ def _maybe_set_opset_version(
         # Already set
         return
     if domain == _ONNX_DOMAIN:
-        # Set the default opset version for ONNX operators
-        opset_imports[domain] = onnxscript_apis.torchlib_opset_version()
+        opset_imports[domain] = _constants.TORCHLIB_OPSET
         return
     if version is None:
         # We don't know the opset version, so set it to 1

@@ -336,6 +336,7 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.xlog1py',
         'special.zeta',
         'split',
         'split_with_sizes',
@@ -676,9 +677,6 @@ def mps_ops_modifier(ops):
         'linalg.eigvals': None,
         'put': None,
         'nn.functional.conv_transpose3d': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
@@ -701,7 +699,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
@@ -790,7 +787,6 @@ def mps_ops_modifier(ops):
         'special.ndtri': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
-        'special.xlog1py': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -840,6 +836,7 @@ def mps_ops_modifier(ops):
         'angle': [torch.int64],
 
         # Operations not supported for integral types
+        'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
@@ -862,6 +859,7 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16 and bfloat16
         'round': [torch.float16, torch.bfloat16],
+        'rounddecimals_0': [torch.bfloat16],
 
         # bfloat16 have weird issues with rounding
         'divfloor_rounding': [torch.bfloat16],
@@ -6528,14 +6526,23 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
-    def test_cholesky(self):
+    def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_cholesky_test(size, *batch_dims, upper):
+        def run_cholesky_test(size, *batch_dims, upper=False, check_errors=False):
+            if check_errors:
+                # expect failure for non-positive definite matrix
+                input_mps = torch.eye(size, dtype=torch.float32, device="mps")
+                input_mps[0, 0] = -1
+                error_msg = r'The factorization could not be completed because the input is not positive-definite'
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
+                return
+            # output checks for positive definite matrix
             input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
             input_mps = input_cpu.to('mps')
-            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
-            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
             self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
 
         # test with different even/odd matrix sizes
@@ -6551,6 +6558,18 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_cholesky_test(128, 10, 10, upper=False)
         run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
+        run_cholesky_test(32, 2, upper=False, check_errors=True)
+        run_cholesky_test(32, 2, upper=True, check_errors=True)
+
+    def test_linalg_cholesky_info(self):
+        # non psd matrix with leading minor of order 2 being not positive definite
+        A = torch.tensor([
+            [4.0, 1.0, 0.0],
+            [1.0, -2.0, 1.0],
+            [0.0, 1.0, 3.0]
+        ], device="mps")
+        with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
@@ -8406,6 +8425,15 @@ class TestMPS(TestCaseMPS):
             x.random_()
             self.assertNotEqual(x.max().item(), 0)
 
+    def test_random_5d(self):
+        # See https://github.com/pytorch/pytorch/issues/147624 / FB16550905
+        shape = (2, 3, 4, 5, 6)
+        x = torch.rand(shape, device="mps")
+        self.assertNotEqual(x[0], x[1])
+        # Check that normal distributino is not affected by the same
+        y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
+        self.assertNotEqual(y[0], y[1])
+
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
@@ -9894,6 +9922,39 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
+
+    def _test_sdpa_3d_input(self, dtype):
+        head_num, seq_len, embed_dim = 16, 16, 80
+
+        q = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        k = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        v = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        attention_mask = torch.ones(1, seq_len, seq_len, dtype=dtype)
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q.to("mps"),
+                k.to("mps"),
+                v.to("mps"),
+                attention_mask.to("mps"),
+                dropout_p=0.0
+            )
+
+            y_ref = F.scaled_dot_product_attention(
+                q.to("cpu"),
+                k.to("cpu"),
+                v.to("cpu"),
+                attention_mask.to("cpu"),
+                dropout_p=0.0
+            )
+
+            self._compare_tensors(y.cpu(), y_ref)
+
+    def test_sdpa_3d_input_fp32(self):
+        self._test_sdpa_3d_input(torch.float32)
+
+    def test_sdpa_3d_input_fp16(self):
+        self._test_sdpa_3d_input(torch.float16)
 
 
 class TestGatherScatter(TestCaseMPS):
@@ -12488,6 +12549,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
+        'special.xlog1py',
     }
 
     FP32_LOW_PRECISION_LIST = {

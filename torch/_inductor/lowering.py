@@ -13,7 +13,7 @@ import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -732,7 +732,7 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(torch._higher_order_ops._foreach_map)
+@register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
     This lowers an invocation of foreach_map
@@ -745,7 +745,7 @@ def _foreach_map(subgraph, *args, **kwargs):
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
 
-    inputs = args[0]  # nested tuple
+    inputs = args
 
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
@@ -3779,7 +3779,7 @@ def scatter_fallback(
         op_overload,
         reduce,
         self.get_dtype(),
-        src.get_dtype() if src_is_tensor else type(src),
+        cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -6786,8 +6786,15 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs):
+def associative_scan(
+    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
+):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    if len(additional_inputs) > 0:
+        raise RuntimeError(
+            "Unable to generate code for associative_scan op, because there are lifted arguments"
+        )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
