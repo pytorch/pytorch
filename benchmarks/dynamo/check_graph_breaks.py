@@ -91,7 +91,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have new dynamo graph breaks:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -99,7 +99,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have fixed dynamo graph breaks:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )
