@@ -29,11 +29,9 @@ echo Running test_autograd.oy, test_nn.py, test_torch.py...
 cd %PYTORCH_ROOT%\test
 set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
 
-for /L %%i in (1,1,%1) do (
-    for %%t in (%CORE_TEST_LIST%) do (
-        echo Running test: %%t
-        python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
-    )
+for %%t in (%CORE_TEST_LIST%) do (
+    echo Running test: %%t
+    python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
 )
 
 goto end
