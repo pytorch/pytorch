@@ -163,6 +163,7 @@ def _is_apple_clang(cpp_compiler: str) -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
+@functools.lru_cache(None)
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -177,8 +178,10 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
+@functools.lru_cache(None)
 def _is_gcc(cpp_compiler: str) -> bool:
-    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+    # Since "clang++" ends with "g++", the regex match below would validate on it.
+    if _is_clang(cpp_compiler):
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
@@ -376,7 +379,7 @@ class BuildOptionsBase:
         libraries: Optional[list[str]] = None,
         passthrough_args: Optional[list[str]] = None,
         aot_mode: bool = False,
-        use_absolute_path: bool = False,
+        use_relative_path: bool = False,
         compile_only: bool = False,
     ) -> None:
         self._compiler = compiler
@@ -390,7 +393,7 @@ class BuildOptionsBase:
         self._passthrough_args: list[str] = passthrough_args or []
 
         self._aot_mode: bool = aot_mode
-        self._use_absolute_path: bool = use_absolute_path
+        self._use_relative_path: bool = use_relative_path
         self._compile_only: bool = compile_only
 
     def _process_compile_only_options(self) -> None:
@@ -438,8 +441,8 @@ class BuildOptionsBase:
     def get_aot_mode(self) -> bool:
         return self._aot_mode
 
-    def get_use_absolute_path(self) -> bool:
-        return self._use_absolute_path
+    def get_use_relative_path(self) -> bool:
+        return self._use_relative_path
 
     def get_compile_only(self) -> bool:
         return self._compile_only
@@ -455,7 +458,7 @@ class BuildOptionsBase:
             "libraries": self.get_libraries(),
             "passthrough_args": self.get_passthrough_args(),
             "aot_mode": self.get_aot_mode(),
-            "use_absolute_path": self.get_use_absolute_path(),
+            "use_relative_path": self.get_use_relative_path(),
             "compile_only": self.get_compile_only(),
         }
 
@@ -630,12 +633,12 @@ class CppOptions(BuildOptionsBase):
         compile_only: bool = False,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
-        use_absolute_path: bool = False,
+        use_relative_path: bool = False,
         compiler: str = "",
     ) -> None:
         super().__init__()
         self._compiler = compiler if compiler else get_cpp_compiler()
-        self._use_absolute_path = use_absolute_path
+        self._use_relative_path = use_relative_path
         self._compile_only = compile_only
 
         (
@@ -696,7 +699,7 @@ def _use_fb_internal_macros() -> list[str]:
 def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
-    use_absolute_path: bool,
+    use_relative_path: bool,
 ) -> tuple[list[str], list[str], list[str]]:
     cflags: list[str] = []
     include_dirs: list[str] = []
@@ -720,7 +723,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_absolute_path:
+        if aot_mode and not use_relative_path:
             linker_script = _LINKER_SCRIPT
         else:
             linker_script = os.path.basename(_LINKER_SCRIPT)
@@ -1002,7 +1005,7 @@ def get_cpp_torch_options(
     include_pytorch: bool,
     aot_mode: bool,
     compile_only: bool,
-    use_absolute_path: bool,
+    use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definations: list[str] = []
@@ -1020,7 +1023,7 @@ def get_cpp_torch_options(
         sys_libs_cflags,
         sys_libs_include_dirs,
         sys_libs_passthrough_args,
-    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_absolute_path)
+    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
@@ -1100,7 +1103,7 @@ class CppTorchOptions(CppOptions):
         warning_all: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
-        use_absolute_path: bool = False,
+        use_relative_path: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
@@ -1110,7 +1113,7 @@ class CppTorchOptions(CppOptions):
             compile_only=compile_only,
             warning_all=warning_all,
             extra_flags=extra_flags,
-            use_absolute_path=use_absolute_path,
+            use_relative_path=use_relative_path,
             compiler=compiler,
         )
 
@@ -1130,7 +1133,7 @@ class CppTorchOptions(CppOptions):
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
-            use_absolute_path=use_absolute_path,
+            use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )
 
@@ -1221,6 +1224,8 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
+        # Suppress multi-line comment warnings in sycl headers
+        cflags += ["Wno-comment"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         if not find_library("ze_loader"):
             raise OSError(
@@ -1269,7 +1274,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         device_type: str = "cuda",
         aot_mode: bool = False,
         compile_only: bool = False,
-        use_absolute_path: bool = False,
+        use_relative_path: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
@@ -1279,7 +1284,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
-            use_absolute_path=use_absolute_path,
+            use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
         )
@@ -1392,7 +1397,7 @@ class CppBuilder:
         self._output_dir = ""
         self._target_file = ""
 
-        self._use_absolute_path: bool = False
+        self._use_relative_path: bool = False
         self._aot_mode: bool = False
 
         self._name = name
@@ -1400,7 +1405,7 @@ class CppBuilder:
         # Code start here, initial self internal veriables firstly.
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
-        self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._use_relative_path = BuildOption.get_use_relative_path()
         self._aot_mode = BuildOption.get_aot_mode()
 
         self._output_dir = output_dir
@@ -1417,11 +1422,11 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if self._aot_mode and not self._use_absolute_path:
+            if self._aot_mode and not self._use_relative_path:
                 inp_name = sources
-                # output process @ get_name_and_dir_from_output_file_path
             else:
-                # We need to copy any absolute-path torch includes
+                # Will create another temp director for building, so do use
+                # use the absolute path.
                 inp_name = [os.path.basename(i) for i in sources]
                 self._target_file = os.path.basename(self._target_file)
 
