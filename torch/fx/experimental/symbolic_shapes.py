@@ -6585,9 +6585,8 @@ class ShapeEnv:
             )
 
     # A local variable to evaluate_expr stored in the class to avoid
-    # using it for the lru_cache that is on top of _evaluate_expr.
-    # since it does not effect the results. When needed its read directly.
-    # _expr_sym_node_id :Optional[int] = None
+    # using it for the lru_cache that is on top of it since it does
+    # not effect the results. When needed its read directly.
     _expr_sym_node_id: Optional[int] = None
 
     def evaluate_sym_node(
