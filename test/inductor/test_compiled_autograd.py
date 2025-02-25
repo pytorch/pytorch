@@ -3742,7 +3742,7 @@ class CompiledAutograd1(torch.nn.Module):
 
                 with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                     for i in [10, 100, 10, 20, 30]:
-                        x = torch.randn(i, requires_grad=True).cuda()
+                        x = torch.randn(i, requires_grad=True)
                         MyMatMul.apply(x).sum().backward()
                         yield x.grad
 
@@ -3763,32 +3763,26 @@ class CompiledAutograd1(torch.nn.Module):
         getitem = inputs[0]
         getitem_1 = inputs[1];  inputs = None
         getitem_2 = sizes[0];  getitem_2 = None
-        getitem_3 = sizes[1]
-        getitem_4 = sizes[2];  sizes = None
+        getitem_3 = sizes[1];  sizes = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
-        getitem_5 = validate_outputs[0];  validate_outputs = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_4 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
-        getitem_6 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
-        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_4], [True], []);  getitem_4 = None
+        getitem_5 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem_5 = None
+        getitem_6 = validate_outputs_1[0];  validate_outputs_1 = None
 
-        getitem_8 = hooks[0]
-        getitem_9 = packed_data[0];  packed_data = None
-        getitem_10 = hooks[1];  hooks = None
-        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
-        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
-        getitem_12 = call_backward[0];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
-        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
+        getitem_7 = hooks[0]
+        getitem_8 = packed_data[0];  packed_data = None
+        getitem_9 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_7, getitem_8, hook_type = 'unpack_hook');  getitem_7 = getitem_8 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_9, (call_hook,), getitem_6);  getitem_9 = call_hook = getitem_6 = None
+        getitem_11 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_11], [((None, None, device(type='cpu'), 6, 0, None), [getitem_3], False)]);  getitem_11 = getitem_3 = None
+        getitem_12 = validate_outputs_2[0];  validate_outputs_2 = None
 
-        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
-        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
-        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
-        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
-
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad_ = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
