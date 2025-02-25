@@ -4136,9 +4136,9 @@ class CommonTemplate:
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
             return torch.gather(x, 0, torch.trunc(y).to(torch.int64))
 
-        x1 = torch.randn(30)
-        x2 = torch.randn(36)
-        y = torch.ones(1, dtype=torch.float64)
+        x1 = torch.randn(30, device=self.device)
+        x2 = torch.randn(36, device=self.device)
+        y = torch.ones(1, dtype=torch.float64, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
@@ -4624,6 +4624,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -4648,6 +4649,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4947,6 +4949,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -11091,10 +11094,6 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
-        if self.device == "cuda" and TEST_WITH_ROCM:
-            raise unittest.SkipTest(
-                "Flash attention support is incomplete on this platform"
-            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
