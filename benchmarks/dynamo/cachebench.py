@@ -85,44 +85,44 @@ def _run_torchbench_model(
         torchbench_file
     ), f"Torchbench does not exist at {torchbench_file}"
 
-    base_args = [
-        sys.executable,
-        torchbench_file,
-        f"--only={model}",
-        "--repeat=1",
-        "--performance",
-        "--backend=inductor",
-        f"--device={cmd_args.device}",
-    ] + MODE_ARGS_DICT[cmd_args.mode]
+    dynamic = cmd_args.dynamic
+    dynamic_args = ["--dynamic-shapes", "--dynamic-batch-only"] if dynamic else []
 
-    for dynamic, dynamic_args in [
-        (False, []),
-        (True, ["--dynamic-shapes", "--dynamic-batch-only"]),
-    ]:
-        args = list(base_args)
-        args.extend(dynamic_args)
+    args = (
+        [
+            sys.executable,
+            torchbench_file,
+            f"--only={model}",
+            "--repeat=1",
+            "--performance",
+            "--backend=inductor",
+            f"--device={cmd_args.device}",
+        ]
+        + MODE_ARGS_DICT[cmd_args.mode]
+        + dynamic_args
+    )
 
-        logger.info(f"Command: {args}")  # noqa: G004
-        try:
-            cold_compile_t, warm_compile_t = _run_torchbench_from_args(
-                cmd_args, model, args
+    logger.info(f"Command: {args}")  # noqa: G004
+    try:
+        cold_compile_t, warm_compile_t = _run_torchbench_from_args(
+            cmd_args, model, args
+        )
+        speedup_pct = (1 - (sum(warm_compile_t) / sum(cold_compile_t))) * 100
+        results.append(
+            RunResult(
+                model=model,
+                mode=cmd_args.mode,
+                benchmark="torchbench",
+                dynamic=dynamic,
+                device=cmd_args.device,
+                cold_compile_s=cold_compile_t,
+                warm_compile_s=warm_compile_t,
+                speedup_pct=speedup_pct,
             )
-            speedup_pct = (1 - (sum(warm_compile_t) / sum(cold_compile_t))) * 100
-            results.append(
-                RunResult(
-                    model=model,
-                    mode=cmd_args.mode,
-                    benchmark="torchbench",
-                    dynamic=dynamic,
-                    device=cmd_args.device,
-                    cold_compile_s=cold_compile_t,
-                    warm_compile_s=warm_compile_t,
-                    speedup_pct=speedup_pct,
-                )
-            )
-        except Exception:
-            logger.info("fail", exc_info=True)
-            return None
+        )
+    except Exception:
+        logger.info("fail", exc_info=True)
+        return None
 
 
 def _write_results_to_json(
@@ -172,6 +172,11 @@ def parse_cmd_args() -> argparse.Namespace:
         "-m",
         "--model",
         help="Name of the model to run",
+    )
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Whether to run with dynamic enabled",
     )
     parser.add_argument(
         "--benchmark",
