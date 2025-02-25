@@ -260,8 +260,8 @@ static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     std::optional<int64_t> batch_size_opt) {
   mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_linear_weight");
-  auto out_features = self.size(0);
-  auto in_features = self.size(1);
+  auto in_features = self.size(0);
+  auto out_features = self.size(1);
   auto self_ = self.contiguous();
   auto w = itensor_from_tensor(self_);
   ideep::dims input_size;
@@ -269,8 +269,8 @@ static Tensor mkldnn_reorder_linear_weight(
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
-      {out_features, in_features},
+  auto packed_desc = ideep::matmul_forward::expected_weights_desc(
+      {in_features, out_features},
       input_size,
       /* weight dtype */ dtype,
       /* src dtype */ dtype);
