@@ -517,6 +517,24 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, n)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_captured_external_tensor(self):
+        cst = torch.ones(1)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, y):
+            torch._dynamo.graph_break()
+            return x * y + cst
+
+        def fn(x, y):
+            return trace_me(x, y)
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_no_action_at_a_distance(self):
         def trace_me(x):
             torch._dynamo.graph_break()
