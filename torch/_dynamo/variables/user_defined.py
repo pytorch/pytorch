@@ -542,8 +542,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     contextlib.suppress,
                     contextlib.AsyncExitStack,
                 )
-                or sys.version_info < (3, 11)
-                and self.value in (contextlib.ExitStack,)
             ):
                 # We are not changing the behavior of Dynamo as these function were
                 # already ignored on trace_rules.py before #136033 landed
