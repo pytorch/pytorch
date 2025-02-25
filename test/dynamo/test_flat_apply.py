@@ -4,7 +4,11 @@ from dataclasses import dataclass
 import torch
 import torch._dynamo.test_case
 import torch.utils._pytree as pytree
-from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.flat_apply import (
     flat_apply,
     func_to_graphable,
@@ -147,6 +151,33 @@ class GraphModule(torch.nn.Module):
         trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
         res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         return (res,)
+""",  # NOQA: B950
+        )
+
+    def test_nonstrict_trace_captured_tensor_post_aot_graph(self):
+        cst = torch.ones(1)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, y):
+            torch._dynamo.graph_break()
+            return x * y + cst
+
+        backend = AotEagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(x, y):
+            return trace_me(x, y)
+
+        fn(torch.randn(10), torch.randn(10))
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[10]", arg1_1: "f32[10]"):
+        mul: "f32[10]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+        _tensor_constant0 = self._tensor_constant0
+        add: "f32[10]" = torch.ops.aten.add.Tensor(mul, _tensor_constant0);  mul = _tensor_constant0 = None
+        return (add,)
 """,  # NOQA: B950
         )
 
