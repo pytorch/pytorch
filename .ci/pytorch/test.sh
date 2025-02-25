@@ -420,6 +420,7 @@ test_inductor_cpp_wrapper_shard() {
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
     --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -489,6 +490,59 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
+test_cachebench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local BENCHMARK
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    local BENCHMARK=torchbench
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    local BENCHMARK=huggingface
+  else
+    echo "invalid SHARD_NUMBER: ${SHARD_NUMBER}"
+    exit 1
+  fi
+
+  local mode_options=("training" "inference")
+
+  for mode in "${mode_options[@]}"; do
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
+
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --dynamic \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
+  done
+}
+
+test_verify_cachebench() {
+  TMP_TEST_REPORTS_DIR=$(mktemp -d)
+  TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode training \
+      --device cpu \
+      --model nanogpt \
+      --benchmark torchbench \
+      --output "$TEST_OUTPUT"
+
+  # -s checks file exists and is non empty
+  if [[ ! -s "$TEST_OUTPUT" ]]; then
+    echo "Cachebench failed to produce an output."
+    echo "Run 'python benchmarks/dynamo/cachebench.py' to make sure it works"
+    exit 1
+  fi
+}
+
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -517,6 +571,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *h100* ]]; then
+    device=cuda_h100
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
@@ -1438,7 +1494,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1506,6 +1562,16 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
+elif [[ "${TEST_CONFIG}" == cachebench ]]; then
+  install_torchaudio cuda
+  install_torchvision
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
+  PYTHONPATH=$(pwd)/torchbench test_cachebench
+elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
+  install_torchaudio cpu
+  install_torchvision
+  checkout_install_torchbench nanogpt
+  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     install_torchaudio cpu

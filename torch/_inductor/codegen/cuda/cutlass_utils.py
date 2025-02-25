@@ -10,6 +10,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
 from ...ir import Layout
@@ -170,6 +171,7 @@ class CUTLASSArgs:
         self.architectures = _normalize_cuda_arch(self.architectures)
 
 
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
 def _gen_ops_cached(arch, version) -> list[Any]:
     # Note: Cache needs to be specific for cuda architecture and version
@@ -383,10 +385,11 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self
 
     def __exit__(self, *args, **kwargs):
-        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
