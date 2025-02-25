@@ -138,7 +138,7 @@ jobs:
           fi
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
-            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && MAX_JOBS=8 ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           else
             docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
           fi
