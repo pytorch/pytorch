@@ -26,7 +26,7 @@ echo Running smoke_test.py...
 python %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package torchonly
 
 echo Running test_autograd.oy, test_nn.py, test_torch.py...
-push %PYTORCH_ROOT%\test
+cd %PYTORCH_ROOT%\test
 set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
 
 for /L %%i in (1,1,%1) do (
