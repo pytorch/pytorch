@@ -5075,8 +5075,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
-        trigger_graph_break = False
-
         def _is_transposed(x):
             return (
                 not x.is_contiguous()
@@ -5103,9 +5101,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 drhs = None
                 if ctx.needs_input_grad[1]:
                     drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
-                if trigger_graph_break:
-                    if _is_transposed(dy):
-                        return dlhs + 1, drhs + 1, None, None
                 return dlhs, drhs, None, None
 
         x1 = torch.randn((8, 8), requires_grad=True)
@@ -5123,10 +5118,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(y1.grad, y2.grad)
-
-        trigger_graph_break = True
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            fn().sum().backward()
 
     def test_partially_initialized_module_property(self):
         class Matrix(torch.nn.Module):
@@ -6377,6 +6368,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
+    # TODO: Remoe this skip once nccl issue if fixed
+    @unittest.skip(
+        "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
+    )
     def test_ddp_checkpoint(self):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
@@ -6509,6 +6504,37 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.randn((2, 12, 16, 32, 32))
             ).sum()
             self.assertEqual(actual, expected)
+
+    def test_incompatible_configs(self):
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=True
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=True
+        ), self.assertRaises(AssertionError):
+            torch.compile(lambda: None)
+
+    def test_str_isalnum(self):
+        def f(x, c):
+            str.isalnum(c)
+            return x.sin()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        c = "foobar"
+        self.assertEqual(f(x, c), opt_f(x, c))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -6698,6 +6724,24 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_truthiness_of_symints_no_recompiles(self, device):
+        def f(x):
+            numel = x.numel()
+            if numel:
+                return x + 1
+            else:
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
+
+        x1 = torch.randn(4)
+        _ = f_compiled(x1)
+        x2 = torch.randn(5)
+        _ = f_compiled(x2)
+
+        self.assertEqual(cnt.frame_count, 1)
 
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):

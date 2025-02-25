@@ -477,5 +477,58 @@ inline float2 sinc(float2 inp) {
   return float2(re, im) / a2;
 }
 
+template <typename T>
+inline T spherical_bessel_j0(T x) {
+  if (::metal::isinf(x))
+    return T(0.0);
+  T x2 = x * x;
+  T k1 = static_cast<T>(-1.0);
+  T k2 = static_cast<T>(1.0);
+
+  if (::metal::fabs(static_cast<T>(x)) < T(0.5)) {
+    return T(1.0) +
+        x2 *
+        (k1 / T(6.0) +
+         x2 *
+             (k2 / T(120.0) +
+              x2 *
+                  (k1 / T(5040.0) +
+                   x2 *
+                       (k2 / T(362880.0) +
+                        x2 *
+                            (k1 / T(39916800.0) +
+                             x2 * (k2 / T(6227020800.0)))))));
+  }
+
+  return static_cast<T>(::metal::sin(x) / x);
+}
+
+// Compute log(1+x) without losing precision for small values of x
+// Adapted from https://www.johndcook.com/blog/cpp_log_one_plus_x/
+template <typename T>
+inline float log1p(T x) {
+  // x is large enough that the obvious evaluation is OK
+  if (::metal::fabs(x) > 1E-4) {
+    return ::metal::log(1. + x);
+  }
+
+  // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
+  // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
+  return (-0.5 * x + 1.0) * x;
+}
+
+template <typename T>
+inline float xlog1py(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * log1p(y);
+}
+
 } // namespace metal
 } // namespace c10

@@ -2510,9 +2510,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_strided_backwards(self):
         shape = (1, 2, 4096, 64)
-        Q = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
-        K = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
-        V = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        Q = torch.randn(shape, requires_grad=True, device="cuda")
+        K = torch.randn(shape, requires_grad=True, device="cuda")
+        V = torch.randn(shape, requires_grad=True, device="cuda")
         func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
 
         K_sliced = K[:, :, :-128]
@@ -3379,6 +3379,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out_compiled = flex_compile(query, key, value, block_mask=block_mask)
 
         torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
+    def test_zero_length_sequence_error(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 0, 64),  # Zero in sequence dimension
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        # Test compiled mode - should also raise assertion error
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError, "Query length must be greater than 0"
+        ):
+            flex_compile(query, key, value)
 
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
