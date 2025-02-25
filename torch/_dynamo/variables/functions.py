@@ -30,7 +30,7 @@ import itertools
 import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -517,7 +517,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
         return True
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -547,8 +547,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__next__":
             return self.next_variable(tx)
@@ -1002,6 +1002,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self):
         return self.code.as_python_constant()
+
+    def python_type(self):
+        return types.FunctionType
 
     def get_function(self):
         if self.closure:

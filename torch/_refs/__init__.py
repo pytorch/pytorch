@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, Union
+from typing import Any, Callable, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims
@@ -2504,11 +2504,6 @@ def mean(
     orig_dtype = dtype
     if dtype is None:
         dtype = a.dtype
-    # can't use out wrapper because of this argument
-    torch._check(
-        out is None or out.dtype == dtype,
-        lambda: f"Expected out tensor to have dtype {dtype}, but got {out.dtype} instead",
-    )
     result = _reduction(
         a,
         prims.sum,

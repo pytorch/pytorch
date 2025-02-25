@@ -94,7 +94,13 @@ def fakify(
         return t
 
     if not isinstance(t, torch.Tensor):
-        raise ValueError(f"Unsupported input type {type(t)}")
+        raise ValueError(
+            f"Unsupported input type {type(t)}. "
+            "Export only supports pytree containers of basic types (Tensor, int, float, ...) as input. "
+            "To register a custom dataclass, use torch.export.register_dataclass. "
+            "To register a custom container type, use torch.utils._pytree.register_pytree_node. "
+            "To register a constant input, use torch.utils._pytree.register_constant"
+        )
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
@@ -567,7 +573,7 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if isinstance(obj, torch.ScriptObject):
+            if torch._library.fake_class_registry._is_script_object(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
