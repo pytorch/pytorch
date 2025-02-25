@@ -2007,7 +2007,7 @@ class DistributedDataParallelTest(
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = dev0
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2021,7 +2021,7 @@ class DistributedDataParallelTest(
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
