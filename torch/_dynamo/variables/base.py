@@ -1,15 +1,31 @@
 # mypy: ignore-errors
 
+"""
+Core variable tracking functionality for Dynamo. This module defines the fundamental
+classes and systems used to track and manage variables during Dynamo's operation.
+
+The module provides:
+1. VariableTracker - The base class for tracking variables during compilation
+2. MutationType system - Classes for tracking and managing mutations to variables
+3. Source type management - Utilities for tracking variable origins and scope
+4. Variable state management - Tools for managing variable state and transformations
+
+These components form the foundation of Dynamo's variable handling system,
+enabling accurate tracking and transformation of Python code into optimized
+computations.
+"""
+
 import collections
+from collections.abc import Sequence
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
@@ -183,11 +199,10 @@ class VariableTrackerMeta(type):
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
-        if type.__instancecheck__(
-            variables.LazyVariableTracker, instance
-        ) and cls not in (
-            VariableTracker,
-            variables.LazyVariableTracker,
+        # This is super expensive - just having it costs over 4% of tracing
+        # time!
+        if (type(instance) is variables.LazyVariableTracker) and (
+            cls not in (VariableTracker, variables.LazyVariableTracker)
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
@@ -228,7 +243,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[Dict[int, Any]] = None,
+        cache: Optional[dict[int, Any]] = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -296,6 +311,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             raise NotImplementedError(f"{self} has no type") from None
 
+    def python_type_name(self):
+        try:
+            return self.python_type().__name__
+        except NotImplementedError:
+            return "<unknown type>"
+
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
@@ -357,23 +378,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen):
         raise NotImplementedError
 
-    def can_reconstruct(self, tx):
-        """If it is possible to reconstruct the Python object this
-        VariableTracker represents."""
-        assert tx is tx.output.root_tx, "Only root tx can reconstruct"
-        try:
-            from ..codegen import PyCodegen
-
-            cg = PyCodegen(tx)
-            self.reconstruct(cg)
-            return True
-        except NotImplementedError:
-            return False
-
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def force_unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -393,26 +401,36 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
-    def inspect_parameter_names(self) -> List[str]:
+    def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"call_function {self} {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="Unsupported function call",
+            context=f"call_function {self} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `{self.debug_repr()}` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
@@ -424,7 +442,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        elif (
+            name in cmp_name_to_op_mapping
+            and len(args) == 1
+            and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
+            and not kwargs
+        ):
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(self, type(other)):
+                return variables.ConstantVariable.create(NotImplemented)
+            if (
+                not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
+                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](
+                    self.as_python_constant(), other.as_python_constant()
+                )
+            )
+        hints = [
+            f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
+            "Please report an issue to PyTorch.",
+        ]
+        # additional hint for method calls on improperly constructed iterators
+        if isinstance(self, variables.UserDefinedObjectVariable) and name in (
+            "__iter__",
+            "__next__",
+        ):
+            hints.append(
+                "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
+                "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
+                "This can happen unintentionally if a previous graph break happens with a builtin iterator "
+                "in the local scope."
+            )
+        unimplemented_v2(
+            gb_type="Unsupported method call",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
+            hints=hints,
+        )
 
     def set_name_hint(self, name):
         pass
@@ -462,8 +523,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
@@ -506,3 +565,6 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+from . import builder

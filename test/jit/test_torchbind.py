@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import copy
 import io
@@ -443,6 +444,10 @@ class TestTorchbind(JitTestCase):
             return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
 
         self.checkScript(fn, (1,))
+
+    def test_hasattr(self):
+        ss = torch.classes._TorchScriptTesting._StackString(["foo", "bar"])
+        self.assertFalse(hasattr(ss, "baz"))
 
     def test_default_args(self):
         def fn() -> int:

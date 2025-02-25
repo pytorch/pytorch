@@ -5,7 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from collections.abc import Sequence
+from typing import Any, Callable, Optional
 from unittest.mock import patch
 
 import sympy
@@ -79,6 +80,7 @@ DTYPE_TO_ATEN = {
 }
 
 DEVICE_TO_ATEN = {
+    "meta": "at::kMeta",
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
@@ -185,7 +187,7 @@ class CppCSEVariable(CSEVariable):
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dependent_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
     def __repr__(self) -> str:
         return (
@@ -211,7 +213,11 @@ class CppCSEVariable(CSEVariable):
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        if self.dtype is None:
+            # Take frexp for example: 2 output with different data type.
+            # The output dtype can't be deduced, since we don't know the idx
+            # of return tensor everywhere invoking update_on_args
+            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
         assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
@@ -268,6 +274,7 @@ def rewrite_index_for_function(
 ):
     # Local buffer at the inner dimensions
     snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
+    assert snode is not None
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -293,7 +300,9 @@ def rewrite_index_for_nodes(
     index: sympy.Expr,
     global_buf_name: str,
 ):
-    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    used_vars = OrderedSet(
+        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
+    )
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):
@@ -307,7 +316,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local: Dict[str, ir.Buffer],
+        global_to_local: dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
@@ -355,11 +364,13 @@ class LocalBufferContext:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
-        self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to global buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.global_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
-        self.global_to_local: Dict[str, ir.Buffer] = {}
+        self.global_to_local: dict[str, ir.Buffer] = {}
+        # record the global buffers that are removed by this LocalBufferContext
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -400,7 +411,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: Optional[list[ir.Buffer]] = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer
@@ -413,7 +424,12 @@ class LocalBufferContext:
                 )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
-                V.graph.removed_buffers.add(global_buffer_name)
+                if global_buffer_name not in V.graph.removed_buffers:
+                    # Record the global buffers that are removed by this LocalBufferContext
+                    # since which may need to restore. Refer to issue:
+                    # https://github.com/pytorch/pytorch/issues/144186
+                    self.removed_buffers.add(global_buffer_name)
+                    V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
@@ -436,11 +452,11 @@ class LocalBufferContext:
 
     def localize_nodes(
         self,
-        nodes: List[ir.IRNode],
+        nodes: list[ir.IRNode],
         rewrite_index: Callable[
             ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
-    ) -> List[ir.IRNode]:
+    ) -> list[ir.IRNode]:
         """
         Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
         though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
@@ -477,7 +493,7 @@ class LocalBufferContext:
 
 def unify_mask_base_type(
     buffer: IndentedBuffer,
-    vars: Tuple[CSEVariable, ...],
+    vars: tuple[CSEVariable, ...],
     dtype=torch.float,
 ):
     """
@@ -492,6 +508,17 @@ def unify_mask_base_type(
         for var in vars
     )
     return new_vars
+
+
+def may_unify_binary_op_mask_type(a, b):
+    """
+    Given two cse variables, when dtype is bool, unify them to the same mask dtype and return casted cse variable.
+    """
+    if a.dtype == torch.bool:
+        assert b.dtype == torch.bool
+        mask_dtype = torch.int32
+        return unify_mask_base_type(V.kernel.compute, (a, b), mask_dtype)
+    return a, b
 
 
 def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
@@ -522,7 +549,7 @@ def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
 
 
 def get_gemm_template_output_and_compute_dtype(input_dtype):
-    if input_dtype == torch.uint8:
+    if input_dtype in [torch.uint8, torch.int8]:
         return (torch.int32, torch.int32)
     else:
         return (torch.float32, torch.float32)
@@ -714,7 +741,7 @@ def _get_loop_body(fn_list):
 
 
 def _get_dtype_from_loopbodies(loop_bodies):
-    dtypes = set()
+    dtypes = OrderedSet[torch.dtype]()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
             body.graph for body in list(loop_body.subblocks.values())
@@ -728,11 +755,11 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 
 def template_fusion_with_epilogues_supported(
-    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
-) -> Tuple[bool, bool]:
+    template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
+) -> tuple[bool, bool]:
     def _get_indexes_of_template_buf_read(
-        epilogue_node: ir.Operation, template_buf_names: List[str]
-    ) -> List[sympy.Expr]:
+        epilogue_node: ir.Operation, template_buf_names: list[str]
+    ) -> list[sympy.Expr]:
         return [
             read.index
             for read in epilogue_node.get_reads()
@@ -742,8 +769,8 @@ def template_fusion_with_epilogues_supported(
     def _check_supported_and_same_indexes(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
-    ) -> Tuple[bool, bool]:
-        num_indexes = len(set(index_of_template_buf_read))
+    ) -> tuple[bool, bool]:
+        num_indexes = len(OrderedSet(index_of_template_buf_read))
 
         if num_indexes > 1:
             same_index = False
@@ -763,8 +790,8 @@ def template_fusion_with_epilogues_supported(
         return supported, same_index
 
     def _template_fusion_supported(
-        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
-    ) -> Tuple[bool, bool]:
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: list[ir.Operation]
+    ) -> tuple[bool, bool]:
         template_buf_names = [x.get_name() for x in template_outputs]
         indexes_of_template_buf_reads = [
             _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)

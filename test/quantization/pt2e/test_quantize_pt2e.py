@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-from typing import Dict, List, Tuple
+# ruff: noqa: F841
 
 import torch
 from torch import Tensor
@@ -41,7 +41,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 )
 from torch.export import export_for_training
 from torch.fx import Node
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -338,8 +337,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
                         def derive_qparams_fn(
-                            obs_or_fqs: List[ObserverOrFakeQuantize],
-                        ) -> Tuple[Tensor, Tensor]:
+                            obs_or_fqs: list[ObserverOrFakeQuantize],
+                        ) -> tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 2
                             ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
@@ -441,8 +440,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
                         def derive_qparams_fn(
-                            obs_or_fqs: List[ObserverOrFakeQuantize],
-                        ) -> Tuple[Tensor, Tensor]:
+                            obs_or_fqs: list[ObserverOrFakeQuantize],
+                        ) -> tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 1
                             ), f"Expecting one weight obs/fq, got: {len(obs_or_fqs)}"
@@ -1460,7 +1459,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         with TemporaryFileName() as fname:
             # serialization
-            quantized_ep = torch.export.export(m, example_inputs)
+            quantized_ep = torch.export.export(m, example_inputs, strict=True)
             torch.export.save(quantized_ep, fname)
             # deserialization
             loaded_ep = torch.export.load(fname)
@@ -1864,6 +1863,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.batch_norm.default,
         )
 
+    @parametrize(
+        "device",
+        ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["hpu"] if TEST_HPU else []),
+    )
     def test_move_exported_model_bn(self, device):
         """
         Test switching batch_norm behavior between train and eval modes using
@@ -2011,6 +2014,47 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         _assert_ops_are_correct(m, train=False)
         m.train()
         _assert_ops_are_correct(m, train=True)
+
+    def test_allow_exported_model_train_eval_idempotent(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.bn(x)
+                return x
+
+        m = M().train()
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = export_for_training(m, example_inputs).module()
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+
+        # Mock m.recompile() to count how many times it's been called
+        m._recompile_count = 0
+
+        def _fake_recompile():
+            m._recompile_count += 1
+
+        m.recompile = _fake_recompile
+
+        # First train after export should always recompile
+        m.train()
+        self.assertNotEqual(m._recompile_count, 0)
+        count1 = m._recompile_count
+
+        # Train -> train should not recompile
+        m.train()
+        self.assertEqual(m._recompile_count, count1)
+
+        # Train -> eval should recompile
+        m.eval()
+        self.assertNotEqual(m._recompile_count, count1)
+        count2 = m._recompile_count
+
+        # Eval -> eval should not recompile
+        m.eval()
+        self.assertEqual(m._recompile_count, count2)
 
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
@@ -2377,7 +2421,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def prepare_obs_or_fq_callback(
                 self,
                 model: torch.fx.GraphModule,
-                edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+                edge_or_node_to_obs_or_fq: dict[EdgeOrNode, ObserverOrFakeQuantize],
             ) -> None:
                 # hard code output quant by updating entire sharing group
                 output_node = next(n for n in model.graph.nodes if n.op == "output")
@@ -2435,9 +2479,88 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 check_nn_module(node)
 
 
-instantiate_parametrized_tests(TestQuantizePT2E)
+@skipIfNoQNNPACK
+class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
+    def test_channel_group_quantization(self):
+        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
+        from torch.ao.quantization.pt2e._affine_quantization import (
+            AffineQuantizedMinMaxObserver,
+        )
 
-devices = ["cpu", "cuda"]
-if TEST_HPU:
-    devices.append("hpu")
-instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerGroup(group_size=128),
+                            ),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        node_occurrence = {
+            torch.ops.pt2e_quant.quantize_affine: 1,
+            torch.ops.pt2e_quant.dequantize_affine: 2,
+        }
+        node_list = [
+            torch.ops.pt2e_quant.quantize_affine,
+            torch.ops.pt2e_quant.dequantize_affine,
+        ]
+        example_inputs = (torch.randn(5, 128),)
+        self._test_quantizer(
+            M().eval(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+            is_debug_mode=True,
+        )
+
+
+instantiate_parametrized_tests(TestQuantizePT2E)

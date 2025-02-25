@@ -1,12 +1,18 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import collections
 import inspect
 import typing
-from typing import List, Optional, Sequence, Union  # noqa: F401
+from types import GenericAlias
+from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
+
+
+# This is used as a negative test for
+# test_custom_ops.py::TestTypeConversion::test_type_eval.
+_TestTensor = torch.Tensor
 
 
 @exposed_in("torch.library")
@@ -52,20 +58,50 @@ def infer_schema(
         (Tensor x) -> Tensor
     """
     UNKNOWN_MUTATES = "unknown"
+    pf_globals = prototype_function.__globals__
+    pf_locals = None
+    # TODO: Once our minimum version is py3.10+ pass `eval_str=True` to
+    # inspect.signature() and we no longer need to deal with stringified
+    # annotations below.
     sig = inspect.signature(prototype_function)
 
     def error_fn(what):
-        raise ValueError(
-            f"infer_schema(func): {what} " f"Got func with signature {sig})"
-        )
+        raise ValueError(f"infer_schema(func): {what} Got func with signature {sig})")
 
     def convert_type_string(annotation_type: str):
         try:
-            return eval(annotation_type)
-        except Exception as e:
+            return eval(annotation_type, pf_globals, pf_locals)
+        except Exception:
             error_fn(
                 f"Unsupported type annotation {annotation_type}. It is not a type."
             )
+
+    def unstringify_types(
+        tys: tuple[Union[type[object], str], ...]
+    ) -> tuple[tuple[typing.Any, ...], bool]:
+        res = []
+        changed = False
+        for ty in tys:
+            ty, ty_changed = unstringify_type(ty)
+            res.append(ty)
+            changed |= ty_changed
+        if changed:
+            return tuple(res), True
+        else:
+            return tys, False  # type: ignore[return-value]
+
+    def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
+        # Dig through a generic type and if it contains a stringified type
+        # convert that to a real type. The second return value indicates if the
+        # type contained a string or not.
+        if isinstance(ty, str):
+            return convert_type_string(ty), True
+        elif origin := typing.get_origin(ty):
+            args, args_changed = unstringify_types(typing.get_args(ty))
+            if args_changed:
+                return GenericAlias(origin, args), True
+
+        return ty, False
 
     params = []
     seen_args = set()
@@ -85,11 +121,9 @@ def infer_schema(
 
         # The annotation might be converted to a string by annotation,
         # we convert it to the actual type.
-        annotation_type = param.annotation
-        if type(annotation_type) == str:
-            annotation_type = convert_type_string(annotation_type)
+        annotation_type, _ = unstringify_type(param.annotation)
 
-        if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
+        if annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
@@ -152,9 +186,7 @@ def infer_schema(
                 f"mutates_args should contain the names of all args that the "
                 f"custom op mutates, or just the string 'unknown' if you don't know."
             )
-    return_annotation = sig.return_annotation
-    if type(return_annotation) == str:
-        return_annotation = convert_type_string(return_annotation)
+    return_annotation, _ = unstringify_type(sig.return_annotation)
     ret = parse_return(return_annotation, error_fn)
     if op_name is not None:
         return f"{op_name}({', '.join(params)}) -> {ret}"
@@ -162,31 +194,44 @@ def infer_schema(
 
 
 def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+    base_type: Union[type, typing._SpecialForm],
+    cpp_type: str,
+    list_base: bool,
+    optional_base_list: bool,
+    optional_list_base: bool,
 ):
-    result = [
+    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(typ):
-        return [
-            typing.Sequence[typ],  # type: ignore[valid-type]
-            typing.List[typ],  # type: ignore[valid-type]
-        ]
+    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
+        return (
+            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
+            typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
+            GenericAlias(collections.abc.Sequence, (typ,)),
+            GenericAlias(list, (typ,)),
+        )
 
     if list_base:
-        result.extend((seq_typ, f"{cpp_type}[]") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        result.extend(
+            (seq_typ, f"{cpp_type}[]") for seq_typ in derived_seq_types(base_type)
+        )
     if optional_base_list:
-        result.extend((seq_typ, f"{cpp_type}?[]") for seq_typ in derived_seq_types(typing.Optional[base_type]))  # type: ignore[valid-type]
+        result.extend(
+            (seq_typ, f"{cpp_type}?[]")
+            for seq_typ in derived_seq_types(typing.Optional[base_type])
+        )
     if optional_list_base:
-        # type: ignore[valid-type]
-        result.extend((typing.Optional[seq_typ], f"{cpp_type}[]?") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        result.extend(
+            (typing.Optional[seq_typ], f"{cpp_type}[]?")
+            for seq_typ in derived_seq_types(base_type)
+        )
     return result
 
 
 def get_supported_param_types():
-    data = [
+    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -205,7 +250,8 @@ def get_supported_param_types():
 
 SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
-    typing.List[Tensor]: "Tensor[]",
+    typing.List[Tensor]: "Tensor[]",  # noqa: UP006
+    list[Tensor]: "Tensor[]",
     int: "SymInt",
     float: "float",
     bool: "bool",
@@ -250,20 +296,25 @@ def supported_param(param: inspect.Parameter) -> bool:
     )
 
 
-def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.List]:
+def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
     type_args = getattr(tuple_type, "__args__", None)
     # Account for different python versions, e.g. python 3.8 would give ()
     # but python 3.12 would give None.
-    if tuple_type is typing.Tuple or type_args == () or type_args is None:
+    if (
+        tuple_type is typing.Tuple  # noqa: UP006
+        or tuple_type is tuple
+        or type_args == ()
+        or type_args is None
+    ):
         # Handle the case of an empty tuple type
-        return typing.List
+        return list
     elif len(type_args) == 1:
         # General case: create a List with the same type arguments
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
-    elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
+        return list[type_args[0]]  # type: ignore[valid-type]
+    elif len(type_args) == 2 and type_args[1] is Ellipsis:
+        return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

@@ -6,7 +6,7 @@ import itertools
 import os
 import sys
 import unittest
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -65,7 +65,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    def _get_param_groups(self, model: nn.Module) -> List[Dict[str, Any]]:
+    def _get_param_groups(self, model: nn.Module) -> list[dict[str, Any]]:
         """
         Constructs separate parameter groups for weights, biases, and other
         parameters.
@@ -87,7 +87,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     def _get_optim(
         self,
         model: nn.Module,
-        optim_class: Type[torch.optim.Optimizer],
+        optim_class: type[torch.optim.Optimizer],
         multi_tensor: bool,
     ) -> torch.optim.Optimizer:
         """
@@ -117,12 +117,12 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         self,
         device_init_mode: DEVICEInitMode,
         init_optim_before_wrap: bool,
-        optim_class: Type[torch.optim.Optimizer],
+        optim_class: type[torch.optim.Optimizer],
         multi_tensor: bool,
         sharding_strategy: ShardingStrategy,
         backward_prefetch: Optional[BackwardPrefetch],
         cpu_offload: CPUOffload,
-    ) -> Tuple[FSDP, torch.optim.Optimizer]:
+    ) -> tuple[FSDP, torch.optim.Optimizer]:
         """
         Returns a transformer with shared parameters wrapped with FSDP and a
         corresponding optimizer.
@@ -260,7 +260,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
         model = torch.compile(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for i in range(10):
+        for _ in range(10):
             losses = []
             inp = ref_model.get_input(torch.device("cuda"))
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
@@ -335,7 +335,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         self,
         device_init_mode: DEVICEInitMode,
         init_optim_before_wrap: bool,
-        optim_class: Type[torch.optim.Optimizer],
+        optim_class: type[torch.optim.Optimizer],
         multi_tensor: bool,
         set_to_none: bool,
         backward_prefetch: Optional[BackwardPrefetch],
@@ -566,7 +566,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         self,
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
-    ) -> Tuple[FSDP, torch.optim.Optimizer, FSDP, torch.optim.Optimizer]:
+    ) -> tuple[FSDP, torch.optim.Optimizer, FSDP, torch.optim.Optimizer]:
         """
         Returns a pair of (FSDP model, optimizer) for ``use_orig_params=False``
         and ``True``, respectively.
@@ -778,7 +778,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                 z = self.lin2(z)
                 return z
 
-            def get_input(self, device: torch.device) -> Tuple[torch.Tensor, ...]:
+            def get_input(self, device: torch.device) -> tuple[torch.Tensor, ...]:
                 return (torch.randn((2, 5)).to(device),)
 
             def get_loss(self, inp, out):
@@ -872,7 +872,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             z = self.lin2(z)
             return z
 
-        def get_input(self, device: torch.device) -> Tuple[torch.Tensor, ...]:
+        def get_input(self, device: torch.device) -> tuple[torch.Tensor, ...]:
             return (torch.randn((2, 5)).to(device),)
 
         def get_loss(self, inp, out):

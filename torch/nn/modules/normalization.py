@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
@@ -88,7 +88,7 @@ class CrossMapLRN2d(Module):
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
-_shape_t = Union[int, List[int], Size]
+_shape_t = Union[int, list[int], Size]
 
 
 class LayerNorm(Module):
@@ -106,7 +106,7 @@ class LayerNorm(Module):
     the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
+    The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
     .. note::
@@ -170,7 +170,7 @@ class LayerNorm(Module):
     """
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
-    normalized_shape: Tuple[int, ...]
+    normalized_shape: tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
@@ -240,7 +240,7 @@ class GroupNorm(Module):
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
+    The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
     This layer uses statistics computed from input data in both training and
@@ -313,7 +313,7 @@ class GroupNorm(Module):
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, " "affine={affine}".format(
+        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
             **self.__dict__
         )
 
@@ -359,7 +359,7 @@ class RMSNorm(Module):
 
     """
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
-    normalized_shape: Tuple[int, ...]
+    normalized_shape: tuple[int, ...]
     eps: Optional[float]
     elementwise_affine: bool
 

@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, List, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -249,7 +249,7 @@ class _TorchDispatchModeKey(Enum):
 
 
 def codegen_per_backend_entries() -> str:
-    r: List[str] = []
+    r: list[str] = []
     for fk in FUNCTIONALITY_KEYS:
         r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)
@@ -283,6 +283,7 @@ dispatch_keys = [
     DispatchKey.MPS,
     DispatchKey.XPU,
     DispatchKey.SparseXPU,
+    DispatchKey.SparseCsrXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -373,6 +374,7 @@ class ScalarType(Enum):
     Float8_e5m2fnuz = auto()
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
+    Float8_e8m0fnu = auto()
 
     def __str__(self) -> str:
         return self.name
@@ -625,6 +627,11 @@ class NativeFunction:
             "use_const_ref_for_mutable_tensors", False
         )
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
+
+        if use_const_ref_for_mutable_tensors:
+            assert (
+                not func.arguments.out
+            ), "see https://github.com/pytorch/pytorch/issues/145522"
 
         variants_s = e.pop("variants", "function")
         assert isinstance(variants_s, str)
@@ -1518,7 +1525,7 @@ class FunctionSchema:
                     and self.returns[0].annotation == self_a.argument.annotation
                 )
             else:
-                # You can't method chain on non-tensor self arguments though (like a List[Tensor])
+                # You can't method chain on non-tensor self arguments though (like a list[Tensor])
                 # so in all other cases we expect the return type to be none.
                 assert len(self.returns) == 0
 
@@ -1815,7 +1822,7 @@ class Annotation:
             alias_set = f"{alias_set}!"
         alias_set_after = "|".join(self.alias_set_after)
         if alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+            alias_set = f"{alias_set} -> {alias_set_after}"
         return alias_set
 
 
@@ -1900,7 +1907,6 @@ class BaseTy(Enum):
     Stream = auto()
     SymInt = auto()
     SymBool = auto()
-    ConstQuantizerPtr = auto()  # TODO: rename
     GraphModule = auto()
 
 

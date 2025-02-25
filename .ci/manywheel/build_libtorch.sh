@@ -225,11 +225,11 @@ make_wheel_record() {
     FPATH=$1
     if echo $FPATH | grep RECORD >/dev/null 2>&1; then
         # if the RECORD file, then
-        echo "$FPATH,,"
+        echo "\"$FPATH\",,"
     else
         HASH=$(openssl dgst -sha256 -binary $FPATH | openssl base64 | sed -e 's/+/-/g' | sed -e 's/\//_/g' | sed -e 's/=//g')
         FSIZE=$(ls -nl $FPATH | awk '{print $5}')
-        echo "$FPATH,sha256=$HASH,$FSIZE"
+        echo "\"$FPATH\",sha256=$HASH,$FSIZE"
     fi
 }
 

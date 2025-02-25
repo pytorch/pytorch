@@ -18,65 +18,52 @@
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 14)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
 #define NCCL_HAS_COMM_NONBLOCKING
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 18)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 18, 0)
 #define NCCL_HAS_COMM_SPLIT
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0)
+#define NCCL_HAS_INIT_RANK_SCALABLE
 #endif
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
 #define ENABLE_NCCL_GET_LAST_ERROR
 #define NCCL_REMOTE_ERROR
 #endif
 
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
+static_assert(
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
+    "NCCL version must be 2.7 or later");
+// The following macros represent features supported prior to NCCL 2.7,
+// therefore we can define them unconditionally, given the static_assert above.
+// TODO: remove these macros from code.
 #define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
-#endif
-
-// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
-// and ncclRecv() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 7)
 #define ENABLE_NCCL_P2P_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_P2P_SUPPORT
-#endif
+// End of macros for NCCL 2.7 and below.
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 17)
-#define NCCL_HAS_COMM_CTA_CGA
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_CTA_CGA
+// Note: the first version that supports ncclConfig_t is 2.14. Here we
+// fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
+// CGA fields because they have already been pybinded out.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
+#define NCCL_HAS_CONFIG
 #endif
 
-#if defined(NCCL_REGISTRATION_SUPPORTED) ||                              \
-    ((defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-      (NCCL_MINOR >= 19)))
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_COMM_REGISTER
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_REGISTER
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
+#define NCCL_HAS_MEM_ALLOC
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -210,95 +197,48 @@ class NCCLComm {
   using LockType = std::unique_lock<MutexType>;
 
  public:
-  explicit NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
+  explicit NCCLComm(ncclComm_t ncclComm);
 
   NCCLComm() = default;
 
-  ~NCCLComm() noexcept {
-    // Add lock in this destructor, as aborted_ needs to be read after memory
-    // barrier here.
-    LockType lock(mutex_);
-    if (ncclComm_ && initialized_ && !aborted_) {
-      at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-      // Use ncclCommAbort instead of ncclCommDestroy here since
-      // ncclCommDestroy could block forever waiting for work to complete on
-      // the communicator.
-      C10D_NCCL_ASSERT(::ncclCommAbort(ncclComm_));
-#else
-      C10D_NCCL_ASSERT(::ncclCommDestroy(ncclComm_));
-#endif
-    }
-  }
+  ~NCCLComm() noexcept;
 
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
       ncclUniqueId commId,
-      at::DeviceIndex deviceIndex) {
-    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
-    auto comm = std::make_shared<NCCLComm>();
-    C10D_NCCL_CHECK(
-        ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
-        std::nullopt);
-    comm->ncclId_ = commId;
-    comm->rank_ = rank;
-    comm->deviceIndex_ = deviceIndex;
-    comm->initialized_ = true;
-    // Old style comm is always blocking.
-    comm->nonBlocking_ = false;
-    return comm;
-  }
+      at::DeviceIndex deviceIndex);
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex,
-      ncclConfig_t& config) {
-    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
-    auto comm = std::make_shared<NCCLComm>();
-    comm->nonBlocking_ = config.blocking == 0;
-    LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
-              << (comm->nonBlocking_ ? "nonblocking" : "blocking");
-    C10D_NCCL_CHECK_NONBLOCKING(
-        ncclCommInitRankConfig(
-            &(comm->ncclComm_), numRanks, commId, rank, &config),
-        std::nullopt);
-    comm->ncclId_ = commId;
-    comm->rank_ = rank;
-    comm->deviceIndex_ = deviceIndex;
-    // Under blocking mode, comm is initialized immediately after NCCL init
-    // returns; Under nonblocking mode, we check whether comm is initialized the
-    // *next* time ncclComm_ is accessed.
-    comm->initialized_ = !comm->nonBlocking_;
-    return comm;
-  }
+      ncclConfig_t& config);
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  static std::shared_ptr<NCCLComm> create_scalable(
+      int numRanks,
+      int rank,
+      std::vector<ncclUniqueId>& commIds,
+      ncclConfig_t& config);
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_CONFIG
 
+#ifdef NCCL_HAS_COMM_SPLIT
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
+#endif // NCCL_HAS_COMM_SPLIT
+
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+  std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-  std::unordered_map<std::string, std::string> ncclCommDump() {
-    std::unordered_map<std::string, std::string> dump;
-    if (isAborted()) {
-      LOG(INFO) << "Communicator was aborted before trying to dump its state.";
-      return dump;
-    }
-    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), std::nullopt);
-    return dump;
-  }
-#endif
-
-  ncclUniqueId getNcclId() {
-    return ncclId_;
-  }
+  ncclUniqueId getNcclId();
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;
@@ -309,168 +249,49 @@ class NCCLComm {
 
   // Move constructable
   // NOLINTNEXTLINE(*-noexcept-move-*)
-  NCCLComm(NCCLComm&& other) {
-    // Using other's lock, as it reads other's states
-    // Can not use this.mutex_, as this object is being constructed.
-    LockType lock(other.mutex_);
-    std::swap(ncclComm_, other.ncclComm_);
-    std::swap(aborted_, other.aborted_);
-    std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
-    std::swap(initialized_, other.initialized_);
-    std::swap(nonBlocking_, other.nonBlocking_);
-    std::swap(deviceIndex_, other.deviceIndex_);
-  }
+  NCCLComm(NCCLComm&& other);
 
   ncclComm_t getNcclComm();
 
-  std::optional<std::string> getNcclCommFailureReason() const {
-    LockType lock(mutex_);
-    return commFailureReason_;
-  }
+  // Wait for the communicator to be ready. This is a blocking function.
+  // Useful in nonblocking mode: NCCL requires the communicator to be ready
+  // before issuing a second command.
+  // Arguments:
+  //   longInterval: if true, wait with sleep of an interval; otherwise, wait
+  //   with `sched_yield` which is faster (but acquires CPU more frequently).
+  //   Use `longInterval=true` when waiting for initialization or finalize to
+  //   complete. Use `longInterval=false` when waiting collective call to return
+  //   ncclSuccess.
+  void waitReady(bool longInterval);
 
-  void abort(std::optional<std::string> commFailureReason = std::nullopt) {
-    LockType lock(mutex_);
-    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_ && !initialized_) {
-      // Should not abort twice.
-      return;
-    }
+  std::optional<std::string> getNcclCommFailureReason() const;
 
-#ifdef NCCL_HAS_COMM_REGISTER
-    // Deregister all registered segments before aborting.
-    for (auto& it : registeredSegmentHandles_) {
-      void* handle = it.second;
-      C10D_NCCL_CHECK(
-          ::ncclCommDeregister(ncclComm_, handle),
-          c10::str(
-              "Failed to deregister segment handle ",
-              handle,
-              " on ncclComm_ ",
-              ncclComm_));
-    }
-    registeredSegmentHandles_.clear();
-#endif
+  void abort(std::optional<std::string> commFailureReason = std::nullopt);
 
-    // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
-    // timeout)
-    commFailureReason_ = commFailureReason;
-    LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
-              << (commFailureReason ? *commFailureReason
-                                    : "No abort reason provided.");
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-    C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
-#else
-    C10D_NCCL_CHECK_TIMEOUT(
-        ::ncclCommAbort(ncclComm_), ncclComm_, commFailureReason_);
-#endif
-    aborted_ = true;
-    ncclComm_ = nullptr;
+  // Finalize a communicator -- asking it to flush its operations. When the
+  // communicator is marked as nonblocking, this is a nonblocking function;
+  // otherwise, it will block till all operations complete.
+  void finalize();
 
-    // Set an appropriate error so that we avoid using the communicator.
-    if (ncclAsyncErr_ == ncclSuccess) {
-      ncclAsyncErr_ = ncclSystemError;
-    }
-#else
-    // This is a NOOP, if error checks are disabled.
-    return;
-#endif
-  }
+  // Destroy a communicator. This is a blocking function.
+  void destroy();
 
-  bool isInitialized() const {
-    LockType lock(mutex_);
-    return initialized_;
-  }
+  bool isInitialized() const;
 
-  bool isAborted() const {
-    LockType lock(mutex_);
-    return aborted_;
-  }
+  bool isAborted() const;
 
-  uint64_t getCommSplitCounter() const {
-    return ncclCommSplitCounter_;
-  }
+  uint64_t getCommSplitCounter() const;
 
-  ncclResult_t checkForNcclError() {
-    LockType lock(mutex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (ncclAsyncErr_ != ncclSuccess) {
-      return ncclAsyncErr_;
-    }
-    C10D_NCCL_CHECK(
-        ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
-    return ncclAsyncErr_;
-#else
-    // Always return success, if error checks are disabled.
-    return ncclSuccess;
-#endif
-  }
+  ncclResult_t checkForNcclError();
 
-  ncclResult_t registerSegment(void* ptr, size_t size) {
-    LockType lock(mutex_);
-#ifdef NCCL_HAS_COMM_REGISTER
-    // We register only segments from cache allocator
-    // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
-    // maps to a unique handle and should not be registered before the current
-    // ptr is deregistered and freed.
-    TORCH_CHECK(
-        registeredSegmentHandles_.count(ptr) == 0,
-        "Segment with ptr ",
-        ptr,
-        " has already been registered on ncclComm_ ",
-        ncclComm_);
+  ncclResult_t registerSegment(
+      void* ptr,
+      size_t size,
+      bool errorOnRereg = true);
 
-    void* handle = nullptr;
-    // Use getNcclComm to make sure comm is ready before calling nccl APIs
-    auto comm = getNcclComm();
-    C10D_NCCL_CHECK(
-        ncclCommRegister(comm, ptr, size, &handle),
-        c10::str(
-            "Failed to register segment with ptr ",
-            ptr,
-            ", size ",
-            size,
-            " on ncclComm_ ",
-            comm));
-    registeredSegmentHandles_[ptr] = handle;
-    return ncclSuccess;
-#else
-    return ncclInvalidUsage;
-#endif
-  }
+  ncclResult_t deregisterSegment(void* ptr);
 
-  ncclResult_t deregisterSegment(void* ptr) {
-    LockType lock(mutex_);
-#ifdef NCCL_HAS_COMM_REGISTER
-    TORCH_CHECK(
-        registeredSegmentHandles_.count(ptr) == 1,
-        "Segment with ptr ",
-        ptr,
-        " is not registered on ncclComm_ ",
-        ncclComm_);
-
-    void* handle = registeredSegmentHandles_[ptr];
-    // Use getNcclComm to make sure comm is ready before calling nccl APIs
-    auto comm = getNcclComm();
-    C10D_NCCL_CHECK(
-        ncclCommDeregister(comm, handle),
-        c10::str(
-            "Failed to deregister segment handle ",
-            handle,
-            ", with ptr ",
-            ptr,
-            " on ncclComm_ ",
-            comm));
-    registeredSegmentHandles_.erase(ptr);
-    return ncclSuccess;
-#else
-    return ncclInvalidUsage;
-#endif
-  }
-
-  std::string repr() const {
-    return c10::str((void*)ncclComm_);
-  }
+  std::string repr() const;
 
   friend class ProcessGroupNCCL;
 
@@ -496,7 +317,7 @@ class NCCLComm {
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
-#endif
+#endif // NCCL_HAS_COMM_REGISTER
 
  private:
   ncclComm_t ncclComm_{nullptr};
@@ -521,7 +342,7 @@ struct ncclRedOpRAII {
       ncclRedOpDestroy(op_, comm_);
     }
   }
-#endif
+#endif // ENABLE_NCCL_PREMUL_SUM_SUPPORT
   operator ncclRedOp_t() const {
     return op_;
   }
@@ -530,6 +351,9 @@ struct ncclRedOpRAII {
   bool premul_sum_ = false;
 };
 
+void printNcclCommProxyTrace(
+    const std::string& dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap);
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

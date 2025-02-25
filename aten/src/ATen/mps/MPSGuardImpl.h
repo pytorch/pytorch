@@ -64,7 +64,7 @@ struct TORCH_API MPSGuardImpl final
     // TODO: Currently setting only device 0
   }
 
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
@@ -78,7 +78,7 @@ struct TORCH_API MPSGuardImpl final
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
@@ -105,6 +105,11 @@ struct TORCH_API MPSGuardImpl final
   void block(void* event, const Stream& stream) const override;
 
   bool queryEvent(void* event) const override;
+
+  void synchronizeEvent(void* event) const override;
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override;
 
   void synchronizeDevice(const DeviceIndex device_index) const override;
 };

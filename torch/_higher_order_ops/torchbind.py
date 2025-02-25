@@ -6,7 +6,11 @@ import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import _ns_and_class_name, FakeScriptObject
+from torch._library.fake_class_registry import (
+    _is_script_object,
+    _ns_and_class_name,
+    FakeScriptObject,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -43,7 +47,7 @@ _orig_scriptmethod_call = torch.ScriptMethod.__call__
 
 
 def torchbind_method_redispatch(self, *args, **kwargs):
-    if isinstance(self.raw_owner, torch.ScriptObject):
+    if _is_script_object(self.raw_owner):
         return call_torchbind(self.raw_owner, self.name, *args, **kwargs)
     return _orig_scriptmethod_call(self, *args, **kwargs)
 
@@ -88,7 +92,7 @@ def inner(mode, *args, **kwargs):
     )
     out = call_torchbind(*args, **kwargs)
 
-    obj, method, *rest_args = args
+    obj, method, *_rest_args = args
     if isinstance(obj, torch.ScriptObject):
         ns, class_name = _ns_and_class_name(
             obj._type().qualified_name()  # type: ignore[attr-defined]

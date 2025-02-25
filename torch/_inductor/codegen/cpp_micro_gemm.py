@@ -2,14 +2,22 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Optional
 
 import sympy
 
 import torch
 
 from .. import cpp_builder, ir
-from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
+from ..cpu_vec_isa import (
+    pick_vec_isa,
+    VecAMX,
+    VecAVX2,
+    VecAVX512,
+    VecISA,
+    VecNEON,
+    VecSVE256,
+)
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
@@ -82,9 +90,10 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
+        self.pack_vnni_B_locally = False
 
     def get_common_options(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert self.compute_dtype == torch.int32
             assert self.output_dtype == torch.int32
             assert self.input2_dtype == torch.int8
@@ -101,10 +110,11 @@ inline void {{kernel_name}}(
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
-            "int8_gemm": self.input_dtype == torch.uint8,
-            "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
+            "int8_gemm": self.input_dtype in [torch.uint8, torch.int8],
+            "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
-            "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            "pack_vnni_B_locally": self.pack_vnni_B_locally,
+            "template": self,
         }
 
     def get_kernel_declaration(self):
@@ -159,6 +169,9 @@ inline void {{kernel_name}}(
         res.writeline(");")
         return res.getvalue()
 
+    def use_local_vnni_blocking(self, should_block_weight: bool):
+        self.pack_vnni_B_locally = should_block_weight
+
     def codegen_init(
         self,
         kernel: CppTemplateKernel,
@@ -174,6 +187,33 @@ inline void {{kernel_name}}(
     def get_b_layout(self) -> LayoutType:
         return LayoutType.NORMAL
 
+    ALLOCATE_WEIGHT_BUFFER = r"""
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{buffer_dtype}}[]> heap_deq_b_buf_ptr(new {{buffer_dtype}}[{{buffer_size}}]);
+    {{buffer_dtype}}* {{buffer_name}} = heap_deq_b_buf_ptr.get();
+    {%- else %}
+    // It's safe to use a stack-allocated array since the blocking strategy would
+    // require us to allocate an array that's smaller than the size of L1D cache,
+    // and the default per thread max stack size on Linux is quite higher,
+    // so we need not worry about stack overflow.
+    alignas(4096) {{buffer_dtype}} {{buffer_name}}[{{buffer_size}}];
+    {%- endif %}
+"""
+
+    def codegen_allocate_weight_buffer(
+        self, buffer_name: str, buffer_dtype: str, *size_args
+    ) -> str:
+        buffer_size = " * ".join(map(str, size_args))
+        return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
+            dict(
+                buffer_name=buffer_name,
+                buffer_dtype=buffer_dtype,
+                buffer_size=buffer_size,
+                is_msvc_compiler=cpp_builder.is_msvc_cl(),
+            )
+        )
+
 
 @dataclasses.dataclass
 class CppMicroGemmConfig:
@@ -181,12 +221,12 @@ class CppMicroGemmConfig:
     input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
-    vec_isa_cls: Type[VecISA]
+    vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
 
 
-micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):
@@ -319,6 +359,22 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE256,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),
@@ -469,11 +525,20 @@ inline void {{kernel_name}}_kernel(
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
-    vnni_size = 4 if config.input_dtype == torch.uint8 else 2
+    vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
     return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 64), (48, 16, 64)],
+        input_dtype=torch.int8,
+        input2_dtype=torch.int8,
+        output_dtype=torch.int32,
+        compute_dtype=torch.int32,
+        extra_check=check_amx_extra,
+    ),
     *generate_gemm_config(
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
@@ -511,22 +576,14 @@ class CppMicroGemmAMX(CppMicroGemm):
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+{%- if pack_vnni_B_locally %}
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K", block_n)}}
+{%- endif %}
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
-    const auto buf_size = K * {{block_n}};
-    {%- if is_msvc_compiler %}
-    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
-    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
-    {%- else %}
-    // It's safe to use a stack-allocated array since the blocking strategy would
-    // require us to allocate an array that's smaller than the size of L1D cache,
-    // and the default per thread max stack size on Linux is quite higher,
-    // so we need not worry about stack overflow.
-    alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
-    {%- endif %}
+    {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
@@ -555,14 +612,17 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
 // The ldb would not be block_n if N != block_n
-{%- if use_cached_dequantized_B %}
+{%- if use_cached_dequantized_B or pack_vnni_B_locally %}
     const int64_t updated_ldb = {{block_n}};
 {%- else %}
     const int64_t updated_ldb = ldb;
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
-{%- if use_cached_dequantized_B %}
+{%- if pack_vnni_B_locally %}
+        // Pack non-constant weights into VNNI interleaved format in packed_B_buf
+        at::vec::pack_vnni2(B + n, packed_B_buf, ldb, K, {{block_n}});
+{%- elif use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
 {%- endif %}
@@ -579,6 +639,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B_locally %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -599,6 +661,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B_locally %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -682,7 +746,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         {%- endif %}
         {%- if int8_gemm %}
+            {%- if input_dtype == torch.int8 %}
+        _tile_dpbssd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- endif %}
@@ -723,7 +791,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         block_m, block_n, block_k = self.register_blocking
         assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
         assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
@@ -770,7 +838,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         return "amx_state,"
 
     def get_b_layout(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             return LayoutType.VNNI4
         else:
             return LayoutType.VNNI2
@@ -802,12 +870,24 @@ class CppMicroBrgemm(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 #include <ATen/native/CPUBlas.h>
 {{declare_kernel}} {
+{%- if pack_vnni_B_locally %}
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K * N")}}
+    at::vec::pack_vnni2(B, packed_B_buf, ldb, K, N);
+{%- endif %}
     at::native::cpublas::brgemm(
       M, N, K,
+    {%- if pack_vnni_B_locally %}
+      lda, N, ldc,
+    {%- else %}
       lda, ldb, ldc,
+    {%- endif %}
       accum,
       A,
+    {%- if pack_vnni_B_locally %}
+      packed_B_buf,
+    {%- else %}
       B,
+    {%- endif %}
       C);
 }
 """

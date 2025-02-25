@@ -38,8 +38,10 @@ namespace torch {
 // the `func()` function defined in `at::` namespace is always hidden.
 using namespace at; // NOLINT
 
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 using std::nullopt; // NOLINT
 using std::optional; // NOLINT
+#endif
 
 using Dtype = at::ScalarType;
 

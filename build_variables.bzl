@@ -138,6 +138,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/autograd/jit_decomp_interface.cpp",
+    "torch/csrc/dynamo/compiled_autograd.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -793,8 +794,11 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
+
+libtorch_xpu_sources = libtorch_python_xpu_sources
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
@@ -837,6 +841,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/cpp_shim.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
+    "torch/csrc/dynamo/eval_frame_cpp.cpp",
     "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/framelocals_mapping.cpp",
     "torch/csrc/dynamo/guards.cpp",

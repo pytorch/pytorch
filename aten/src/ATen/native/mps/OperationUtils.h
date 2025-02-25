@@ -25,6 +25,16 @@
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+@interface MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+@end
+
 // Fwd declarations
 namespace at {
 struct TensorIteratorBase;
@@ -81,10 +91,6 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape);
-MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
-                                                 MPSShape* mpsShape,
-                                                 const MPSDataType mpsDataType);
 MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
                                MPSGraphTensor* inputTensor,
                                const TensorBase& input,
@@ -134,7 +140,6 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
-MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
@@ -347,6 +352,15 @@ template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
+  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
+      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
+      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
+    } else {
+      TORCH_CHECK(false, "Passed CPU tensor to MPS op");
+    }
+    return;
+  }
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 

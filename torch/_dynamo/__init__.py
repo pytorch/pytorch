@@ -1,3 +1,13 @@
+"""
+TorchDynamo is a Python-level JIT compiler designed to make unmodified PyTorch programs faster.
+TorchDynamo hooks into the frame evaluation API in CPython (PEP 523) to dynamically modify Python
+bytecode right before it is executed. It rewrites Python bytecode in order to extract sequences of
+PyTorch operations into an FX Graph which is then just-in-time compiled with a customizable backend.
+It creates this FX Graph through bytecode analysis and is designed to mix Python execution with
+compiled backends to get the best of both worlds: usability and performance. This allows it to
+seamlessly optimize PyTorch programs, including those using modern Python features.
+"""
+
 import torch
 
 from . import convert_frame, eval_frame, resume_execution
@@ -108,7 +118,7 @@ def reset() -> None:
         resume_execution.ContinueExecutionCache.cache.clear()
         _reset_guarded_backend_cache()
         reset_frame_count()
-        torch._C._dynamo.compiled_autograd.clear_cache()
+        torch._dynamo.compiled_autograd.reset()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()

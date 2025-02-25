@@ -83,7 +83,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         # This behavior is not ideal, but supporting it would add overhead
         # to callsites of eval_frame.innermost_fn. A warning would also be very noisy.
-        w = torch._dynamo.disable(fn=wrapper, recursive=True)
+        torch._dynamo.disable(fn=wrapper, recursive=True)
 
     def test_disable_nn_modules_forward_hook(self):
         class SimpleLinear(torch.nn.Module):
@@ -330,7 +330,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn3(torch.randn(4, 5))
             self.assertFalse(True)
         except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("call torch._dynamo.disable() wrapped function", str(e))
+            self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -543,7 +543,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return v1, v2, v3, v4, v5, v6, v7, v8, v9
 
         a, b, c = A(), B(), C()
-        v1, v2, v3, v4, v5, v6, v7, v8, v9 = fn(a, b, c)
+        v1, v2, v3, v4, v5, _, v7, v8, v9 = fn(a, b, c)
 
         self.assertEqual(v1, (A, 1))
         self.assertEqual(v2, (A, 2))

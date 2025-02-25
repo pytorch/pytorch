@@ -2,6 +2,7 @@
 import logging
 
 import torch
+from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
 from ..select_algorithm import (
@@ -12,6 +13,8 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
+    use_ck_gemm_template,
+    use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
 )
@@ -22,6 +25,7 @@ from .mm_common import (
     mm_args,
     mm_configs,
     mm_options,
+    should_fallback_to_aten,
 )
 
 
@@ -180,8 +184,19 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if use_cpp_bmm_template(layout, mat1, mat2):
+        from ..codegen.cpp_bmm_template import CppBmmTemplate
+
+        CppBmmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
+
+    if use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+
+    if should_fallback_to_aten(choices):
         choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)

@@ -16,6 +16,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
 
@@ -92,11 +93,12 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            return (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-                if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
-            )
+            if device == "cpu":
+                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+            elif device == "xpu":
+                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+            else:
+                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
     @staticmethod
     def load(device, so_path):
@@ -169,13 +171,25 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
+
+        # For non mixed device inputs with default "cpu",set the device manully.
+        if all(
+            t.device.type == "cpu"
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        ):
+            example_inputs = tuple(
+                clone_preserve_strides_offset(x, device=self.device)
+                for x in example_inputs
+            )
+
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
@@ -202,8 +216,8 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -229,8 +243,8 @@ def code_check_count(
 ):
     with torch.no_grad(), config.patch(
         {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         so_path = torch._export.aot_compile(model, example_inputs)

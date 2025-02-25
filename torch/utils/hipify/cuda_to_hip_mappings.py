@@ -3863,6 +3863,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUDA_C_64I", ("HIP_C_64I", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_64U", ("HIP_R_64U", CONV_TYPE, API_RUNTIME)),
         ("CUDA_C_64U", ("HIP_C_64U", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E4M3", ("HIP_R_8F_E4M3", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E5M2", ("HIP_R_8F_E5M2", CONV_TYPE, API_RUNTIME)),
         (
             "MAJOR_VERSION",
             ("hipLibraryMajorVersion", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
@@ -5035,6 +5037,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cudaLaunchCooperativeKernel",
             ("hipLaunchCooperativeKernel", CONV_EXEC, API_RUNTIME),
         ),
+        ("cudaLaunchHostFunc", ("hipLaunchHostFunc", CONV_EXEC, API_RUNTIME, HIP_UNSUPPORTED)),
         (
             "cudaSetupArgument",
             ("hipSetupArgument", CONV_EXEC, API_RUNTIME, HIP_UNSUPPORTED),
@@ -7292,6 +7295,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("HIPBLAS_COMPUTE_32F", CONV_MATH_FUNC, API_BLAS)
         ),
         (
+            "CUBLAS_COMPUTE_32F_FAST_TF32",
+            ("HIPBLAS_COMPUTE_32F_FAST_TF32", CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
             "CUBLAS_COMPUTE_64F",
             ("HIPBLAS_COMPUTE_64F", CONV_MATH_FUNC, API_BLAS)
         ),
@@ -7965,6 +7972,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
         ("nvtxRangeStartA", ("roctxRangeStartA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangeEnd", ("roctxRangeStop", CONV_OTHER, API_ROCTX)),
+        ("nvtxRangeId_t", ("int", CONV_OTHER, API_ROCTX)),
         ("nvmlReturn_t", ("rsmi_status_t", CONV_OTHER, API_ROCMSMI)),
         ("NVML_SUCCESS", ("RSMI_STATUS_SUCCESS", CONV_OTHER, API_ROCMSMI)),
         ("NVML_P2P_CAPS_INDEX_READ", ("RSMI_STATUS_SUCCESS", CONV_OTHER, API_ROCMSMI)),
@@ -8420,6 +8428,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
+        ("TORCH_CUDA_CPP_API", ("TORCH_HIP_CPP_API", API_PYTORCH)),
+        ("TORCH_CUDA_CU_API", ("TORCH_HIP_API", API_PYTORCH)),
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
         ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),

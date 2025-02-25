@@ -89,6 +89,7 @@ struct WarnNotImplemented : public Node {
   size_t num_outputs;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
   auto inputsLocal = std::move(inputs);
   warnAutogradNotImplemented(op_name);

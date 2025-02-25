@@ -18,12 +18,13 @@ SequenceNum::SequenceNum(const SequenceNum& other) {
 
 uint64_t SequenceNum::get() const {
   std::lock_guard<std::mutex> lock(lock_);
-  return *num_;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return num_.value();
 }
 
 void SequenceNum::increment() {
   std::lock_guard<std::mutex> lock(lock_);
-  TORCH_CHECK(num_ != std::nullopt);
+  TORCH_CHECK(num_.has_value());
   num_ = ++(*num_);
 }
 
@@ -32,7 +33,7 @@ void SequenceNum::increment() {
 uint64_t SequenceNum::getAndIncrement() {
   uint64_t curVal = 0;
   std::lock_guard<std::mutex> lock(lock_);
-  TORCH_CHECK(num_ != std::nullopt);
+  TORCH_CHECK(num_.has_value());
   curVal = *num_;
   num_ = ++(*num_);
   return curVal;
@@ -45,7 +46,7 @@ void SequenceNum::set(const uint64_t num) {
 
 bool SequenceNum::isSet() const {
   std::lock_guard<std::mutex> lock(lock_);
-  return num_ != std::nullopt;
+  return num_.has_value();
 }
 
 SequenceNum& SequenceNum::operator=(const SequenceNum& other) {

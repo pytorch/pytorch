@@ -8,6 +8,116 @@
 
 namespace c10d {
 
+NCCLComm::NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
+
+NCCLComm::~NCCLComm() noexcept {
+  // (kwen2501) Making CUDA/NCCL calls in this destructor can hit CUDA driver
+  // shutdown error if CUDA context has exited first. Thus, we are not
+  // destroying or aborting NCCL communicators here. We just detect and warn
+  // about the risk of memory leak. Normally, a user would have called
+  // `destroy_process_group` or `abort_process_group`, and such risk would be
+  // avoided.
+  LockType lock(mutex_);
+  if (ncclComm_ && initialized_ && !aborted_) {
+    TORCH_WARN_ONCE(
+        "WARNING: NCCL communicator hasn't been destroyed. This may cause "
+        "memory leaks. To avoid the risk, you can call `destroy_process_group` "
+        "during normal exit or `_abort_process_group` when handling failures.")
+  }
+}
+
+// NOLINTNEXTLINE(*-noexcept-move-*)
+NCCLComm::NCCLComm(NCCLComm&& other) {
+  // Using other's lock, as it reads other's states
+  // Can not use this.mutex_, as this object is being constructed.
+  LockType lock(other.mutex_);
+  std::swap(ncclComm_, other.ncclComm_);
+  std::swap(aborted_, other.aborted_);
+  std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
+  std::swap(initialized_, other.initialized_);
+  std::swap(nonBlocking_, other.nonBlocking_);
+  std::swap(deviceIndex_, other.deviceIndex_);
+}
+
+ncclUniqueId NCCLComm::getNcclId() {
+  return ncclId_;
+}
+
+std::shared_ptr<NCCLComm> NCCLComm::create(
+    int numRanks,
+    int rank,
+    ncclUniqueId commId,
+    at::DeviceIndex deviceIndex) {
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
+  auto comm = std::make_shared<NCCLComm>();
+  C10D_NCCL_CHECK(
+      ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
+      std::nullopt);
+  comm->ncclId_ = commId;
+  comm->rank_ = rank;
+  comm->deviceIndex_ = deviceIndex;
+  comm->initialized_ = true;
+  // Old style comm is always blocking.
+  comm->nonBlocking_ = false;
+  return comm;
+}
+
+#ifdef NCCL_HAS_CONFIG
+std::shared_ptr<NCCLComm> NCCLComm::create(
+    int numRanks,
+    int rank,
+    ncclUniqueId commId,
+    at::DeviceIndex deviceIndex,
+    ncclConfig_t& config) {
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
+  auto comm = std::make_shared<NCCLComm>();
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+            << (comm->nonBlocking_ ? "nonblocking" : "blocking");
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommInitRankConfig(
+          &(comm->ncclComm_), numRanks, commId, rank, &config),
+      std::nullopt);
+  comm->ncclId_ = commId;
+  comm->rank_ = rank;
+  comm->deviceIndex_ = deviceIndex;
+  // Under blocking mode, comm is initialized immediately after NCCL init
+  // returns; Under nonblocking mode, we check whether comm is initialized the
+  // *next* time ncclComm_ is accessed.
+  comm->initialized_ = !comm->nonBlocking_;
+  return comm;
+}
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
+    int numRanks,
+    int rank,
+    std::vector<ncclUniqueId>& commIds,
+    ncclConfig_t& config) {
+  auto comm = std::make_shared<NCCLComm>();
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+            << (comm->nonBlocking_ ? "nonblocking" : "blocking")
+            << " with scalable init.";
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommInitRankScalable(
+          &(comm->ncclComm_),
+          numRanks,
+          rank,
+          commIds.size(),
+          commIds.data(),
+          &config),
+      std::nullopt);
+  // Only the first ncclUniqueId will be used to create the
+  // communicator hash id, which is used to identify the communicator
+  // in the log file and in the replay tool.
+  comm->ncclId_ = commIds[0];
+  comm->rank_ = rank;
+  comm->initialized_ = !comm->nonBlocking_;
+  return comm;
+}
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_CONFIG
+
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
   if (aborted_) {
@@ -25,8 +135,9 @@ ncclComm_t NCCLComm::getNcclComm() {
   }
   // In non-blocking mode, ensure comm is ready.
   if (nonBlocking_) {
-    // If timeout is reached, throw an exception.
-    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+    // Wait with long interval if communicator is being initialized.
+    bool longInterval = !initialized_;
+    waitReady(longInterval);
     // ncclComm_ should be initialized by now
   }
   if (!initialized_) {
@@ -37,6 +148,27 @@ ncclComm_t NCCLComm::getNcclComm() {
               << " is initialized.";
   }
   return ncclComm_;
+}
+
+// Wait for the communicator to be ready. This is a blocking function.
+// Arguments:
+//   longInterval: if true, wait with sleep of an interval; otherwise, wait
+//   with `sched_yield` which is faster (but acquires CPU more frequently).
+void NCCLComm::waitReady(bool longInterval) {
+  LockType lock(mutex_);
+  if (aborted_)
+    return;
+  // If timeout is reached, throw an exception.
+  if (longInterval) {
+    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+  } else {
+    C10D_NCCL_CHECK_TIMEOUT(ncclInProgress, ncclComm_, std::nullopt);
+  }
+}
+
+std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
+  LockType lock(mutex_);
+  return commFailureReason_;
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -104,12 +236,199 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 }
 #endif
 
-std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
+void NCCLComm::finalize() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip finalize.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
+}
 
-  c10::call_once(ncclGetVersionFlag, []() {
+void NCCLComm::destroy() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip destroy.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
+  // Poison future getNcclComm
+  aborted_ = true;
+}
+
+void NCCLComm::abort(std::optional<std::string> commFailureReason) {
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+  if (aborted_ && !initialized_) {
+    // Should not abort twice.
+    return;
+  }
+
+#ifdef NCCL_HAS_COMM_REGISTER
+  // Deregister all registered segments before aborting.
+  for (auto& it : registeredSegmentHandles_) {
+    void* handle = it.second;
+    C10D_NCCL_CHECK(
+        ::ncclCommDeregister(ncclComm_, handle),
+        c10::str(
+            "Failed to deregister segment handle ",
+            handle,
+            " on ncclComm_ ",
+            ncclComm_));
+  }
+  registeredSegmentHandles_.clear();
+#endif
+
+  // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
+  // timeout)
+  commFailureReason_ = commFailureReason;
+  LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
+            << (commFailureReason ? *commFailureReason
+                                  : "No abort reason provided.");
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
+#else
+  C10D_NCCL_CHECK_TIMEOUT(
+      ::ncclCommAbort(ncclComm_), ncclComm_, commFailureReason_);
+#endif
+  aborted_ = true;
+  ncclComm_ = nullptr;
+
+  // Set an appropriate error so that we avoid using the communicator.
+  if (ncclAsyncErr_ == ncclSuccess) {
+    ncclAsyncErr_ = ncclSystemError;
+  }
+#else
+  // This is a NOOP, if error checks are disabled.
+  return;
+#endif
+}
+
+bool NCCLComm::isInitialized() const {
+  LockType lock(mutex_);
+  return initialized_;
+}
+
+bool NCCLComm::isAborted() const {
+  LockType lock(mutex_);
+  return aborted_;
+}
+
+uint64_t NCCLComm::getCommSplitCounter() const {
+  return ncclCommSplitCounter_;
+}
+
+ncclResult_t NCCLComm::checkForNcclError() {
+  LockType lock(mutex_);
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+  if (ncclAsyncErr_ != ncclSuccess) {
+    return ncclAsyncErr_;
+  }
+  C10D_NCCL_CHECK(
+      ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
+  return ncclAsyncErr_;
+#else
+  // Always return success, if error checks are disabled.
+  return ncclSuccess;
+#endif
+}
+
+ncclResult_t NCCLComm::registerSegment(
+    void* ptr,
+    size_t size,
+    bool errorOnRereg /*=true*/) {
+  LockType lock(mutex_);
+#ifdef NCCL_HAS_COMM_REGISTER
+  // We register only segments from cache allocator
+  // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
+  // maps to a unique handle and should not be registered before the current
+  // ptr is deregistered and freed.
+  if (registeredSegmentHandles_.count(ptr) > 0) {
+    TORCH_CHECK(
+        !errorOnRereg,
+        "Segment with ptr ",
+        ptr,
+        " has already been registered on ncclComm_ ",
+        ncclComm_);
+    // Skip below
+    return ncclSuccess;
+  }
+
+  void* handle = nullptr;
+  // Use getNcclComm to make sure comm is ready before calling nccl APIs
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(
+      ncclCommRegister(comm, ptr, size, &handle),
+      c10::str(
+          "Failed to register segment with ptr ",
+          ptr,
+          ", size ",
+          size,
+          " on ncclComm_ ",
+          comm));
+  registeredSegmentHandles_[ptr] = handle;
+  return ncclSuccess;
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t NCCLComm::deregisterSegment(void* ptr) {
+  LockType lock(mutex_);
+#ifdef NCCL_HAS_COMM_REGISTER
+  TORCH_CHECK(
+      registeredSegmentHandles_.count(ptr) == 1,
+      "Segment with ptr ",
+      ptr,
+      " is not registered on ncclComm_ ",
+      ncclComm_);
+
+  void* handle = registeredSegmentHandles_[ptr];
+  // Use getNcclComm to make sure comm is ready before calling nccl APIs
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(
+      ncclCommDeregister(comm, handle),
+      c10::str(
+          "Failed to deregister segment handle ",
+          handle,
+          ", with ptr ",
+          ptr,
+          " on ncclComm_ ",
+          comm));
+  registeredSegmentHandles_.erase(ptr);
+  return ncclSuccess;
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+std::string NCCLComm::repr() const {
+  return c10::str((void*)ncclComm_);
+}
+
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
+  std::unordered_map<std::string, std::string> dump;
+  if (isAborted()) {
+    LOG(INFO) << "Communicator was aborted before trying to dump its state.";
+    return dump;
+  }
+  C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), std::nullopt);
+  return dump;
+}
+#endif
+
+std::string getNcclVersion() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -132,12 +451,12 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }
 
-#ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -158,7 +477,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
-#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
@@ -234,6 +552,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Dump proxyTrace log to stdout
+void printNcclCommProxyTrace(
+    const std::string& dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap) {
+  LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
+  for (auto& [key, value] : dumpMap) {
+    LOG(INFO) << "key: " << key << ", value: " << value;
+  }
+  LOG(INFO) << "----------------------";
 }
 
 } // namespace c10d

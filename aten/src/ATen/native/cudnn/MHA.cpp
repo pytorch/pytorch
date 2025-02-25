@@ -418,12 +418,18 @@ auto build_graph_and_tensors(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
   auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
@@ -564,12 +570,20 @@ auto build_graph_and_tensors_backward(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
+
   auto Offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
+
   auto O = mha_graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("O")
                                  .set_dim(o.sizes().vec())
@@ -633,6 +647,15 @@ void run_cudnn_SDP_fprop(
     Tensor& o,
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto _dropoutseed = dropoutseed;
+  auto _dropoutoffset = dropoutoffset;
+  // cuDNN dropout bug requires these to be in int64
+  if (dprops->major == 10 && dprops->minor == 0) {
+    _dropoutseed = dropoutseed.to(kLong);
+    _dropoutoffset = dropoutoffset.to(kLong);
+  }
+
   cudnnHandle_t handle = getCudnnHandle();
   if (!o.defined()) {
     // q is passed to us in BHSD dim order
@@ -685,8 +708,8 @@ void run_cudnn_SDP_fprop(
         attn_bias,
         softmaxstats,
         o,
-        dropoutseed,
-        dropoutoffset,
+        _dropoutseed,
+        _dropoutoffset,
         handle);
   }
   auto [mha_graph, Q, K, V, bias, attn_scale, seed, offset, O, Stats] =
@@ -697,8 +720,8 @@ void run_cudnn_SDP_fprop(
           {K, k.data_ptr()},
           {V, v.data_ptr()},
           {attn_scale, &scaling_factor},
-          {seed, dropoutseed.data_ptr()},
-          {offset, dropoutoffset.data_ptr()},
+          {seed, _dropoutseed.data_ptr()},
+          {offset, _dropoutoffset.data_ptr()},
           {O, o.data_ptr()}};
   if (return_softmaxstats) {
     variant_pack[Stats] = softmaxstats.data_ptr();
@@ -740,6 +763,14 @@ void run_cudnn_SDP_bprop(
   if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() ||
       !softmaxstats.numel()) {
     return;
+  }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto _dropoutseed = dropoutseed;
+  auto _dropoutoffset = dropoutoffset;
+  // cuDNN dropout bug requires these to be in int64
+  if (dprops->major == 10 && dprops->minor == 0) {
+    _dropoutseed = dropoutseed.to(kLong);
+    _dropoutoffset = dropoutoffset.to(kLong);
   }
 
   Tensor dO_ = dO;
@@ -803,8 +834,8 @@ void run_cudnn_SDP_bprop(
         dQ,
         dK,
         dV,
-        dropoutseed,
-        dropoutoffset,
+        _dropoutseed,
+        _dropoutoffset,
         handle);
   }
   auto
@@ -837,8 +868,8 @@ void run_cudnn_SDP_bprop(
                       // pass by value
                       {attn_scale, &scaling_factor}};
   if (dropout_probability != 0.0f) {
-    variant_pack[Seed] = dropoutseed.data_ptr();
-    variant_pack[Offset] = dropoutoffset.data_ptr();
+    variant_pack[Seed] = _dropoutseed.data_ptr();
+    variant_pack[Offset] = _dropoutoffset.data_ptr();
   }
   if (attn_bias.has_value()) {
     variant_pack[bias.value()] = attn_bias.value().data_ptr();

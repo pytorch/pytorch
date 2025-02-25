@@ -29,7 +29,7 @@ class C10_CUDA_API FreeMemoryCallback {
 
 C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 #define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__);
+  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__)
 } // namespace c10
   //
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do

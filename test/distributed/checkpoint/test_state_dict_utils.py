@@ -104,7 +104,7 @@ class TestStateDictUtils(DTensorTestBase):
             return tensor, dist_tensor
 
         ltensor, ldtensor = [], []
-        for i in range(10):
+        for _ in range(10):
             tensor, dtensor = create_dtensor()
             ltensor.append(tensor)
             ltensor.append(torch.ones(10, device=torch.device("cuda")))
@@ -206,6 +206,34 @@ class TestStateDictUtils(DTensorTestBase):
                 local_v_full_tensor := local_v.full_tensor(), ref_v[0].full_tensor()
             )
             self.assertEqual(local_v_full_tensor, ref_v[1])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_for_dtensor(self):
+        device_mesh = init_device_mesh("cuda", mesh_shape=(self.world_size,))
+        sd = {
+            "k": DTensor.from_local(
+                torch.ones(8, 8, device="cuda"), device_mesh, [Shard(0)]
+            )
+        }
+        cpu_sd = _create_cpu_state_dict(sd)
+
+        self.assertTrue(isinstance(cpu_sd["k"], DTensor))
+        self.assertTrue(isinstance(sd["k"], DTensor))
+        self.assertTrue(cpu_sd["k"].is_cpu)
+        self.assertTrue(cpu_sd["k"]._local_tensor.is_cpu)
+        self.assertFalse(sd["k"].is_cpu)
+        self.assertFalse(sd["k"]._local_tensor.is_cpu)
+
+        self.assertFalse(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
+        _copy_state_dict(sd, cpu_sd, non_blocking=True)
+        torch.cuda.synchronize()
+        self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
+        sd["k"] += 1
+        self.assertFalse(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
+        _copy_state_dict(sd, cpu_sd, non_blocking=True)
+        torch.cuda.synchronize()
+        self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
 
 
 if __name__ == "__main__":

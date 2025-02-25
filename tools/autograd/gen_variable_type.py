@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -46,7 +46,6 @@ from torchgen.api.types import (
     BaseCppType,
     BaseCType,
     Binding,
-    DispatcherSignature,
     intArrayRefT,
     iTensorListRefT,
     ListCType,
@@ -104,6 +103,10 @@ from .gen_trace_type import (
     tie_return_values,
     type_wrapper_name,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # We don't set or modify grad_fn on these methods. Generally, they return
@@ -241,6 +244,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "slice",
     "constant_pad_nd",
     "unbind",
+    "unbind_copy",
     "split",
     "split_with_sizes",
     "unsafe_split",
@@ -1406,7 +1410,7 @@ def emit_body(
 
             if all_forward_grad_cond:
                 if not is_inplace_foreach:
-                    body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
+                    body.append(f"if ({' || '.join(all_forward_grad_cond)}) {{")
                     body.append("  original_self = self.clone();")
                     body.append("}")
                 else:
@@ -1535,9 +1539,6 @@ def emit_body(
         f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
     ) -> str:
         """Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(f.func)
-        dispatcher_exprs = dispatcher_sig.exprs()
-
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # Ops also always have a function variant of the redispatch API.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
@@ -1800,7 +1801,7 @@ def emit_body(
         if len(var_names) == 1:
             return f"_any_has_forward_grad_{var_names[0]}"
         else:
-            return f'_any_has_forward_grad_{"_".join(var_names)}'
+            return f"_any_has_forward_grad_{'_'.join(var_names)}"
 
     def emit_any_has_forward_grad() -> list[str]:
         content: list[str] = []
@@ -2088,7 +2089,7 @@ def emit_body(
                     raise RuntimeError(
                         f'Unsupported input type for "{name}" when forbidding forward AD usage.'
                     )
-            return f'({" || ".join(to_check)})'
+            return f"({' || '.join(to_check)})"
         else:
             # (2) If derivative is provided, use that information to determine which inputs
             #     to check fw_grad for

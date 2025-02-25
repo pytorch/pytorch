@@ -12,13 +12,13 @@ namespace at::native {
 
 DEFINE_DISPATCH(qgelu_stub);
 
-Tensor gelu_quantized_cpu(const Tensor& qx, c10::string_view approximate) {
+Tensor gelu_quantized_cpu(const Tensor& qx, std::string_view approximate) {
   Tensor qy;
   qgelu_stub(qx.device().type(), qx, qy, get_gelutype_enum(approximate));
   return qy;
 }
 
-Tensor& gelu_quantized_cpu_(Tensor& self, c10::string_view approximate) {
+Tensor& gelu_quantized_cpu_(Tensor& self, std::string_view approximate) {
   Tensor qy = gelu_quantized_cpu(self, approximate);
   // This can be optimized in a future PR if it becomes a bottleneck.
   self.copy_(qy);
