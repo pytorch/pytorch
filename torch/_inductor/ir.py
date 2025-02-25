@@ -5787,6 +5787,14 @@ class UserDefinedTritonKernel(ExternKernel):
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
 
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -5797,13 +5805,6 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
-            # NOTE: raw_args doesn't include autotuned args.
-            # But, kernel.constexprs includes indices of autotuned args.
-            # So, let's recalculate constexpr indices wrt to raw_args.
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if kernel.arg_names.index(kwarg) in kernel.constexprs:
-                    constexpr_indices.append(idx)
 
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
@@ -5843,11 +5844,6 @@ class UserDefinedTritonKernel(ExternKernel):
                         equal_to_1.append(idx - index_shift)
 
                 triton_meta["configs"][0].equal_to_1 = equal_to_1
-        else:
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if triton_meta["signature"][kwarg] == "constexpr":
-                    constexpr_indices.append(idx)
 
         # Call to kernel
         self.codegen_comment(wrapper)

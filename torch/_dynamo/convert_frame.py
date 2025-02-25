@@ -540,8 +540,8 @@ class ConvertFrameAssert:
                 context="",
                 explanation="Generators cannot be compiled directly with `torch.compile`.",
                 hints=[
-                    "Wrap the generator in a non-generator function and compile the latter. "
-                    "Dynamo supports tracing functions that call a generator.",
+                    "Call a generator from inside of a non-generator Python function and "
+                    "compile that function instead.",
                     *graph_break_hints.FUNDAMENTAL,
                 ],
             )
