@@ -59,10 +59,6 @@ class UniqueRuntimeError(RuntimeError):
 
 class TestExitStack(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        if sys.version_info < (3, 11):
-            self.skipTest(
-                "Tracing the unittest module needs exception table (Python 3.11+) to work"
-            )
         self._old = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
@@ -208,7 +204,6 @@ class CPythonTestBaseExitStack:
             result.append(2)
         self.assertEqual(result, [1, 2, 3, 4])
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_enter_context_errors(self):
         with self.exit_stack() as stack:
@@ -596,13 +591,6 @@ class CPythonTestExitStack(CPythonTestBaseExitStack, torch._dynamo.test_case.Tes
         ("__exit__", "raise exc"),
         ("__exit__", "if cb(*exc_details):"),
     ]
-
-    def setUp(self):
-        if sys.version_info < (3, 11):
-            self.skipTest(
-                "Tracing the unittest module needs exception table (Python 3.11+) to work"
-            )
-        return super().setUp()
 
 
 if __name__ == "__main__":
