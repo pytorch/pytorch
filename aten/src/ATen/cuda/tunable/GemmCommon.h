@@ -10,6 +10,7 @@
 #pragma once
 
 #include <string>
+#include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -87,7 +88,7 @@ struct GemmParams : OpParams {
   GemmParams() = default;
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -172,7 +173,7 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -258,7 +259,7 @@ private:
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -351,7 +352,7 @@ struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -424,10 +425,12 @@ struct ScaledGemmParams : OpParams {
   const void* a_scale_ptr{};
   int64_t lda{};
   ScalarType a_dtype{};
+  ScalarType a_scale_dtype{};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
+  ScalarType b_scale_dtype{};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};

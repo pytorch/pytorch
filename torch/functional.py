@@ -551,6 +551,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -698,6 +699,11 @@ def stft(
             normalized=normalized,
             onesided=onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
+        )
+    if center and align_to_window is not None:
+        raise RuntimeError(
+            "stft align_to_window should only be set when center = false"
         )
     # NOTE: Do not edit. This code will be removed once the forward-compatibility
     #       period is over for PR #73432
@@ -716,6 +722,7 @@ def stft(
         normalized,
         onesided,
         return_complex,
+        align_to_window,
     )
 
 

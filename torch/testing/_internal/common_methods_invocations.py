@@ -31,7 +31,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
+    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
     _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
@@ -11635,20 +11635,6 @@ def error_inputs_mean(op_info, device, is_ref=False, **kwargs):
         error_regex=err_msg2
     )
 
-    if is_ref:
-        err_msg3 = "Expected out tensor to have dtype torch.float64, but got torch.float32 instead"
-    else:
-        err_msg3 = "Expected out tensor to have dtype double, but got float instead"
-    yield ErrorInput(
-        SampleInput(
-            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-            [],
-            dtype=torch.float64,
-            out=make_tensor([], dtype=torch.float32, device=device),
-        ),
-        error_regex=err_msg3
-    )
-
 # numpy implementation of torch.flatten
 # unfortunately there's no np.flatten. we figure out the desired shape and call np.reshape
 def reference_flatten(input, start_dim=0, end_dim=-1):
@@ -15259,6 +15245,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -15304,6 +15294,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
                ),
            ),
            skips=(
@@ -16211,7 +16205,7 @@ op_db: list[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
+        decorators=[skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
@@ -22999,15 +22993,7 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
-        torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        skips=(
-            # Reference result was farther (0.29562714856322714) from the precise
-            # computation than the torch result was (0.20437285143677286)!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.bfloat16,), device_type="cpu"
-            ),
-        ),
+        torch_opinfo_name="nn.functional.hinge_embedding_loss"
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",

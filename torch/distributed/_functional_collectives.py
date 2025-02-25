@@ -182,7 +182,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
-):
+) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
@@ -1052,7 +1052,7 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 def all_gather_tensor_inplace(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
-    group,  # TODO add a type,
+    group=None,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0,
