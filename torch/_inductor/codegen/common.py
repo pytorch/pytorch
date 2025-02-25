@@ -1232,18 +1232,6 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
-def is_buffer_removed(name: str) -> bool:
-    return any(
-        name in x
-        for x in (
-            V.graph.removed_buffers,
-            V.kernel.removed_buffers,
-            V.graph.inplaced_to_remove,
-            V.kernel.inplaced_to_remove,
-        )
-    )
-
-
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1253,7 +1241,15 @@ class DeferredLine(DeferredLineBase):
         assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
-        if not is_buffer_removed(self.name):
+        if all(
+            self.name not in x
+            for x in (
+                V.graph.removed_buffers,
+                V.kernel.removed_buffers,
+                V.graph.inplaced_to_remove,
+                V.kernel.inplaced_to_remove,
+            )
+        ):
             return self.line
         return None
 
