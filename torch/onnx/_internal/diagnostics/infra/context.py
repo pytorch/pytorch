@@ -143,7 +143,7 @@ class Diagnostic:
         """
         if self.logger.isEnabledFor(level):
             indented_format_message = (
-                f"##{'#' * self._current_log_section_depth } {message}"
+                f"##{'#' * self._current_log_section_depth} {message}"
             )
             self.log(
                 level,
