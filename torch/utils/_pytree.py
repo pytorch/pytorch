@@ -577,9 +577,9 @@ class structseq(tuple[_T_co, ...]):
 
     __slots__: ClassVar[tuple[()]] = ()
 
-    n_fields: Final[ClassVar[int]]  # type: ignore[misc]
-    n_sequence_fields: Final[ClassVar[int]]  # type: ignore[misc]
-    n_unnamed_fields: Final[ClassVar[int]]  # type: ignore[misc]
+    n_fields: Final[int]  # type: ignore[misc]
+    n_sequence_fields: Final[int]  # type: ignore[misc]
+    n_unnamed_fields: Final[int]  # type: ignore[misc]
 
     def __init_subclass__(cls) -> NoReturn:
         """Prohibit subclassing."""
