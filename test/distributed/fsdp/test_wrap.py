@@ -405,8 +405,7 @@ class TestFSDPWrap(FSDPTest):
             def forward(self):
                 return self.a
 
-        device = torch.device("cuda")
-        model = FSDP(ZeroArguModel(), device_id=device)
+        model = FSDP(ZeroArguModel())
         self.assertEqual(model(), torch.tensor([1.0]))
 
 
