@@ -5607,7 +5607,6 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     H = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
-    D_QK = query.size(-1)
     D_V = value.size(-1)
 
     res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
