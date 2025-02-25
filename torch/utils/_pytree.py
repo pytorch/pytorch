@@ -806,18 +806,18 @@ def _deque_unflatten(values: Iterable[T], context: Context) -> deque[T]:
     return deque(values, maxlen=context)
 
 
-def _structseq_flatten(d: structseq[Any]) -> tuple[list[Any], Context]:
+def _structseq_flatten(d: structseq[T]) -> tuple[list[T], Context]:
     return list(d), type(d)
 
 
 def _structseq_flatten_with_keys(
-    d: structseq[Any],
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: structseq[T],
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _structseq_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _structseq_unflatten(values: Iterable[Any], context: Context) -> structseq[Any]:
+def _structseq_unflatten(values: Iterable[T], context: Context) -> structseq[T]:
     return context(values)  # type: ignore[no-any-return]
 
 
