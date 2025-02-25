@@ -235,7 +235,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 
     def convert_return(typ: BaseType, val: str) -> str:
         if typ.name == BaseTy.Tensor:
-            return f"new_tensor_handle(std::move({val}));"
+            return f"new_tensor_handle(std::move({val}))"
         elif typ.name == BaseTy.SymInt:
             return f"{val}.expect_int()"
         elif typ.name == BaseTy.Scalar:
