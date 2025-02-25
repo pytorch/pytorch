@@ -174,7 +174,6 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
 }
 
 // result = beta * input + alpha * (batch1 @ batch2)
-//                  binary  eltwise
 Tensor& baddbmm_out(
     const Tensor& input,
     const Tensor& batch1,
@@ -434,13 +433,16 @@ Tensor _weight_int4pack_mm_xpu(
   TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(
+      qZeros.dtype() == kChar,
+      __func__,
+      " : expect qZeros to be int8 tensor currently.");
   TORCH_CHECK(B.dim() == 2, __func__, " : expect B to 2d tensor.");
 
   TORCH_CHECK(
-      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
-          qGroupSize == 256,
+      qGroupSize > 1 && qGroupSize % 32 == 0,
       __func__,
-      ": expect qGroupSize to be 32, 64, 128 or 256, got ",
+      " : expect qGroupSize to be multiple of 32 and greater than 1, got ",
       qGroupSize);
 
   TORCH_CHECK(

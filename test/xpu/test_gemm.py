@@ -1154,7 +1154,7 @@ class TestBasicGEMM(TestCase):
         # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)
         if out.device != torch.device("cpu"):
-            out = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
+            out = (out[::, 1::2] << 4 | out[::, 0::2]).to(torch.uint8)
 
         # Scales and zeros for the same q-group should be contiguous, so we can
         # load as a 32-bit word
@@ -1171,8 +1171,8 @@ class TestBasicGEMM(TestCase):
         inner_k_tiles = 2
 
         torch.manual_seed(1)
-        a_bf16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+        a_bf16 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_bf16 = torch.rand((k, n), dtype=torch.float32, device=device)
 
         def convert_weight_to_int4pack(b):
             # b_uint8 [n, k //2]
@@ -1191,7 +1191,7 @@ class TestBasicGEMM(TestCase):
 
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
 
-        for dtype in [torch.float16]:
+        for dtype in [torch.bfloat16, torch.float16]:
             a = a_bf16.to(dtype=dtype)
             b = b_bf16.to(dtype=dtype)
             b_scales = b_scales.to(dtype=dtype)

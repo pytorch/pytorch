@@ -9,10 +9,10 @@
 namespace at::native::onednn {
 
 sycl::event woq_matmul_int4(
-    Tensor& result, // torchao: [M, K], dtype: fp16
-    const Tensor& mat1_, // torchao: [M, K], dtype: fp16
+    Tensor& result, // torchao: [M, K], dtype: fp16,bf16
+    const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
-    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16
+    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16
     const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
     int64_t group_size,
     Attr attr,
@@ -23,10 +23,12 @@ sycl::event woq_matmul_int4(
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
   at::Device cur_device = at::Device(at::kXPU, at::xpu::current_device());
+  TORCH_CHECK(
+      cur_device == mat1_.device(),
+      "_weight_int4pack_mm_with_scale_and_zeros input should be on current device.");
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  // make them all contiguous
   Tensor m1 = mat1_;
   Tensor m2 = mat2_;
   Tensor scale_ = scale;
@@ -49,9 +51,8 @@ sycl::event woq_matmul_int4(
       dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides,
       zp_usr_strides, dst_usr_strides;
-  int64_t compressed_k = (uint64_t)(k / 8);
-  int64_t num_groups = (uint64_t)(k / group_size);
-  // wei: {compressed_k, n}:
+  uint64_t compressed_k = (uint64_t)(k / 8);
+  uint64_t num_groups = (uint64_t)(k / group_size);
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
   m2_usr_dims = {compressed_k, n};
