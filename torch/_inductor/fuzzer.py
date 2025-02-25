@@ -7,7 +7,7 @@ import signal
 import string
 import sys
 import traceback
-from collections.abc import KeysView
+from collections.abc import KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
@@ -18,7 +18,6 @@ from typing import (
     get_origin,
     Literal,
     Optional,
-    Sequence,
     TypeVar,
     Union,
 )
@@ -501,6 +500,8 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
+        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
+        "suppress_errors": DEFAULT,
     },
 }
 

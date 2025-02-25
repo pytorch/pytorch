@@ -163,9 +163,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             x = x * sd.get(2, 0)
             x = x * sd.get(3, 4)
             x = len(sd) * x
-            x = x * sd.attr
-            sd.attr = 10
-            x = x * sd.attr
             return x
 
         x = torch.randn(4)
@@ -174,17 +171,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         sd1 = SimpleDict()
         sd1[2] = 5
         sd1[4] = 10
-        sd1.attr = 4
 
         sd2 = SimpleDict()
         sd2[2] = 5
         sd2[4] = 10
-        sd2.attr = 4
         self.assertTrue(sd1 == sd2)
 
         self.assertEqual(fn(sd1, x), opt_fn(sd2, x))
         self.assertTrue(sd1 == sd2)
-        self.assertTrue(sd1.attr == sd2.attr)
 
     def test_dict_subclass_setitem(self):
         class SetItemDict(dict):
@@ -218,8 +212,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager")
         def fn(x, d):
+            # Forces side effects attribute reapplication logic
+            d.sample = 1
+            d["baz"] = 4
             return x * d["foo"] * d["bar"]
 
+        fn(torch.randn(4), d)
+        # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
@@ -324,7 +323,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_ordered_dict_subclass_reordered_keys(self):
         class ODSubclass(OrderedDict):
-            def keys():
+            def keys(self):
                 return super().keys()
 
         d = ODSubclass()
@@ -643,6 +642,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ):
 
             class CustomDict(super_class):
+                def __new__(self, *args, **kwargs):
+                    return super().__new__(self, *args, **kwargs)
+
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
 
@@ -836,6 +838,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d["e"] = 5
         self.assertEqual(d["e"], res["e"])
 
+    def test_mapping_proxy_existing(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x, mp):
+            y = torch.sin(x * mp["a"])
+            for k, v in mp.items():
+                y += torch.cos(x * v)
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        mp = types.MappingProxyType(d)
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+        d["a"] = 3
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+        d.pop("b")
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+    def test_mapping_proxy_existing_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        mp = types.MappingProxyType(d)
+
+        def fn(x):
+            d["d"] = 4
+            y = torch.sin(x * mp["d"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = torch.sin(x * 4)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(d.keys(), mp.keys())
+
+    def test_mapping_proxy_existing_local_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        mp = types.MappingProxyType(d)
+
+        def fn(x):
+            # Dynamo should not cause a graph break here because it knows that
+            # the existing proxy cant point to this new dict
+            other_dict = {}
+            other_dict["d"] = 4
+            y = torch.sin(x * mp["c"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = torch.sin(x * mp["c"])
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(d.keys(), mp.keys())
+
     def test_move_to_end(self):
         def fn(x):
             d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
@@ -846,6 +911,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_overridden_get_item(self):
+        class MyDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.calls = 0
+
+            def __getitem__(self, key):
+                self.calls += 1
+                return super().__getitem__(key) + 1
+
+        def fn(x, d):
+            d["d"] = 4
+            return x * d["a"] + d["b"] + d["c"] + d["d"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d1 = MyDict({"a": 2, "b": 3, "c": 5})
+        ref = fn(x, d1)
+
+        d2 = MyDict({"a": 2, "b": 3, "c": 5})
+        res = opt_fn(x, d2)
+        self.assertEqual(ref, res)
+        self.assertEqual(d1.calls, d2.calls)
 
 
 if __name__ == "__main__":
