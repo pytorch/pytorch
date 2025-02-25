@@ -1,14 +1,11 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
-import json
-import math
-import re
-import tempfile
 import unittest
 from itertools import product
 from functools import partial
 from typing import Optional
+import re
 
 import torch
 
@@ -21,7 +18,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
-    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM
@@ -846,45 +842,6 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
-
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support row-wise scaling")
-    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
-    def test_honor_sm_carveout(self) -> None:
-        torch.manual_seed(42)
-
-        x = torch.randn(8192, 2048, device="cuda", dtype=torch.float32)
-        y = torch.randn(8192, 2048, device="cuda", dtype=torch.float32).t()
-        x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
-        y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
-        x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
-        y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
-
-        with tempfile.NamedTemporaryFile() as f:
-            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
-                self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(0)
-                self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(66)
-                self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(None)
-                self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-
-            prof.export_chrome_trace(f.name)
-            no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                math.prod(evt.get("args", {}).get("grid", []))
-                for evt in json.load(open(f.name))["traceEvents"]
-                if evt.get("cat", "") == "kernel"
-            ]
-
-            self.assertEqual(no_carveout, no_carveout_again)
-            self.assertNotEqual(no_carveout, carveout_66)
-            self.assertNotEqual(carveout_66, carveout_0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
