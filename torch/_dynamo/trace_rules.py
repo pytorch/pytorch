@@ -19,7 +19,7 @@ import typing
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -122,7 +122,7 @@ If you are removing an existing torch level API:
 
 
 """
-manual_torch_name_rule_map: Dict[str, Any] = {
+manual_torch_name_rule_map: dict[str, Any] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -640,6 +640,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_privateuse1_backend_name",
         "torch._C._get_qengine",
         "torch._C._get_schema",
+        "torch._C._get_sm_carveout_experimental",
         "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
@@ -1158,6 +1159,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
         "torch._C._set_should_use_format_with_string_table",
+        "torch._C._set_sm_carveout_experimental",
         "torch._C._set_storage_access_error_msg",
         "torch._C._set_tensor_metadata",
         "torch._C._set_tracing_state",

@@ -667,7 +667,7 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been (or needs to be) `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
