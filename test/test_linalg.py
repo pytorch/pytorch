@@ -5165,15 +5165,15 @@ class TestLinalg(TestCase):
         m = 3
         n = 5
         k = 7
-        X =  torch.rand(m, k, dtype=dtype, device=device)
+        X = torch.rand(m, k, dtype=dtype, device=device)
         matA = torch.rand(n, k, dtype=dtype, device=device)
         bias = torch.rand(n, dtype=dtype, device=device)
- 
+
         torch.nn.functional.linear(X, matA, bias)
 
         # This stores total number of cummulative results
         total_num_results = len(torch.cuda.tunable.get_results())
- 
+
         # There must be a new tuning result
         self.assertEqual((total_num_results - ref_num_results), 1)
 
@@ -5184,7 +5184,7 @@ class TestLinalg(TestCase):
         try:
             import os
             filename = torch.cuda.tunable.get_filename()
-            # os.remove(filename)
+            os.remove(filename)
         except FileNotFoundError:
             pass
 
