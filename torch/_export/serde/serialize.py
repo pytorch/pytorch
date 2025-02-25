@@ -766,6 +766,13 @@ class GraphModuleSerializer(metaclass=Final):
         )
         return inputs
 
+    def is_inductor_sym_int_arg(self, arg) -> bool:
+        # This is a special branch for handling SymInt args in inductor's
+        # ExternalFallbackNode.
+        # For regular FX graph, SymInt arg should be a fx.Node and should be
+        # verified with is_sym_int_arg()
+        return type(arg) is int or isinstance(arg, torch.SymInt)
+
     def is_sym_int_arg(self, arg) -> bool:
         return type(arg) is int or (
             isinstance(arg, torch.fx.Node)
@@ -908,14 +915,17 @@ class GraphModuleSerializer(metaclass=Final):
                 return Argument.create(as_floats=list(arg))
             elif all(type(a) is str for a in arg):
                 return Argument.create(as_strings=list(arg))
-            elif all(isinstance(a, torch.SymInt) for a in arg):
+            elif all(self.is_inductor_sym_int_arg(a) for a in arg):
                 # This is a special branch for handling SymInt args in inductor's
                 # ExternalFallbackNode.
-                # For regular FX graph, SymInt arg should be a fx.Node with
-                # self.is_sym_int_arg(arg) being true
-                return Argument.create(
-                    as_sym_ints=[SymIntArgument.create(as_name=str(a)) for a in arg]
-                )
+                # For regular FX graph, SymInt arg should be a fx.Node
+                values = []
+                for a in arg:
+                    if isinstance(a, torch.SymInt):
+                        values.append(SymIntArgument.create(as_name=str(a)))
+                    elif type(a) is int:
+                        values.append(SymIntArgument.create(as_int=a))
+                return Argument.create(as_sym_ints=values)
             elif all(isinstance(a, torch.SymFloat) for a in arg):
                 return Argument.create(
                     as_sym_floats=[SymFloatArgument.create(as_name=str(a)) for a in arg]
