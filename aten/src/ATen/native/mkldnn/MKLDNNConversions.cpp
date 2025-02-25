@@ -273,7 +273,8 @@ static Tensor mkldnn_reorder_linear_weight(
       {out_features, in_features},
       input_size,
       /* weight dtype */ dtype,
-      /* src dtype */ dtype);
+      /* src dtype */ dtype,
+      ideep::prop_kind::forward_inference);
   ideep::tensor result;
   result.init(packed_desc);
   result.feed_from(w);
