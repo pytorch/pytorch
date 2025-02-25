@@ -344,7 +344,7 @@ def draft_export(
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = False,
-) -> tuple[ExportedProgram, DraftExportReport]:
+) -> ExportedProgram:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
@@ -473,4 +473,4 @@ You can now change back to torch.export.export()
     """
         )
 
-    return ep, report
+    return ep
