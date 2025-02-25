@@ -137,6 +137,18 @@ std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
   return sdp_priority_order;
 }
 
+bool Context::allowTF32OneDNN() const {
+  return allow_tf32_onednn;
+}
+
+void Context::setAllowTF32OneDNN(bool b){
+#ifdef USE_XPU
+  allow_tf32_onednn = b;
+#else
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
@@ -318,7 +330,7 @@ at::BlasBackend Context::blasPreferredBackend() {
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
-          "gfx90a", "gfx940", "gfx941", "gfx942",
+          "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
           "gfx1100", "gfx1101"
 #endif
@@ -394,7 +406,6 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -409,6 +420,14 @@ bool Context::allowBF16ReductionCuBLAS() const {
 
 void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
+}
+
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
+}
+
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
 }
 
 

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/env.h>
 #include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -93,7 +94,7 @@ inline std::vector<std::string> split(
 inline std::string getCvarString(
     const std::vector<std::string>& env,
     const char* def) {
-  const char* ret = def;
+  std::string ret(def);
 
   if (env.empty()) {
     TORCH_CHECK(false, "No environment variables passed");
@@ -104,14 +105,14 @@ inline std::string getCvarString(
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    const char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
-    ret = val;
+    ret = val.value();
   }
 
   return ret;
@@ -158,15 +159,14 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val_ = std::getenv(env[i].c_str());
-    if (val_ == nullptr) {
+    auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
-    std::string val = std::string(val_);
-    for (auto& x : val) {
+    for (auto& x : val.value()) {
       // NOLINTNEXTLINE(*-narrowing-conversions)
       x = std::tolower(x);
     }
@@ -557,6 +557,13 @@ size_t computeLengthsAndOffsets(
   }
   return offset;
 }
+
+// Get the start and stride of the global rank from a list of global ranks
+// If the global ranks do not follow the consecutive rule, the stride will be -1
+void TORCH_API getGlobalRankStartAndStride(
+    const std::vector<uint64_t>& globalRanksInGroup,
+    int& globalRankStart,
+    int& globalRankStride);
 
 using RankType = uint32_t;
 using SizeType = uint64_t;

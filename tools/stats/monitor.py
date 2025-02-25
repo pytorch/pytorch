@@ -8,7 +8,7 @@ Usage:
     python3 monitor.py
 
 - To run the script in the local machine with debug mode and customized data collect time, use the following command:
-    python3 monitor.py --debug --log-interval 10 --data-collect-interval 0.5
+    python3 monitor.py --debug --log-interval 10 --data-collect-interval 2
 
 - To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
@@ -28,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
 import copy
 import dataclasses
-import datetime
 import os
 import signal
 import threading
@@ -40,6 +39,7 @@ import psutil  # type: ignore[import]
 
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     GpuUsage,
     RecordData,
     UtilizationMetadata,
@@ -117,8 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-collect-interval",
         type=float,
-        default=0.5,
-        help="set time interval to collect data, default is 0.5 second, this should not longer than log_interval",
+        default=1,
+        help="set time interval to collect data, default is 1 second, this should not longer than log_interval",
     )
     args = parser.parse_args()
     return args
@@ -163,14 +163,14 @@ class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    By default, data is collected every 0.5 seconds, and log
+    By default, data is collected every 1 seconds, and log
     the aggregated result every 5 seconds.
     """
 
     def __init__(
         self,
         log_interval: float = 5,
-        data_collect_interval: float = 0.5,
+        data_collect_interval: float = 1,
         is_debug_mode: bool = False,
         pynvml_enabled: bool = False,
         amdsmi_enabled: bool = False,
@@ -182,16 +182,18 @@ class UsageLogger:
             in a pretty format with more information.
         """
         self._log_interval = log_interval
+        self._data_collect_interval = data_collect_interval
         self._metadata = UtilizationMetadata(
             level="metadata",
-            usage_collect_interval=self._log_interval,
+            usage_collect_interval=self._data_collect_interval,
             data_model_version=getDataModelVersion(),
             job_id=_job_id,
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
+            start_at=getTsNow(),
         )
-        self._data_collect_interval = data_collect_interval
+
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
         self._gpu_handles: list[Any] = []
@@ -252,12 +254,16 @@ class UsageLogger:
         """
         output the data.
         """
-        self._metadata.start_at = datetime.datetime.now().timestamp()
+        self._metadata.start_at = getTsNow()
         self.log_json(self._metadata.to_json())
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
-            stats = UtilizationRecord()
+            stats = UtilizationRecord(
+                level="record",
+                timestamp=getTsNow(),
+            )
+
             try:
                 data_list, error_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
@@ -275,8 +281,6 @@ class UsageLogger:
                 if not data_list:
                     # pass since no data is collected
                     continue
-                stats.level = "record"
-                stats.timestamp = datetime.datetime.now().timestamp()
 
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
@@ -303,7 +307,7 @@ class UsageLogger:
             except Exception as e:
                 stats = UtilizationRecord(
                     level="record",
-                    timestamp=datetime.datetime.now().timestamp(),
+                    timestamp=getTsNow(),
                     error=str(e),
                 )
             finally:
@@ -409,7 +413,7 @@ class UsageLogger:
                 self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
-            self._num_of_cpus = psutil.cpu_count(logical=False)
+            self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
             self._metadata.gpu_type = self._gpu_lib_detected
             self._metadata.gpu_count = len(self._gpu_handles)

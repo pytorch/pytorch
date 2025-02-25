@@ -841,6 +841,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/cpp_shim.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
+    "torch/csrc/dynamo/eval_frame_cpp.cpp",
     "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/framelocals_mapping.cpp",
     "torch/csrc/dynamo/guards.cpp",

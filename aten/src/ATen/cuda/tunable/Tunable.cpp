@@ -227,15 +227,10 @@ TuningResultsValidator::TuningResultsValidator() {
   }
   // rocblas
   {
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-#undef XSTRINGIFY
-#undef STRINGIFY
+    size_t rocblas_version_size;
+    rocblas_get_version_string_size(&rocblas_version_size);
+    std::string rocblas_version(rocblas_version_size - 1, '\0');
+    rocblas_get_version_string(rocblas_version.data(), rocblas_version_size);
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
@@ -459,6 +454,8 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
   }
 }
 

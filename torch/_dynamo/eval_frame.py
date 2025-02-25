@@ -2,10 +2,25 @@
 # mypy: disable-error-code="method-assign"
 
 """
-Functions in this file are responsible for modifying the eval frame
-handler at RUNTIME.  Therefore, all functions in this file are hot.
-Functions that only execute at compile time should be placed
-in torch._dynamo.convert_frame.
+This module implements the core frame evaluation handler for TorchDynamo's compilation system.
+The eval frame handler intercepts Python bytecode execution at runtime to enable dynamic
+compilation and optimization of PyTorch code.
+
+Key components defined here:
+- Frame evaluation handlers that intercept and analyze Python execution frames
+- Guards management for tracking dependencies and invalidating compiled code
+- Optimization contexts and decorators (optimize, run_once, disable, etc.)
+- Export functionality for saving optimized graphs
+- Backend compiler integrations and callback management
+
+Functions in this file are responsible for modifying the eval frame handler at RUNTIME.
+Therefore, all functions in this file are hot and performance-critical. Functions that
+only execute at compile time should be placed in torch._dynamo.convert_frame.
+
+The eval frame handler is the core mechanism that enables TorchDynamo to dynamically
+intercept, analyze and optimize PyTorch code during execution. It works by registering
+a custom frame evaluation function that gets called for every Python frame, allowing
+us to detect PyTorch operations and trigger compilation as needed.
 """
 
 from __future__ import annotations
@@ -16,7 +31,6 @@ import functools
 import inspect
 import logging
 import os
-import random
 import sys
 import sysconfig
 import textwrap
@@ -101,8 +115,6 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    from torch._C._dynamo.eval_frame import set_eval_frame
-
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
@@ -450,20 +462,22 @@ class _TorchDynamoContext:
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
+        self.prior = set_eval_frame(None)
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
+        _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        _maybe_set_eval_frame(self.prior)
+        set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
+        _maybe_set_eval_frame(_callback_from_stance(self.prior))
+        self.prior = unset
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -535,7 +549,6 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
-            prev_rng_state = random.getstate()
             try:
                 if is_fx_tracing():
                     if config.error_on_nested_fx_trace:
@@ -569,8 +582,6 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
-                    # ignore random state updates since beginning of _fn
-                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -579,8 +590,6 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
-                    # NB: assumes no random calls made between fn() and here
-                    prev_rng_state = random.getstate()
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -590,10 +599,6 @@ class _TorchDynamoContext:
                         cleanup()
             finally:
                 _maybe_set_eval_frame(prior)
-                # ignore random state updates:
-                # - since beginning of _fn if fn was not called
-                # - since end of fn if fn was called (even if exn occurs)
-                random.setstate(prev_rng_state)
 
         # hooks to properly handle inlining
         _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
@@ -750,22 +755,18 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
-            prev_rng_state = random.getstate()
             try:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
-                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    prev_rng_state = random.getstate()
             finally:
                 _maybe_set_eval_frame(prior)
-                random.setstate(prev_rng_state)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -847,6 +848,13 @@ def is_inductor_supported():
         return False
 
 
+def check_for_incompatible_configs():
+    # Some of the configs should be mutually exclusive
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
+
+
 def optimize(*args, **kwargs):
     def rebuild_ctx():
         ca_kwargs_override = config.compiled_autograd_kwargs_override
@@ -899,6 +907,7 @@ def _optimize(
             ...
     """
     check_if_dynamo_supported()
+    check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same

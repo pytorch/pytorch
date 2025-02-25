@@ -30,7 +30,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch._library import capture_triton
 from torch.compiler._cache import CacheArtifactManager
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -556,6 +556,64 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(res1, res2)
 
+    @config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @config.patch("fx_graph_remote_cache", False)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    def test_no_arguments_tensor_device_guards(self):
+        """
+        Usually, when there are example inputs, the device index of the inputs
+        is sufficient to make sure we don't cache hit with the results from different
+        cuda devices.
+        When the input has no arguments, we still need to have the cuda
+        device index in the cache key.
+        """
+
+        @torch.compile
+        def f():
+            y = torch.randn(3, device="cuda")
+            return (y,)
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:0"))
+        self.reset()
+        # Should not cache hit with device guard
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:1"))
+
+    @config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @config.patch("fx_graph_remote_cache", False)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    def test_tensor_device_guards_cpu_tensor(self):
+        """
+        CPU tensor arguments should still cache hit
+        """
+
+        @torch.compile
+        def f(x):
+            return x.sin()
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f(torch.randn(3, device="cpu"))
+            self.assertEqual(result.device, torch.device("cpu"))
+
+        self.reset()
+        # Should not cache hit with device guard
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f(torch.randn(3, device="cpu"))
+            self.assertEqual(result.device, torch.device("cpu"))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -1029,6 +1087,29 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    @requires_cuda
+    @unittest.expectedFailure  # TODO: pass in optimize_mem at runtime
+    def test_async_compile_cache(self):
+        class SimpleFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        x = torch.rand([10], requires_grad=True, device="cuda")
+        counters.clear()
+
+        sf = SimpleFunction
+        out = torch.compile(sf.apply)(x)
+        out.sum().backward()
+
+        self.assertEqual(counters["inductor"]["async_compile_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["async_compile_cache_hit"], 1)
+
     @config.patch({"fx_graph_cache": True})
     def test_cache_guard_overspec(self):
         b = torch.tensor([0, 2, 4, 6, 8])
@@ -1150,6 +1231,8 @@ class TestFxGraphCacheHashing(TestCase):
         gm._has_frozen_params = True
         gm._frozen_param0 = small
         gm._frozen_param1 = large
+        small._is_frozen_param = True
+        large._is_frozen_param = True
         pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
@@ -1469,6 +1552,9 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Worker processes do not register PatchCaches() properly
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
@@ -1506,6 +1592,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_local_cache": True})
     @config.patch({"autotune_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"compile_threads": 1})
     @config.patch({"max_autotune": True})
     def test_bundled_autotune_remote_cache(self):
         class Model(torch.nn.Module):

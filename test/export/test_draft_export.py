@@ -94,6 +94,7 @@ class TestDraftExport(TestCase):
             class M(torch.nn.Module):
                 def forward(self, a, b):
                     res = torch.ops.mylib.foo(a, b)
+                    res = torch.ops.mylib.foo(res, b)
                     return res
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
@@ -203,12 +204,6 @@ class TestDraftExport(TestCase):
             def foo_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo1", lib=lib)
-            def mylib_foo_default_fake(*args, **kwargs):
-                ctx = torch.library.get_ctx()
-                fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
-                return torch.empty(fake_shape, dtype=torch.float32, device="cpu")
-
             class M(torch.nn.Module):
                 def forward(self, a, b, c):
                     res = torch.ops.mylib.foo1(a, b)
@@ -221,34 +216,89 @@ class TestDraftExport(TestCase):
             ep, report = draft_export(M(), inp)
             self.assertTrue(len(report.failures) > 0)
             self.assertEqual(
-                report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+                report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
+            )
+            self.assertEqual(
+                report.failures[1].failure_type, FailureType.DATA_DEPENDENT_ERROR
             )
 
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_unbacked_div_mod_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.zeros(x.item())
+                x = x.unsqueeze(0).repeat(10, 2)
+                return x.view(-1, 2, 2345)
+
+        _, report = draft_export(M(), (torch.tensor([938]),))
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
                 res = 0
                 for v in [x, y]:
-                    if v.item() > 10:
-                        res += v * v
+                    b = v.item()
+                    if b > 10:
+                        res += v * b
                     else:
-                        res += v + v
+                        res += v + b
 
                 return z * res
 
         inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
 
         ep, report = draft_export(M(), inp)
-        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(len(report.failures), 1)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
 
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_complex_data_dependent_expr(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                a = -a
+                a = a // 3
+                a = a + 5
+
+                z = torch.cat([y, y])
+
+                return z[:a]
+
+        ep, report = draft_export(
+            M(),
+            (torch.tensor(6), torch.randn(5)),
+            dynamic_shapes={"x": None, "y": {0: Dim.DYNAMIC}},
+        )
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertTrue(len(report.expressions_created) >= 4)
+        for _ep in [ep, ep.run_decompositions()]:
+            # check data-dependent asserts
+            assert_scalar_nodes = [
+                node
+                for node in _ep.graph.nodes
+                if node.target == torch.ops.aten._assert_scalar.default
+            ]
+            self.assertEqual(len(assert_scalar_nodes), 5)
+            # unbacked bindings
+            unbacked_binding_symbols = set()
+            for node in _ep.graph.nodes:
+                if bindings := node.meta.get("unbacked_bindings"):
+                    unbacked_binding_symbols.update(bindings.keys())
+            self.assertEqual(len(unbacked_binding_symbols), 1)
 
     def test_offsets(self):
         class M(torch.nn.Module):
@@ -437,6 +487,38 @@ class TestDraftExport(TestCase):
         self.assertTrue(
             "Mismatched aliasing spec between fake kernel and real kernel"
             in report.failures[0].data["reason"]
+        )
+
+    def test_override_mismatched_fake_kernel_with_unbacked_symbols(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a[b.item()].to(torch.bfloat16)
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            ctx = torch.library.get_ctx()
+            u = ctx.new_dynamic_size()
+            return torch.empty(u, a.shape[1], dtype=a.dtype)
+
+        mod = M()
+        inputs = (torch.randn(100, 4), torch.tensor(10))
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            report.failures[0].data["reason"],
+            "Dtypes torch.bfloat16 and torch.float32 are not equal!",
         )
 
     # https://github.com/pytorch/pytorch/issues/140625
