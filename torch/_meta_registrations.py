@@ -2483,7 +2483,7 @@ if torch._C._has_mkldnn:
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
-        return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
+        return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[1]))
 
     if torch._C.has_mkl:
         _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(

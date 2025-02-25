@@ -925,9 +925,7 @@ if torch._C._has_mkldnn:
             linear_node = add_node.args[0]
             packed_weight_node = linear_node.args[1]
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
-            transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.target == aten.permute.default
-            weight_meta = transpose_weight_node.args[0].meta.get("val")
+            weight_meta = packed_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
             if isinstance(bias_node, int):
                 # we only folding bias if it is a constant
@@ -1300,9 +1298,6 @@ if torch._C._has_mkldnn:
             )
             weight = args[1] if linear_node.target == aten.mm.default else args[2]
             with graph.inserting_before(linear_node):
-                transpose_weight_node = graph.create_node(
-                    "call_function", aten.permute.default, (weight, (1, 0))
-                )
                 weight_dtype = weight.meta.get("val").dtype
                 is_lp_weight = weight_dtype in (
                     torch.bfloat16,
@@ -1313,9 +1308,20 @@ if torch._C._has_mkldnn:
                     assert (
                         is_lp_weight or mkldnn._is_mkldnn_acl_supported()
                     ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                weight_node = (
+                    weight
+                    if (
+                        is_lp_weight
+                        or mkldnn._is_mkldnn_acl_supported()
+                        or V.aot_compilation
+                    )
+                    else graph.create_node(
+                        "call_function", aten.permute.default, (weight, (1, 0))
+                    )
+                )
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
-                    transpose_weight_node,
+                    weight_node,
                     batch_size.node.shape_env.size_hint(batch_size.node.expr)
                     if has_free_symbols(batch_size)
                     else batch_size,
@@ -1347,7 +1353,7 @@ if torch._C._has_mkldnn:
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
-                    packed_linear_inputs += (transpose_weight_node, bias, batch_size)
+                    packed_linear_inputs += (weight_node, bias, batch_size)
                     packed_linear_op = torch.ops.mkl._mkl_linear
                 packed_linear_node = graph.create_node(
                     "call_function", packed_linear_op, packed_linear_inputs
