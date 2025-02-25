@@ -3,6 +3,7 @@
 
 import contextlib
 import copy
+import functools
 import gc
 import gzip
 import io
@@ -115,6 +116,48 @@ class FilelikeMock:
 
     def was_called(self, name):
         return name in self.calls
+
+class ClassAMock:
+    class Nested:
+        pass
+
+class ClassBMock:
+    class Nested:
+        pass
+
+def up_size(size):
+    return (*size[:-1], size[-1] * 2)
+
+class UInt4Tensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem, **kwargs):
+        assert elem.dtype is torch.uint8
+        assert not kwargs.get("requires_grad", False)
+        kwargs["requires_grad"] = False
+        return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.uint4, **kwargs)
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        pass
+
+
+class Int4Tensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem, **kwargs):
+        assert elem.dtype is torch.uint8
+        assert not kwargs.get("requires_grad", False)
+        kwargs["requires_grad"] = False
+        return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.int4, **kwargs)
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        pass
 
 
 class SerializationMixin:
@@ -871,7 +914,6 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
     y: int
     c: str
 
-@unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
@@ -1121,6 +1163,21 @@ class TestSerialization(TestCase, SerializationMixin):
         _test_save_load_attr(t)
         _test_save_load_attr(torch.nn.Parameter(t))
 
+    def test_serialization_nested_class(self) -> None:
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(
+                dict(
+                    a_nested=ClassAMock.Nested(),
+                    b_nested=ClassBMock.Nested(),
+                ),
+                checkpoint
+            )
+            checkpoint.seek(0)
+            torch.serialization.add_safe_globals(
+                [ClassAMock, ClassBMock, getattr, ClassAMock.Nested, ClassBMock.Nested]
+            )
+            torch.load(checkpoint, weights_only=True)
+
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
@@ -1133,7 +1190,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL print"):
                 torch.load(f, weights_only=True)
             with torch.serialization.safe_globals([print]):
                 f.seek(0)
@@ -1225,8 +1282,12 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(sd, f, pickle_protocol=pickle_protocol)
             f.seek(0)
             if unsafe_global:
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` or .* to allowlist"):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "use `torch.serialization.add_safe_globals"
+                    r"\(\[torch.testing._internal.two_tensor.TwoTensor\]\)`"
+                    " or .* to allowlist"
+                ):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
@@ -4113,9 +4174,9 @@ class TestSerialization(TestCase, SerializationMixin):
         finally:
             set_default_load_endianness(current_load_endian)
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading_options(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -4140,8 +4201,8 @@ class TestSerialization(TestCase, SerializationMixin):
         input = torch.randn(4, 3)
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
-    @unittest.skipIf(not torch.cuda.is_available() or IS_WINDOWS,
-                     "CUDA is unavailable or NamedTemporaryFile on Windows")
+    @unittest.skipIf(not torch.cuda.is_available(),
+                     "CUDA is unavailable")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -4237,7 +4298,6 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertEqual(y, byte_literals)
 
     @parametrize('filename', (True, False))
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
     def test_filewriter_metadata_writing(self, filename):
         sd = torch.nn.Linear(3, 5).state_dict()
@@ -4245,7 +4305,7 @@ class TestSerialization(TestCase, SerializationMixin):
         bias_nbytes = sd['bias'].untyped_storage().nbytes()
         # TemporaryFileName will give a string
         # NamedTemporaryFile will be treated as a buffer
-        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
+        file_creation_func = TemporaryFileName if filename else functools.partial(tempfile.NamedTemporaryFile, delete=False)
 
         with file_creation_func() as f, file_creation_func() as g:
             # save state_dict in f
@@ -4258,6 +4318,8 @@ class TestSerialization(TestCase, SerializationMixin):
                     data_file = io.BytesIO(zip_file.get_record('data.pkl'))
                     data_0_offset = zip_file.get_record_offset('data/0')
                     data_1_offset = zip_file.get_record_offset('data/1')
+            if not filename:
+                f.close()
 
             # write nulls for 'data/0' and 'data/1'
             with open(f if filename else f.name, 'rb+') as opened_f:
@@ -4275,11 +4337,15 @@ class TestSerialization(TestCase, SerializationMixin):
                 zip_file.write_record_metadata('data/1', bias_nbytes)
 
             if not filename:
-                f.seek(0)
                 g.seek(0)
             sd_loaded = torch.load(g)
-            sd_loaded_ref = torch.load(f)
-            self.assertEqual(sd_loaded, sd_loaded_ref)
+            with open(f if filename else f.name, 'rb') as opened_f:
+                sd_loaded_ref = torch.load(opened_f)
+                self.assertEqual(sd_loaded, sd_loaded_ref)
+            if not filename:
+                os.unlink(f.name)
+                g.close()
+                os.unlink(g.name)
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization(self, materialize_fake):
@@ -4465,12 +4531,11 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
 
     @parametrize("should_import", [False, True])
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_load_njt_weights_only(self, should_import):
-        with tempfile.NamedTemporaryFile() as f:
+        with TemporaryFileName() as filename:
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
-            torch.save(njt, f)
-            filename = pathlib.Path(f.name)
+            torch.save(njt, filename)
+            filename = pathlib.Path(filename)
             import_string = "import torch._dynamo;" if should_import else ""
             err_msg = (
                 "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
@@ -4578,6 +4643,31 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertEqual(model_mmap_state_dict(inp), model_non_mmap_state_dict(inp.clone()))
         finally:
             serialization_config.load.calculate_storage_offsets = calculate_offsets_before
+
+    def test_serialization_uintx_intx(self):
+        torch.serialization.add_safe_globals([UInt4Tensor, Int4Tensor])
+
+        for dtype in [torch.uint4, torch.int4]:
+            if dtype == torch.uint4:
+                tensor_class = UInt4Tensor
+            else:
+                tensor_class = Int4Tensor
+
+            # make sure it runs
+            x = tensor_class(torch.tensor([
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+            ], dtype=torch.uint8))
+
+            assert x.dtype == dtype
+
+            with tempfile.NamedTemporaryFile() as checkpoint:
+                torch.save(x, checkpoint)
+                checkpoint.seek(0)
+                y = torch.load(checkpoint)
+
+            assert x.dtype == y.dtype
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
