@@ -4321,20 +4321,16 @@ def max_pool2d_checks(
     return kernel_size, stride, padding, dilation, use_fallback
 
 
-@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
-def _low_memory_max_pool2d_with_offsets(
+def _max_pool2d_with_offsets(
     x,
     kernel_size,
     stride,
     padding,
     dilation,
     ceil_mode=False,
+    assert_fallback=None,
+    int_dtype=torch.int64,
 ):
-    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
-    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
-        x, kernel_size, stride, padding, dilation, assert_fallback=False
-    )
-
     x.realize_hint()
     *batch, h, w = x.get_size()
 
@@ -4354,44 +4350,74 @@ def _low_memory_max_pool2d_with_offsets(
     else:
         x_loader = x.make_loader()
 
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-        maxval = None
-        maxindex = None
-        for h_inc, w_inc in itertools.product(
-            range(kernel_size[0]), range(kernel_size[1])
-        ):
-            ih = bh * stride[0] + h_inc - padding[0]
-            iw = bw * stride[1] + w_inc - padding[1]
-            val = x_loader([*prefix, ih, iw])
-            if return_index:
-                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
+    dim = 2
 
-    out = Pointwise.create(
+    def fn_inner(idx, reduction_idx):
+        prefix = idx[:-dim]
+        bh = idx[-dim:]
+        ih = [bh[i] * stride[i] + reduction_idx[i] - padding[i] for i in range(dim)]
+        return x_loader([*prefix, *ih])
+
+    result = Reduction.create(
+        reduction_type="max",
+        input_node=x,
         device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
+        dst_dtype=dtype,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
         ranges=new_size,
+        reduction_ranges=kernel_size,
     )
-    offsets = Pointwise.create(
+    offsets = Reduction.create(
+        reduction_type="argmax",
+        input_node=x,
         device=x.get_device(),
-        dtype=torch.int8,
-        inner_fn=functools.partial(fn, return_index=True),
+        dst_dtype=int_dtype,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
         ranges=new_size,
+        reduction_ranges=kernel_size,
     )
-    return out, offsets
+    if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        result.realize()
+    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        offsets.realize()
+
+    return result, offsets
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        assert_fallback=False,
+    )
+
+    with config.patch(unroll_reductions_threshold=25):
+        return _max_pool2d_with_offsets(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+            True,
+            int_dtype=torch.int8,
+        )
 
 
 @register_lowering(
@@ -4429,8 +4455,40 @@ def _low_memory_max_pool2d_offsets_to_indices(
     return indices
 
 
-# Fallback selected when we do not decompose to the low-memory path.
-make_fallback(aten.max_pool2d_with_indices)
+fallback_max_pool2d_with_indices = fallback_handler(
+    aten.max_pool2d_with_indices.default,
+    add_to_fallback_set=False,
+)
+
+
+# Fallback when we do not decompose to the low-memory path.
+@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
+def max_pool2d_with_indices(
+    x,
+    kernel_size,
+    stride=None,
+    padding=0,
+    dilation=1,
+    ceil_mode=False,
+):
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation
+    )
+
+    if any(d > 1 for d in dilation):
+        return fallback_max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode=ceil_mode
+        )
+
+    out, offsets = _max_pool2d_with_offsets(
+        x, kernel_size, stride, padding, dilation, ceil_mode, True
+    )
+
+    indices = _low_memory_max_pool2d_offsets_to_indices(
+        offsets, kernel_size[-1], x.shape[-1], stride, padding
+    )
+
+    return out, indices
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
