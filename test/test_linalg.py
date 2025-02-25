@@ -5151,6 +5151,44 @@ class TestLinalg(TestCase):
         os.remove(filename)
 
     @onlyCUDA
+    @dtypes(torch.bfloat16)
+    def test_gemm_bias_tunableop(self, device, dtype):
+        # Test GEMM and bias tuning
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        m = 3
+        n = 5
+        k = 7
+        X =  torch.rand(m, k, dtype=dtype, device=device)
+        matA = torch.rand(n, k, dtype=dtype, device=device)
+        bias = torch.rand(n, dtype=dtype, device=device)
+ 
+        torch.nn.functional.linear(X, matA, bias)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+ 
+        # There must be a new tuning result
+        self.assertEqual((total_num_results - ref_num_results), 1)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
+        try:
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            # os.remove(filename)
+        except FileNotFoundError:
+            pass
+
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
