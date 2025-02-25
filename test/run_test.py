@@ -551,7 +551,6 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
-    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -1479,7 +1478,6 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
-    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
@@ -1917,21 +1915,26 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        # If job name isn't available, use build environment as a backup
+        job_name = os.environ.get("BUILD_ENVIRONMENT")
+    else:
+        job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
-    if test_config in test_times_file.get(build_environment, {}):
+    if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
-        return test_times_file[build_environment][test_config]
+        return test_times_file[job_name][test_config]
     elif test_config in test_times_file["default"]:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
-            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+            f"::warning:: Gathered no stats from artifacts for {job_name} build env"
+            f" and {test_config} test config. Using default job name and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
-            f" and {test_config} test config. Using default build env and default test config instead."
+            f"::warning:: Gathered no stats from artifacts for job name {job_name} build env"
+            f" and {test_config} test config. Using default job name and default test config instead."
         )
         return test_times_file["default"]["default"]
 

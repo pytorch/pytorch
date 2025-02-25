@@ -3721,9 +3721,7 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target == "constant":
-                    return node.args[-1]  # type: ignore[return-value]
-                elif node.target == "to_dtype":
+                elif node.target in ["to_dtype", "constant", "index_expr"]:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -3758,7 +3756,7 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target == "load"
+                    _node.target in ["load", "index_expr"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
