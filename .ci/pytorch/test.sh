@@ -507,6 +507,22 @@ test_cachebench() {
       --benchmark torchbench \
       --repeat 3 \
       --output "$TEST_REPORTS_DIR/cachebench_inference.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode training \
+      --dynamic \
+      --device cuda \
+      --benchmark torchbench \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_training_dynamic.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode inference \
+      --dynamic \
+      --device cuda \
+      --benchmark torchbench \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_inference_dynamic.json"
 }
 
 test_verify_cachebench() {
