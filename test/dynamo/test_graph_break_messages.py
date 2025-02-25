@@ -11,7 +11,12 @@ import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, scoped_load_inline
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    scoped_load_inline,
+)
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 """
@@ -29,7 +34,7 @@ make sure that there is a test for it.
 """
 
 
-class GraphBreakMessagesTest(torch._dynamo.test_case.TestCase):
+class GraphBreakMessagesTest(LoggingTestCase):
     maxDiff = None
 
     def test_dynamic_shape_operator(self):
@@ -200,10 +205,10 @@ Backend compiler exception
   Hint: Report an issue to the backend compiler repo.
 
   Developer debug context: Backend: bad_backend
-Exception:test
-Traceback:
-  File "test_graph_break_messages.py", line N, in fn
-    return x + 1""",
+    Exception:test
+    Traceback:
+      File "test_graph_break_messages.py", line N, in fn
+        return x + 1""",
         )
 
     def test_unsupported_builtin(self):
@@ -414,7 +419,7 @@ from user code:
             """\
 Attempted to call function marked as skipped
   Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
-  Hint:  Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
+  Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
   Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
 """,
@@ -612,21 +617,33 @@ from user code:
                         pass
                     torch._dynamo.graph_break()
 
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+        self.assertExpectedInline(
+            munge_exc(cm.exception, suppress_suffix=True, skip=1),
             """\
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
   Hint: Move the offending context manager(s) to outside the compiled region.
-  Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
 
   Developer debug context: Active generic context managers: [GenericContextWrappingVariable(CtxMgr), GenericContextWrappingVariable(CtxMgr)]
 
 
 from user code:
-   File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.graph_break()""",
+""",
+        )
+
+        self.assertExpectedInline(
+            munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=1),
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+""",
         )
 
     def test_unsupported_bytecode(self):
@@ -658,7 +675,7 @@ Missing bytecode handler
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    class Foo:""",
+    s = re.sub(""",
             post_munge=post_munge,
         )
 
@@ -680,7 +697,7 @@ from user code:
 Reconstruction failure
   Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
-  Hint: This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
   Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't havereconstruction rules may be fundamentally unreconstructable.
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
@@ -688,8 +705,56 @@ Reconstruction failure
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return Foo().meth""",
+    lambda: torch.compile(fn, backend="eager", fullgraph=True)(),""",
             post_munge=post_munge,
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_reconstruction_failure_gb(self, records):
+        class Foo:
+            def meth(self):
+                return 0
+
+        def fn():
+            f = Foo().meth
+            torch._dynamo.graph_break()
+            return f
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        torch.compile(fn, backend="eager")()
+
+        self.assertExpectedInline(
+            post_munge(
+                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=1)
+            ),
+            """\
+Graph break in user code at /data/users/williamwen/pytorch3/test/dynamo/test_graph_break_messages.py:N
+Graph Break Reason: Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+User code traceback:
+""",
+        )
+
+        self.assertExpectedInline(
+            post_munge(munge_exc(records[1].exc_info[1], suppress_suffix=True, skip=1)),
+            """\
+Reconstruction failure
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Hint: If Dynamo attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+  Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't havereconstruction rules may be fundamentally unreconstructable.
+
+  Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+
+
+from user code:
+""",
         )
 
     def test_faketensor_nyi(self):

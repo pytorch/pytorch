@@ -780,6 +780,7 @@ def break_graph_if_unsupported(*, push):
                             "Move the offending context manager(s) to outside the compiled region.",
                             *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         ],
+                        from_exc=excp,
                     )
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
