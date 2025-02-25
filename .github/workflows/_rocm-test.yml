@@ -249,9 +249,9 @@ jobs:
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
-          
+
       - name: Change permissions (only needed for MI300 runners for now)
-        if: ${{ contains(matrix.runner, 'mi300')
+        if: ${{ contains(matrix.runner, 'mi300') }}
         run: |
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
 
@@ -292,7 +292,7 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
-      
+
       - name: Revert owner and group change
         if: always()
         run: |
