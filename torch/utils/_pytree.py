@@ -31,6 +31,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    ClassVar,
     Final,
     Generic,
     NoReturn,
@@ -574,9 +575,11 @@ _T_co = TypeVar("_T_co", covariant=True)
 class structseq(tuple[_T_co, ...]):
     """A generic type stub for CPython's ``PyStructSequence`` type."""
 
-    n_fields: Final[int]  # type: ignore[misc]
-    n_sequence_fields: Final[int]  # type: ignore[misc]
-    n_unnamed_fields: Final[int]  # type: ignore[misc]
+    __slots__: ClassVar[tuple[()]] = ()
+
+    n_fields: Final[ClassVar[int]]  # type: ignore[misc]
+    n_sequence_fields: Final[ClassVar[int]]  # type: ignore[misc]
+    n_unnamed_fields: Final[ClassVar[int]]  # type: ignore[misc]
 
     def __init_subclass__(cls) -> NoReturn:
         """Prohibit subclassing."""
