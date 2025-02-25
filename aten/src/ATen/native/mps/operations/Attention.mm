@@ -24,8 +24,7 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
   if (x.dim() == 3) {
     return {x.unsqueeze(0), true};
   } else if (x.dim() > 4) {
-    auto batchSize = static_cast<int64_t>(
-        std::accumulate(x.sizes().begin(), x.sizes().end() - 3, 1ULL, std::multiplies<uint64_t>()));
+    auto batchSize = c10::multiply_integers(x.sizes().begin(), x.sizes().end() - 3);
     return {x.view({batchSize, x.size(-3), x.size(-2), x.size(-1)}), true};
   } else {
     return {x, false};
@@ -56,8 +55,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto [q_, sq] = ensure_4d(query);
   auto [k_, sk] = ensure_4d(key);
   auto [v_, sv] = ensure_4d(value);
-  Tensor mask_;
-  bool sm = false;
+  std::optional<Tensor> mask_;
 
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
@@ -121,9 +119,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
           } else if (attn_mask) {
             auto maskExpandedDims = query.sizes().vec();
             maskExpandedDims[maskExpandedDims.size() - 1] = maxSeqLength;
-            mask_ = attn_mask.value().expand(maskExpandedDims);
-            std::tie(mask_, sm) = ensure_4d(mask_);
-            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, mask_);
+            *mask_ = attn_mask->expand(maskExpandedDims);
+            std::tie(*mask_, std::ignore) = ensure_4d(mask_);
+            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *mask_);
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
           }
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
@@ -140,10 +138,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
     auto attnPlaceholder = Placeholder(cachedGraph->attnTensor, attn);
     NSDictionary* feeds = nil;
-    if (!attn_mask) {
+    if (!mask_) {
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
     } else {
-      auto mPlaceholder = Placeholder(cachedGraph->maskTensor, mask_);
+      auto mPlaceholder = Placeholder(cachedGraph->maskTensor, *mask_);
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, mPlaceholder);
     }
     NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
