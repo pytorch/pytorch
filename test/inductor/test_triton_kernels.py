@@ -28,6 +28,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
+    skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -3001,6 +3002,51 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
+    @make_mutation_test
+    def test_branch_with_multiple_yield_args():
+        @triton.jit
+        def branch_with_multiple_yield_args(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            conditional_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            conditional = tl.load(conditional_ptr)
+            if conditional:
+                in0 = in_ptr0 + 1
+                in1 = in_ptr1 + 1
+                out = out_ptr + 1
+            else:
+                in0 = in_ptr0
+                in1 = in_ptr1
+                out = out_ptr
+            x = tl.load(in0 + offsets, mask=mask)
+            y = tl.load(in1 + offsets, mask=mask)
+            tl.store(out + offsets, x + y, mask=mask)
+
+        x = torch.randn(15)
+        y = torch.randn(15)
+        out = torch.zeros(15)
+        conditional = torch.tensor(True)
+        return (
+            branch_with_multiple_yield_args,
+            {
+                "in_ptr0": x,
+                "in_ptr1": y,
+                "out_ptr": out,
+                "conditional_ptr": conditional,
+                "n_elements": 14,
+                "BLOCK_SIZE": 16,
+            },
+            ["out_ptr"],
+        )
+
 
 if HAS_GPU:
     t = torch.randn(4)
@@ -3437,6 +3483,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
+    @skipIfWindows(msg="AOTI/Cpp_Wrapper have not enabled on Windows")
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
