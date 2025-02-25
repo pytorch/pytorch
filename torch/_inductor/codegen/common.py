@@ -18,8 +18,6 @@ from typing import (
     cast,
     ClassVar,
     Generic,
-    Iterator,
-    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -52,13 +50,14 @@ from ..utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_subs,
+    triton_type,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, MutableMapping, Sequence
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
@@ -537,8 +536,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",
@@ -1371,8 +1369,19 @@ class KernelArgs:
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
+            alive_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if not isinstance(val, RemovedArg)
+            ]
+            removed_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if isinstance(val, RemovedArg)
+            ]
+            inplace_buffer_idx = len(unique(alive_buffers)) + len(removed_buffers)
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                f"in_out_ptr{inplace_buffer_idx}",
                 [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
@@ -1788,6 +1797,15 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
+
+                    if (
+                        assignment
+                        and config.test_configs.runtime_triton_dtype_assert
+                        and dtype is not None
+                    ):
+                        assert_line = f"tl.static_assert({self.prefix}{var}.dtype == {triton_type(dtype)})"
+                        buffer.writeline(assert_line)
+
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
@@ -2237,6 +2255,12 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:

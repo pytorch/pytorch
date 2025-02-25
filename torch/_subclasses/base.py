@@ -166,6 +166,9 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
                 )
             )
 
+        # ops override
+        breakpoint()
+
         return super().__new__(meta, name, bases, attrs)
 
 

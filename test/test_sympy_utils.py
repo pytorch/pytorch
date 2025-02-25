@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     OpaqueUnaryFn_cos,
     simple_floordiv_gcd,
 )
@@ -955,6 +956,17 @@ class TestSingletonInt(TestCase):
 
         self.assertEqual(j1.free_symbols, set())
 
+class TestIdentity(TestCase):
+    def test_expand_identity(self):
+        """
+        Test removing an identity via expansion.
+        """
+        x = sympy.Symbol("x")
+        arg = x + sympy.S.One
+        expr = Identity(arg)
+        expanded = expr.expand(identity=True)
+        self.assertEqual(expanded.count(Identity), 0)
+        self.assertEqual(expanded, arg)
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)

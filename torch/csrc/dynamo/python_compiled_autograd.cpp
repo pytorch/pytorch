@@ -313,28 +313,20 @@ struct VerboseLogger : public PythonLogger {
 
   VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
 
-  void log_node_check(
+  std::string log_node_check(
       const Node& fn,
       size_t size_inputs_num,
-      std::unordered_set<CacheKey> cached_keys,
+      const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       size_t node_idx) {
     std::string node_name =
         fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
-
-    if (size_inputs_num > 0) {
-      cumulative_sizes_per_node[size_inputs_num] = node_name;
-    }
-
-    if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
-      _log_node_miss(typeid(fn), cached_keys, key, node_name);
-      logged_node_miss = true;
-    }
+    return _log_node_miss(typeid(fn), cached_keys, key, node_name);
   }
 
-  void _log_node_miss(
+  std::string _log_node_miss(
       const std::type_info& node_type,
-      std::unordered_set<CacheKey> cached_keys,
+      const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
     std::ostringstream oss;
@@ -352,28 +344,27 @@ struct VerboseLogger : public PythonLogger {
       }
     }
     oss << "]";
-    log(PythonLogger::DEBUG, oss.str());
+    std::string compile_reason = oss.str();
+    log(PythonLogger::DEBUG, compile_reason);
+    return compile_reason;
   }
 
-  void log_dynamic_shapes_check(size_t size_idx) const {
-    if (cumulative_sizes_per_node.empty()) {
-      return;
+  std::string log_dynamic_shapes_miss(
+      const std::vector<size_t>& new_dyn_sizes_idx,
+      size_t all_dyn_sizes_len) const {
+    std::ostringstream oss;
+    oss << "Cache miss due to " << new_dyn_sizes_idx.size()
+        << " changed tensor shapes (total of " << all_dyn_sizes_len << "): ";
+    for (const auto i : c10::irange(new_dyn_sizes_idx.size() - 1)) {
+      oss << "sizes[" << std::to_string(new_dyn_sizes_idx[i]) << "], ";
     }
-
-    auto it = cumulative_sizes_per_node.lower_bound(size_idx);
-    TORCH_CHECK(it != cumulative_sizes_per_node.end());
-    size_t start_idx =
-        it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    log(PythonLogger::DEBUG,
-        "Cache miss due to changed shapes: marking size idx " +
-            std::to_string(size_idx - start_idx) + " of " + it->second +
-            " as dynamic");
+    oss << "sizes["
+        << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
+        << "]";
+    std::string recompile_reason = oss.str();
+    log(PythonLogger::DEBUG, recompile_reason);
+    return recompile_reason;
   }
-
-  // track which size index belongs to which node
-  std::map<size_t, std::string> cumulative_sizes_per_node;
-  // only log cache miss due to node key once
-  bool logged_node_miss = false;
 };
 
 struct CacheNode {
@@ -404,6 +395,7 @@ struct CacheNode {
     expected_sizes.clear();
     runtime_wrapper = nullptr;
     compiled_fn = nullptr;
+    compile_reasons.clear();
   }
 
   bool is_empty() const {
@@ -425,6 +417,7 @@ struct CacheNode {
 
   bool check_dynamic_sizes(
       AutogradCompilerCall& call,
+      std::optional<std::string>& compile_reason,
       const std::optional<VerboseLogger>& vlogger) {
     /*
     We start off by assuming everything is static, then we mark things
@@ -450,6 +443,7 @@ struct CacheNode {
     }
     std::vector<uint32_t> dynamic_size_input_origins;
     dynamic_size_input_origins.reserve(len);
+    std::vector<size_t> newly_dynamic;
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
       bool was_dynamic = expected.dyn_type == SizeInput::DYNAMIC;
@@ -458,7 +452,7 @@ struct CacheNode {
         if (!was_dynamic) {
           cache_hit = false;
           if (vlogger.has_value()) {
-            vlogger->log_dynamic_shapes_check(i);
+            newly_dynamic.emplace_back(call.dyn_size_inputs.size());
           }
         }
         expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
@@ -481,6 +475,12 @@ struct CacheNode {
       // recompilation with the varying size input as dynamic
       runtime_wrapper = nullptr;
       compiled_fn = nullptr;
+      if (vlogger.has_value() && !newly_dynamic.empty()) {
+        // some shapes became dynamic, recompile
+        TORCH_INTERNAL_ASSERT(!compile_reason.has_value());
+        compile_reason = vlogger->log_dynamic_shapes_miss(
+            newly_dynamic, call.dyn_size_inputs.size());
+      }
     }
     return cache_hit;
   }
@@ -527,6 +527,7 @@ struct CacheNode {
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
+  std::vector<std::string> compile_reasons;
 
   THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
@@ -644,6 +645,22 @@ static PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
+static PyObject* wrap_string_list(const std::vector<std::string>& strs) {
+  PyObject* pystrs = PyList_New(static_cast<Py_ssize_t>(strs.size()));
+  for (const auto i : c10::irange(strs.size())) {
+    PyObject* pystr = PyUnicode_FromString(strs[i].c_str());
+    PyList_SET_ITEM(pystrs, i, pystr);
+  }
+  return pystrs;
+}
+
+std::string unwrap_string(PyObject* pystr) {
+  TORCH_INTERNAL_ASSERT(PyUnicode_Check(pystr));
+  const char* str = PyUnicode_AsUTF8(pystr);
+  TORCH_INTERNAL_ASSERT(str != nullptr);
+  return std::string(str);
+}
+
 static void set_ivalue_proxies(
     PyObject* fake_ivalue_args,
     std::vector<LiftedIValueArg>& lifted_ivalue_args) {
@@ -686,27 +703,33 @@ static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
     AutogradCompilerCall& compiler_call,
-    size_t num_outputs) {
+    size_t num_outputs,
+    std::optional<std::string>&& maybe_compile_reason) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
-  THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
-  THPObjectPtr pyivalueargsinput(
+  THPObjectPtr py_input(THPVariable_WrapList(compiler_call.tensor_args.inputs));
+  THPObjectPtr py_size_input(cache.wrap_dynamic_inputs());
+  THPObjectPtr py_ivalue_args_input(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
-  THPObjectPtr pynodeorigins(
-      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput.get())));
+  THPObjectPtr py_node_origins(
+      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(py_size_input.get())));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
-      pyinput.get(),
-      pysizeinput.get(),
-      pyivalueargsinput.get(),
-      pynodeorigins.get(),
+      py_input.get(),
+      py_size_input.get(),
+      py_ivalue_args_input.get(),
+      py_node_origins.get(),
       nullptr)));
 
-  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},
-      *fake_ivalue_args{nullptr};
+  PyObject *compile_id_str{nullptr}, *fake_inputs{nullptr},
+      *fake_sizes{nullptr}, *fake_ivalue_args{nullptr};
   check(PyArg_ParseTuple(
-      pyresult.get(), "OOO", &fake_inputs, &fake_sizes, &fake_ivalue_args));
+      pyresult.get(),
+      "OOOO",
+      &compile_id_str,
+      &fake_inputs,
+      &fake_sizes,
+      &fake_ivalue_args));
 
   variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
   TORCH_INTERNAL_ASSERT(
@@ -718,6 +741,18 @@ static TraceState call_begin_capture(
   }
 
   set_ivalue_proxies(fake_ivalue_args, compiler_call.lifted_ivalue_args.args);
+  if (auto compile_reason = std::move(maybe_compile_reason);
+      compile_reason.has_value()) {
+    TORCH_INTERNAL_ASSERT(!Py_IsNone(compile_id_str));
+    std::string formatted_compile_reason = unwrap_string(compile_id_str) +
+        ": " + std::move(compile_reason.value());
+    cache.compile_reasons.emplace_back(formatted_compile_reason);
+    THPObjectPtr py_compile_reasons(wrap_string_list(cache.compile_reasons));
+    static PyObject* log_compile_reasons =
+        PyUnicode_InternFromString("log_compile_reasons");
+    check(PyObject_CallMethodObjArgs(
+        self, log_compile_reasons, py_compile_reasons.get(), nullptr));
+  }
   return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
@@ -780,6 +815,7 @@ static CacheNode* _compiled_autograd_impl(
 
   int i = 0;
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
+  std::optional<std::string> compile_reason;
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -797,17 +833,16 @@ static CacheNode* _compiled_autograd_impl(
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
-      if (vlogger.has_value()) {
+      if (vlogger.has_value() && !compile_reason.has_value()) {
         std::unordered_set<CacheKey> cached_keys;
         for (const auto& [k, _] : cache->next) {
           cached_keys.emplace(k);
         }
-        vlogger->log_node_check(
-            *fn,
-            compiler_call.all_size_inputs.size(),
-            std::move(cached_keys),
-            key,
-            i);
+        if (cached_keys.find(key) == cached_keys.end()) {
+          // new autograd node found, compile
+          compile_reason = vlogger->log_node_check(
+              *fn, compiler_call.all_size_inputs.size(), cached_keys, key, i);
+        }
       }
       cache = cache->lookup(key);
     }
@@ -836,15 +871,20 @@ static CacheNode* _compiled_autograd_impl(
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
+  if (!cache->check_dynamic_sizes(compiler_call, compile_reason, vlogger)) {
     // cache miss, need to capture FX graph
+    TORCH_INTERNAL_ASSERT(!vlogger.has_value() || compile_reason.has_value());
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
     setPyCompilerInterface(std::make_unique<PyCompilerInterfaceImpl>());
 
     TraceState state = call_begin_capture(
-        py_compiler, *cache, compiler_call, output_edges.size());
+        py_compiler,
+        *cache,
+        compiler_call,
+        output_edges.size(),
+        std::move(compile_reason));
     InputBuffers input_buffers;
 
     for (size_t i = 0; i < calls.size(); i++) {
