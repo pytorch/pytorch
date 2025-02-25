@@ -94,7 +94,7 @@ class TestSDPAXpuOnly(NNTestCase):
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
         math_ref = torch.ops.aten._scaled_dot_product_attention_math(
-            query.contiguous().float(), key.contiguous().float(), value.contiguous().float(), attn_mask=None, dropout_p=0.0, is_causal=False)[0]
+            query.float(), key.float(), value.float(), attn_mask=None, dropout_p=0.0, is_causal=False)[0]
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
@@ -110,7 +110,7 @@ class TestSDPAXpuOnly(NNTestCase):
 
         with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
-                o = F.scaled_dot_product_attention(q, k, v)
+                _ = F.scaled_dot_product_attention(q, k, v)
 
     @parametrize("type", ["dense"])
     @parametrize("is_contiguous", [True, False])
