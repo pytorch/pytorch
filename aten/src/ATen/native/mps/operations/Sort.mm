@@ -22,7 +22,8 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
  std::optional<bool> stable,
  int64_t dim,
  bool descending,
- bool dynamic_indices_type,
+ ScalarType indices_dtype,
+ bool dynamic_indices_dtype,
  const Tensor& values,
  const Tensor& indices) {
   using namespace mps;
