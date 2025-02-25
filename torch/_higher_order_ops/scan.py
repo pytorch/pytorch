@@ -194,11 +194,8 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(
-            combine_fn, leaves_init, leaves_xs, additional_inputs=()
-        )
+        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=())
 
-    # if not torch._dynamo.is_compiling():
     if not torch.compiler.is_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,

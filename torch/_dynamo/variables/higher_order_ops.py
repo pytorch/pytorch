@@ -1433,9 +1433,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs
 
-        combine_fn, init, xs, additional_inputs = arg_extractor(
-            *args, **kwargs
-        )
+        combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
         assert isinstance(additional_inputs, variables.TupleVariable)
 
         # Ensure that all additional_inputs are TensorVariables and no
