@@ -170,7 +170,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("lu_solve"),
     xfail("lu_unpack"),
     xfail("matmul"),
-    xfail("mean"),
     xfail("mm"),
     xfail("mode"),
     xfail("msort"),
@@ -2782,8 +2781,10 @@ class TestFakeTensor(TestCase):
                 with torch._subclasses.CrossRefFakeMode(
                     ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
                 ):
-                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(
-                        False
+                    with (
+                        warnings.catch_warnings(),
+                        context(),
+                        torch.autograd.set_multithreading_enabled(False),
                     ):
                         composite_compliance.compute_expected_grads(
                             op.get_op(),
