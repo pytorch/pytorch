@@ -2,7 +2,6 @@ import logging
 from typing import Any
 
 import torch
-from torch._inductor.ir import IRNode
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import config as inductor_config, lowering
@@ -160,23 +159,17 @@ def register_woq_mm_ops() -> None:
 
         # define functions to generate example inputs for weight and group size
         # otherwise, autotuner generates example inputs of all zeros for them
-        def get_example_weight(x: IRNode) -> torch.Tensor:
-            shape = x.get_size()
-            device = x.get_device()
-            return torch.randint(0, 255, shape, dtype=torch.uint8, device=device)
-
-        def get_example_group_size(x: IRNode) -> torch.Tensor:
-            return torch.tensor(qGroupSize, dtype=torch.int64)
+        input_gen_fns = {
+            1: lambda x: V.graph.constants[x.get_name()],  # packed weight
+            2: lambda x: V.graph.constants[x.get_name()],  # group size
+        }
 
         return autotune_select_algorithm(
             "_weight_int4pack_mm_for_cpu",
             choices,
             [mat1, mat2, group_size, qScaleAndZeros],
             aten_layout,
-            input_gen_fns={
-                1: get_example_weight,
-                2: get_example_group_size,
-            },
+            input_gen_fns=input_gen_fns,
         )
 
     lowering.make_fallback(aten._dyn_quant_matmul_4bit)

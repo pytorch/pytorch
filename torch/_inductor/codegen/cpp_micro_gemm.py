@@ -925,7 +925,7 @@ class CppMicroBrgemm(CppMicroGemm):
         return LayoutType.VNNI2
 
 
-def woq_int4_extra_check(config, m, n, k, alpha, num_threads, **kwargs):
+def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
     q_group_size = kwargs.get("q_group_size", None)
@@ -948,7 +948,7 @@ def woq_int4_extra_check(config, m, n, k, alpha, num_threads, **kwargs):
         input2_dtype=torch.uint8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
-        extra_check=woq_int4_extra_check,
+        extra_check=check_woq_int4_extra,
     ),
 )
 class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
