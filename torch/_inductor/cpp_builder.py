@@ -1430,7 +1430,6 @@ class CppBuilder:
                 # Will create another temp director for building, so do NOT use
                 # use the absolute path.
                 inp_name = [os.path.basename(i) for i in sources]
-                self._target_file = os.path.basename(self._target_file)
                 self._orig_source_paths = sources
             self._sources_args = " ".join(inp_name)
         else:
