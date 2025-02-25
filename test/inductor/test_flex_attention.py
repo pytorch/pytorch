@@ -3591,18 +3591,18 @@ class GraphModule(torch.nn.Module):
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
 
-        score_mod_0 = self.score_mod_0
-        mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        score_mod = self.score_mod
+        mask_fn = self.mask_fn
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
-    class score_mod_0(torch.nn.Module):
+    class score_mod(torch.nn.Module):
         def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
             mul: "f64[]" = child * child;  child = None
             return mul
 
-    class mask_fn_0(torch.nn.Module):
+    class mask_fn(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
