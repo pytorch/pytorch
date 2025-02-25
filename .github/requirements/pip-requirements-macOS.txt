@@ -26,7 +26,7 @@ filelock==3.6.0
 pytest-cpp==2.3.0
 z3-solver==4.12.2.0
 tensorboard==2.13.0
-optree==0.13.0
+git+https://github.com/metaopt/optree.git#egg=optree
 # NB: test_hparams_* from test_tensorboard is failing with protobuf 5.26.0 in
 # which the stringify metadata is wrong when escaping double quote
 protobuf==3.20.2
