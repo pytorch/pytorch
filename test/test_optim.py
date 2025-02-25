@@ -2235,6 +2235,67 @@ class TestOptimRenewed(TestCase):
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
 
+    @onlyCUDA
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ == "Adam"], dtypes=[torch.float32]
+    )
+    def test_bf16_fused_adam(self, device, dtype, optim_info):
+        optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            # currently not supported
+            if kwargs.get("amsgrad", False) or kwargs.get(
+                "decoupled_weight_decay", False
+            ):
+                continue
+            kwargs["fused"] = True
+
+            print(kwargs)
+
+            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(8)]
+            for p in params:
+                p.grad = torch.rand_like(p)
+
+            params_c = [p.clone() for p in params]
+            for p, pc in zip(params, params_c):
+                pc.grad = p.grad.clone()
+
+            ref_optim = optim_cls(params, **kwargs)
+            bf16_optim = optim_cls(params_c, **kwargs)
+            mp_policy = {
+                "exp_avg": lambda _: torch.bfloat16,
+                "exp_avg_sq": lambda _: torch.bfloat16,
+                "max_exp_avg_sq": lambda _: torch.bfloat16,
+            }
+            bf16_optim.set_dtype_policy(mp_policy)
+
+            # to simulate bf16 training, we are going to fake cast the ref_optim's state to
+            # to bf16 and then cast back to fp32 after every step.
+            for _ in range(1):
+                ref_optim.step()
+                bf16_optim.step()
+                for d in ref_optim.state.values():
+                    d["exp_avg"] = d["exp_avg"].to(torch.bfloat16).to(torch.float32)
+                    d["exp_avg_sq"] = (
+                        d["exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
+                    )
+                    if "max_exp_avg_sq" in d:
+                        d["max_exp_avg_sq"] = (
+                            d["max_exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
+                        )
+
+            for p, pc in zip(params, params_c):
+                self.assertEqual(p, pc)
+
+            for d, dc in zip(ref_optim.state.values(), bf16_optim.state.values()):
+                self.assertEqual(d["exp_avg"], dc["exp_avg"].to(torch.float32))
+                self.assertEqual(d["exp_avg_sq"], dc["exp_avg_sq"].to(torch.float32))
+                if "max_exp_avg_sq" in d:
+                    self.assertEqual(
+                        d["max_exp_avg_sq"], dc["max_exp_avg_sq"].to(torch.float32)
+                    )
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 

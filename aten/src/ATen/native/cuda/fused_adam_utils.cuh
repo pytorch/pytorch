@@ -274,18 +274,20 @@ struct FusedAdamMathFunctorMP {
         if (!std::is_same_v<scalar_type, param_type>) {
           scalar_type casted_param_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
-            casted_param_args[ii] = static_cast<scalar_type>(param_args[ii]);
+            casted_param_args[ii] =
+                static_cast<scalar_type>(param_args[ii + i_start]);
           }
-          load_store(r_args[kParamIdx], casted_param_args, 0, i_start);
+          load_store(r_args[kParamIdx], casted_param_args, 0, 0);
         } else {
           load_store(r_args[kParamIdx], (scalar_type*)param_args, 0, i_start);
         }
         if (!std::is_same_v<scalar_type, grad_type>) {
           scalar_type casted_grad_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
-            casted_grad_args[ii] = static_cast<scalar_type>(grad_args[ii]);
+            casted_grad_args[ii] =
+                static_cast<scalar_type>(grad_args[ii + i_start]);
           }
-          load_store(r_args[kGradIdx], casted_grad_args, 0, i_start);
+          load_store(r_args[kGradIdx], casted_grad_args, 0, 0);
         } else {
           load_store(r_args[kGradIdx], (scalar_type*)grad_args, 0, i_start);
         }
@@ -293,9 +295,9 @@ struct FusedAdamMathFunctorMP {
           scalar_type casted_exp_avg_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_exp_avg_args[ii] =
-                static_cast<scalar_type>(exp_avg_args[ii]);
+                static_cast<scalar_type>(exp_avg_args[ii + i_start]);
           }
-          load_store(r_args[kExpAvgIdx], casted_exp_avg_args, 0, i_start);
+          load_store(r_args[kExpAvgIdx], casted_exp_avg_args, 0, 0);
         } else {
           load_store(
               r_args[kExpAvgIdx], (scalar_type*)exp_avg_args, 0, i_start);
@@ -304,9 +306,9 @@ struct FusedAdamMathFunctorMP {
           scalar_type casted_exp_avg_sq_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_exp_avg_sq_args[ii] =
-                static_cast<scalar_type>(exp_avg_sq_args[ii]);
+                static_cast<scalar_type>(exp_avg_sq_args[ii + i_start]);
           }
-          load_store(r_args[kExpAvgSqIdx], casted_exp_avg_sq_args, 0, i_start);
+          load_store(r_args[kExpAvgSqIdx], casted_exp_avg_sq_args, 0, 0);
         } else {
           load_store(
               r_args[kExpAvgSqIdx], (scalar_type*)exp_avg_sq_args, 0, i_start);
