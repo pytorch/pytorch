@@ -2,7 +2,7 @@
 
 """Test the support on onnxscript in PyTorch-ONNX converter with onnxruntime."""
 
-from typing import Sequence  # noqa: UP035
+from typing import Sequence
 
 import onnx_test_common
 import onnxscript

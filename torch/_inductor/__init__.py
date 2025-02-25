@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, Dict, IO, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx

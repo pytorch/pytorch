@@ -9,7 +9,17 @@ import warnings
 import zipfile
 from collections.abc import Iterator
 from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree

@@ -1,5 +1,7 @@
 # mypy: ignore-errors
 
+from typing import List
+
 from torch.testing._internal.opinfo.core import OpInfo
 from torch.testing._internal.opinfo.definitions import (
     _masked,

@@ -1353,11 +1353,11 @@ def _is_exception(obj) -> bool:
 
 
 def raise_error_container_parameter_missing(target_type) -> None:
-    if target_type.endswith("ict"):
+    if target_type == "Dict":
         raise RuntimeError(
-            f"Attempted to use {target_type} without "
+            "Attempted to use Dict without "
             "contained types. Please add contained type, e.g. "
-            f"{target_type}[int, int]"
+            "Dict[int, int]"
         )
     raise RuntimeError(
         f"Attempted to use {target_type} without a "
@@ -1366,20 +1366,15 @@ def raise_error_container_parameter_missing(target_type) -> None:
     )
 
 
-_RAW_TYPE_NAME_MAPPING = {
-    dict: "dict",
-    list: "list",
-    tuple: "tuple",
-    typing.Dict: "Dict",  # noqa: UP006
-    typing.List: "List",  # noqa: UP006
-    typing.Optional: "Optional",
-    typing.Tuple: "Tuple",  # noqa: UP006
-}
-
-
 def check_args_exist(target_type) -> None:
-    if name := _RAW_TYPE_NAME_MAPPING.get(target_type):
-        raise_error_container_parameter_missing(name)
+    if target_type is typing.List or target_type is list:  # noqa: UP006
+        raise_error_container_parameter_missing("List")
+    elif target_type is typing.Tuple or target_type is tuple:  # noqa: UP006
+        raise_error_container_parameter_missing("Tuple")
+    elif target_type is typing.Dict or target_type is dict:  # noqa: UP006
+        raise_error_container_parameter_missing("Dict")
+    elif target_type is None or target_type is Optional:
+        raise_error_container_parameter_missing("Optional")
 
 
 def check_empty_containers(obj) -> None:

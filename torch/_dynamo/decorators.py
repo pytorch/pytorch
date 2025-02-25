@@ -206,7 +206,7 @@ def disallow_in_graph(fn):
 
 
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
-def graph_break(msg=""):
+def graph_break():
     """Force a graph break"""
 
 

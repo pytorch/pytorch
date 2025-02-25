@@ -12,11 +12,19 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Mapping,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -119,7 +127,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping, Sequence
+    from collections.abc import Generator, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
@@ -472,7 +480,7 @@ def is_tf32_warning_applicable(gm: GraphModule) -> bool:
 
 def maybe_disable_comprehensive_padding(
     example_inputs: Sequence[InputType],
-) -> AbstractContextManager[None, None]:
+) -> contextlib.AbstractContextManager[None, None]:
     """
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
@@ -1772,7 +1780,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
     """
