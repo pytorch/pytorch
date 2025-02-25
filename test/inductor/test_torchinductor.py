@@ -5023,16 +5023,14 @@ class CommonTemplate:
 
     @skip_if_gpu_halide  # slow
     def test_max_pool2d6(self):
-        # Too big kernel size, use fallback
+        # Big kernel size
         def fn(x):
             return aten.max_pool2d_with_indices(x, [13, 13], [])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/94775
     def test_max_pool2d7(self):
