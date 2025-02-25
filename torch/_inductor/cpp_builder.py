@@ -163,6 +163,7 @@ def _is_apple_clang(cpp_compiler: str) -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
+@functools.lru_cache(None)
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -177,8 +178,10 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
+@functools.lru_cache(None)
 def _is_gcc(cpp_compiler: str) -> bool:
-    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+    # Since "clang++" ends with "g++", the regex match below would validate on it.
+    if _is_clang(cpp_compiler):
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
@@ -1221,6 +1224,8 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
+        # Suppress multi-line comment warnings in sycl headers
+        cflags += ["Wno-comment"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         if not find_library("ze_loader"):
             raise OSError(

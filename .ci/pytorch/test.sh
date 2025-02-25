@@ -494,8 +494,34 @@ test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode training --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_training.json"
-  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
+  local BENCHMARK
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    local BENCHMARK=torchbench
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    local BENCHMARK=huggingface
+  else
+    echo "invalid SHARD_NUMBER: ${SHARD_NUMBER}"
+    exit 1
+  fi
+
+  local mode_options=("training" "inference")
+
+  for mode in "${mode_options[@]}"; do
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
+
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --dynamic \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
+  done
 }
 
 test_verify_cachebench() {
@@ -1539,7 +1565,7 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench nanogpt BERT_pytorch resnet50
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   install_torchaudio cpu
