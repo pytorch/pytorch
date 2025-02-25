@@ -803,7 +803,7 @@ def slice_scatter(
     if start == 0 and end == dim_size and step == 1:
         return src.clone()
 
-    indices: list[Optional[Tensor]] = [None] * input.dim()
+    indices = [None] * input.dim()
     idx = torch.arange(dim_size, device=input.device)
     indices[dim] = (idx - start) // step
 
@@ -1664,7 +1664,6 @@ def native_layer_norm_backward(
         )
     mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
-    assert input_cast is not None
     x_hat = (input_cast - mean) * rstd
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
@@ -5092,7 +5091,10 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
     if not isinstance(elements, torch.Tensor):
         elements = torch.tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
-        test_elements = torch.tensor(test_elements, device=elements.device)
+        if invert:
+            return torch.ne(elements, test_elements)
+        else:
+            return torch.eq(elements, test_elements)
 
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
@@ -5124,14 +5126,10 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
-
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
-    if not invert:
-        cmp = x == test_elements
-    else:
-        cmp = x != test_elements
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
-    return cmp.any(dim=dim)
+    res = (x == test_elements).any(dim=dim)
+    return ~res if invert else res
 
 
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
