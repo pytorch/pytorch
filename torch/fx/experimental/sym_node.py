@@ -494,9 +494,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_sym_node(self)
         try:
             return int(r)
         except Exception:
@@ -506,9 +504,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_sym_node(self)
         try:
             return float(r)
         except Exception:
@@ -518,9 +514,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
-        )
+        r = self.shape_env.evaluate_sym_node(self)
         try:
             return bool(r)
         except Exception:
@@ -572,13 +566,7 @@ class SymNode:
         """
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr,
-            self.hint,
-            fx_node=self.fx_node,
-            size_oblivious=True,
-            expr_sym_node_id=id(self),
-        )
+        r = self.shape_env.evaluate_sym_node(self, size_oblivious=True)
         try:
             return bool(r)
         except Exception:
