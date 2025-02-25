@@ -17,5 +17,5 @@ SUPPORTABLE = [
     "encounter this graph break often and it is causing performance issues.",
 ]
 CAUSED_BY_EARLIER_GRAPH_BREAK = [
-    "This graph break is likely caused by an earlier graph break. Resolving the earlier graph break may resolve this one.",
+    "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.",
 ]
