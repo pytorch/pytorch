@@ -11076,13 +11076,15 @@ graph():
 graph():
     %b_buffer : [num_users=1] = placeholder[target=b_buffer]
     %x : [num_users=1] = placeholder[target=x]
-    %twotensor___init__0 : [num_users=1] = get_attr[target=twotensor___init__0]
+    %twotensor___init__0 : [num_users=0] = get_attr[target=twotensor___init__0]
+    %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__1]
     %twotensor_const_func_spec0 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
-    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__0, %x, %x), kwargs = {})
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__1, %x, %x), kwargs = {})
     %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
-    %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__0]
-    %twotensor_const_func_spec0_1 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
-    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0_1, %twotensor___init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
+    %twotensor___init__2 : [num_users=0] = get_attr[target=twotensor___init__0]
+    %twotensor___init__3 : [num_users=1] = get_attr[target=twotensor___init__2]
+    %twotensor_const_func_spec1 : [num_users=1] = get_attr[target=twotensor_const_func_spec1]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec1, %twotensor___init__3, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
     %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
     %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
