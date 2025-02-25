@@ -4,6 +4,8 @@
 #include <metal_stdlib>
 
 using namespace metal;
+constant uint TILE_DIM = 16;
+
 template <typename T>
 c10::metal::opmath_t<T> dot_product(
     constant T* v1,
@@ -18,24 +20,52 @@ c10::metal::opmath_t<T> dot_product(
 }
 
 template <typename T>
-kernel void naive_matmul(
+kernel void matmul(
     constant T* mat1Data [[buffer(0)]],
     constant T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  uint y = thread_index / sizes.x;
-  uint x = thread_index % sizes.x;
-  if (x >= sizes.x || y >= sizes.z) {
-    return;
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 group_id [[threadgroup_position_in_grid]]) {
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
+  c10::metal::opmath_t<T> sum = 0;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
+  for (uint t = 0; t < numTiles; t++) {
+    uint tiledCol = t * TILE_DIM + tid.x;
+    if (row < sizes.x && tiledCol < sizes.y) {
+      A_tile[tid.y][tid.x] =
+          mat1Data[row * strides[0].x + tiledCol * strides[0].y];
+    } else {
+      A_tile[tid.y][tid.x] = 0;
+    }
+
+    uint tiledRow = t * TILE_DIM + tid.y;
+    if (tiledRow < sizes.y && col < sizes.z) {
+      B_tile[tid.y][tid.x] =
+          mat2Data[tiledRow * strides[1].x + col * strides[1].y];
+    } else {
+      B_tile[tid.y][tid.x] = 0;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 0; k < TILE_DIM; k++) {
+      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  auto rc = dot_product(
-      mat1Data + x * strides[0].x,
-      mat2Data + y * strides[1].y,
-      ulong2(strides[0].y, strides[1].x),
-      sizes.y);
-  outputData[x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
+
+  if (row < sizes.x && col < sizes.z) {
+    outputData[row * strides[2].x + col * strides[2].y] = static_cast<T>(sum);
+  }
 }
 
 template <typename T>
@@ -447,15 +477,15 @@ kernel void applyPivots(
   }
 }
 
-#define INSTANTIATE_NAIVE_MM(DTYPE)                          \
-  template [[host_name("naive_matmul_" #DTYPE)]] kernel void \
-  naive_matmul<DTYPE>(                                       \
-      constant DTYPE * mat1Data [[buffer(0)]],               \
-      constant DTYPE * mat2Data [[buffer(1)]],               \
-      device DTYPE * outputData [[buffer(2)]],               \
-      constant array<ulong2, 3> & strides [[buffer(3)]],     \
-      constant uint3 & sizes [[buffer(4)]],                  \
-      uint thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_NAIVE_MM(DTYPE)                                   \
+  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                        \
+      constant DTYPE * mat2Data [[buffer(1)]],                        \
+      device DTYPE * outputData [[buffer(2)]],                        \
+      constant array<ulong2, 3> & strides [[buffer(3)]],              \
+      constant uint3 & sizes [[buffer(4)]],                           \
+      uint2 tid [[thread_position_in_threadgroup]],                   \
+      uint2 group_id [[threadgroup_position_in_grid]])
 
 #define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
