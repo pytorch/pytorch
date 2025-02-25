@@ -402,16 +402,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
-    def __init__(self, value, traceable=None, **kwargs) -> None:
+    def __init__(self, value, nonstrict_traceable=None, **kwargs) -> None:
         super().__init__(value, **kwargs)
         from ..trace_rules import is_nonstrict_trace_callable
 
-        if traceable is None:
-            traceable = is_nonstrict_trace_callable(value)
-        self.traceable = traceable
+        if nonstrict_traceable is None:
+            nonstrict_traceable = is_nonstrict_trace_callable(value)
+        self.nonstrict_traceable = nonstrict_traceable
 
     def __repr__(self) -> str:
-        return f"TorchInGraphFunctionVariable({self.value}, traceable={self.traceable})"
+        return f"TorchInGraphFunctionVariable({self.value}, nonstrict_traceable={self.nonstrict_traceable})"
 
     def get_function(self):
         return self.value
@@ -985,7 +985,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
-        if self.traceable:
+        if self.nonstrict_traceable:
             import torch._higher_order_ops.flat_apply as flat_apply
             from torch._higher_order_ops.flat_apply import (
                 func_to_graphable,
@@ -1030,14 +1030,9 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             ]
 
             # The downstream `flat_apply` call requires the input spec; however,
-            # it's not a graphable type. So we still have to reconstruct it into
-            # a python object, and store it as a constant attribute on the fx
-            # graph.
-            #
-            # Luckily, the structure of input spec is predictable and fixed
-            # (it's a part of the torch codebase), and existing
-            # `VariableTracker.as_python_constant` implementations already
-            # covers all the cases, so we just use that.
+            # the spec not a graphable type, so we still have to reconstruct it
+            # into a python object, and store it as a constant attribute on the
+            # fx graph.
             #
             # TODO handle `pytree._register_constant`-ed values.
             try:
@@ -1045,11 +1040,11 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             except NotImplementedError:
                 unimplemented(
                     """
-This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been (or needs to be) `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
                 )
 
-            # `flat_appy` wants a TreeSpec for the function input.
+            # `flat_apply` wants a TreeSpec for the function input.
             _, f_spec = func_to_graphable(fn)
 
             # TreeSpec isn't graphable, so we register the function and input
