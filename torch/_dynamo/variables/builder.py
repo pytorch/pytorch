@@ -1710,9 +1710,6 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
-        if get_static_address_type(value) == "guarded":
-            self.install_guards(GuardBuilder.ID_MATCH)
-
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
@@ -1793,21 +1790,24 @@ class VariableBuilder:
                 is_tensor=True,
             )
 
-        guard_type = GuardBuilder.TENSOR_MATCH
+        if get_static_address_type(value) == "guarded":
+            self.install_guards(GuardBuilder.ID_MATCH)
+        else:
+            guard_type = GuardBuilder.TENSOR_MATCH
 
-        if isinstance(source, GradSource) and is_from_optimizer_source(source):
-            guard_type = GuardBuilder.NOT_NONE_MATCH
+            if isinstance(source, GradSource) and is_from_optimizer_source(source):
+                guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        self.install_guards(
-            functools.partial(
-                guard_type,
-                value=(
-                    value
-                    if isinstance(source, NumpyTensorSource)
-                    else TensorWeakRef(value)
-                ),
+            self.install_guards(
+                functools.partial(
+                    guard_type,
+                    value=(
+                        value
+                        if isinstance(source, NumpyTensorSource)
+                        else TensorWeakRef(value)
+                    ),
+                )
             )
-        )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
