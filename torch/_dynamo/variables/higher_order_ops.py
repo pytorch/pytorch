@@ -2983,7 +2983,9 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 
     # autograd_cache_key is sensitive to the name of the placeholder nodes.
     # So, we first canonicalize it.
-    canonicalized_gmod = canonicalize(gmod, tx.output.nn_modules)
+    canonicalized_gmod = canonicalize(
+        gmod, tx.output.nn_modules
+    )  # TODO: why does it use nn_modules?
     config = get_dummy_aot_autograd_config()
 
     key, _ = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
@@ -3046,11 +3048,19 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._prims_common import clone_preserve_strides
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
+        ]
+
+        # We need to clone so that when we retrace, we don't get the same
+        # unbacked symbols
+        fake_inputs = [
+            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+            for arg in fake_inputs
         ]
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider

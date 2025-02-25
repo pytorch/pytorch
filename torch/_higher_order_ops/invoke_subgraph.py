@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-
+from contextlib import nullcontext
 from typing import Optional, Union
 
 import torch
@@ -10,6 +10,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _from_fun,
     _maybe_reenter_make_fx,
+    _set_compilation_env,
     clone_outputs_aliasing_inputs,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
@@ -21,11 +22,14 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
+    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 invoke_subgraph_counter = 0
@@ -63,9 +67,33 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
-def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
-    # Just a placeholder for Dynamo to replace with invoke_subgraph
-    return subgraph(*args, **kwargs)
+def invoke_subgraph_placeholder(func, *args, **kwargs):
+    if torch.compiler.is_dynamo_compiling():
+        # This is just a placeholder for Dynamo to replace with invoke_subgraph
+        raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
+
+    if torch.compiler.is_compiling():
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_mode,
+        )
+
+        def _invoke_subgraph_placeholder_wrapper(func, args):
+            return invoke_subgraph_placeholder(func, *args)
+
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+
+                return torch.compile(
+                    _invoke_subgraph_placeholder_wrapper,
+                    backend=backend,
+                    fullgraph=True,
+                )(func, args)
+
+    return func(*args, **kwargs)
 
 
 def mark_compile_region(fn=None):
@@ -90,10 +118,12 @@ def mark_compile_region(fn=None):
         return wrap
 
 
-def get_invoke_subgraph_cache():
+def get_invoke_subgraph_cache(proxy_mode=None):
     cache = None
     if tracing_ctx := torch._guards.TracingContext.try_get():
         cache = tracing_ctx.hop_dispatch_set_cache.get_cache(invoke_subgraph)
+    elif proxy_mode:
+        cache = proxy_mode.hop_dispatch_set_cache.get_cache(invoke_subgraph)
     return cache
 
 
@@ -143,10 +173,21 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             # args are functional tensors, generate some example tensors
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
+            from torch._guards import detect_fake_mode
+
+            fake_mode = detect_fake_mode(fw_inputs)
+            context = (
+                nullcontext()
+                if fake_mode is None
+                else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            )
+
             if grad_outputs is None:
                 # Infer grad_outputs to be the same properties as the fw_outputs
-                # if they're not passed in.
-                grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+                # if they're not passed in
+
+                with context:
+                    grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in grad_outputs
@@ -275,7 +316,7 @@ def _(ctx, subgraph, identifier, operands):
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
-    with mode:
+    with mode, mode.shape_env.ignore_fresh_unbacked_symbols():
         return subgraph(*operands)
 
 
@@ -283,12 +324,24 @@ def _(mode, subgraph, identifier, operands):
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     # Check if we have already traced the subgraph.
     graph = None
-    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    invoke_subgraph_cache = get_invoke_subgraph_cache(proxy_mode)
     if invoke_subgraph_cache:
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
 
     if graph is None:
         graph = reenter_make_fx(subgraph)(*operands)
+
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(operands)
+        insert_deferred_runtime_asserts(
+            graph,
+            fake_mode.shape_env,
+            "invoke_subgraph_proxy_torch_dispatch_mode",
+            export=True,
+        )
+        graph.recompile()
+
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
         proxy_mode.tracer.root.register_module(qualname, graph)

@@ -11,6 +11,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -182,13 +183,17 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
-    with disable_proxy_modes_tracing():
-        return make_fx(
+    with fake_mode, disable_proxy_modes_tracing():
+        gm = make_fx(
             fn,
             tracing_mode=tracing_mode,
             pre_dispatch=pre_dispatch,
-            _error_on_data_dependent_ops=False,
+            _error_on_data_dependent_ops=True,
         )(*inputs)
+        insert_deferred_runtime_asserts(
+            gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+        )
+        return gm
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
@@ -594,6 +599,7 @@ def check_input_alias_and_mutation(
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
+
             outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
