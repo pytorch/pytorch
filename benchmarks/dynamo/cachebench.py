@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Callable, TypeAlias
+from typing import Callable
 
 from torch._inductor.utils import fresh_inductor_cache
 
@@ -230,7 +230,7 @@ def parse_cmd_args() -> argparse.Namespace:
     return args
 
 
-Dispatch_fn_t: TypeAlias = Callable[[argparse.Namespace, list[RunResult], str], None]
+Dispatch_fn_t = Callable[[argparse.Namespace, list[RunResult], str], None]
 
 
 def main() -> None:
