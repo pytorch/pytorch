@@ -720,10 +720,10 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     matmul = _find_producer_matmul(input_node)
     if matmul is None:
         return
-    
+
     if rs_res_node in matmul.arg_ancestor_nodes:
         return
-    
+
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
         if "val" in matmul.A_node.meta:
@@ -735,6 +735,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
                 inductor_prims.force_stride_order,
                 args=(matmul.A_node, restrided.stride()),
             )
+
         fused_node = _insert_fused_matmul_reduce_scatter(
             graph,
             matmul,
