@@ -1,6 +1,7 @@
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
 #include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
 
+#if defined(USE_CK_FLASH_ATTENTION)
 namespace pytorch_flash {
 std::tuple<
     at::Tensor, // dQ
@@ -116,3 +117,4 @@ mem_eff_backward_ck(
 }
 
 } // namespace pytorch_flash
+#endif // USE_CK_FLASH_ATTENTION

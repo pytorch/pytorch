@@ -1251,10 +1251,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   if(at::globalContext().getROCmFAPreferredBackend() ==
     at::ROCmFABackend::Ck) {
+
+#if defined(USE_CK_FLASH_ATTENTION)
     std::optional<Tensor> out(res);
     std::optional<Tensor> seqused_k = std::nullopt;
     std::optional<Tensor> alibi_slopes = std::nullopt;
-
     auto
         [out_,
          q,
@@ -1282,6 +1283,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     seqused_k);                           // seqused_k_
 
     logsumexp = lse;
+#else
+    TORCH_CHECK(false, "Attempting to use CK mem_eff_forward backend in a build that has not built CK");
+#endif
   } else { // use aotriton
     auto ret = aotriton::v2::flash::check_gpu(stream);
     if (hipSuccess != ret) {
@@ -1295,11 +1299,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     // compute_logsumexp is false
     constexpr int kAlignLSE = 1;
     res = at::empty({B, M, num_heads, Kv}, query.options());
+    at::Tensor softmax_lse;
     logsumexp = at::empty(
       { B, num_heads, compute_logsumexp ? max_seqlen_q : 0},
       query.options().dtype(at::ScalarType::Float));
     if (compute_logsumexp) {
-    softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
+      softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
     }
     at::Tensor q_t = query.transpose(1, 2);
     at::Tensor k_t = key.transpose(1, 2);

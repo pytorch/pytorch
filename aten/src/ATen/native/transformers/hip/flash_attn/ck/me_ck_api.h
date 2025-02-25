@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 
+#if defined(USE_CK_FLASH_ATTENTION)
 namespace pytorch_flash {
 
 std::tuple<
@@ -63,3 +64,4 @@ mem_eff_backward_ck(
     const at::Tensor philox_offset);
 
 } // namespace pytorch_flash
+#endif // USE_CK_FLASH_ATTENTION
