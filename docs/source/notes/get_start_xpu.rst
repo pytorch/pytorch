@@ -247,7 +247,7 @@ Train with FP32
 Train with AMP
 """"""""""""""
 
-Note: Training with ``GradScaler`` requires hardware support for ``FP64``. If you encounter a FP64 not supported error, it indicates that your hardware does not support FP64.
+Note: Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
 
 .. code-block::
 
