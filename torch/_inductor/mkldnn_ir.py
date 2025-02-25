@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 
