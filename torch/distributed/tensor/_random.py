@@ -68,12 +68,12 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         ``manual_seed`` will throw an error.
         Current implementation only supports a GPU device mesh.
     """
-    device_handle = _get_device_handle(device_mesh.device_type)
-    if not device_handle:
-        raise NotImplementedError(
-            "DTensor randomness only supports cuda/cuda-like device type, "
-            f"but got {device_mesh.device_type}"
+    if not is_rng_supported_mesh(device_mesh):
+        warnings.warn(
+            "DTensor manual_seed() may not have complete support "
+            f"on {device_mesh.device_type} device mesh"
         )
+        return
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
