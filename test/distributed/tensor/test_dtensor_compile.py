@@ -174,7 +174,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",
+    return (view_1,)""",  # noqa: B950
         )
 
     def test_placement_compile(self):

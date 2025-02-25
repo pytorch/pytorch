@@ -428,6 +428,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule:mean" in recorded_dict)
 
     @skipIfNoDynamoSupport
+    @skipIfTorchDynamo()
     def test_effectful_custom_op_with_subclasses(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
             lib.define("zoo(Tensor x) -> Tensor")

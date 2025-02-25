@@ -184,8 +184,8 @@ def _mark_subclass_constructor_exportable_experimental(constructor_subclass):
                 spec_proxy = _register_and_get_spec_proxy_in_tracer(
                     tracer, constructor_spec_name, in_spec
                 )
-                qualname = tracer.get_fresh_qualname(constructor_spec_name)
-                setattr(tracer.root, qualname, in_spec)
+                qualname = tracer.get_fresh_qualname(constructor_spec_name)  # type: ignore[union-attr]
+                setattr(tracer.root, qualname, in_spec)  # type: ignore[union-attr]
                 spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
                 flat_proxy_args = pytree.tree_map_only(
                     torch.Tensor, lambda x: get_proxy_slot(x, tracer).proxy, flat_args
@@ -203,8 +203,8 @@ def _mark_subclass_constructor_exportable_experimental(constructor_subclass):
                     type(subclass).__name__.lower() + "_const_func_spec"
                 )
 
-                qualname = tracer.get_fresh_qualname(fxable_constructor_call_spec_name)
-                setattr(tracer.root, qualname, func_spec)
+                qualname = tracer.get_fresh_qualname(fxable_constructor_call_spec_name)  # type: ignore[union-attr]
+                setattr(tracer.root, qualname, func_spec)  # type: ignore[union-attr]
                 func_spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
 
                 inner_proxy = tracer.create_proxy(

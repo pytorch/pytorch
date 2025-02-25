@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -2444,6 +2445,7 @@ def forward(self, x_1):
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+    @skipIfTorchDynamo()
     def test_wrapper_subclass_reentrant_dispatch_with_mode(self):
         # Tests the interaction between a wrapper subclass using reentrant dispatch
         # and a TorchDispatchMode. See https://github.com/pytorch/pytorch/issues/136565
