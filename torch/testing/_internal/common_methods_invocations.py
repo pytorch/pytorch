@@ -22993,15 +22993,7 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
-        torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        skips=(
-            # Reference result was farther (0.29562714856322714) from the precise
-            # computation than the torch result was (0.20437285143677286)!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.bfloat16,), device_type="cpu"
-            ),
-        ),
+        torch_opinfo_name="nn.functional.hinge_embedding_loss"
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
