@@ -10,6 +10,7 @@
 #pragma once
 
 #include <string>
+#include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -424,10 +425,12 @@ struct ScaledGemmParams : OpParams {
   const void* a_scale_ptr{};
   int64_t lda{};
   ScalarType a_dtype{};
+  ScalarType a_scale_dtype{};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
+  ScalarType b_scale_dtype{};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};
