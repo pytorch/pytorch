@@ -2583,23 +2583,25 @@ def get_safe_global_name(tx, root, obj):
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
-def get_unique_name_wrt(prefix: str, *containers) -> str:
+def is_in(item: Any, *containers) -> bool:
+    for container in containers:
+        if item in container:
+            return True
+    return False
+
+
+def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
     """
     Return a name that starts with `prefix` and is not in any of the
     `containers` (e.g., map, set).
     """
-    name = prefix
-    for i in itertools.count():
-        found = False
-        for container in containers:
-            if name in container:
-                found = True
-                break
+    if not requires_suffix and not is_in(prefix, *containers):
+        return prefix
 
-        if not found:
-            return name
-        # else update and retry
-        name = f"{prefix}_{i}"
+    for i in itertools.count():
+        candidate = f"{prefix}_{i}"
+        if not is_in(candidate, *containers):
+            return candidate
 
     raise AssertionError("unreachable")
 
