@@ -130,10 +130,12 @@ class MetadataMismatchError(RuntimeError):
 
 
 class FakeTensorTLS(threading.local):
-    allow_non_fake_inputs_override: bool
+    # Default to None, otherwise it'll be used to override _all_
+    # `FakeTensorMode.allow_non_fake_inputs` in this thread.
+    allow_non_fake_inputs_override: Optional[bool]
 
     def __init__(self) -> None:
-        self.allow_non_fake_inputs_override = False
+        self.allow_non_fake_inputs_override = None
 
 
 fake_tensor_tls = FakeTensorTLS()
@@ -2479,7 +2481,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                 allow_non_fake_inputs = (
                     self.allow_non_fake_inputs
-                    or fake_tensor_tls.allow_non_fake_inputs_override
+                    if fake_tensor_tls.allow_non_fake_inputs_override is None
+                    else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:

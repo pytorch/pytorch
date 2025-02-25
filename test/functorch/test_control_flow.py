@@ -2909,8 +2909,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     select_copy = torch.select_copy(elem, 0, 0)
     new_carry = l_init_ + select_copy;  new_carry = None
     add_1 = l_init_ + select_copy;  select_copy = add_1 = None
-    scan_combine_fn = self.scan_combine_fn
-    scan = torch.ops.higher_order.scan(scan_combine_fn, [l_init_], [elem], True, []);  scan_combine_fn = l_init_ = elem = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -4296,16 +4296,16 @@ class TestControlFlowTraced(TestCase):
 def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     l_pred_ = L_pred_
     l_x_ = L_x_
-    cond_true = self.cond_true
-    cond_false = self.cond_false
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true, cond_false, [l_x_]);  l_pred_ = cond_true = cond_false = l_x_ = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
     return (result, grad_out)""",  # noqa: B950
         )
 
         self.assertExpectedInline(
-            gm.cond_true.code.strip(),
+            gm.cond_true_0.code.strip(),
             """\
 def forward(self, l_x_):
     l_x__1 = l_x_
@@ -4313,7 +4313,7 @@ def forward(self, l_x_):
     return (sin,)""",  # noqa: B950
         )
         self.assertExpectedInline(
-            gm.cond_false.code.strip(),
+            gm.cond_false_0.code.strip(),
             """\
 def forward(self, l_x_):
     l_x__1 = l_x_
@@ -4329,9 +4329,9 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
     l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
     l_ctx_pred = L_ctx_pred
     l_flat_grads_0_ = L_flat_grads_0_
-    cond_true = self.cond_true
-    cond_false = self.cond_false
-    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true, cond_false, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true = cond_false = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -4424,9 +4424,9 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
     l_pytree_input_0_0_ = L_pytree_input_0_0_
     l_pytree_input_1_x_ = L_pytree_input_1_x_
     l_pytree_input_1_y_ = L_pytree_input_1_y_
-    cond_fn = self.cond_fn
-    body_fn = self.body_fn
-    while_loop = torch.ops.higher_order.while_loop(cond_fn, body_fn, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn = body_fn = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     value = while_loop[2]
@@ -4630,15 +4630,15 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_de
     l_self_buffers_dec_ = L_self_buffers_dec_
     l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
     l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
-    cond_fn = self.cond_fn
-    body_fn = self.body_fn
-    while_loop = torch.ops.higher_order.while_loop(cond_fn, body_fn, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn = body_fn = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1];  while_loop = None
     return (getitem, getitem_1)""",  # noqa: B950
             )
             self.assertExpectedInline(
-                gm.cond_fn.code.strip(),
+                gm.cond_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_ : torch.Tensor, l_x_ : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
     sub = l_iter_ - l_self_buffers_dec__cond_fn;  l_iter_ = l_self_buffers_dec__cond_fn = None
@@ -4646,7 +4646,7 @@ def forward(self, l_iter_ : torch.Tensor, l_x_ : torch.Tensor, l_self_buffers_de
     return gt""",  # noqa: B950
             )
             self.assertExpectedInline(
-                gm.body_fn.code.strip(),
+                gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_ : torch.Tensor, l_x_ : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
     child = l_iter_ - 1;  l_iter_ = None
@@ -4671,7 +4671,7 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     return (getitem, getitem_1)""",  # noqa: B950
             )
             self.assertExpectedInline(
-                gm.cond_fn.code.strip(),
+                gm.cond_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
@@ -4679,7 +4679,7 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
     return gt""",  # noqa: B950
             )
             self.assertExpectedInline(
-                gm.body_fn.code.strip(),
+                gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     child = l_iter_ - 1;  l_iter_ = None
@@ -6658,7 +6658,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         backend = EagerAndRecordGraphs()
         out = torch.compile(Mod(), backend=backend)(inp, tmp)
         self.assertExpectedInline(
-            backend.graphs[0].cond_true.code.strip("\n"),
+            backend.graphs[0].cond_true_0.code.strip("\n"),
             """\
 def forward(self, l_inp_, l_tmp_):
     l_inp__1 = l_inp_
@@ -6708,9 +6708,9 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
     l_b_ = L_b_
     l_self_num = L_self_num
     tensor = torch.tensor([True])
-    cond_true = self.cond_true
-    cond_false = self.cond_false
-    cond = torch.ops.higher_order.cond(tensor, cond_true, cond_false, [l_a_, l_b_, l_self_num, s0]);  tensor = cond_true = cond_false = l_a_ = l_b_ = l_self_num = s0 = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, [l_a_, l_b_, l_self_num, s0]);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -6859,8 +6859,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     r_3 = r_2.matmul(r_1);  r_2 = r_1 = None
     r_4 = r_3.add(l_add_closure_0_cell_contents_1_0_);  r_3 = None
     r_5 = r_4.sum();  r_4 = r_5 = None
-    scan_combine_fn = self.scan_combine_fn
-    scan = torch.ops.higher_order.scan(scan_combine_fn, [l_init_], [r], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6881,8 +6881,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     matmul_1 = matmul @ select_copy;  matmul = select_copy = None
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
     sum_1 = ret.sum();  ret = sum_1 = None
-    scan_combine_fn = self.scan_combine_fn
-    scan = torch.ops.higher_order.scan(scan_combine_fn, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6978,9 +6978,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_x_: "f32[s0, s1]"):
         l_x_ = L_x_
 
-        cond_fn = self.cond_fn
-        body_fn = self.body_fn
-        while_loop = torch.ops.higher_order.while_loop(cond_fn, body_fn, (0, l_x_), (s0, s1));  cond_fn = body_fn = l_x_ = s1 = None
+        cond_fn_0 = self.cond_fn_0
+        body_fn_0 = self.body_fn_0
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (s0, s1));  cond_fn_0 = body_fn_0 = l_x_ = s1 = None
 
         getitem_4: "Sym(u1)" = while_loop[0]
 
@@ -7002,7 +7002,7 @@ class GraphModule(torch.nn.Module):
         ones: "f32[2*u1]" = torch.ones(mul);  mul = None
         return (add, add_1, lt, ones)
 
-    class cond_fn(torch.nn.Module):
+    class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s0, s1]", s0, s1):
             s0_1 = s0
             s1_1 = s1
@@ -7013,7 +7013,7 @@ class GraphModule(torch.nn.Module):
             lt: "Sym(u0 < s0)" = unbacked_symint < getitem;  unbacked_symint = getitem = None
             return lt
 
-    class body_fn(torch.nn.Module):
+    class body_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s0, s1]", s0, s1):
             s0_1 = s0
             s1_1 = s1
@@ -7141,9 +7141,9 @@ class GraphModule(torch.nn.Module):
         item: "Sym(u0)" = to.item();  to = None
         child: "f32[2, 3]" = l_t_.sin()
 
-        cond_fn = self.cond_fn
-        body_fn = self.body_fn
-        while_loop = torch.ops.higher_order.while_loop(cond_fn, body_fn, (2, 3, 1, 1, 1, 3, item, child), ());  cond_fn = body_fn = item = child = None
+        cond_fn_0 = self.cond_fn_0
+        body_fn_0 = self.body_fn_0
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (2, 3, 1, 1, 1, 3, item, child), ());  cond_fn_0 = body_fn_0 = item = child = None
 
         getitem_8: "Sym(u8)" = while_loop[0]
         getitem_9: "Sym(u9)" = while_loop[1]
@@ -7174,7 +7174,7 @@ class GraphModule(torch.nn.Module):
         add_15: "f32[2, 3]" = child_1 + l_t_;  child_1 = l_t_ = None
         return (add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15)
 
-    class cond_fn(torch.nn.Module):
+    class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[2, 3]"):
             mul: "Sym(u3*u4)" = unbacked_symint_1 * unbacked_symint_2;  unbacked_symint_1 = unbacked_symint_2 = None
             mul_1: "Sym(u3*u4*u5)" = mul * unbacked_symint_3;  mul = unbacked_symint_3 = None
@@ -7182,7 +7182,7 @@ class GraphModule(torch.nn.Module):
             lt: "Sym(u3*u4*u5 < u1*u2)" = mul_1 < mul_2;  mul_1 = mul_2 = None
             return lt
 
-    class body_fn(torch.nn.Module):
+    class body_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[2, 3]"):
             add: "Sym(u7 + 1)" = unbacked_symint_5 + 1;  unbacked_symint_5 = None
             child_1: "f32[2, 3]" = child + 1;  child = None
@@ -7279,9 +7279,9 @@ class GraphModule(torch.nn.Module):
 
         child: "f32[s0, s1]" = l_x_.sin();  l_x_ = None
 
-        cond_fn = self.cond_fn
-        body_fn = self.body_fn
-        while_loop = torch.ops.higher_order.while_loop(cond_fn, body_fn, (s0, s1, 2, 2, 3, child), (s0, s1));  cond_fn = body_fn = s0 = s1 = child = None
+        cond_fn_0 = self.cond_fn_0
+        body_fn_0 = self.body_fn_0
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 2, 2, 3, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = child = None
 
         getitem_10: "Sym(u5)" = while_loop[0]
         getitem_11: "Sym(u6)" = while_loop[1]
@@ -7300,7 +7300,7 @@ class GraphModule(torch.nn.Module):
         add_5: "f32[s0, s1]" = getitem_14 + out_x;  getitem_14 = None
         return (getitem_10, getitem_11, add, add_1, add_2, add_3, add_4, add_5, out_x)
 
-    class cond_fn(torch.nn.Module):
+    class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s0, s1]", s0, s1):
             s0_1 = s0
             s1_1 = s1
@@ -7311,7 +7311,7 @@ class GraphModule(torch.nn.Module):
             lt: "Sym(u2*u3*u4 < u0*u1)" = mul_1 < mul_2;  mul_1 = mul_2 = None
             return lt
 
-    class body_fn(torch.nn.Module):
+    class body_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s0, s1]", s0, s1):
             s0_1 = s0
             s1_1 = s1
