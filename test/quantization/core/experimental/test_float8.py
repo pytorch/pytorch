@@ -432,7 +432,7 @@ class TestFloat8Dtype(TestCase):
             torch.float8_e8m0fnu,
         ):
             # error message: https://gist.github.com/vkuzo/f533f9b4db82119f90a88c39ffdbdd56
-            # TODO(TODO issue): implement for e8m0 dtype
+            # TODO(#147873): implement for e8m0 dtype
             # TODO(later): implement for fnuz dtypes
             return unittest.skip(f"not yet implemented for {dtype}")
 
@@ -461,7 +461,7 @@ class TestFloat8Dtype(TestCase):
             torch.float8_e8m0fnu,
         ):
             # error message: https://gist.github.com/vkuzo/cabe066c5be5e0659638f925b04b94f4
-            # TODO(TODO issue): implement for e8m0 dtype
+            # TODO(#147875): implement for e8m0 dtype
             # TODO(later): implement for fnuz dtypes
             return unittest.skip(f"not yet implemented for {dtype}")
 
