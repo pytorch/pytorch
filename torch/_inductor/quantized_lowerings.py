@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Union
 
 import sympy
 
@@ -9,6 +9,7 @@ from torch._inductor.kernel.mm_common import mm_args
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
+from .ir import Buffer, Pointwise
 from .lowering import expand, register_lowering
 from .select_algorithm import (
     autotune_select_algorithm,
@@ -52,7 +53,7 @@ def register_woq_mm_ops() -> None:
         *,
         layout: Any = None,
     ) -> Any:
-        m, n, _, layout, mat1, mat2 = mm_args(
+        m, n, k, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
         assert (
@@ -68,11 +69,22 @@ def register_woq_mm_ops() -> None:
             else []
         )
 
-        def _fuse_scale(m, n) -> bool:
+        def _fuse_weight_scale(
+            m: Union[int, sympy.Expr],
+            n: Union[int, sympy.Expr],
+            k: Union[int, sympy.Expr],
+        ) -> bool:
             # If AVX512_FP16 is available, we'll fuse scale
-            if has_free_symbols((n,)):
+            if has_free_symbols(
+                (
+                    n,
+                    k,
+                )
+            ):
                 return False
-            if n % 32 != 0:
+            if n % 32 != 0 or k % 64 != 0:
+                # These are the current hard-coded register blockings
+                # but we may change them after experimentation
                 return False
             if isinstance(m, sympy.Expr):
                 m = V.graph.sizevars.size_hint(m, fallback=1)
@@ -88,7 +100,7 @@ def register_woq_mm_ops() -> None:
 
         # scale might be applied as an epilogue, and the scale tensor is expanded (with a view op)
         # for broadcasting, as it's 1D.
-        def _mul_epilogue(buf: torch.Tensor) -> Any:
+        def _mul_epilogue(buf: Buffer) -> Pointwise:
             return create_epilogue_with_attr(
                 buf, "mul", other=realize_inputs(expand(scale, layout.size))
             )
@@ -99,7 +111,7 @@ def register_woq_mm_ops() -> None:
                 aten_layout,
                 [mat1, mat2, scale],
                 trans_w=True,
-                epilogue_creator=None if _fuse_scale(m, n) else _mul_epilogue,
+                epilogue_creator=None if _fuse_weight_scale(m, n, k) else _mul_epilogue,
             )
 
         if (

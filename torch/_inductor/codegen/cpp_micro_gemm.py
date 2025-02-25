@@ -157,8 +157,8 @@ inline void {{kernel_name}}(
             if scales is not None:
                 kwargs_for_extra_args = {"kernel": kernel, "scales": scales}
             extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
-            for arg in extra_args:
-                res.writeline(arg)
+            if extra_args:
+                res.writeline(extra_args)
             res.writeline(f"{A_ptr},")
             res.writeline(f"{B_ptr},")
             res.writeline(f"{C_ptr},")
@@ -496,13 +496,18 @@ inline void {{kernel_name}}_kernel(
 
 
 def check_fp16_extra(config, m, n, k, alpha, num_threads):
-    return torch._C._cpu._is_avx512_fp16_supported() and m <= 4 and (n % 32 == 0)
+    return (
+        torch._C._cpu._is_avx512_fp16_supported()
+        and m <= 4
+        and (n % 32 == 0)
+        and (k % 64 == 0)
+    )
 
 
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
-        [(4, 32, 1)],
+        [(4, 32, 64)],
         input_dtype=torch.float16,
         input2_dtype=torch.int8,
         output_dtype=torch.float16,
@@ -633,14 +638,12 @@ inline void {{kernel_name}}_kernel(
     def get_kernel_extra_args_declare(self) -> str:
         return "const half* __restrict__ S,"
 
-    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+    def get_kernel_extra_args(self, **kwargs) -> str:
         assert "kernel" in kwargs
         assert "scales" in kwargs
         scales = kwargs["scales"]
         kernel = kwargs["kernel"]
-        return [
-            f"&({kernel.index(scales, [0])}),",
-        ]
+        return f"&({kernel.index(scales, [0])}),"
 
 
 # extra check for CppMicroGemmAMX
@@ -1069,8 +1072,14 @@ def create_micro_gemm(
         and input_dtype == torch.float16
         and input2_dtype == torch.int8
         and torch._C._cpu._is_avx512_fp16_supported()
-        and not has_free_symbols((n,))
+        and not has_free_symbols(
+            (
+                n,
+                k,
+            )
+        )
         and n % 32 == 0
+        and k % 64 == 0
     ):
         # We compute this GEMM with FP16 compute & accumulation
         output_dtype = torch.float16

@@ -1368,17 +1368,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @dtypes(torch.float16)
+    @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size",
-        (1,),
+        (1, 4),
     )
-    @parametrize("in_features", (4096,))
-    @parametrize("out_features", (4096,))
-    @unittest.skipIf(
-        not torch.cpu._is_avx512_fp16_supported(), "Requires AVX512_FP16 support"
-    )
+    @parametrize("in_features", (32, 64))
+    @parametrize("out_features", (64, 257, 4096))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
+        if dtype == torch.float16:
+            unittest.skipIf(
+                not torch.cpu._is_avx512_fp16_supported(),
+                "Requires AVX512_FP16 support",
+            )
         # x will be reshaped from 3d to 2d
         second_dim_size = 1
 
@@ -1417,7 +1419,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         w = torch.rand((out_features, in_features), dtype=dtype)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
-        self.common(mod, (x, w_scales))
+        self.common(
+            mod,
+            (x, w_scales),
+            atol=1e-2 if dtype in [torch.bfloat16, torch.float16] else None,
+            rtol=1e-2 if dtype in [torch.bfloat16, torch.float16] else None,
+        )
         # , atol=1e-2 if small_batch_size else None, rtol=1e-2 if small_batch_size else None)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if batch_size > 4:
@@ -1500,8 +1507,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.common(
             mod,
             (a,),
-            atol=1e-2 if dtype is torch.bfloat16 else None,
-            rtol=1e-2 if dtype is torch.bfloat16 else None,
+            atol=1e-2 if dtype in [torch.bfloat16, torch.float16] else None,
+            rtol=1e-2 if dtype in [torch.bfloat16, torch.float16] else None,
         )
 
         vec_amx = VecAMX()
