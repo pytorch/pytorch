@@ -649,7 +649,6 @@ if(MSVC)
 
   string(APPEND CMAKE_CXX_FLAGS " /FS")
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
-
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
