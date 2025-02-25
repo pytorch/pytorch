@@ -3,16 +3,30 @@
 ## Install prerequisites.
 
 ```
-Install Docker 
+$ sudo dnf install podman podman-docker jq
 ```
-## Clone pytorch repository
-
 ## Add services.
 
 ```
 $ sudo cp self-hosted-builder/*.service /etc/systemd/system/
 $ sudo systemctl daemon-reload
 ```
+
+## Rebuild the image
+
+First build ppc64le builder image `docker.io/pytorch/ubippc64le-builder`,
+using following commands:
+
+```
+$ cd ~
+$ git clone https://github.com/pytorch/pytorch
+$ cd pytorch
+$ git submodule update --init --recursive
+$ GPU_ARCH_TYPE=cpu-ppc64le "$(pwd)/.ci/docker/manywheel/build.sh" ubippc64le-builder
+$ docker image tag localhost/pytorch/ubippc64le-builder docker.io/pytorch/ubippc64le-builder:cpu-ppc64le
+$ docker image save -o ~/ubi-ppc64le.tar docker.io/pytorch/ubippc64le-builder:cpu-ppc64le
+```
+
 Next step is to build `actions-runner` image using:
 
 ```
@@ -36,8 +50,7 @@ $ sudo /bin/cp <github_app_private_key_file> /etc/actions-runner/<name>/key_priv
 $ sudo echo <github_app_id> | sudo tee /etc/actions-runner/<name>/appid.env
 $ sudo echo <github_app_install_id> | sudo tee /etc/actions-runner/<name>/installid.env
 $ sudo echo NAME=<worker_name> | sudo tee    /etc/actions-runner/<name>/env
-$ sudo echo OWNER=<github_owner>   | sudo tee -a /etc/actions-runner/<name>/env
-$ sudo echo REPO=pytorch   | sudo tee -a /etc/actions-runner/<name>/env
+$ sudo echo ORG=<github_org>   | sudo tee -a /etc/actions-runner/<name>/env
 $ cd self-hosted-builder
 $ sudo /bin/cp helpers/*.sh /usr/local/bin/
 $ sudo chmod 755 /usr/local/bin/app_token.sh /usr/local/bin/gh_token_generator.sh

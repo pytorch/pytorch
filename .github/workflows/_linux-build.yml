@@ -109,7 +109,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -119,17 +119,16 @@ jobs:
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         with:
           no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9' }}
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
@@ -138,13 +137,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -154,26 +153,24 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Parse ref
         id: parse-ref
-        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         run: .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
-        if: always() && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
-        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -184,14 +181,14 @@ jobs:
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: ${{ inputs.s3-bucket }}
 
       - name: Build
-        if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && (inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9')
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -278,16 +275,6 @@ jobs:
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
-      - name: Execute Build and Tests inside ppc64le Docker Container
-        if: inputs.build-environment == 'linux-ppc64le-binary-manywheel-ubi9'
-        run: |
-            CONTAINER_NAME="temp_builder_${RUN_ID}"
-            docker run -d --name "$CONTAINER_NAME" pytorch-ppc64le:ubi9.3 /ppc64le-build.sh
-            docker wait "$CONTAINER_NAME"
-            docker logs "$CONTAINER_NAME"
-            docker cp "$CONTAINER_NAME":/workspace/pytorch/dist/. dist/
-            docker rm "$CONTAINER_NAME"
-
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
@@ -295,7 +282,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -305,7 +292,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3 for split build
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
@@ -331,27 +318,8 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - name: Archive ppc64le artifacts into zip
-        if: inputs.build-environment == 'linux-ppc64le-binary-manywheel-ubi9'
-        run: |
-          zip -1 -r artifacts.zip dist/
-      
-  
-      - name: Store PyTorch Build Artifacts for ppc64le
-        uses: actions/upload-artifact@v4
-        if: inputs.build-environment == 'linux-ppc64le-binary-manywheel-ubi9'
-        with:
-          name: ${{ inputs.build-environment }}-ubi9
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
-      - name: Cleanup dangling Docker images for ppc64le
-        if: always() && inputs.build-environment == 'linux-ppc64le-binary-manywheel-ubi9'
-        run: docker image prune -f
-
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/upload-sccache-stats
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -359,7 +327,7 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && (inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9')
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: Cleanup docker
         if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'

@@ -11,27 +11,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-ppc64le-docker-image-build:
-    name: Build docker image for ppc64le
-    runs-on: linux.ppc64le 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          submodules: true
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Build Docker image for ppc64le
-        run: |
-          docker build -f .ci/docker/manywheel/Dockerfile_ppc64le -t pytorch-ppc64le:ubi9.3 .
+  ppc64le-UBI-9-Build-and-Test:
+    name: ppc64le-UBI-9-Build-and-Test
+    runs-on: linux.ppc64le
+    env:
+      IMAGE_NAME: docker.io/pytorch/ubippc64le-builder:cpu-ppc64le-main  # Define the image variable
 
-  ppc64le-UBI-9-3-Build-and-Test:
-    name: ppc64le-UBI-9-3-Build-and-Test
-    uses: ./.github/workflows/_linux-build.yml
-    needs: linux-ppc64le-docker-image-build
-    with:
-      build-environment: linux-ppc64le-binary-manywheel-ubi9
-      docker-image-name: pytorch-ppc64le:ubi9.3
-      runner: linux.ppc64le 
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Execute Build and Tests inside ppc64le Docker Container
+        run: |
+          docker run --rm -v ${GITHUB_WORKSPACE}:/workspace/pytorch $IMAGE_NAME /workspace/pytorch/.github/scripts/ppc64le-build.sh
+      
+      - name: Archive ppc64le artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip dist/
+      
+      - name: Store PyTorch Build Artifacts for ppc64le
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ppc64le-binary-ubi9
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
+      - name: Cleanup docker
+        if: always()
+        shell: bash
+        run: |
+          # Stop and remove all containers
+          docker ps -q | xargs -r docker stop
+          docker ps -aq | xargs -r docker rm 
       

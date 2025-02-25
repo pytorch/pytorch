@@ -2,37 +2,14 @@
 
 set -e -u
 
-trap cleanup EXIT
+# first import docker image
+if [ -f ./pytorch-ubi-ppc64le.tar ] ; then
+        docker image load --input pytorch-ubi-ppc64le.tar
+        docker image tag docker.io/pytorch/ubippc64le-builder:cpu-ppc64le docker.io/pytorch/ubippc64le-builder:cpu-ppc64le-main
+        rm -f ubi-ppc64le.tar
+fi
 
 token_file=registration-token.json
-
-# Function to clean up and unregister the runner
-cleanup() {
-    echo "Cleaning up temporary files..."
-    [ -f "$token_file" ] && rm -f "$token_file"
-    [ -f "runner-id.json" ] && rm -f "runner-id.json"
-
-    echo "Unregistering the runner from GitHub..."
-    ACCESS_TOKEN="$(cat /run/runner_secret)"
-    runner_id=$(curl -s \
-        -H "Accept: application/vnd.github.v3+json" \
-        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-        "https://api.github.com/repos/${OWNER}/${REPO}/actions/runners" | \
-        jq --raw-output '.runners[] | select(.name=="'"${NAME}"'") | .id')
-
-    if [ -n "$runner_id" ]; then
-        curl -s \
-            -X DELETE \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-            "https://api.github.com/repos/${OWNER}/${REPO}/actions/runners/$runner_id"
-        echo "Runner unregistered successfully."
-    else
-        echo "Warning: Runner ID for ${NAME} not found. It may already be removed."
-    fi
-
-    unset ACCESS_TOKEN runner_id
-}
 
 # Fetch GitHub access token
 if [ ! -f /run/runner_secret ]; then
@@ -48,10 +25,13 @@ curl \
         -X POST \
         -H "Accept: application/vnd.github.v3+json" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-        "https://api.github.com/repos/${OWNER}/${REPO}/actions/runners/registration-token" \
+        "https://api.github.com/orgs/${ORG}/actions/runners/registration-token" \
         -o "$token_file"
  
 unset ACCESS_TOKEN
+
+sudo umount /run/runner_secret
+sudo rm -f /run/runner_secret
 
 # register runner as ephemeral runner
 # it does one job, stops and unregisters
@@ -60,7 +40,7 @@ registration_token=$(jq --raw-output .token "$token_file")
 ./config.sh \
         --unattended \
         --ephemeral \
-        --url "https://github.com/${OWNER}/${REPO}" \
+        --url "https://github.com/${ORG}" \
         --token "${registration_token}" \
         --name "${NAME}" \
         --no-default-labels \
