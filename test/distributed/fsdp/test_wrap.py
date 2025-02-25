@@ -400,15 +400,14 @@ class TestFSDPWrap(FSDPTest):
         class ZeroArguModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.a = torch.nn.Parameter(torch.tensor([1.0]))
+                self.a = torch.tensor([1.0])
 
             def forward(self):
                 return self.a
 
         device = torch.device("cuda")
-        model = ZeroArguModel().to(device)
-        model = FSDP(model)
-        model()
+        model = FSDP(ZeroArguModel(), device_id=device)
+        self.assertEqual(model(), torch.tensor([1.0]))
 
 
 class TestAutoWrap(TestCase):
