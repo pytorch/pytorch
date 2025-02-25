@@ -160,24 +160,24 @@ def allow_in_graph(fn):
     return fn
 
 
-def mark_traceable(traceable_fn):
+def nonstrict_trace(traceable_fn):
     """
     Like `allow_in_graph`, but with the following enhancements/differences:
 
     1. Supports user-defined class as inputs, as long as the class has been
        registered with pytree.
-    2. In the resulting Dynamo graph, the call to a `mark_traceable`-ed function
+    2. In the resulting Dynamo graph, the call to a `nonstrict_trace`-ed function
        will be represented as a call to `torch._higher_order_ops.flat_apply`,
-       which takes in the `mark_traceable`-ed function and pytree-flattened
+       which takes in the `nonstrict_trace`-ed function and pytree-flattened
        inputs.
     3. Only the returned function is traceable, and the original function will
-       not be. Moreover, `mark_traceable` can be used inside a `torch.compile`
+       not be. Moreover, `nonstrict_trace` can be used inside a `torch.compile`
        region.
 
     NOTE: like `allow_in_graph`, aliasing information is neither preserved
     between inputs themselves, nor between inputs and outputs.
     """
-    assert callable(traceable_fn), "mark_traceable expects a callable"
+    assert callable(traceable_fn), "nonstrict_trace expects a callable"
 
     @functools.wraps(traceable_fn)
     def wrapped(*args, **kwargs):
@@ -187,7 +187,7 @@ def mark_traceable(traceable_fn):
     trace_rules._allowed_callable_ids.add(id(wrapped))
 
     # This line allows us to diverge the impl from `allow_in_graph`.
-    trace_rules._mark_traceable_callable_ids.add(id(wrapped))
+    trace_rules._nonstrict_trace_callable_ids.add(id(wrapped))
 
     return wrapped
 
@@ -208,7 +208,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
         trace_rules._allowed_callable_ids.remove(id(fn))
-        trace_rules._mark_traceable_callable_ids.remove(id(fn))
+        trace_rules._nonstrict_trace_callable_ids.remove(id(fn))
         trace_rules._disallowed_callable_ids.add(id(fn))
         return fn
 

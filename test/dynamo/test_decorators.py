@@ -211,8 +211,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def fn1(x):
                 return x.cos()
 
-    def test_mark_traceable_tensor_args(self):
-        @torch._dynamo.mark_traceable
+    def test_nonstrict_trace_tensor_args(self):
+        @torch._dynamo.nonstrict_trace
         def trace_me(x, y, z):
             torch._dynamo.graph_break()
             return x * y + z
@@ -230,8 +230,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_pre_existing_dict(self):
-        @torch._dynamo.mark_traceable
+    def test_nonstrict_trace_pre_existing_dict(self):
+        @torch._dynamo.nonstrict_trace
         def trace_me(x, d):
             torch._dynamo.graph_break()
             return x * d["a"]
@@ -248,8 +248,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_newly_constructed_dict_with_side_effects(self):
-        @torch._dynamo.mark_traceable
+    def test_nonstrict_trace_newly_constructed_dict_with_side_effects(self):
+        @torch._dynamo.nonstrict_trace
         def trace_me(x, d):
             torch._dynamo.graph_break()
             return x * d["a"]
@@ -267,8 +267,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_pre_existing_dict_with_side_effects(self):
-        @torch._dynamo.mark_traceable
+    def test_nonstrict_trace_pre_existing_dict_with_side_effects(self):
+        @torch._dynamo.nonstrict_trace
         def trace_me(x, d):
             torch._dynamo.graph_break()
             return x * d["a"]
@@ -288,7 +288,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d0, d1)
 
-    def test_mark_traceable_pre_existing_custom_class(self):
+    def test_nonstrict_trace_pre_existing_custom_class(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -303,7 +303,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             lambda xy, _: Point(xy[0], xy[1]),
         )
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_me(p):
             torch._dynamo.graph_break()
             return p.x * p.y
@@ -319,7 +319,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(p)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_pre_existing_custom_class_with_side_effects(self):
+    def test_nonstrict_trace_pre_existing_custom_class_with_side_effects(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -334,7 +334,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             lambda xy, _: Point(xy[0], xy[1]),
         )
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_me(p):
             torch._dynamo.graph_break()
             return p.x * p.y
@@ -355,7 +355,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(p1.x, p2.x)
         self.assertEqual(p1.y, p2.y)
 
-    def test_mark_traceable_newly_constructed_custom_class_with_side_effects(self):
+    def test_nonstrict_trace_newly_constructed_custom_class_with_side_effects(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -370,7 +370,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             lambda xy, _: Point(xy[0], xy[1]),
         )
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_me(p):
             torch._dynamo.graph_break()
             return p.x * p.y
@@ -389,7 +389,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_nested_custom_class(self):
+    def test_nonstrict_trace_nested_custom_class(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -422,7 +422,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.graph_break()
             return p.x * p.y
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_point_tensor(pt):
             torch._dynamo.graph_break()
             return pt.t + trace_point(pt.p)
@@ -441,8 +441,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_tuple_and_sym_int_output(self):
-        @torch._dynamo.mark_traceable
+    def test_nonstrict_trace_tuple_and_sym_int_output(self):
+        @torch._dynamo.nonstrict_trace
         def trace_me(x):
             torch._dynamo.graph_break()
             return x + 1, x.size(0)
@@ -458,13 +458,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_inside_compiled_function(self):
+    def test_nonstrict_trace_inside_compiled_function(self):
         def trace_me(x):
             torch._dynamo.graph_break()
             return x + 42
 
         def fn(x):
-            res = torch._dynamo.mark_traceable(trace_me)(x)
+            res = torch._dynamo.nonstrict_trace(trace_me)(x)
             return res + 1
 
         x = torch.randn(10)
@@ -474,12 +474,28 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_on_method(self):
+    def test_nonstrict_trace_inside_compiled_function_kwarg(self):
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 42
+
+        def fn(x):
+            res = torch._dynamo.nonstrict_trace(traceable_fn=trace_me)(x)
+            return res + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_on_method(self):
         class Num:
             def __init__(self, n):
                 self.n = n
 
-            @torch._dynamo.mark_traceable
+            @torch._dynamo.nonstrict_trace
             def trace_me(self, t):
                 torch._dynamo.graph_break()
                 return t + self.n
@@ -501,13 +517,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, n)
         self.assertEqual(ref, res)
 
-    def test_mark_traceable_no_action_at_a_distance(self):
+    def test_nonstrict_trace_no_action_at_a_distance(self):
         def trace_me(x):
             torch._dynamo.graph_break()
             return x + 42
 
         # No effect on traceability of `trace_me`
-        torch._dynamo.mark_traceable(trace_me)
+        torch._dynamo.nonstrict_trace(trace_me)
 
         def fn(x):
             res = trace_me(x)
@@ -523,14 +539,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # There should be 1 graph break
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_mark_traceable_inside_compiled_function_error(self):
+    def test_nonstrict_trace_inside_compiled_function_error(self):
         @torch.compile(fullgraph=True, backend="aot_eager")
         def fn(x, y):
             def trace_me(x, y):
                 torch._dynamo.graph_break()
                 return x * y
 
-            res = torch._dynamo.mark_traceable(trace_me)(x, y)
+            res = torch._dynamo.nonstrict_trace(trace_me)(x, y)
             return res + 1
 
         try:
@@ -538,11 +554,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-`mark_traceable` currently requires the target function to be defined outside `torch.compile` region.
+Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
-    def test_mark_traceable_custom_class_error(self):
+    def test_nonstrict_trace_custom_class_error(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -551,7 +567,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_me(p):
             torch._dynamo.graph_break()
             return p.x * p.y
@@ -567,12 +583,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <DecoratorTests.test_mark_traceable_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
-    def test_mark_traceable_nested_custom_class_error(self):
+    def test_nonstrict_trace_nested_custom_class_error(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -599,7 +616,7 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
             torch._dynamo.graph_break()
             return p.x * p.y
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_point_tensor(pt):
             torch._dynamo.graph_break()
             return pt.t + trace_point(pt.p)
@@ -617,12 +634,13 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <DecoratorTests.test_mark_traceable_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
-    def test_mark_traceable_pytree_register_constant_error(self):
+    def test_nonstrict_trace_pytree_register_constant_error(self):
         class Point:
             x: int
             y: int
@@ -633,7 +651,7 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
 
         torch.utils._pytree.register_constant(Point)
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_me(x, p):
             torch._dynamo.graph_break()
             return x * p.x + p.y
@@ -649,7 +667,7 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-This error is most likely due to a call to `mark_traceable`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 

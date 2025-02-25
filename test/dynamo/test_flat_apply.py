@@ -84,7 +84,7 @@ class FlatApplyTests(torch._dynamo.test_case.TestCase):
         result = flat_apply(func_spec, in_spec, *flat_args)
         self.assertEqual(result, f(*args, **kwargs))
 
-    def test_mark_traceable_dynamo_graph(self):
+    def test_nonstrict_trace_dynamo_graph(self):
         class Point:
             x: torch.Tensor
             y: torch.Tensor
@@ -117,7 +117,7 @@ class FlatApplyTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.graph_break()
             return p.x * p.y
 
-        @torch._dynamo.mark_traceable
+        @torch._dynamo.nonstrict_trace
         def trace_point_tensor(pt):
             torch._dynamo.graph_break()
             return pt.t + trace_point(pt.p)
@@ -143,9 +143,9 @@ class GraphModule(torch.nn.Module):
 
         t: "f32[10]" = l_x_ + l_y_
 
-        trace_point_tensor = self.trace_point_tensor
-        trace_point_tensor_input_spec = self.trace_point_tensor_input_spec
-        res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
+        trace_point_tensor_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_spec
+        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
+        res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         return (res,)
 """,  # NOQA: B950
         )
