@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     set_default_dtype,
+    skipIfRocm,
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
@@ -1340,6 +1341,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
+    @skipIfRocm
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):

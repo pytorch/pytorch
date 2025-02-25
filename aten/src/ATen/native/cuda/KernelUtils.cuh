@@ -7,6 +7,7 @@
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
 #if defined(USE_ROCM) && ROCM_VERSION >= 60201
+#include <device_functions.h>
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 
@@ -221,6 +222,95 @@ __device__ __forceinline__ void fastAtomicAdd(
     gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
+
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+template <class scalar_t, class index_t>
+__device__ __forceinline__ void opportunistic_fastAtomicAdd(
+    scalar_t* self_ptr,
+    index_t index,
+    const index_t numel,
+    scalar_t value) {
+
+    scalar_t* dst = self_ptr + index;
+    //Try to pack coalseced bf16 and fp16
+    if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
+    {
+        typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+        union ill { unsigned int i[2]; int64_t il; } iil_ = { .il = (int64_t)dst }; ill ill_oneUpDst;
+        int oneUpDst = __builtin_amdgcn_mov_dpp(index, 0x130, 0xf, 0xf, 0);
+        int oneDnDst = __builtin_amdgcn_mov_dpp(index, 0x138, 0xf, 0xf, 0);
+        union bfi { __hip_bfloat16 bf; short s; } bfi_ = { .bf = (__hip_bfloat16)value }; bfi bfi_oneUpVal;
+        bfi_oneUpVal.s = __builtin_amdgcn_mov_dpp(bfi_.s, 0x130, 0xf, 0xf, 0);
+        auto oneUpVal = bfi_oneUpVal.bf;
+        if (oneUpDst - (int64_t)dst == 1) {
+          union bfvs { __hip_bfloat16 bf[2]; vec_short2 vs2; } bfvs_;
+          bfvs_.bf[0] = (__hip_bfloat16)value;
+          bfvs_.bf[1] = (__hip_bfloat16)oneUpVal;
+          __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)dst, bfvs_.vs2);
+          return;
+        } else if ((int64_t)dst - oneDnDst == 1) {
+          return;
+        }
+    }
+    // not coalsced, so now let try to capture lane-matches...
+
+    auto mask = __match_any_sync(__activemask(), (int64_t)dst);
+    int leader = __ffsll(mask) - 1;    // select a leader
+    scalar_t crnt_val = (scalar_t)0;
+    auto crnt_msk = mask >> (leader);
+    int crnt_idx = leader;
+    if constexpr(sizeof(scalar_t) <= sizeof(int)) {
+     union punner { int l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long)) {
+     union punner { long l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long long)) {
+     union punner { long long l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else {
+     union punner { long long l[2]; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l[0] = __shfl(pnr.l[0] ,crnt_idx) };
+	    add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+
+
+    if (__lane_id() == leader) {  // only leader-lane does the update
+      fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
+    }
+}
+#endif
 
 #undef ATOMICADD
 #undef NATIVE_ZERO_BF16
