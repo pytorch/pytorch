@@ -80,6 +80,7 @@ from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
+    register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
@@ -9694,6 +9695,27 @@ graph():
                 r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm
             )
         )
+
+    @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
+    @testing.expectedFailureSerDer  # register_constant needs to handle serialization
+    def test_register_constant(self):
+        @dataclass
+        class MyInput:
+            int_1: int
+            int_2: int
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, f):
+                return x + f.int_1 + f.int_2
+
+        register_constant(MyInput)
+        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
 
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
