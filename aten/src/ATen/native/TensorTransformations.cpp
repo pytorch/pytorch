@@ -34,6 +34,11 @@
 namespace at::native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
+  TORCH_CHECK(
+      self.scalar_type() != at::kQUInt4x2 &&
+          self.scalar_type() != at::kQUInt2x4,
+      "flip is not supported for tensor with data type ",
+      self.scalar_type());
   const int64_t total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
