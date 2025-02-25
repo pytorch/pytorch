@@ -156,13 +156,25 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 def forward(self, b_buffer, x):
     to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float32, layout = torch.strided, device = device(type='cuda'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
-    dtensor___init__0 = self.dtensor___init__0
+    dtensor___init__0 = self.dtensor___init__0;  dtensor___init__0 = None
+    dtensor___init__1 = self.dtensor___init__1
     dtensor_const_func_spec0 = self.dtensor_const_func_spec0
-    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__1, view_as, False);  dtensor_const_func_spec0 = dtensor___init__1 = view_as = None
     add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
     access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
     view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
     return (view_as_1,)""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            str(ep.run_decompositions({}).graph_module.code).strip(),
+            """\
+def forward(self, b_parametrizations_buffer_original0, x):
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float32, layout = torch.strided, device = device(type='cuda'));  x = None
+    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    return (view_1,)""",
         )
 
     def test_placement_compile(self):
