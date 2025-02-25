@@ -1061,12 +1061,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
         if config.graph_partition:
-            if hasattr(self, "all_partition_names"):
-                all_partition_name_list = ", ".join(self.all_partition_names) + (
-                    "," if len(self.all_partition_names) == 1 else ""
-                )
-            else:
-                all_partition_name_list = ""
+            all_partition_name_list = ", ".join(self.all_partition_names) + (
+                "," if len(self.all_partition_names) == 1 else ""
+            )
 
             result.splice(
                 f"""
@@ -2745,9 +2742,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
-
-        if partition_signatures is not None:
-            self.partition_signatures = partition_signatures
+        self.partition_signatures = partition_signatures
 
         super().__init__()
 
@@ -2790,21 +2785,21 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def get_graph_inputs(
         self,
     ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
-        if signature := getattr(self, "partition_signatures", None):
+        if signature := self.partition_signatures:
             inputs = signature.input_nodes
         else:
             inputs = V.graph.graph_inputs
         return inputs
 
     def get_graph_input_names(self) -> list[str]:
-        if signature := getattr(self, "partition_signatures", None):
+        if signature := self.partition_signatures:
             names = list(signature.input_nodes.keys())
         else:
             names = V.graph.graph_input_names
         return names
 
     def get_graph_outputs(self) -> list[IRNode]:
-        if signature := getattr(self, "partition_signatures", None):
+        if signature := self.partition_signatures:
             outputs = signature.output_nodes
         else:
             outputs = V.graph.graph_outputs
@@ -2812,9 +2807,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
-        if (
-            signature := getattr(self, "partition_signatures", None)
-        ) and name in signature.input_nodes:
+        if (signature := self.partition_signatures) and name in signature.input_nodes:
             # skip allocation if buffer is a subgraph input.
             # This allows reusing an input buffer in graph partition,
             # although this is not allowed in general.
