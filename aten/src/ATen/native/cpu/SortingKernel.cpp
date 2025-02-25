@@ -89,8 +89,6 @@ struct KeyValueCompDesc {
   }
 };
 
-#ifdef USE_FBGEMM
-
 template <typename T>
 struct UnsignedType{};
 
@@ -106,6 +104,7 @@ TO_TYPE(uint32_t, int32_t)
 TO_TYPE(uint64_t, int64_t)
 TO_TYPE(int64_t, int64_t)
 
+#ifdef USE_FBGEMM
 static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
   // radix_sort can be used only for 1D data
   if (values.dim() != 1) return false;
