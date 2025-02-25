@@ -599,12 +599,12 @@ class GraphModule(torch.nn.Module):
         l_weird_c = L_weird_c
 
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
-        fwd_body_0 = self.fwd_body_0
-        bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        fwd_body = self.fwd_body
+        bwd_body = self.bwd_body
+        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body, bwd_body, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], non_differentiable_idx = []);  fwd_body = bwd_body = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
-    class fwd_body_0(torch.nn.Module):
+    class fwd_body(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
@@ -615,7 +615,7 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return (mul_1, [l_weird_b, l_weird_c])
 
-    class bwd_body_0(torch.nn.Module):
+    class bwd_body(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
@@ -1306,14 +1306,14 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
-        fwd_body_0 = self.fwd_body_0
-        bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        fwd_body = self.fwd_body
+        bwd_body = self.bwd_body
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body, bwd_body, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1]);  fwd_body = bwd_body = l_x_ = l_y_ = None
         getitem: "f32[]" = autograd_function_apply[0]
         getitem_1: "f32[]" = autograd_function_apply[1];  autograd_function_apply = None
         return (getitem, getitem_1)
 
-    class fwd_body_0(torch.nn.Module):
+    class fwd_body(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", y: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
@@ -1324,7 +1324,7 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return ((out1, out2), [])
 
-    class bwd_body_0(torch.nn.Module):
+    class bwd_body(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, grad1: "f32[]", grad2: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 

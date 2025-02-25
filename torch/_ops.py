@@ -834,7 +834,9 @@ class OpOverload(OperatorBase):
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):
-                        with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                        with (
+                            torch.utils._python_dispatch._pop_mode_temporarily() as mode
+                        ):
                             return torch._library.utils.handle_dispatch_mode(
                                 mode, self, *args, **kwargs
                             )

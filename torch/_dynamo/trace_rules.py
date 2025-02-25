@@ -306,7 +306,7 @@ manual_torch_name_rule_map: Dict[str, Any] = {
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
-    "torch._dynamo.mark_traceable": UserFunctionVariable,
+    "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -2998,7 +2998,7 @@ def _disallowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
-def _mark_traceable_callable_ids() -> dict[int, str]:
+def _nonstrict_trace_callable_ids() -> dict[int, str]:
     rv: dict[int, str] = {}
     return rv
 
@@ -3108,9 +3108,9 @@ def is_callable_allowed(obj) -> bool:
     return id(obj) in _allowed_callable_ids
 
 
-def is_mark_traceable_callable(obj) -> bool:
+def is_nonstrict_trace_callable(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _mark_traceable_callable_ids
+    return id(obj) in _nonstrict_trace_callable_ids
 
 
 def is_callable_disallowed(obj) -> bool:
