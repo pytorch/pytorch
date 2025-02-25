@@ -458,7 +458,8 @@ class SerializationMixin:
             def __reduce_ex__(self, proto):
                 indices = self.tensor._indices().clone()
                 indices[0][0] = 3
-                return (torch.sparse.FloatTensor, (indices, self.tensor._values(), x.size()))
+                print(f"{indices=}, f{self.tensor._values()=}, {self.tensor.size()}")
+                return (torch.sparse.FloatTensor, (indices, self.tensor._values(), self.tensor.size()))
 
         with tempfile.NamedTemporaryFile() as f:
             sd = {"spoofed_legacy_ctor": LegacyCtorSerializationSpoofer(x_legacy_ctor)}
