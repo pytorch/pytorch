@@ -511,8 +511,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             )
 
 # Specify Visual Studio C runtime library for hipcc
-def _set_hipcc_runtime_lib(is_standalone):
-    debug = os.getenv("DEBUG")
+def _set_hipcc_runtime_lib(is_standalone, debug):
     if is_standalone:
         if debug:
             COMMON_HIP_FLAGS.append('-fms-runtime-lib=static_dbg')
@@ -929,7 +928,8 @@ class BuildExtension(build_ext):
                                    debug=0,
                                    extra_preargs=None,
                                    extra_postargs=None,
-                                   depends=None):
+                                   depends=None,
+                                   is_standalone=False):
             if not self.compiler.initialized:
                 self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
@@ -957,6 +957,7 @@ class BuildExtension(build_ext):
                 cflags.extend(self.compiler.compile_options)
             cflags = cflags + common_cflags + pp_opts + COMMON_MSVC_FLAGS
             if IS_HIP_EXTENSION:
+                _set_hipcc_runtime_lib(is_standalone, debug)
                 common_cflags.extend(COMMON_HIP_FLAGS)
             else:
                 common_cflags.extend(COMMON_MSVC_FLAGS) 
@@ -2611,7 +2612,7 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         cflags = common_cflags + ['/std:c++17'] + extra_cflags
-        clfags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
+        cflags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
@@ -2670,7 +2671,6 @@ def _write_ninja_file_to_build_library(path,
 
     objects = [object_file_path(src) for src in sources]
     ldflags = ([] if is_standalone else [SHARED_FLAG]) + extra_ldflags
-    _set_hipcc_runtime_lib(is_standalone)
 
     # The darwin linker needs explicit consent to ignore unresolved symbols.
     if IS_MACOS:
