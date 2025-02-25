@@ -2944,9 +2944,6 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
-    def python_type(self):
-        return type(self.value)
-
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2962,7 +2959,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
         ) = self.create_wrapped_node(
-            tx, args[0], args[1:], {}, self.value._name, subgraph_name="subgraph"
+            tx, args[0], args[1].items, {}, self.value._name, subgraph_name="subgraph"
         )
         assert len(p_kwargs) == 0
 
@@ -2983,6 +2980,10 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
+        )
+        p_args = (
+            p_args[0],
+            p_args[1:],
         )
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(

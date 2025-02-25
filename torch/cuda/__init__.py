@@ -17,7 +17,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
@@ -85,7 +85,7 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
-                    self.paths: list[str] = paths
+                    self.paths: List[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any

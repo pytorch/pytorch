@@ -11,7 +11,6 @@ from typing import Any
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Group,
-    MatchInfo,
     MatchState,
     Membership,
     Op,
@@ -47,7 +46,7 @@ def match_one_event(
     event_b: dict[Any, Any],
     memberships: dict[str, set[Any]],
     pg_name: str,
-) -> MatchInfo:
+) -> MatchState:
     op_a = Op(event_a, memberships, pg_name)
     op_b = Op(event_b, memberships, pg_name)
     return op_a.match(op_b)
@@ -153,7 +152,7 @@ def match_coalesced_groups(
             dst_global_rank = sorted(memberships[op.pg_name])[op.dst]
             peer_ops = all_ops[dst_global_rank]
             for i, other in enumerate(peer_ops):
-                if op.match(other).state == MatchState.FULLY_MATCHED:
+                if op.match(other) == MatchState.FULLY_MATCHED:
                     match_idx = i
                     break
                 elif op.dst == other.src:

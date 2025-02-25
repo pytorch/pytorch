@@ -64,7 +64,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, statically_known_true
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver

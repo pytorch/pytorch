@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Union
+from typing import Tuple, Union
 
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor

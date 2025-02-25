@@ -1824,7 +1824,6 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s", e, futures[future]
                         )
                     else:
-                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
                         log.info(
                             "Precompiling benchmark choice %s took %.02fs",
                             futures[future],

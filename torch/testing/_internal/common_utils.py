@@ -3102,16 +3102,13 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
+        self, exc_type, callable, expect, *, suppress_suffix=True
     ):
         try:
             callable()
         except exc_type as e:
-            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
-            if post_munge:
-                munged = post_munge(munged)
             self.assertExpectedInline(
-                munged, expect, skip=1
+                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
             )
             return
         self.fail(msg="Did not raise when expected to")

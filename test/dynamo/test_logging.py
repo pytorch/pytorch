@@ -906,8 +906,6 @@ exclusions = {
     "aot_graphs_effects",
     "pre_grad_graphs",
     "post_grad_graphs",
-    "ir_pre_fusion",
-    "ir_post_fusion",
     "compiled_autograd",
     "compiled_autograd_verbose",
     "recompiles",

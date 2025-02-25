@@ -655,12 +655,8 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     #   connected to the compute node.
     def fn(match):
         x_meta_value = match.kwargs["x"].meta.get("val")
-        # QLinear binary fusion is not supprted for XPU yet.
-        is_xpu_linear_match = (
-            x_meta_value.device.type == "xpu"
-            and qop == torch.ops.onednn.qlinear_pointwise
-        )
-        if is_xpu_linear_match:
+        is_xpu_match = x_meta_value.device.type == "xpu"
+        if is_xpu_match:
             return False
         output_dtype = _get_pattern_output_dtype(match)
         compute_node = filter_nodes(match.nodes, qop)[0]
@@ -713,8 +709,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             if "other" in match.kwargs
             else (
                 match.kwargs["accum"]
-                if (output_dtype in [torch.uint8, torch.int8])
-                or (not extra_input_from_dequant)
+                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
                 else match.kwargs["accum_after_dequant"]
             )
         )
@@ -2762,19 +2757,13 @@ def _register_qconv_post_op_fusion_pass(
             else:
                 accum = (
                     kwargs["accum"]
-                    if output_dtype in [torch.uint8, torch.int8]
+                    if output_dtype == torch.uint8
                     else kwargs["accum_after_dequant"]
                 )
                 accum_scale = (
-                    kwargs["accum_scale"]
-                    if output_dtype in [torch.uint8, torch.int8]
-                    else 1.0
+                    kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
                 )
-                accum_zp = (
-                    kwargs["accum_zp"]
-                    if output_dtype in [torch.uint8, torch.int8]
-                    else 0
-                )
+                accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
                 computation_args = (
                     x,
                     x_scale,

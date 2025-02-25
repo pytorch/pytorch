@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Hashable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -24,8 +24,6 @@ from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
-
     from ..graph import GraphLowering
 
 

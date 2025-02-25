@@ -730,7 +730,7 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
+@register_lowering(torch._higher_order_ops._foreach_map)
 def _foreach_map(subgraph, *args, **kwargs):
     """
     This lowers an invocation of foreach_map
@@ -743,7 +743,7 @@ def _foreach_map(subgraph, *args, **kwargs):
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
 
-    inputs = args
+    inputs = args[0]  # nested tuple
 
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)

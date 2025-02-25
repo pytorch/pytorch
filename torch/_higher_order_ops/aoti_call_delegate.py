@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from typing import List
+
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
@@ -48,9 +50,9 @@ class AOTICallDelegate(HigherOrderOperator):
         self,
         lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
         original_gm: torch.fx.GraphModule,
-        weight_args: list[torch.Tensor],
-        input_args: list[torch.Tensor],
-    ) -> list[torch.Tensor]:
+        weight_args: List[torch.Tensor],
+        input_args: List[torch.Tensor],
+    ) -> List[torch.Tensor]:
         return super().__call__(lowered_module, original_gm, weight_args, input_args)
 
 
@@ -66,9 +68,9 @@ aoti_call_delegate.fallthrough(torch._C.DispatchKey.AutocastCPU)
 def call_delegate_cpu(
     lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
     original_gm: torch.fx.GraphModule,
-    weight_args: list[torch.Tensor],
-    input_args: list[torch.Tensor],
-) -> list[torch.Tensor]:
+    weight_args: List[torch.Tensor],
+    input_args: List[torch.Tensor],
+) -> List[torch.Tensor]:
     # FX creates this immutable_dict/list concept. Get rid of this.
     map_types = {
         torch.fx.immutable_collections.immutable_dict: dict,
@@ -102,8 +104,8 @@ def call_delegate_fake_tensor_mode(
     mode: FakeTensorMode,
     lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
     original_gm: torch.fx.GraphModule,
-    weight_args: list[torch.Tensor],
-    input_args: list[torch.Tensor],
-) -> list[torch.Tensor]:
+    weight_args: List[torch.Tensor],
+    input_args: List[torch.Tensor],
+) -> List[torch.Tensor]:
     with mode:
         return call_delegate_cpu(lowered_module, original_gm, weight_args, input_args)

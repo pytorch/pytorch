@@ -18,6 +18,8 @@ from typing import (
     cast,
     ClassVar,
     Generic,
+    Iterator,
+    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -57,7 +59,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
+    from collections.abc import Sequence
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
