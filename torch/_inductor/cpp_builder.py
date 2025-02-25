@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
@@ -32,6 +33,7 @@ from torch.torch_version import TorchVersion
 
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
+    from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -41,21 +43,24 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def use_global_cache() -> bool:
+    def use_global_cache() -> bool:  # type: ignore[misc]
         return False
 
 
 # Windows need setup a temp dir to store .obj files.
 _BUILD_TEMP_DIR = "CxxBuild"
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 # initialize variables for compilation
 _IS_LINUX = sys.platform.startswith("linux")
@@ -158,6 +163,7 @@ def _is_apple_clang(cpp_compiler: str) -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
+@functools.lru_cache(None)
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -172,8 +178,10 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
+@functools.lru_cache(None)
 def _is_gcc(cpp_compiler: str) -> bool:
-    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+    # Since "clang++" ends with "g++", the regex match below would validate on it.
+    if _is_clang(cpp_compiler):
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
@@ -693,8 +701,6 @@ def _setup_standard_sys_libs(
     aot_mode: bool,
     use_absolute_path: bool,
 ) -> tuple[list[str], list[str], list[str]]:
-    from torch._inductor.codecache import _LINKER_SCRIPT
-
     cflags: list[str] = []
     include_dirs: list[str] = []
     passthrough_args: list[str] = []
@@ -1218,6 +1224,8 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
+        # Suppress multi-line comment warnings in sycl headers
+        cflags += ["Wno-comment"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         if not find_library("ze_loader"):
             raise OSError(
@@ -1514,6 +1522,49 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    # Given a path to an input cpp file and an output path,
+    # Attempts to compile the file, storing the output in "output_path"
+    def build_fbcode(
+        self,
+        input_path: Union[str, list[str]],
+        output_path: str,
+    ) -> None:
+        from torch._inductor.codecache import cpp_prefix_path
+
+        with dynamo_timed("compile_file"):
+            input_paths = [input_path] if isinstance(input_path, str) else input_path
+            input_files = [
+                os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
+            ]
+            command = self.get_command_line().split()
+            try:
+                assert config.is_fbcode(), "compile_file() is only used in fbcode"
+                # Need to copy our header into the same folder as the sourcecode.
+                header_path = cpp_prefix_path()
+                header_name = os.path.basename(header_path)
+                output_name = os.path.basename(output_path)
+                # When we build remotely, we need to make sure to carefully copy any files
+                # that are required during the compilation process into our build directly.
+                # This is where all of the ATen/c10/Torch includes come from.
+                torch_includes_path = os.path.join(_TORCH_PATH, "include")
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    # Copy everything to tmp compilation folder
+                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                    shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
+                    for p, f in zip(input_paths, input_files):
+                        shutil.copy(p, os.path.join(tmp_dir, f))
+                    dest_include_path = os.path.join(tmp_dir, "include")
+                    shutil.copytree(torch_includes_path, dest_include_path)
+                    # Run the build
+                    output_file_path = _run_build_command(command, tmp_dir, output_name)
+                    # Copy output from the build
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                    shutil.copy(output_file_path, output_path)
+            except subprocess.CalledProcessError as e:
+                output = e.output.decode("utf-8")
+                raise exc.CppCompileError(command, output) from e
 
     def build(self) -> None:
         """
