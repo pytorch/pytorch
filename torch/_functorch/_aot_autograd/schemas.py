@@ -59,7 +59,6 @@ OutputType = Enum(
         # In this case, we don't want to do view-replay, since we won't be able to replay the custom function.
         # Instead, we'll treat this output "normally", and trace its backward into the graph.
         "custom_function_view",
-        "alias_of_intermediate_detach",
     ),
 )
 
@@ -514,7 +513,6 @@ class ViewAndMutationMeta:
                     OutputType.alias_of_intermediate,
                     OutputType.alias_of_intermediate_save_as_output,
                     OutputType.alias_of_intermediate_base_is_user_output,
-                    OutputType.alias_of_intermediate_detach,
                 ]
             ]
         )

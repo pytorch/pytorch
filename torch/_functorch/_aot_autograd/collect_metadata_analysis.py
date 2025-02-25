@@ -585,7 +585,7 @@ from a multi-output view call"
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
-                output_type = OutputType.alias_of_intermediate_detach
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
                 base_idx = existing_out_idx
             else:
                 output_type = OutputType.non_alias
