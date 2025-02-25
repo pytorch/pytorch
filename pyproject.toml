@@ -149,8 +149,8 @@ select = [
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
-    "SLOT",
     "S324",
+    "SLOT",
     "TCH",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
     "TRY203",
