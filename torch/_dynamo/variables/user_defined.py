@@ -1469,9 +1469,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return getattr(self, name)
         return getattr(self.exc_vt, name)
 
-    def reconstruct(self, codegen):
-        unimplemented(f"{self.__class__.__name__} reconstruct")
-
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
