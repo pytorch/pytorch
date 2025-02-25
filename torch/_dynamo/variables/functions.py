@@ -1024,11 +1024,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def has_closure(self):
         return self.closure is not None
 
-    def const_getattr(self, tx, name):
-        if name == "__name__":
-            return self.fn_name.as_python_constant()
-        return super().const_getattr(tx, name)
-
     def has_self(self):
         return False
 
