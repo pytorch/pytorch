@@ -3668,7 +3668,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
