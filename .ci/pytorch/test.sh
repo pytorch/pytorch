@@ -494,35 +494,34 @@ test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode training \
-      --device cuda \
-      --benchmark torchbench \
-      --repeat 3 \
-      --output "$TEST_REPORTS_DIR/cachebench_training.json"
+  local BENCHMARK
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    local BENCHMARK=torchbench
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    local BENCHMARK=huggingface
+  else
+    echo "invalid SHARD_NUMBER: ${SHARD_NUMBER}"
+    exit 1
+  fi
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode inference \
-      --device cuda \
-      --benchmark torchbench \
-      --repeat 3 \
-      --output "$TEST_REPORTS_DIR/cachebench_inference.json"
+  local mode_options=("training" "inference")
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode training \
-      --dynamic \
-      --device cuda \
-      --benchmark torchbench \
-      --repeat 3 \
-      --output "$TEST_REPORTS_DIR/cachebench_training_dynamic.json"
+  for mode in "${mode_options[@]}"; do
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
 
-  $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode inference \
-      --dynamic \
-      --device cuda \
-      --benchmark torchbench \
-      --repeat 3 \
-      --output "$TEST_REPORTS_DIR/cachebench_inference_dynamic.json"
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --dynamic \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
+  done
 }
 
 test_verify_cachebench() {
