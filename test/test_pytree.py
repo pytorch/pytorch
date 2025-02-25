@@ -16,7 +16,6 @@ from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as py_pytree
-from torch.autograd.forward_ad import UnpackedDualTensor
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -741,6 +740,8 @@ class TestGenericPytree(TestCase):
         ],
     )
     def test_unpacked_dual_tensor_is_leaf(self, pytree_impl):
+        from torch.autograd.forward_ad import UnpackedDualTensor
+
         # Test that an UnpackedDualTensor is considered a leaf node
         dt = UnpackedDualTensor(primal=1, tangent=2)
         leaves, spec = pytree_impl.tree_flatten(dt)
