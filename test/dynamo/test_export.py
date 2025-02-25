@@ -1900,14 +1900,14 @@ def forward(self, x):
     size = l_x_.size()
     getitem = size[0];  size = None
     le = getitem <= 2;  getitem = None
-    cond_true = self.cond_true
-    cond_false = self.cond_false
-    cond = torch.ops.higher_order.cond(le, cond_true, cond_false, [l_x_]);  le = cond_true = cond_false = l_x_ = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_2 = cond[0];  cond = None
     return pytree.tree_unflatten([getitem_2], self._out_spec)""",
             )
             self.assertExpectedInline(
-                out_graph.cond_true.code.strip(),
+                out_graph.cond_true_0.code.strip(),
                 """\
 def forward(self, l_x_):
     l_x__1 = l_x_
@@ -1915,7 +1915,7 @@ def forward(self, l_x_):
     return (add,)""",
             )
             self.assertExpectedInline(
-                out_graph.cond_false.code.strip(),
+                out_graph.cond_false_0.code.strip(),
                 """\
 def forward(self, l_x_):
     l_x__1 = l_x_
@@ -3846,15 +3846,15 @@ def forward(self, pred, x):
     b = torch.ones(6, 4)
     c = torch.ones(6, 4)
     d = torch.ones(6, 4)
-    cond_true = self.cond_true
-    cond_false = self.cond_false
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true, cond_false, [a, b, l_x_, d, c]);  l_pred_ = cond_true = cond_false = a = b = l_x_ = d = c = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
     getitem = cond[0];  cond = None
     return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )
 
         self.assertExpectedInline(
-            out_graph.cond_true.code.strip(),
+            out_graph.cond_true_0.code.strip(),
             """\
 def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
@@ -3871,7 +3871,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         )
 
         self.assertExpectedInline(
-            out_graph.cond_false.code.strip(),
+            out_graph.cond_false_0.code.strip(),
             """\
 def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
