@@ -119,7 +119,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
           } else if (attn_mask) {
             auto maskExpandedDims = query.sizes().vec();
             maskExpandedDims[maskExpandedDims.size() - 1] = maxSeqLength;
-            *mask_ = attn_mask->expand(maskExpandedDims);
+            mask_ = attn_mask->expand(maskExpandedDims);
             std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *mask_);
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
