@@ -417,20 +417,19 @@ class MicroPipelineTPTest(TestCase):
             orig_shape = A.shape
             A = A.reshape(-1, orig_shape[-1])
             C = torch._scaled_mm(
-                A, B.T, A_scale, B_scale.T, out_dtype=out_dtype
+                A, B, A_scale, B_scale, out_dtype=out_dtype
             )
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_tensor(C, "avg", scatter_dim, group)
 
-        import pdb; pdb.set_trace()
         A = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn)
-        B = torch.rand(32, 64, device="cuda").to(torch.float8_e4m3fn)
+        B = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn).T
 
         # A_scale = rowwise scales
         A_scale = torch.full((A.shape[0], 1), 0.1, device="cuda")
 
         # B_scale = rowwise scales transposed for A @ B^T
-        B_scale = torch.full((B.shape[0], 1), 0.1, device="cuda")
+        B_scale = torch.full((1, B.shape[1]), 0.1, device="cuda")
 
         gm = _make_post_grad_fx(func, A, B, A_scale, B_scale, torch.bfloat16)
         with _test_mode():
