@@ -1031,6 +1031,8 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source.append(source)
 
     # Collect the dynamo graph inputs
+    # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
+    # matched tensors back into the Fx graph, this might not be necessary.
     static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
