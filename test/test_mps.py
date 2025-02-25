@@ -12522,14 +12522,14 @@ MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
-def transform_opinfo_sample_to_mps(sample):
-    """Transforms opinfo.core.SampleInput from CPU to MPS"""
+def transform_opinfo_sample_to_cpu(sample):
+    """Transforms opinfo.core.SampleInput from MPS to CPU"""
     mps_sample = sample.transform(
-        lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+        lambda x: x.detach().cpu().requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-    # Transform kwargs `device="cpu"` to `device="mps"`
-    if mps_sample.kwargs.get("device", "") == "cpu":
-        mps_sample.kwargs["device"] = "mps"
+    # Transform kwargs `device="mps:0"` to `device="cpu"`
+    if mps_sample.kwargs.get("device", "") == "mps:0":
+        mps_sample.kwargs["device"] = "cpu"
     return mps_sample
 
 class TestConsistency(TestCaseMPS):
@@ -12645,7 +12645,7 @@ class TestConsistency(TestCaseMPS):
 
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
-        self.assertEqual(device, "cpu")
+        self.assertEqual(device, "mps:0")
 
         def get_samples():
             return op.sample_inputs(
@@ -12655,13 +12655,12 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
                 set_seed=False,
             )
-        cpu_samples = get_samples()
 
-        for cpu_sample in cpu_samples:
+        for mps_sample in get_samples():
             #
             # Forward check
             #
-            mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
@@ -12693,7 +12692,7 @@ class TestConsistency(TestCaseMPS):
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
-        self.assertEqual(device, "cpu")
+        self.assertEqual(device, "mps:0")
 
         def get_samples():
             return op.sample_inputs(
@@ -12703,14 +12702,13 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
                 set_seed=False,
             )
-        cpu_samples = get_samples()
 
-        for cpu_sample in cpu_samples:
+        for mps_sample in get_samples():
             #
             # Forward check
             #
             forward_failed = False
-            mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
@@ -13000,7 +12998,7 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
-instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
+instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
