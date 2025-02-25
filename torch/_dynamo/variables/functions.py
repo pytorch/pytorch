@@ -64,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -975,6 +975,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         wrapped_fn=None,
         **kwargs,
     ) -> None:
+        if kwargs.get("mutation_type") is None:
+            kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -1020,6 +1022,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             assert isinstance(annotations, dict)
             func.__annotations__ = annotations
         return func
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        tx.output.side_effects.store_attr(self, name_var, val)
+        return ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
 
     def has_closure(self):
         return self.closure is not None
