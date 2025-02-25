@@ -597,6 +597,26 @@ class TestCuda(TestCase):
             else:
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hipblaslt_allow_tf32(self):
+        tf32_ctx = self._hip_allow_tf32
+        with tf32_ctx():
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "0"
+            # Save original value of allow_tf32
+            orig = torch.backends.cuda.matmul.allow_tf32
+            # If allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
+            # then matmul.allow_tf32 will return False after this point even if
+            # HIP_BLASLT_ALLOW_TF32 is set to 1 and matmul.allow_tf32 is changed.
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+            # Toggle torch.backends.cuda.matmul.allow_tf32 couple of times.
+            torch.backends.cuda.matmul.allow_tf32 = not orig
+            test1 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+            test2 = torch.backends.cuda.matmul.allow_tf32
+            self.assertNotEqual(test1, test2)
+            # Restore original value of allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+
     def test_cublas_allow_tf32_get_set(self):
         """
         We only turn on TF32 for MI300 with a special env var. This is because TF32
