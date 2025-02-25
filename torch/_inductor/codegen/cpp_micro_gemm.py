@@ -81,7 +81,6 @@ inline void {{kernel_name}}(
         compute_dtype,
         register_blocking,
         alpha=1,
-        is_woq_int4=False,
     ) -> None:
         self.name = name
         self.input_dtype = input_dtype
@@ -91,7 +90,6 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
-        self.is_woq_int4 = is_woq_int4
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
@@ -115,7 +113,7 @@ inline void {{kernel_name}}(
             "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
             "is_msvc_compiler": cpp_builder.is_msvc_cl(),
-            "is_woq_int4": self.is_woq_int4,
+            "is_woq_int4": self.is_woq_int4(),
         }
 
     def get_kernel_declaration(self):
@@ -186,6 +184,9 @@ inline void {{kernel_name}}(
 
     def get_b_layout(self) -> LayoutType:
         return LayoutType.NORMAL
+
+    def is_woq_int4(self):
+        return False
 
 
 @dataclasses.dataclass
@@ -1146,6 +1147,9 @@ inline void {{kernel_name}}_kernel(
             "k_start,",
         ]
 
+    def is_woq_int4(self):
+        return True
+
 
 def create_micro_gemm(
     name,
@@ -1159,7 +1163,6 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=True,
-    is_woq_int4=False,
     q_group_size=None,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
@@ -1171,7 +1174,6 @@ def create_micro_gemm(
             config.compute_dtype,
             config.register_blocking,
             alpha,
-            is_woq_int4,
         )
 
     assert isinstance(n, int) or n.is_number, n
@@ -1249,7 +1251,7 @@ def create_micro_gemm(
                     )
                 )
     if len(matched_configs) == 0:
-        if use_ref and not is_woq_int4:
+        if use_ref:
             return CppMicroGemmRef(
                 name, input_dtype, input2_dtype, output_dtype, compute_dtype, alpha
             )

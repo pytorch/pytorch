@@ -1512,7 +1512,7 @@ def use_cpp_gemm_template(
         input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
-        is_woq_int4=is_woq_int4,
+        use_ref=not is_woq_int4,
         q_group_size=q_group_size,
     )
 

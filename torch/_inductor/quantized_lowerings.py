@@ -6,7 +6,7 @@ from torch._inductor.ir import IRNode
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import config as inductor_config, lowering
-from .codegen.cpp_gemm_template import CppGemmTemplate
+from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
 from .select_algorithm import (
@@ -142,12 +142,10 @@ def register_woq_mm_ops() -> None:
             is_woq_int4=True,
             q_group_size=qGroupSize,
         ):
-            CppGemmTemplate.add_choices(
+            CppWoqInt4GemmTemplate[qGroupSize].add_choices(
                 choices,
                 aten_layout,
                 [mat1, mat2, group_size, qScaleAndZeros],
-                is_woq_int4=True,
-                q_group_size=qGroupSize,
             )
 
         if (
