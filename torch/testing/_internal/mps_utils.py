@@ -1,6 +1,7 @@
 import unittest
 import warnings
-from typing import Callable, Dict, Iterable, List, Optional, Union
+from collections.abc import Iterable
+from typing import Callable, Optional, Union
 
 import torch
 from torch.testing._internal.common_utils import MACOS_VERSION
@@ -51,7 +52,7 @@ class MPSSkipInfo:
         *args: str,
         test_class: Optional[str] = None,
         variant: Optional[str] = None,
-        dtypes: Optional[Union[torch.dtype, List[torch.dtype]]] = None,
+        dtypes: Optional[Union[torch.dtype, list[torch.dtype]]] = None,
         skip: Callable = unittest.expectedFailure,
         skip_msg: str = "Skipped!",
         upper: Optional[float] = None,
@@ -68,7 +69,7 @@ class MPSSkipInfo:
         upper: Upper bound MacOS version this xfail applies to (exclusive)
         lower: Lower bound MacOS version this xfail applies to (inclusive)
         """
-        self.tests: List[str] = []
+        self.tests: list[str] = []
         for arg in args:
             self.tests.append(arg)
         self.test_class = test_class
@@ -230,7 +231,17 @@ UNIMPLEMENTED_XFAILIST = {
     "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
-    "special.xlog1py": MPSSkipInfo(UNIMPLEMENTED),
+    "special.xlog1py": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[
+            torch.bool,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.int8,
+            torch.uint8,
+        ],
+    ),
     "special.zeta": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[
@@ -906,10 +917,10 @@ ERRORINPUT_XFAILLIST = {
 }
 
 
-MPS_OPINFO: Dict[str, List[MPSSkipInfo]] = {}
+MPS_OPINFO: dict[str, list[MPSSkipInfo]] = {}
 
 
-def append_skips(skip_list: Dict) -> None:
+def append_skips(skip_list: dict) -> None:
     for op_name, skip in skip_list.items():
         if not isinstance(skip, Iterable):
             skip = [skip]
@@ -928,15 +939,15 @@ append_skips(MACOS_13_XFAILLIST)
 append_skips(ERRORINPUT_XFAILLIST)
 
 
-def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
+def mps_op_db(op_db: list[OpInfo]) -> list[OpInfo]:
     """Utility function for OpInfo tests, updates the op_db with xfails defined in MPS_OPINFO_SKIPLIST"""
 
     for op in op_db:
         if op.name in MPS_OPINFO:
             if not isinstance(MPS_OPINFO[op.name], Iterable):
-                skips: List[MPSSkipInfo] = [MPS_OPINFO[op.name]]  # type: ignore[list-item]
+                skips: list[MPSSkipInfo] = [MPS_OPINFO[op.name]]  # type: ignore[list-item]
             else:
-                skips: List[MPSSkipInfo] = MPS_OPINFO[op.name]  # type: ignore[no-redef]
+                skips: list[MPSSkipInfo] = MPS_OPINFO[op.name]  # type: ignore[no-redef]
 
             for skip in skips:
                 # If the SkipInfo specified an OS range or a test variant, make sure it is valid
