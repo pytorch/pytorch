@@ -64,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -973,9 +973,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn=None,
-        setattr_values=None,
         **kwargs,
     ) -> None:
+        if kwargs.get("mutation_type") is None:
+            kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -988,7 +989,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
-        self.setattr_values: dict[str, VariableTracker] = setattr_values or {}
 
     def self_args(self):
         return []
@@ -1029,7 +1029,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ):
-        self.setattr_values[name_var] = val
+        tx.output.side_effects.store_attr(self, name_var, val)
         return ConstantVariable(None)
 
     def call_method(self, tx, name, args, kwargs):
@@ -1039,11 +1039,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def has_closure(self):
         return self.closure is not None
-
-    def const_getattr(self, tx, name):
-        if name == "__name__":
-            return self.fn_name.as_python_constant()
-        return super().const_getattr(tx, name)
 
     def has_self(self):
         return False
@@ -1076,9 +1071,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen):
-        if self.setattr_values:
-            unimplemented("NestedUserFunctionVariable with setattr_values")
-
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
