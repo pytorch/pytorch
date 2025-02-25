@@ -918,7 +918,7 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if config.graph_partition:
             # async_compile.wait will be written when finalize_prefix to make sure
             # it is added before `class Runner`` definition.
             return
@@ -939,7 +939,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call(self) -> None:
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if config.graph_partition:
             self.prefix.splice(
                 """
                 def recursively_apply_fns(self, fns):
@@ -1446,7 +1446,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
-        if config.graph_partition and not V.graph.cpp_wrapper and not V.graph.aot_mode:
+        if config.graph_partition:
             runner_buffer = IndentedBuffer()
 
             if hasattr(self, "all_partition_names"):
