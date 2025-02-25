@@ -777,8 +777,8 @@ class Node(_NodeBase):
                 return True
 
             if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
-                return True
+                # Treat as impure if fallback to eager since it mutates RNG state.
+                return torch._inductor.config.fallback_random
 
             return self.target in _side_effectful_functions
 

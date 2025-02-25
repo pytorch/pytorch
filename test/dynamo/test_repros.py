@@ -6511,6 +6511,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch.cuda.manual_seed_all(54321)
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
+        # https://github.com/pytorch/pytorch/issues/147171
+        torch._inductor.config.fallback_random = True
+
         for backend in ["eager", "aot_eager"]:
             torch.manual_seed(54321)
             torch.cuda.manual_seed_all(54321)
