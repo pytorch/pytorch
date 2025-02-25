@@ -1554,15 +1554,7 @@ class OutputGraph:
             return dict()
 
     def install_subgraph(self, name, sub_gm):
-        next_name = None
-        i = 0
-        while not next_name:
-            candidate = f"{name}_{i}"
-            if candidate in self.nn_modules:
-                i += 1
-            else:
-                next_name = candidate
-
+        next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
         sub_gm.__name__ = next_name
         sub_gm.torchdynamo_force_dynamic = False
         # This graph module is not present in the user space, so it can't be
@@ -2289,14 +2281,7 @@ class SubgraphTracer(fx.Tracer):
                     TracingContext.extract_stack()
                 )
 
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
-
+        name = get_unique_name_wrt(name, self.input_name_to_proxy)
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
             node = self.input_name_to_proxy[prev_name].node
