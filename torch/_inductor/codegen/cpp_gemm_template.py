@@ -204,7 +204,11 @@ GEMM_TEMPLATE = r"""
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
-        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+    {%- if maybe_k_slicing %}
+         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+    {%- else %}
+        {{ kernel.define_thread_local_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+    {%- endif %}
 {%- endif %}
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             {{ template.codegen_m_loop_params()|indent(12, false) }}
@@ -212,7 +216,9 @@ GEMM_TEMPLATE = r"""
                 {{ template.codegen_n_loop_params()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
-                {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
+    {%- if maybe_k_slicing %}
+        {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
+    {%- endif %}
 {%- else %}
     {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- endif %}
