@@ -1,5 +1,22 @@
 # mypy: ignore-errors
 
+"""
+This module contains variable tracker classes for handling tensors and tensor-related operations in Dynamo.
+
+The main class is TensorVariable which represents torch.Tensor inputs and intermediate values in the FX graph.
+It handles tensor operations, method calls, and maintains metadata about tensor properties like dtype, device, etc.
+
+Other key classes include:
+- SymNodeVariable: Represents symbolic scalars (int/float/bool) used for size computation and unspecialized values
+- NumpyNdarrayVariable: Handles numpy array interop through torch._numpy
+- UnspecializedPythonVariable: Represents unspecialized Python numeric values as 1-element tensors
+- TensorSubclassVariable: Handles tensor subclasses with __torch_function__ overrides
+- UntypedStorageVariable: Represents tensor storage objects
+- DataPtrVariable: Handles tensor data pointer operations
+
+These classes work together to track tensor operations and properties during Dynamo's tracing process.
+"""
+
 import functools
 import inspect
 import logging
@@ -28,7 +45,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import (
+    unimplemented,
+    UnknownPropertiesDuringBackwardTrace,
+    UserError,
+    UserErrorType,
+)
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -389,8 +411,15 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from . import UserDefinedClassVariable
 
-        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
-            unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx):
+            if name in self._strict_mode_banned_ops():
+                unimplemented(
+                    f"Getattr invocation {name} in strict mode is not supported"
+                )
+            elif name in self._strict_mode_conditional_banned_ops():
+                raise UnknownPropertiesDuringBackwardTrace(
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                )
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -532,6 +561,11 @@ class TensorVariable(VariableTracker):
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
+
+    def _strict_mode_conditional_banned_ops(self):
+        return (
+            torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops
+        )
 
     def call_method(
         self,
@@ -1207,6 +1241,9 @@ class SymNodeVariable(VariableTracker):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
+            if torch.fx.experimental._config.no_data_dependent_graph_break:
+                raise
+
             raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
