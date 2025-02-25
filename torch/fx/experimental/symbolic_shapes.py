@@ -3450,7 +3450,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
-            "_expr_sym_node_id"
+            "_expr_sym_node_id",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
