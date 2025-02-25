@@ -23,8 +23,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM
+    PLATFORM_SUPPORTS_FP8
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -255,7 +254,6 @@ class TestMatmulCuda(TestCase):
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
-mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
@@ -371,79 +369,6 @@ def to_fp8_saturated(
         raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
 
     return x.to(fp8_dtype)
-
-# copied from https://github.com/drisspg/transformer_nuggets/blob/main/transformer_nuggets/mx/to_blocked.py
-def ceil_div(a, b):
-    return (a + b - 1) // b
-
-def to_blocked(input_matrix) -> torch.Tensor:
-    """
-    Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
-
-    See:
-        https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
-
-    Args:
-        input_matrix: Input tensor of shape (H, W)
-
-    Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
-    """
-    rows, cols = input_matrix.shape
-    n_row_blocks = ceil_div(rows, 128)
-    n_col_blocks = ceil_div(cols, 4)
-
-    # Calculate the padded shape
-    padded_rows = n_row_blocks * 128
-    padded_cols = n_col_blocks * 4
-
-    padded = input_matrix
-    # Ideally we would use torch.nn.pad but it doesn't support float8_e8m0fnu for now
-    if (rows, cols) != (padded_rows, padded_cols):
-        padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
-        padded[:rows, :cols] = input_matrix
-
-    # Rearrange the blocks
-    blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
-    rearranged = blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(-1, 32, 16)
-
-    return rearranged.flatten()
-
-def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    """Computes the error between two tensors in dB.
-
-    For more details see:
-        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
-
-    Args:
-        x: The original tensor.
-        y: The tensor to compare to the original tensor.
-    """
-    Ps = torch.norm(x)
-    Pn = torch.norm(x - y)
-    return 20 * torch.log10(Ps / Pn)
-
-# largest power of 2 representable in `torch.float8_e4m3fn`
-F8E4M3_LARGEST_POW2 = 8
-# max value of `torch.float8_e4m3fn` (448)
-F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
-# exponent bias of `torch.float8_e8m0fnu`
-F8E8M0_EXP_BIAS = 127
-
-def data_to_mx_scale(x, block_size):
-    # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
-    # section 6.3, not all edge cases (such as NaN) are handled/tested
-    orig_shape = x.shape
-    x = x.reshape(-1, block_size)
-    max_abs = torch.amax(torch.abs(x), 1)
-    largest_p2_lt_max_abs = torch.floor(torch.log2(max_abs))
-    scale_e8m0_unbiased = largest_p2_lt_max_abs - F8E4M3_LARGEST_POW2
-    scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, -1 * F8E8M0_EXP_BIAS, F8E8M0_EXP_BIAS)
-    scale_e8m0_biased = scale_e8m0_unbiased + F8E8M0_EXP_BIAS
-    scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
-    scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
-    return scale_e8m0_biased.reshape(orig_shape[0], -1)
-
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
