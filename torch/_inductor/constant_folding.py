@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.freezing_utils import maybe_set_is_frozen_param
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -54,6 +55,8 @@ def replace_node_with_constant(
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
         gm.register_buffer(qualname, constant)
         setattr(gm, qualname, constant)
+        # mark any constants created during freezing
+        maybe_set_is_frozen_param(constant)
 
 
 def is_const_source(
@@ -81,6 +84,7 @@ class ConstantFolder(torch.fx.Interpreter):
         self.user_to_last_uses = self.node_to_last_non_output_use()
         self.lifted_constant_names = lifted_constant_names
         self.deferred_value = object()
+        self.skip_folding_node_fn = skip_folding_node_fn
 
     def _support_dynamic_shape(self) -> bool:
         # ConstantFolder not support dynamic shape now
@@ -91,6 +95,8 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
         # if lifted_constant_names is passed in, no concrete value is available
         # so we just check if all inputs have values
+        if self.skip_folding_node_fn is not None and self.skip_folding_node_fn(node):
+            return self.unknown_value
         flattened_node_inps = pytree.arg_tree_leaves(*node.args, **node.kwargs)
         for inp in flattened_node_inps:
             if (
@@ -317,6 +323,7 @@ def constant_graph_tag(
             gm,
             skip_constructors=skip_constructors,
             lifted_constant_names=lifted_constant_names,
+            skip_folding_node_fn=skip_folding_node_fn,
         )
         cf.run()
 

@@ -332,6 +332,12 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+#endif
+  void * alpha_ptr = &alpha;
+  void * beta_ptr = &beta;
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
@@ -348,6 +354,16 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
     abcType = CUDA_C_32F;
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
+#ifndef USE_ROCM
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+      computeType = CUBLAS_COMPUTE_16F;
+      halpha = alpha;
+      hbeta = beta;
+      alpha_ptr = &halpha;
+      beta_ptr = &hbeta;
+    }
+#endif
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
@@ -415,12 +431,12 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      &alpha,
+      alpha_ptr,
       a,
       Adesc.descriptor(),
       b,
       Bdesc.descriptor(),
-      &beta,
+      beta_ptr,
       c,
       Cdesc.descriptor(),
       c,
@@ -530,6 +546,13 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   BGEMM_CHECK_ARGVALUES(at::Half);
   float falpha = alpha;
   float fbeta = beta;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+  auto compute_type = CUDA_R_32F;
+#endif
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
@@ -538,21 +561,28 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
                                    hipOperationToRocOperation(opa),
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
-                                   (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
+                                   (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)&fbeta, c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    halpha = alpha;
+    hbeta = beta;
+    compute_type = CUDA_R_16F;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
   if (prop->major >= 5){
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
       handle, opa, opb, m, n, k,
-      (void*)(&falpha), a, CUDA_R_16F, lda, stridea,
-      b, CUDA_R_16F, ldb, strideb, (void*)(&fbeta),
+      alpha_ptr, a, CUDA_R_16F, lda, stridea,
+      b, CUDA_R_16F, ldb, strideb, beta_ptr,
       c, CUDA_R_16F, ldc, stridec,
-      num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
       at::cuda::blas::gemm<at::Half>(
@@ -867,6 +897,13 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   float falpha = alpha;
   float fbeta = beta;
+#ifndef USE_ROCM
+  at::Half halpha;
+  at::Half hbeta;
+  auto compute_type = CUDA_R_32F;
+#endif
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
@@ -881,14 +918,14 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       m,
       n,
       k,
-      &falpha,
+      alpha_ptr,
       a,
       rocblas_datatype_f16_r,
       lda,
       b,
       rocblas_datatype_f16_r,
       ldb,
-      &fbeta,
+      beta_ptr,
       c,
       rocblas_datatype_f16_r,
       ldc,
@@ -901,6 +938,13 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    compute_type = CUDA_R_16F;
+    halpha = alpha;
+    hbeta = beta;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
   if (prop->major >= 5) {
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
     if (!at::globalContext().allowFP16ReductionCuBLAS()) {
@@ -915,18 +959,18 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         m,
         n,
         k,
-        &falpha,
+        alpha_ptr,
         a,
         CUDA_R_16F,
         lda,
         b,
         CUDA_R_16F,
         ldb,
-        &fbeta,
+        beta_ptr,
         c,
         CUDA_R_16F,
         ldc,
-        CUDA_R_32F,
+        compute_type,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
@@ -1228,6 +1272,12 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  void * alpha_ptr = &alpha_val;
+  void * beta_ptr = &beta_val;
+#ifndef USE_ROCM
+  at::Half halpha_val;
+  at::Half hbeta_val;
+#endif
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
@@ -1238,6 +1288,17 @@ void gemm_and_bias(
     }
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
+#ifndef USE_ROCM
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+      computeType = CUBLAS_COMPUTE_16F;
+      scaleType = CUDA_R_16F;
+      halpha_val = alpha_val;
+      hbeta_val = beta_val;
+      alpha_ptr = &halpha_val;
+      beta_ptr = &hbeta_val;
+    }
+#endif
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
@@ -1306,12 +1367,12 @@ void gemm_and_bias(
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      &alpha_val,
+      alpha_ptr,
       mat1_ptr,
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      &beta_val,
+      beta_ptr,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,

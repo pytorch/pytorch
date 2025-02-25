@@ -289,6 +289,17 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        # IMPORTANT: Are you here because you are trying to proxy a new type into
+        # the graph? Please Please Please contact someone on the PyTorch Compiler team;
+        # the considerations are subtle.
+        #
+        # 1) When you add a new type, all of the downstream consumers and pass writers
+        # need to handle the new type. torch.fx is intended to be easy to write
+        # passes for, so we will push back against new types.
+        # 2) In torch.compile's IR, there are only specific operations that go
+        # into the graph. In particular, Tensor operations should go into the graph,
+        # but non-Tensor operations shouldn't. What that means is that constructors
+        # for new types *SHOULD NOT* become nodes in the FX graph.
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
         elif hasattr(a, "__fx_create_arg__"):

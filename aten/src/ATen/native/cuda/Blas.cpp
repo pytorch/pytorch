@@ -191,7 +191,7 @@ static bool isSupportedHipLtROCmArch(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
-        "gfx90a", "gfx940", "gfx941", "gfx942",
+        "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
         "gfx1100", "gfx1101"
 #endif
@@ -862,7 +862,7 @@ static bool _scaled_mm_allowed_device() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
 #ifdef USE_ROCM
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
@@ -879,7 +879,7 @@ static bool _scaled_mm_allowed_device() {
 static bool _scaled_mm_is_fnuz() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
@@ -1082,7 +1082,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #ifndef USE_ROCM
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
-    TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
+    TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
         mat2,

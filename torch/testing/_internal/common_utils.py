@@ -102,7 +102,7 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+MI300_ARCH = ("gfx942",)
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1293,14 +1293,9 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
-        if not RERUN_DISABLED_TESTS:
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            sys.exit(0 if exit_code == 5 else exit_code)
-        else:
-            # Only record the test report and always return a success code when running under rerun
-            # disabled tests mode
-            sys.exit(0)
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        sys.exit(0 if exit_code == 5 else exit_code)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -1724,6 +1719,41 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
     return decorator
+
+
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(fn)
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+    ) -> None:
+        def dummy(fn: Callable[..., Any]) -> None:
+            fn(self)
+
+        actual = CompileCounter()
+
+        dummy(fn)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn(fn)
+        reset()
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+        )
+
+    return test_fn
 
 
 # Run PyTorch tests with translation validation on.
@@ -2670,6 +2700,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
+            # Probably test has disable issue but not for this platform
             skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
@@ -3067,13 +3098,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
+        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            if post_munge:
+                munged = post_munge(munged)
             self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+                munged, expect, skip=1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -3134,6 +3168,15 @@ class TestCase(expecttest.TestCase):
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
+
+        # We disable size_asserts for test_ops since some tests fail
+        # due to mismatch of strides returned from eager v.s. meta kernels
+        # Only some of the ops has this problem, but since tests in
+        # test_op.py are parametrized, it's hard to do this specifically
+        # for the affected ops.
+        # It's not a big deal since these problems are captured by
+        # test_torchinductor_opinfo.py as well.
+        should_disable_size_asserts = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -3145,6 +3188,9 @@ class TestCase(expecttest.TestCase):
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
                         should_reset_dynamo = True
+
+                        if filename == "test_ops":
+                            should_disable_size_asserts = True
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -3177,7 +3223,14 @@ class TestCase(expecttest.TestCase):
             suppress_errors = not strict_mode
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
+
+        maybe_disable_size_asserts = (
+            torch._inductor.config.patch(size_asserts=False)
+            if should_disable_size_asserts
+            else contextlib.nullcontext()
+        )
+
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:

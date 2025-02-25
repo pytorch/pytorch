@@ -250,14 +250,15 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   int liwork = -1;
   scalar_t lwork_query;
   value_t rwork_query;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int iwork_query;
+  int iwork_query = 0;
 
   // call lapackSyevd once to get the optimal size for work data
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
 
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
+  value_t next_after_lw = std::nextafter(real_impl<scalar_t, value_t>(lwork_query), std::numeric_limits<value_t>::infinity());
+  lwork = std::max<int>(1, std::ceil(next_after_lw));
+
   Tensor work = at::empty({lwork}, vectors.options());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
@@ -268,7 +269,8 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (vectors.is_complex()) {
-    lrwork = std::max<int>(1, rwork_query);
+    value_t next_after_rwork_query = std::nextafter(rwork_query, std::numeric_limits<value_t>::infinity());
+    lrwork = std::max<int>(1, std::ceil(next_after_rwork_query));
     rwork = at::empty({lrwork}, values.options());
     rwork_data = rwork.mutable_data_ptr<value_t>();
   }
@@ -339,8 +341,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   auto n = input.size(-1);
   auto lda = std::max<int64_t>(1, m);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
@@ -410,8 +411,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto n = self.size(-1);
   auto k = tau.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
 
   // LAPACK's requirement
   TORCH_INTERNAL_ASSERT(m >= n);

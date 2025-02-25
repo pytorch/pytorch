@@ -61,7 +61,7 @@ class _GradAccConfig:
     def __repr__(self) -> str:
         # Override to remove any spaces in the string to appease the internal
         # build's test name parser
-        return f"(use_no_sync={self.use_no_sync}," f"num_iters={self.num_iters})"
+        return f"(use_no_sync={self.use_no_sync},num_iters={self.num_iters})"
 
 
 @dataclass

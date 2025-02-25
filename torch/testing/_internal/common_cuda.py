@@ -41,7 +41,7 @@ IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
         gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
-        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx942"})
     return False
 
 def evaluate_gfx_arch_exact(matching_arch):
@@ -118,19 +118,6 @@ def initialize_cuda_context_rng():
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device=f"cuda:{i}")
         __cuda_ctx_rng_initialized = True
-
-
-# Test whether hardware TF32 math mode enabled. It is enabled only on:
-# - CUDA >= 11
-# - arch >= Ampere
-def tf32_is_not_fp32():
-    if not torch.cuda.is_available() or torch.version.cuda is None:
-        return False
-    if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-        return False
-    if int(torch.version.cuda.split('.')[0]) < 11:
-        return False
-    return True
 
 
 @contextlib.contextmanager
@@ -220,7 +207,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         def wrapped(*args, **kwargs):
             for k, v in zip(arg_names, args):
                 kwargs[k] = v
-            cond = tf32_is_not_fp32()
+            cond = torch.cuda.is_tf32_supported()
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
             if 'dtype' in kwargs:
