@@ -201,7 +201,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         input_indices: Optional[list[int]] = None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.IRNode]] = None,  # gemm idx to its act buf
-        q_group_size: Optional[int] = None,
     ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
