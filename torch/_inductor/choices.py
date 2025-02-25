@@ -99,7 +99,7 @@ class InductorChoices:
         # corresponding non-persistent reductions. MultiKernel will do benchmarking
         # to pick the faster one.
         if config.triton.multi_kernel:
-            threshold *= 16
+            threshold *= 32
         return V.graph.sizevars.statically_known_leq(features.reduction_numel, threshold)  # type: ignore[arg-types]
 
     @staticmethod
