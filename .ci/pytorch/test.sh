@@ -1565,7 +1565,7 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench nanogpt BERT_pytorch resnet50
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   install_torchaudio cpu
