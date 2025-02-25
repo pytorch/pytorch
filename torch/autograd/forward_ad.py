@@ -152,7 +152,7 @@ class UnpackedDualTensor(NamedTuple):
     tangent: Optional[torch.Tensor]
 
 
-# remove `_asdict` method to make it a opaque leaf (pytree checks `_fields`, `_make`, `_asdict`)
+# remove `_asdict` method to make it an opaque leaf (pytree checks `_fields`, `_make`, `_asdict`)
 del UnpackedDualTensor._asdict
 
 

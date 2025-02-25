@@ -617,9 +617,6 @@ def is_structseq_class(cls: type) -> bool:
     )
 
 
-is_structseq_class.__torch_dynamo_can_constant_fold_through__ = True  # type: ignore[attr-defined]
-
-
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_structseq_instance(obj: object) -> bool:
     """Return whether the object is an instance of PyStructSequence."""
