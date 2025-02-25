@@ -3221,8 +3221,8 @@ def native_group_norm(
         b = b + bias_reshaped
 
     if input.device.type == "cpu" and weight is not None:
-        w = w.as_strided([batch_size, num_channels], [w.stride()[0], w.stride()[2]])
-        b = b.as_strided([batch_size, num_channels], [b.stride()[0], b.stride()[2]])
+        w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
