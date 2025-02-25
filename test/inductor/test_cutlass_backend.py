@@ -34,10 +34,10 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    IS_FBCODE,
     IN_RE_WORKER,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -1100,10 +1100,6 @@ class TestCutlassBackend(TestCase):
                 "cuda.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
-            # Y = model(a, b)
-            # Y_compiled = torch.compile(model, dynamic=dynamic)(a, b)
-            # torch.testing.assert_close(Y_compiled, Y)
-
             from tempfile import NamedTemporaryFile
 
             from torch._inductor.codegen.cuda.cutlass_utils import (
@@ -1142,16 +1138,17 @@ class TestCutlassBackend(TestCase):
             )
 
             if IS_FBCODE:
+                # hack to bypass the following error:
                 # error while loading shared libraries: IX}: invalid mode for dlopen(): Invalid argument
                 platform_path = sysconfig.get_config_var("LIBDIR")
                 cuda_path = os.path.realpath(os.path.join(platform_path, "libcuda.so"))
                 command = command.replace("-lcuda ", f"-L{cuda_path} ")
 
             repro_message = (
-                "Reproduce with: {}\n"
-                "exe_file.name: {}\n"
-                "cu_file.name: {}\n"
-            ).format(command, exe_file.name, cu_file.name)
+                f"Reproduce with: {command}\n"
+                f"exe_file.name: {exe_file.name}\n"
+                f"cu_file.name: {cu_file.name}\n"
+            )
 
             retcode = os.system(command)
             self.assertEqual(retcode, 0, repro_message)
