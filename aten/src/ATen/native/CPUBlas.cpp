@@ -337,9 +337,11 @@ void gemm(
               b, &ldb_,
               &beta_,
               float_v.data(), &ldc_);
-      for (auto cv: float_v) {
-        *(c++) = c10::convert<at::BFloat16>(cv);
-      }
+      at::parallel_for(0, c_size, 1, [&](int64_t begin, int64_t end) {
+        for (const auto i : c10::irange(begin, end)) {
+          *(c++) = c10::convert<at::BFloat16>(float_v[i]);
+        }
+      });
       return;
    }
 #endif
