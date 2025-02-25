@@ -199,6 +199,28 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+  pytorch-linux-focal-py3.12-clang10)
+    ANACONDA_PYTHON_VERSION=3.12
+    CLANG_VERSION=10
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-py3.13-clang10)
+    ANACONDA_PYTHON_VERSION=3.13
+    CLANG_VERSION=10
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
