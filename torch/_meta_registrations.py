@@ -7011,6 +7011,54 @@ def meta_local_scalar_dense(self: Tensor):
     raise RuntimeError("Tensor.item() cannot be called on meta tensors")
 
 
+@register_meta(aten.silu)
+def silu(self: Tensor) -> Tensor:
+    return torch.empty_like(self)
+
+
+@register_meta(aten.sigmoid)
+def sigmoid(self: Tensor) -> Tensor:
+    return torch.empty_like(self)
+
+
+@register_meta(aten._softmax)
+def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+    res = torch.empty_like(x)
+    res = res.contiguous()
+    result_dtype = result_dtype if not half_to_float else computation_dtype
+    res = res.to(result_dtype)
+    return res
+
+
+@register_meta(aten.embedding)
+def embedding(
+    weight: Tensor,
+    indices: Tensor,
+    padding_idx: int = -1,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
+) -> Tensor:
+    assert weight.dim() == 2, "'weight' must be 2-D"
+    weight_shape = weight.shape
+    indices_shape = indices.shape
+
+    if indices.ndim == 0:
+        out_shape = (weight_shape[1],)
+    elif indices.ndim == 1:
+        out_shape = (indices_shape[0], weight_shape[1])
+    else:
+        out_shape = (*indices_shape, weight_shape[1])
+
+    out_dtype = weight.dtype
+    return weight.new_empty(out_shape, dtype=out_dtype)
+
+
 @register_meta(aten._jagged_to_padded_dense_forward.default)
 def meta__jagged_to_padded_dense_forward(
     values: Tensor,
