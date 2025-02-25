@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 
-class XPUModule:
+class _XPUModule:
     def __getattr__(self, name):
         if name == "allow_tf32":
             return torch.get_float32_matmul_precision() == "high"
@@ -30,4 +30,4 @@ class XPUModule:
         raise AttributeError("Unknown attribute " + name)
 
 
-matmul = XPUModule()
+matmul = _XPUModule()
