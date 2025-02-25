@@ -1169,10 +1169,11 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            qualname = self.value.__qualname__
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
-                    f"Dynamo developers have intentionally marked that the function `{self.value.__qualname__}` "
+                    f"Dynamo developers have intentionally marked that the function `{qualname}` "
                     f"in file `{path}` should not be traced."
                 )
                 hints = [
@@ -1194,7 +1195,7 @@ class SkipFunctionVariable(VariableTracker):
                 if self.value.__module__ in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{self.value.__qualname__}`."
+                        f"`{self.value.__module__}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1206,7 +1207,7 @@ class SkipFunctionVariable(VariableTracker):
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1215,7 +1216,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{self.value.__qualname__}.` "
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
