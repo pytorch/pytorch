@@ -26,7 +26,6 @@ from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
     TritonTemplate,
 )
 from ..utils import (
@@ -464,19 +463,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
-    if should_fallback_to_aten(choices):
-        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
-
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
-    try:
-        return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
+    return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -490,10 +483,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
-
-    # TODO: Re-enable eager mode implementation once cuBLAS is fixed
-    if use_cutlass or use_triton_template(layout, enable_int32=True):
-        choices = []
 
     if use_cutlass:
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -511,16 +500,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             )
 
     if should_fallback_to_aten(choices):
-        choices = [aten__int_mm.bind((mat1, mat2), layout)]
+        return aten__int_mm.bind((mat1, mat2), layout).output_node()
 
-    try:
-        return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
-        choices = [aten__int_mm.bind((mat1, mat2), layout)]
-        return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
@@ -669,22 +651,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
                 ),
             )
-    try:
-        return autotune_select_algorithm(
-            "addmm", choices, [inp_expanded, mat1, mat2], layout
-        )
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
-        fallback_choice = aten_addmm.bind(
-            (inp, mat1, mat2),
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            alpha=alpha,
-            beta=beta,
-        )
-        return fallback_choice.output_node()
+
+    return autotune_select_algorithm(
+        "addmm", choices, [inp_expanded, mat1, mat2], layout
+    )
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
