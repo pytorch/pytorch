@@ -1580,12 +1580,12 @@
   result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
   output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
-- name: sort(Tensor self, int dim=-1, bool descending=False, bool dynamic_indices_type=False) -> (Tensor values, Tensor indices)
+- name: sort(Tensor self, int dim=-1, bool descending=False, ScalarType indices_dtype=long, bool dynamic_indices_dtype=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), true)
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
-- name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, bool dynamic_indices_type=False) -> (Tensor values, Tensor indices)
+- name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, ScalarType indices_dtype=long, bool dynamic_indices_dtype=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), true)
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)

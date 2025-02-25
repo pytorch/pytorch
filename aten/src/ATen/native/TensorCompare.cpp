@@ -541,7 +541,7 @@ static void isin_sorting(
   Tensor all_elements =
       at::cat({std::move(elements_flat), std::move(test_elements_flat)});
   auto [sorted_elements, sorted_order] = all_elements.sort(
-      /*stable=*/true, /*dim=*/0, /*descending=*/false, /*dynamic_indices_type*/ false);
+      /*stable=*/true, /*dim=*/0, /*descending=*/false);
 
   // 3. Create a mask for locations of adjacent duplicate values within the
   //    sorted list. Duplicate values are in both elements and test elements.

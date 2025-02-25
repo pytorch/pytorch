@@ -6352,7 +6352,15 @@ sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
 
 
 @register_lowering(aten.sort.stable, type_promotion_kind=None)
-def sort_stable(x, *, stable=None, dim=-1, descending=False, dynamic_indices_type=False):
+def sort_stable(
+    x,
+    *,
+    stable=None,
+    dim=-1,
+    descending=False,
+    indices_dtype=torch.long,
+    dynamic_indices_dtype=False,
+):
     if stable is None:
         stable = False
 
@@ -6364,7 +6372,14 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False, dynamic_indices_typ
 
     dim_size = shape[dim] if len(shape) else 1
     if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
-        return sort_fallback(x, stable=stable, dim=dim, descending=descending, dynamic_indices_type=dynamic_indices_type)
+        return sort_fallback(
+            x,
+            stable=stable,
+            dim=dim,
+            descending=descending,
+            indices_dtype=indices_dtype,
+            dynamic_indices_dtype=False,
+        )
 
     indices = iota(
         dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
@@ -6383,18 +6398,35 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False, dynamic_indices_typ
         axis=dim,
         stable=stable,
         descending=descending,
-        dynamic_indices_type=dynamic_indices_type,
+        indices_dtype=indices_dtype,
+        dynamic_indices_dtype=dynamic_indices_dtype,
     )
     if values is None:
-        return sort_fallback(x, stable=stable, dim=dim, descending=descending, dynamic_indices_type=dynamic_indices_type)
+        return sort_fallback(
+            x,
+            stable=stable,
+            dim=dim,
+            descending=descending,
+            indices_dtype=indices_dtype,
+            dynamic_indices_dtype=dynamic_indices_dtype,
+        )
 
     assert indices is not None
     return values, to_dtype(indices, torch.int64)
 
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
-def sort(x, dim=-1, descending=False, dynamic_indices_type=False):
-    return sort_stable(x, stable=False, dim=dim, descending=descending, dynamic_indices_type=dynamic_indices_type)
+def sort(
+    x, dim=-1, descending=False, indices_dtype=torch.long, dynamic_indices_dtype=False
+):
+    return sort_stable(
+        x,
+        stable=False,
+        dim=dim,
+        descending=descending,
+        indices_dtype=indices_dtype,
+        dynamic_indices_dtype=dynamic_indices_dtype,
+    )
 
 
 def register_pointwise_numeric(op, name=None, triton_fallback=None):

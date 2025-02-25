@@ -1,4 +1,3 @@
-#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -46,6 +45,7 @@
 #include <ATen/ops/topk_native.h>
 #endif
 
+#include <limits>
 #include <utility>
 
 namespace at::meta {
@@ -72,7 +72,7 @@ TORCH_META_FUNC(topk)
 }
 
 TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending, bool dynamic_indices_type=false) {
+(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending, ScalarType indices_dtype, bool dynamic_indices_dtype) {
   maybe_wrap_dim(dim, self.dim());
 
   const auto self_dtype = self.dtype();
@@ -89,18 +89,21 @@ TORCH_META_FUNC2(sort, stable)
       : at::infer_dense_strides(self.sizes(), self.strides());
 
   set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
+
+  auto dtype_indices = at::ScalarType::Long;
   const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
-  if (dynamic_indices_type == false) {
-    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::kLong), {});
+  if (dynamic_indices_dtype == false) {
+    dtype_indices = indices_dtype;
   } else if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
-    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::Byte), {});
+    dtype_indices = at::ScalarType::Byte;
   } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
-    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt16), {});
+    dtype_indices = at::ScalarType::UInt16;
   } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
-    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt32), {});
+    dtype_indices = at::ScalarType::UInt32;
   } else {
-    set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(at::ScalarType::UInt64), {});
+    dtype_indices = at::ScalarType::UInt64;
   }
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(dtype_indices), {});
 }
 
 } // namespace at::meta
@@ -957,7 +960,8 @@ TORCH_IMPL_FUNC(sort_stable_out)
  std::optional<bool> stable,
  int64_t dim,
  bool descending,
- bool dynamic_indices_type,
+ ScalarType indices_dtype,
+ bool dynamic_indices_dtype,
  const Tensor& values,
  const Tensor& indices) {
   values.copy_(self);
@@ -974,41 +978,43 @@ std::tuple<Tensor&, Tensor&> sort_out(
     const Tensor& self,
     int64_t dim,
     bool descending,
-    bool dynamic_indices_type,
+    ScalarType indices_dtype,
+    bool dynamic_indices_dtype,
     Tensor& values,
     Tensor& indices) {
-  return at::sort_out(values, indices, self, false, dim, descending, dynamic_indices_type);
+  return at::sort_out(values, indices, self, false, dim, descending, indices_dtype, dynamic_indices_dtype);
 }
 
 std::tuple<Tensor, Tensor> sort(
     const Tensor& self,
     int64_t dim,
     bool descending,
-    bool dynamic_indices_type) {
-  return at::sort(self, false, dim, descending, dynamic_indices_type);
+    ScalarType indices_dtype,
+    bool dynamic_indices_dtype) {
+  return at::sort(self, false, dim, descending, indices_dtype, dynamic_indices_dtype);
 }
 
 Tensor& msort_out(const Tensor& self, Tensor& values) {
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::sort_out(values, indices, self, 0, false, false);
+  at::sort_out(values, indices, self, 0, false, at::ScalarType::Long, false);
   return values;
 }
 
 Tensor msort(const Tensor& self) {
-  return std::get<0>(at::sort(self, 0, false, false));
+  return std::get<0>(at::sort(self, 0, false, at::ScalarType::Long, false));
 }
 
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
-  return std::get<1>(at::sort(self, dim, descending));
+  return std::get<1>(at::sort(self, dim, descending, at::ScalarType::Long, false));
 }
 
 Tensor argsort(const Tensor & self, bool stable, int64_t dim, bool descending) {
-  return std::get<1>(at::sort(self, stable, dim, descending, false));
+  return std::get<1>(at::sort(self, stable, dim, descending, at::ScalarType::Long, false));
 }
 
 Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descending, Tensor& out) {
   auto values = at::empty({0}, self.options());
-  at::sort_outf(self, stable, dim, descending, false, values, out);
+  at::sort_outf(self, stable, dim, descending, at::ScalarType::Long, false, values, out);
   return out;
 }
 

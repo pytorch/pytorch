@@ -297,6 +297,8 @@ class DtypePropagationOpsHandler:
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
+        indices_dtype: torch.dtype,
+        dynamic_indices_dtype: bool,
     ) -> tuple[torch.dtype, ...]:
         return dtypes
 

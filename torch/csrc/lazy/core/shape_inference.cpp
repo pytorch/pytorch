@@ -746,11 +746,12 @@ std::vector<Shape> compute_shape_sort(
     const at::Tensor& self,
     int64_t dim,
     bool descending,
-    bool dynamic_indices_type) {
-  auto dtype_indices = c10::ScalarType::Long;
+    at::ScalarType indices_dtype,
+    bool dynamic_indices_dtype) {
+  auto dtype_indices = at::ScalarType::Long;
   const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
-  if (dynamic_indices_type) {
-    dtype_indices = c10::ScalarType::Long;
+  if (dynamic_indices_dtype == false) {
+    dtype_indices = indices_dtype;
   } else if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
     dtype_indices = at::ScalarType::Byte;
   } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
