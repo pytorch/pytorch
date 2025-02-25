@@ -84,11 +84,11 @@ RUN mkdir -p /opt/runner && \
     chown -R  runner:runner /opt/runner && \
     su - runner -c "/opt/runner/config.sh --version"
 
-RUN     rm -rf /tmp/runner /tmp/runner.patch
+RUN rm -rf /tmp/runner /tmp/runner.patch
 
 # Copy custom scripts and set permissions
 COPY fs/ /
-RUN chmod 777 /usr/bin/actions-runner /usr/bin/entrypoint
+RUN chmod +x /usr/bin/actions-runner /usr/bin/entrypoint
 
 # Switch to the runner user
 USER runner

@@ -14,7 +14,6 @@ ExecStartPre=-/usr/local/bin/gh_cat_token.sh /etc/actions-runner/%i/ghtoken.env 
 ExecStart=/usr/bin/docker run \
               --env-file=/etc/actions-runner/%i/env \
               --volume /etc/actions-runner/%i/ghtoken.txt:/run/runner_secret \
-              --volume /var/run/docker.sock:/var/run/docker.sock \
               --init \
               --interactive \
               --name=actions-runner.%i \
