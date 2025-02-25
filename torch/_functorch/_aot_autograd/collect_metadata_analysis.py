@@ -420,6 +420,17 @@ def run_functionalized_fw_and_collect_metadata(
                 if not isinstance(o, torch.Tensor)
                 else StorageWeakRef(o.untyped_storage())
             )
+            outs_with_identical_metadata_that_require_grad = (
+                []
+                if not isinstance(o, Tensor)
+                else [
+                    curr
+                    for curr in out_storage_to_metadata_key_to_tensors[curr_storage][
+                        MetadataKey.make(o)
+                    ]
+                    if o is not curr
+                ]
+            )
 
             # See Note [Accessing .grad_fn on FunctionalTensor]
             # In-place operations on views will trigger a lazy rebase of the autograd graph;
@@ -563,6 +574,19 @@ from a multi-output view call"
                                 id(o._base)
                             ] = new_out_idx
                             intermediate_bases.append(o._base)
+            elif (
+                # See https://github.com/pytorch/pytorch/issues/100348 for this case.
+                # This protects against the specific case where a user fn returns (output, output.detach())
+                out_tensor_alias_counts[curr_storage] > 1
+                and len(outs_with_identical_metadata_that_require_grad) > 0
+                and not o.requires_grad
+            ):
+                # In theory we could use any of these tensors to regenerate the aliased outputs from,
+                # since they all alias each other and have identical metatadata
+                out_alias = outs_with_identical_metadata_that_require_grad[0]
+                existing_out_idx = out_tensor_ids[id(out_alias)]
+                output_type = OutputType.alias_of_intermediate_detach
+                base_idx = existing_out_idx
             else:
                 output_type = OutputType.non_alias
                 base_idx = None

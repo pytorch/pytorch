@@ -12839,17 +12839,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue(max_live_tensors == 3)
 
         # See https://github.com/pytorch/pytorch/issues/100348
-        def test_inductor_detach_view(self):
+        @parametrize("backend", ["aot_eager", "inductor"])
+        def test_inductor_detach_view(self, backend):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 a = x * 2
                 return a, a.detach()
 
-            fn_opt = torch.compile(fn, backend="inductor")
+            fn_opt = torch.compile(fn, backend=backend)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
             inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
-            out = fn_opt(inp)
             out_ref[0].sum().backward()
+            out = fn_opt(inp)
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 

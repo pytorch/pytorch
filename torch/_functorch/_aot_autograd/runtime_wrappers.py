@@ -222,8 +222,20 @@ class AliasOfIntermediateHandler:
             self.unwrap_out(out),
             self.requires_grad,
             self.functional_tensor,
-            replay_views=self.replay_views,
+            replay_views=self.replay_views and self.requires_grad,
         )
+
+
+class AliasOfIntermediateDetachHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        self.base_idx = info.base_idx
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.functional_tensor = info.functional_tensor
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        return self.unwrap_out(out)
 
 
 _HANDLER_MAP = {
@@ -235,6 +247,7 @@ _HANDLER_MAP = {
     OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
     OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
     OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_detach: AliasOfIntermediateDetachHandler,
 }
 
 

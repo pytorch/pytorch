@@ -1087,10 +1087,11 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
     @parametrize("view_replay_for_aliased_outputs", [False, True])
     @parametrize("dynamic_shapes", [False, True])
-    def test_alias_of_intermediate(
-        self, view_replay_for_aliased_outputs, dynamic_shapes
+    def test_alias_of_intermediate_detach(
+        self, backend, view_replay_for_aliased_outputs, dynamic_shapes
     ):
         with patch(
             "torch._functorch.config.view_replay_for_aliased_outputs",
@@ -1113,7 +1114,7 @@ def forward(self, arg0_1, arg1_1):
             y_ref = fn(x_ref)
 
             x = inp_fn()
-            y = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+            y = torch.compile(fn, backend=backend, fullgraph=True)(x)
             self.assertEqual(y_ref, y)
             y0, y1 = y
             self.assertFalse(y0.requires_grad)
