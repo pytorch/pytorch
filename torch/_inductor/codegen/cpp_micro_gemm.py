@@ -90,6 +90,7 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
+        self.pack_vnni_B_locally = False
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
@@ -112,7 +113,8 @@ inline void {{kernel_name}}(
             "int8_gemm": self.input_dtype in [torch.uint8, torch.int8],
             "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
-            "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            "pack_vnni_B_locally": self.pack_vnni_B_locally,
+            "template": self,
         }
 
     def get_kernel_declaration(self):
@@ -171,6 +173,9 @@ inline void {{kernel_name}}(
         res.writeline(");")
         return res.getvalue()
 
+    def use_local_vnni_blocking(self, should_block_weight: bool):
+        self.pack_vnni_B_locally = should_block_weight
+
     def codegen_init(
         self,
         kernel: CppTemplateKernel,
@@ -185,6 +190,33 @@ inline void {{kernel_name}}(
 
     def get_b_layout(self) -> LayoutType:
         return LayoutType.NORMAL
+
+    ALLOCATE_WEIGHT_BUFFER = r"""
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{buffer_dtype}}[]> heap_deq_b_buf_ptr(new {{buffer_dtype}}[{{buffer_size}}]);
+    {{buffer_dtype}}* {{buffer_name}} = heap_deq_b_buf_ptr.get();
+    {%- else %}
+    // It's safe to use a stack-allocated array since the blocking strategy would
+    // require us to allocate an array that's smaller than the size of L1D cache,
+    // and the default per thread max stack size on Linux is quite higher,
+    // so we need not worry about stack overflow.
+    alignas(4096) {{buffer_dtype}} {{buffer_name}}[{{buffer_size}}];
+    {%- endif %}
+"""
+
+    def codegen_allocate_weight_buffer(
+        self, buffer_name: str, buffer_dtype: str, *size_args
+    ) -> str:
+        buffer_size = " * ".join(map(str, size_args))
+        return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
+            dict(
+                buffer_name=buffer_name,
+                buffer_dtype=buffer_dtype,
+                buffer_size=buffer_size,
+                is_msvc_compiler=cpp_builder.is_msvc_cl(),
+            )
+        )
 
 
 @dataclasses.dataclass
@@ -699,22 +731,14 @@ class CppMicroGemmAMX(CppMicroGemm):
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+{%- if pack_vnni_B_locally %}
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K", block_n)}}
+{%- endif %}
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
-    const auto buf_size = K * {{block_n}};
-    {%- if is_msvc_compiler %}
-    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
-    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
-    {%- else %}
-    // It's safe to use a stack-allocated array since the blocking strategy would
-    // require us to allocate an array that's smaller than the size of L1D cache,
-    // and the default per thread max stack size on Linux is quite higher,
-    // so we need not worry about stack overflow.
-    alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
-    {%- endif %}
+    {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
@@ -743,14 +767,17 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
 // The ldb would not be block_n if N != block_n
-{%- if use_cached_dequantized_B %}
+{%- if use_cached_dequantized_B or pack_vnni_B_locally %}
     const int64_t updated_ldb = {{block_n}};
 {%- else %}
     const int64_t updated_ldb = ldb;
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
-{%- if use_cached_dequantized_B %}
+{%- if pack_vnni_B_locally %}
+        // Pack non-constant weights into VNNI interleaved format in packed_B_buf
+        at::vec::pack_vnni2(B + n, packed_B_buf, ldb, K, {{block_n}});
+{%- elif use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
 {%- endif %}
@@ -767,6 +794,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B_locally %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -787,6 +816,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B_locally %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -994,12 +1025,24 @@ class CppMicroBrgemm(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 #include <ATen/native/CPUBlas.h>
 {{declare_kernel}} {
+{%- if pack_vnni_B_locally %}
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", input2_t, "K * N")}}
+    at::vec::pack_vnni2(B, packed_B_buf, ldb, K, N);
+{%- endif %}
     at::native::cpublas::brgemm(
       M, N, K,
+    {%- if pack_vnni_B_locally %}
+      lda, N, ldc,
+    {%- else %}
       lda, ldb, ldc,
+    {%- endif %}
       accum,
       A,
+    {%- if pack_vnni_B_locally %}
+      packed_B_buf,
+    {%- else %}
       B,
+    {%- endif %}
       C);
 }
 """

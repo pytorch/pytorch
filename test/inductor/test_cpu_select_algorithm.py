@@ -2040,6 +2040,55 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True, False))
+    def test_linear_to_lowp_fp(self, batch_size, in_features, out_features, bias):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x).to(torch.float16)
+
+        counters.clear()
+        dtype = torch.float32
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        B = (batch_size,)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_weight_prune(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 128, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(2, 32).to(torch.bfloat16)
+        mod = M().eval().to(torch.bfloat16)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_weight_prune"], 1)
+
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -2063,6 +2112,36 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bs", (2,))
+    @parametrize("Mdim", (16, 32))
+    @parametrize("Kdim", (32,))
+    @parametrize("Ndim", (3, 16, 32, 48, 128, 1024, 1025))
+    @dtypes(torch.bfloat16, torch.half)
+    def test_bmm_amx(self, dtype, bs, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x @ y
+
+        counters.clear()
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        # Currently brgemm config is only added for half
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @patches
     @torch.no_grad
@@ -2131,7 +2210,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
-        dtype = torch.float
         bs = 12
         Mdim = 10
         Kdim = 62
@@ -2310,6 +2388,63 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 "cpu",
                 mod,
                 (x, w),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)  # avoid k_slicing to make the test deterministic
+    @parametrize(
+        "out_features1",
+        (
+            8,
+            16,
+            24,
+            32,
+            48,
+        ),
+    )
+    @dtypes(torch.float)
+    def test_local_and_global_accumulator(self, out_features1, dtype):
+        batch_size = 256
+        in_features = 64
+        out_features = 129
+        in_features1 = 128
+        bias = True
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(in_features1, out_features1, bias)
+
+            def forward(self, x):
+                y = self.linear(x)
+                view = torch.ops.aten.view.default(y, [-1, in_features1])
+                return self.linear1(view)
+
+        counters.clear()
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(
+                x,
+            )
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (x,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)

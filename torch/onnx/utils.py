@@ -14,13 +14,14 @@ import re
 import typing
 import warnings
 from typing import Any, Callable, cast
+from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.jit._trace
 import torch.serialization
 from torch import _C
-from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
+from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
 
@@ -55,10 +56,14 @@ def is_in_onnx_export() -> bool:
 _params_dict = {}  # type: ignore[var-annotated]
 
 
+@deprecated("Please set training mode before exporting the model", category=None)
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
-    r"""A context manager to temporarily set the training mode of ``model``
+    """A context manager to temporarily set the training mode of ``model``
     to ``mode``, resetting it when we exit the with-block.
+
+    .. deprecated:: 2.7
+        Please set training mode before exporting the model.
 
     Args:
         model: Same type and meaning as ``model`` arg to :func:`export`.
@@ -103,8 +108,17 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
             model.train(originally_training)
 
 
+@deprecated(
+    "Please remove usage of this function. Copy its logic if it is required in user code",
+    category=None,
+)
 @contextlib.contextmanager
 def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFunction):
+    """A context manager to temporarily disable the Apex O2 hook that returns.
+
+    .. deprecated:: 2.7
+        Please remove usage of this function.
+    """
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
@@ -134,8 +148,14 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
             pass
 
 
+@deprecated("The feature will be removed. Please remove usage of this function")
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
+    """A context manager to temporarily set the ONNX logging verbosity.
+
+    .. deprecated:: 2.7
+        Please remove usage of this function.
+    """
     is_originally_enabled = _C._jit_is_onnx_log_enabled
     if is_originally_enabled or verbose:  # type: ignore[truthy-function]
         _C._jit_set_onnx_log_enabled(True)
@@ -146,15 +166,25 @@ def setup_onnx_logging(verbose: bool):
             _C._jit_set_onnx_log_enabled(False)
 
 
+@deprecated(
+    "The feature will be removed. Please remove usage of this function "
+    "and implement equivalent logic if needed",
+    category=None,
+)
 @contextlib.contextmanager
 def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
-    with select_model_mode_for_export(
-        model, mode
-    ) as mode_ctx, disable_apex_o2_state_dict_hook(
-        model
-    ) as apex_ctx, setup_onnx_logging(
-        verbose
-    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
+    """A context manager to temporarily set the training mode of ``model``
+    to ``mode``, disable the Apex O2 hook, and set the ONNX logging verbosity.
+
+    .. deprecated:: 2.7
+        Please set training mode before exporting the model.
+    """
+    with (
+        select_model_mode_for_export(model, mode) as mode_ctx,
+        disable_apex_o2_state_dict_hook(model) as apex_ctx,
+        setup_onnx_logging(verbose) as log_ctx,
+        diagnostics.create_export_diagnostic_context() as diagnostic_ctx,
+    ):
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
@@ -482,14 +512,14 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args
@@ -1153,7 +1183,9 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
-@_deprecation.deprecated("2.5", "the future", "avoid using this function")
+@deprecated(
+    "Unconvertible ops are not definitive. Please remove usage of this function"
+)
 def unconvertible_ops(
     model,
     args,
@@ -1161,6 +1193,9 @@ def unconvertible_ops(
     opset_version: int | None = None,
 ) -> tuple[_C.Graph, list[str]]:
     """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
+
+    .. deprecated:: 2.5
+        Unconvertible ops are not definitive. Please remove usage of this function.
 
     The list is approximated because some ops may be removed during the conversion
     process and don't need to be converted. Some other ops may have partial support

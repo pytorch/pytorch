@@ -290,7 +290,7 @@ def _offsets_to_lengths(offsets, max_len):
     """
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import FunctionalTensor
-    if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
+    if not isinstance(offsets, (FakeTensor, FunctionalTensor)) and offsets.device.type != "meta":
         return offsets.diff().tolist()
     return [max_len] * (offsets.size(0) - 1)
 

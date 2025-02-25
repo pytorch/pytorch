@@ -91,6 +91,8 @@ def compile_time_strobelight_meta(
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 
@@ -221,12 +223,16 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
+        elif "gfx95" in gcn_arch:
+            return 1700  # TODO: placeholder, get actual value
         else:
             return 1100
 

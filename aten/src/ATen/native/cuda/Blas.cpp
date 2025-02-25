@@ -191,9 +191,12 @@ static bool isSupportedHipLtROCmArch(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
-        "gfx90a", "gfx940", "gfx941", "gfx942",
+        "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101"
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+        "gfx950"
 #endif
     };
     for (std::string arch : archs) {
@@ -862,7 +865,15 @@ static bool _scaled_mm_allowed_device() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
 #ifdef USE_ROCM
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {
+        "gfx942",
+#if ROCM_VERSION >= 60300
+        "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+        "gfx950"
+#endif
+    };
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
@@ -879,7 +890,7 @@ static bool _scaled_mm_allowed_device() {
 static bool _scaled_mm_is_fnuz() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     std::string device_arch = dprops->gcnArchName;
-    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    static const std::vector<std::string> archs = {"gfx942"};
     for (std::string arch : archs) {
         size_t substring = device_arch.find(arch);
         if (substring != std::string::npos) {
@@ -1082,7 +1093,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #ifndef USE_ROCM
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
-    TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
+    TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
         mat2,
@@ -1144,6 +1155,34 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 BLASOP_A, BLASOP_B> scaledgemm{};                       \
             scaledgemm(&params);                                        \
           }                                                             \
+        }                                                               \
+        else if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {     \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fn) {        \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,         \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fn, at::Float8_e5m2, scalar_t,           \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }                                                               \
+        else if (mat1.scalar_type() == ScalarType::Float8_e5m2) {       \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fn) {        \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2, at::Float8_e4m3fn, scalar_t,           \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2, at::Float8_e5m2, scalar_t,             \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
         }
     AT_DISPATCH_V2(out_dtype_, "_tunable_scaled_gemm", AT_WRAP([&] {
       bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
@@ -1186,7 +1225,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         TORCH_CHECK(false, "unreachable");
       }
     }),
-    kHalf, kBFloat16, kFloat8_e4m3fnuz, kFloat8_e5m2fnuz, AT_EXPAND(AT_FLOATING_TYPES));
+    kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
 #undef TUNABLE_DISPATCH
   }
   else
