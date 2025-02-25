@@ -336,6 +336,7 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.xlog1py',
         'special.zeta',
         'split',
         'split_with_sizes',
@@ -676,9 +677,6 @@ def mps_ops_modifier(ops):
         'linalg.eigvals': None,
         'put': None,
         'nn.functional.conv_transpose3d': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
@@ -789,7 +787,6 @@ def mps_ops_modifier(ops):
         'special.ndtri': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
-        'special.xlog1py': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -839,6 +836,7 @@ def mps_ops_modifier(ops):
         'angle': [torch.int64],
 
         # Operations not supported for integral types
+        'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
@@ -861,6 +859,7 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16 and bfloat16
         'round': [torch.float16, torch.bfloat16],
+        'rounddecimals_0': [torch.bfloat16],
 
         # bfloat16 have weird issues with rounding
         'divfloor_rounding': [torch.bfloat16],
@@ -8426,6 +8425,15 @@ class TestMPS(TestCaseMPS):
             x.random_()
             self.assertNotEqual(x.max().item(), 0)
 
+    def test_random_5d(self):
+        # See https://github.com/pytorch/pytorch/issues/147624 / FB16550905
+        shape = (2, 3, 4, 5, 6)
+        x = torch.rand(shape, device="mps")
+        self.assertNotEqual(x[0], x[1])
+        # Check that normal distributino is not affected by the same
+        y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
+        self.assertNotEqual(y[0], y[1])
+
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
@@ -9948,6 +9956,62 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_3d_input_fp16(self):
         self._test_sdpa_3d_input(torch.float16)
 
+    def _test_sdpa_no_mask_5d(
+        self,
+        dtype: torch.dtype,
+        B: int = 2,
+        extra: int = 3,
+        NH: int = 4,
+        L: int = 10,
+        HS: int = 16,
+        requires_grad: bool = False
+    ):
+        torch.manual_seed(1729)
+        q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps", requires_grad=requires_grad)
+        k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+        if requires_grad and torch.is_grad_enabled():
+            y.sum().backward()
+            y_ref.sum().backward()
+            self._compare_tensors(q.grad.cpu(), q.cpu().grad)
+
+    def test_sdpa_no_mask_5d_fp32(self):
+        self._test_sdpa_no_mask_5d(torch.float32)
+
+    def test_sdpa_no_mask_5d_fp16(self):
+        self._test_sdpa_no_mask_5d(torch.float16)
+
+    def _test_sdpa_mask_5d(
+        self,
+        dtype: torch.dtype,
+        B: int = 2,
+        extra: int = 3,
+        NH: int = 4,
+        L: int = 10,
+        HS: int = 16
+    ):
+        torch.manual_seed(1729)
+        q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
+        mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device="mps")).unsqueeze(0).unsqueeze(0)
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+    def test_sdpa_mask_5d_fp32(self):
+        self._test_sdpa_mask_5d(torch.float32)
+
+    def test_sdpa_mask_5d_fp16(self):
+        self._test_sdpa_mask_5d(torch.float16)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -12541,6 +12605,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
+        'special.xlog1py',
     }
 
     FP32_LOW_PRECISION_LIST = {

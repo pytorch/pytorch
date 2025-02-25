@@ -68,6 +68,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
+        # only need to include each header once
+        self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
+            self._include_extra_header
+        )
 
     @staticmethod
     def create(
@@ -168,7 +172,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                '''
+                r'''
                 """
             )
 
@@ -189,8 +193,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # does not provide any ABI compatibility promise.
             self.header.splice("#include <ATen/record_function.h>")
 
-    @functools.lru_cache(None)  # noqa: B019
-    def include_extra_header(self, header: str):
+    def _include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
         self.header.splice(f"#include <{header}>")
 
@@ -401,6 +404,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode:
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
+                assert V.graph.const_code is not None
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:
