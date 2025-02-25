@@ -378,11 +378,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 unimplemented(
                     f"""
 Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""
-                )  # NOQA: B950
+"""  # NOQA: B950
+                )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(fn, traceable=True)
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
 
         if self.is_constant:
             return invoke_and_store_as_constant(

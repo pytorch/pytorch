@@ -964,7 +964,11 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
-@dataclasses.dataclass(frozen=True, repr=False)
+# NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
+# this class with `dataclasses.fields`, etc., while having a simplified
+# constructor that takes no argument, we wrap with `dataclass(init=True, ...)`
+# again, with fields that have `init=False`.
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
     context: Context = dataclasses.field(default=None, init=False)

@@ -1542,7 +1542,7 @@ class OutputGraph:
             return dict()
 
     def install_subgraph(self, name, sub_gm):
-        next_name = get_unique_name_wrt(name, self.nn_modules)
+        next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
         sub_gm.__name__ = next_name
         sub_gm.torchdynamo_force_dynamic = False
         # This graph module is not present in the user space, so it can't be
