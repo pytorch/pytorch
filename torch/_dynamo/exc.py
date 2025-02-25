@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+
+"""Exception handling and error reporting for TorchDynamo.
+
+This module provides a comprehensive set of exception classes and utilities for error
+handling in TorchDynamo. It includes:
+
+Base Exceptions:
+    - TorchDynamoException: Base class for all TorchDynamo-specific exceptions
+    - Various specialized subclasses for different error scenarios
+
+User Error Handling:
+    - UserError: Exceptions for user-facing errors in TorchDynamo usage
+    - UserErrorType: Enumeration of different categories of user errors
+    - Formatted error messages with debugging information
+
+Observed Exceptions:
+    - Classes for handling exceptions observed during tracing
+    - Special handling for StopIteration, LookupError, etc.
+    - Exception state management during compilation
+
+Error Formatting:
+    - Stack trace filtering and formatting
+    - Error message augmentation
+    - Debugging utilities for error reporting
+"""
+
 import logging
 import os
 import textwrap
@@ -413,6 +439,69 @@ def unimplemented(
     if from_exc is not _NOTHING:
         raise Unsupported(msg, case_name=case_name) from from_exc
     raise Unsupported(msg, case_name=case_name)
+
+
+def unimplemented_v2_with_warning(
+    e: Exception,
+    code: types.CodeType,
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+) -> NoReturn:
+    # This function calls unimplemented internally and eventually graph breaks
+    # or falls to eager. unimplemented itself does not print any user warnings,
+    # i.e., its very silent. This helper function is intended when an error is
+    # encountered in the torch.compile stack which is worth showing as warning
+    # to the user. For example, if AOT Autograd backend fails with a fake tensor
+    # exception, its ok to fallback to eager but not silently. Here, we can use
+    # this function to log the message and the stack trace.
+    graph_break_msg = format_error_msg_verbose(e, code)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "dynamo_graph_break_reason",
+            "encoding": "string",
+        },
+        payload_fn=lambda: graph_break_msg,
+    )
+    graph_breaks_log.debug("%s", graph_break_msg)
+    unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
+
+
+# TODO replace old unimplemented later
+def unimplemented_v2(
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+    *,
+    from_exc: Any = _NOTHING,
+    log_warning: bool = False,
+) -> NoReturn:
+    """
+    Called within dynamo to cause a graph break.
+    Args:
+        gb_type: Context-free graph break type. It should be a short string without any
+                 information specific to the tracing context (i.e. no dynamically-generated strings)
+        context: Developer context for the graph break. It can contain tracing context/dynamic strings.
+        explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
+        hints: List of user-facing hints for the graph break.
+    """
+    hints_str = "\n".join(hints)
+    hints_str = textwrap.indent(hints_str, "  Hint: ")
+    msg = f"""\
+{gb_type}
+  Explanation: {explanation}
+{hints_str}
+
+  Developer debug context: {context}
+"""
+    if log_warning:
+        log.warning(msg)
+    if from_exc is not _NOTHING:
+        raise Unsupported(msg) from from_exc
+    raise Unsupported(msg)
 
 
 def warning(msg: str) -> None:

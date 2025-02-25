@@ -8,10 +8,7 @@
 #include <ATen/core/List.h>
 #include <torch/csrc/jit/backends/xnnpack/xnnpack_graph_builder.h>
 
-namespace torch {
-namespace jit {
-namespace xnnpack {
-namespace delegate {
+namespace torch::jit::xnnpack::delegate {
 
 // Expected method_compile_spec should look something like this:
 // {
@@ -126,7 +123,4 @@ c10::IValue preprocess(
 constexpr auto backend_name = "xnnpack";
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 
-} // namespace delegate
-} // namespace xnnpack
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::xnnpack::delegate
