@@ -8,6 +8,10 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
+TORCH_FN_OVERRIDE_OPS_ATTR = "tsc_torch_function_ops"
+TORCH_DISPATCH_OVERRIDE_OPS_ATTR = "tsc_torch_dispatch_ops"
+
+
 def gen_tensor_flatten_fn(
     inner_tensors: List[str],
     meta_attrs: Optional[List[str]],
@@ -77,40 +81,42 @@ def gen_tensor_unflatten_fn(
 
 
 def gen_torch_function(
-    torch_fn_pro: Optional[Callable], torch_fn_epi: Optional[Callable]
+    pro_fn: Optional[Callable], epi_fn: Optional[Callable], override_fn_table
 ):
-    if torch_fn_pro is None:
-
-        def fn(cls, func, types, args=(), kwargs=None):
-            if kwargs is None:
-                kwargs = {}
-            with torch._C.DisableTorchFunctionSubclass():
-                return torch_fn_epi.__wrapped__(
-                    cls, func, types, args, kwargs, func(*args, **kwargs)
-                )
-
-        return fn
-    elif torch_fn_epi is None:
-
-        def fn(cls, func, types, args=(), kwargs=None):
-            if kwargs is None:
-                kwargs = {}
-            if ret := torch_fn_pro.__wrapped__(cls, func, types, args, kwargs):
-                return ret
-            with torch._C.DisableTorchFunctionSubclass():
-                return func(*args, **kwargs)
-
-        return fn
+    # TODO: Shortcuts to gen minimal control flow if smth undef
 
     def fn(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if ret := torch_fn_pro.__wrapped__(cls, func, types, args, kwargs):
-            return ret
+
+        if override_fn_table and func in override_fn_table:
+            return override_fn_table[func](cls, func, types, args, kwargs)
+
+        if pro_fn is not None:
+            if ret := pro_fn.__wrapped__(cls, func, types, args, kwargs):
+                return ret
         with torch._C.DisableTorchFunctionSubclass():
-            return torch_fn_epi.__wrapped__(
-                cls, func, types, args, kwargs, func(*args, **kwargs)
-            )
+            if epi_fn:
+                return epi_fn.__wrapped__(
+                    cls, func, types, args, kwargs, func(*args, **kwargs)
+                )
+
+            return func(*args, **kwargs)
+
+    return fn
+
+
+def gen_torch_dispatch(override_fn_table):
+    # TODO: Shortcuts to gen minimal control flow if smth undef
+
+    def fn(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if override_fn_table and func in override_fn_table:
+            return override_fn_table[func](cls, func, types, args, kwargs)
+
+        return func(*args, **kwargs)
 
     return fn
 
@@ -121,6 +127,18 @@ def gen_repr(qualname, inner_tensors):
         return f"{qualname}({r})"
 
     return fn
+
+
+def _parse_override_table(attrs, fn_attr):
+    table = {}
+    for k, v in attrs.items():
+        if ops := getattr(v, fn_attr, None):
+            for op in ops:
+                assert (
+                    op not in table
+                ), f"More than one override of {fn_attr} op {op} func:{v}"
+                table[op] = v
+    return table or None
 
 
 class BaseTensorSubclassMeta(torch._C._TensorMeta):
@@ -156,18 +174,23 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
             if "__repr__" not in attrs:
                 attrs["__repr__"] = gen_repr(attrs["__qualname__"], inner_tensors)
 
-        if "__torch_function__" not in attrs and (
-            ("torch_function_prologue" in attrs) or ("torch_function_epilogue" in attrs)
-        ):
+        if "__torch_function__" not in attrs:
+            torch_fn_pro = attrs.get("torch_function_prologue", None)
+            torch_fn_epi = attrs.get("torch_function_epilogue", None)
+            torch_fn_override_table = _parse_override_table(
+                attrs, TORCH_FN_OVERRIDE_OPS_ATTR
+            )
             attrs["__torch_function__"] = classmethod(
-                gen_torch_function(
-                    attrs.get("torch_function_prologue", None),
-                    attrs.get("torch_function_epilogue", None),
-                )
+                gen_torch_function(torch_fn_pro, torch_fn_epi, torch_fn_override_table)
             )
 
-        # ops override
-        breakpoint()
+        if "__torch_dispatch__" not in attrs:
+            torch_dispatch_override_table = _parse_override_table(
+                attrs, TORCH_DISPATCH_OVERRIDE_OPS_ATTR
+            )
+            attrs["__torch_dispatch__"] = classmethod(
+                gen_torch_dispatch(torch_dispatch_override_table)
+            )
 
         return super().__new__(meta, name, bases, attrs)
 
@@ -247,3 +270,19 @@ class BaseTensorSubclass(torch.Tensor, metaclass=BaseTensorSubclassMeta):
     #     if func is torch.nn.functional.linear:
     #         print("linear")
     #     return out
+
+
+def torch_function_override(ops):
+    def wrapped_func(fn):
+        setattr(fn, TORCH_FN_OVERRIDE_OPS_ATTR, ops)
+        return fn
+
+    return wrapped_func
+
+
+def torch_dispatch_override(ops):
+    def wrapped_func(fn):
+        setattr(fn, TORCH_DISPATCH_OVERRIDE_OPS_ATTR, ops)
+        return fn
+
+    return wrapped_func

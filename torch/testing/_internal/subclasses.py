@@ -3,7 +3,12 @@ from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from torch._subclasses.base import BaseTensorSubclass, tensor_kwargs_from
+from torch._subclasses.base import (
+    BaseTensorSubclass,
+    tensor_kwargs_from,
+    torch_dispatch_override,
+    torch_function_override,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -115,21 +120,35 @@ class BaseWithMeta(BaseTensorSubclass):
         self.a = a
         self.m = m
 
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
-        ms = []
+    # @classmethod
+    # def __torch_dispatch__(cls, func, types, args, kwargs):
+    #    ms = []
 
-        def add_m(sc):
-            ms.append(sc.m)
+    #    def add_m(sc):
+    #        ms.append(sc.m)
 
-        pytree.tree_map_only(cls, add_m, args)
-        pytree.tree_map_only(cls, add_m, kwargs)
+    #    pytree.tree_map_only(cls, add_m, args)
+    #    pytree.tree_map_only(cls, add_m, kwargs)
 
-        m = ms[0] if ms else "no_m"
+    #    m = ms[0] if ms else "no_m"
 
-        out = pytree.tree_map_only(
-            torch.Tensor,
-            lambda x: cls(x, m),
-            cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
+    #    out = pytree.tree_map_only(
+    #        torch.Tensor,
+    #        lambda x: cls(x, m),
+    #        cls.func_args_kwargs_attr(func, args, kwargs or {}, "a"),
+    #    )
+    #    return cls._return(func, args, kwargs, out)
+
+    @torch_function_override(ops=[torch.add])
+    def torch_fn_add(cls, func, types, args=(), kwargs=None):
+        print(
+            f"XXX BaseSC.torch_fn_add cls:{cls} func:{func} types:{types} args:{args} kwargs:{kwargs}"
         )
-        return cls._return(func, args, kwargs, out)
+        return func(*args, **kwargs)
+
+    @torch_dispatch_override(ops=[torch.ops.aten.add.Tensor])
+    def torch_disp_add(cls, func, types, args=(), kwargs=None):
+        print(
+            f"XXX BaseSC.torch_dispatch_add cls:{cls} func:{func} types:{types} args:{args} kwargs:{kwargs}"
+        )
+        return func(*args, **kwargs)
