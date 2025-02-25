@@ -485,6 +485,14 @@ def aot_dispatch_autograd(
                 inner_meta.bw_donated_idxs = fw_metadata.bw_donated_idxs
 
         if aot_config.enable_log:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "torch._functorch.config",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: torch._functorch.config.get_config_copy(),
+            )
             aot_graphs_log.info(
                 "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
                 str(aot_config.aot_id),
