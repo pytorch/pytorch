@@ -3450,6 +3450,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
+            "_expr_sym_node_id"
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -6589,7 +6590,6 @@ class ShapeEnv:
     # not effect the results. When needed its read directly.
     _expr_sym_node_id: Optional[int] = None
 
-    @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_sym_node(
         self,
         sym_node: SymNode,
