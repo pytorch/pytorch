@@ -388,7 +388,7 @@ class _ScaledMatmul(_Matmul):
 
         return _ScaledMatmul(
             nodes=match,
-            A_node=cast(torch.fx.Node, match[0].args[0]),
+            A_node=cast(torch.fx.Node, mm_node.args[0]),
             B_node=cast(torch.fx.Node, mm_node.args[1]),
             A_scale_node=cast(torch.fx.Node, mm_node.args[2]),
             B_scale_node=cast(torch.fx.Node, mm_node.args[3]),
@@ -720,10 +720,10 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     matmul = _find_producer_matmul(input_node)
     if matmul is None:
         return
-
+    
     if rs_res_node in matmul.arg_ancestor_nodes:
         return
-
+    
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
         if "val" in matmul.A_node.meta:
@@ -735,7 +735,6 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
                 inductor_prims.force_stride_order,
                 args=(matmul.A_node, restrided.stride()),
             )
-
         fused_node = _insert_fused_matmul_reduce_scatter(
             graph,
             matmul,
