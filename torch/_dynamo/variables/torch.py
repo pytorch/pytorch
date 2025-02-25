@@ -404,10 +404,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
     def __init__(self, value, traceable=None, **kwargs) -> None:
         super().__init__(value, **kwargs)
-        from ..trace_rules import is_mark_traceable_callable
+        from ..trace_rules import is_nonstrict_trace_callable
 
         if traceable is None:
-            traceable = is_mark_traceable_callable(value)
+            traceable = is_nonstrict_trace_callable(value)
         self.traceable = traceable
 
     def __repr__(self) -> str:
@@ -1014,9 +1014,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             for flat_arg_vt in flat_args_vts.items:
                 arg_type = flat_arg_vt.python_type()
                 if not is_graphable_type(arg_type):
+                    type_name = flat_arg_vt.python_type().__qualname__
                     unimplemented(
                         f"""
-Attempting to call a `mark_traceable`-ed function with arguments that contain a value of type <{flat_arg_vt.python_type().__qualname__}>, please use one of the following to register the type with pytree:
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <{type_name}>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
                     )
@@ -1043,7 +1045,7 @@ Attempting to call a `mark_traceable`-ed function with arguments that contain a 
             except NotImplementedError:
                 unimplemented(
                     """
-This error is most likely due to a call to `mark_traceable`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been `torch.utils._pytree.register_constant`-ed. We currently don't support that.
 """  # NOQA: B950
                 )
 
@@ -1065,11 +1067,13 @@ This error is most likely due to a call to `mark_traceable`-ed function, where o
             # TreeSpec isn't graphable, so we register the function and input
             # specs as attributes on the graph module.
             f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                fn.__name__, f_spec
+                f"{fn.__name__}_spec", f_spec
             )
             input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
                 fn.__name__ + "_input_spec", input_spec
             )
+            f_spec_proxy.node.type = type(f_spec)
+            input_spec_proxy.node.type = type(input_spec)
             all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
             # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate

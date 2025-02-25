@@ -916,10 +916,13 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark=mark), maybe_enable_compiled_autograd(
-                args.compiled_autograd,
-                fullgraph=args.nopython,
-                dynamic=args.dynamic_shapes,
+            with (
+                maybe_mark_profile(p=p, mark=mark),
+                maybe_enable_compiled_autograd(
+                    args.compiled_autograd,
+                    fullgraph=args.nopython,
+                    dynamic=args.dynamic_shapes,
+                ),
             ):
                 timings[rep], actual_output = timed(
                     model,
@@ -1090,10 +1093,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
-                args.compiled_autograd,
-                fullgraph=args.nopython,
-                dynamic=args.dynamic_shapes,
+            with (
+                maybe_mark_profile(p=p, mark="actual"),
+                maybe_enable_compiled_autograd(
+                    args.compiled_autograd,
+                    fullgraph=args.nopython,
+                    dynamic=args.dynamic_shapes,
+                ),
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -2445,12 +2451,15 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd,
-                fullgraph=self.args.nopython,
-                dynamic=self.args.dynamic_shapes,
-            ), maybe_snapshot_memory(
-                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            with (
+                maybe_enable_compiled_autograd(
+                    self.args.compiled_autograd,
+                    fullgraph=self.args.nopython,
+                    dynamic=self.args.dynamic_shapes,
+                ),
+                maybe_snapshot_memory(
+                    self.args.snapshot_memory, f"compiled_{self.args.only}"
+                ),
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2598,12 +2607,15 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd,
-                fullgraph=self.args.nopython,
-                dynamic=self.args.dynamic_shapes,
-            ), maybe_snapshot_memory(
-                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            with (
+                maybe_enable_compiled_autograd(
+                    self.args.compiled_autograd,
+                    fullgraph=self.args.nopython,
+                    dynamic=self.args.dynamic_shapes,
+                ),
+                maybe_snapshot_memory(
+                    self.args.snapshot_memory, f"compiled_{self.args.only}"
+                ),
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -3564,6 +3576,15 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "RobertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+            "volo_d1_224",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            # sizes following #145130 (due to enabling split-k?)
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False

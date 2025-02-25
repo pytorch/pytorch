@@ -1154,17 +1154,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
 def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
-
-
-@overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -1260,6 +1260,17 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only(
     type_or_types_or_pred: Callable[[Any], bool],
     /,
     func: FnAny[Any],
@@ -1306,6 +1317,17 @@ def tree_map_only_(
     type_or_types_or_pred: Type3[T, S, U],
     /,
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
