@@ -163,7 +163,6 @@ def _is_apple_clang(cpp_compiler: str) -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -178,10 +177,8 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
 def _is_gcc(cpp_compiler: str) -> bool:
-    # Since "clang++" ends with "g++", the regex match below would validate on it.
-    if _is_clang(cpp_compiler):
+    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 

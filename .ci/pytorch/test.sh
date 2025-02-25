@@ -494,53 +494,8 @@ test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  local BENCHMARK
-  if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    local BENCHMARK=torchbench
-  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
-    local BENCHMARK=huggingface
-  else
-    echo "invalid SHARD_NUMBER: ${SHARD_NUMBER}"
-    exit 1
-  fi
-
-  local mode_options=("training" "inference")
-
-  for mode in "${mode_options[@]}"; do
-    $TASKSET python "benchmarks/dynamo/cachebench.py" \
-        --mode "$mode" \
-        --device cuda \
-        --benchmark "$BENCHMARK" \
-        --repeat 3 \
-        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
-
-    $TASKSET python "benchmarks/dynamo/cachebench.py" \
-        --mode "$mode" \
-        --dynamic \
-        --device cuda \
-        --benchmark "$BENCHMARK" \
-        --repeat 3 \
-        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
-  done
-}
-
-test_verify_cachebench() {
-  TMP_TEST_REPORTS_DIR=$(mktemp -d)
-  TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
-
-  $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode training \
-      --device cpu \
-      --model nanogpt \
-      --benchmark torchbench \
-      --output "$TEST_OUTPUT"
-
-  # -s checks file exists and is non empty
-  if [[ ! -s "$TEST_OUTPUT" ]]; then
-    echo "Cachebench failed to produce an output."
-    echo "Run 'python benchmarks/dynamo/cachebench.py' to make sure it works"
-    exit 1
-  fi
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode training --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_training.json"
+  $TASKSET python "benchmarks/dynamo/cachebench.py" --mode inference --benchmark torchbench --output "$TEST_REPORTS_DIR/cachebench_inference.json"
 }
 
 test_perf_for_dashboard() {
@@ -1565,13 +1520,8 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50
   PYTHONPATH=$(pwd)/torchbench test_cachebench
-elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
-  install_torchaudio cpu
-  install_torchvision
-  checkout_install_torchbench nanogpt
-  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     install_torchaudio cpu

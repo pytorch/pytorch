@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -195,9 +194,8 @@ class UvTcpSocket : public UvHandle {
   }
 
   virtual void processBuf(const uv_buf_t* buf, size_t nread) {
-    C10D_THROW_ERROR(
-        DistStoreError,
-        "Trying to read from a socket subclass that lacks processBuf");
+    TORCH_CHECK(
+        false, "Trying to read from a socket subclass that lacks processBuf");
   }
 
   void onClose() override {
@@ -219,8 +217,7 @@ class UvTcpServer : public UvTcpSocket {
     res->handleReady();
     try {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
-      TORCH_CHECK_WITH(
-          DistStoreError,
+      TORCH_CHECK(
           uv_res == 0,
           "Failed to open existing socket. ",
           "socket: ",
@@ -259,8 +256,7 @@ class UvTcpServer : public UvTcpSocket {
       } else {
         uv_res = uv_ip4_addr("0.0.0.0", port, (struct sockaddr_in*)&addr);
       }
-      TORCH_CHECK_WITH(
-          DistStoreError,
+      TORCH_CHECK(
           uv_res == 0,
           "UV Store addr parsing failure. ",
           "port: ",
@@ -276,8 +272,7 @@ class UvTcpServer : public UvTcpSocket {
 
       uv_res = uv_tcp_bind(
           res->unsafeGetSocket(), (const struct ::sockaddr*)&addr, 0);
-      C10D_CHECK_WITH(
-          SocketError,
+      TORCH_CHECK(
           uv_res == 0,
           "The server socket has failed to bind. ",
           "port: ",
@@ -293,17 +288,18 @@ class UvTcpServer : public UvTcpSocket {
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
-      C10D_CHECK_WITH(
-          SocketError,
-          uv_res == 0,
-          fmt::format(
-              "The server socket has failed to listen on any local network address. "
-              "port: {}, useIpv6: {}, code: {}, name: {}, message: {}",
-              port,
-              useIpv6,
-              uv_res,
-              uv_err_name(uv_res),
-              uv_strerror(uv_res)));
+      if (uv_res != 0) {
+        C10D_THROW_ERROR(
+            SocketError,
+            fmt::format(
+                "The server socket has failed to listen on any local network address. "
+                "port: {}, useIpv6: {}, code: {}, name: {}, message: {}",
+                port,
+                useIpv6,
+                uv_res,
+                uv_err_name(uv_res),
+                uv_strerror(uv_res)));
+      }
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();
@@ -320,8 +316,7 @@ class UvTcpServer : public UvTcpSocket {
   void accept(const c10::intrusive_ptr<UvTcpSocket>& socket) {
     int res =
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
-    C10D_CHECK_WITH(
-        SocketError,
+    TORCH_CHECK(
         res == 0,
         "Failed to accept socket. ",
         "code: ",
@@ -366,8 +361,7 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   static void missingOnConnect(int status) {
-    C10D_THROW_ERROR(
-        DistStoreError, "Socket accepted byt onConnect callback missing");
+    TORCH_CHECK(false, "Socket accepted byt onConnect callback missing");
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {
@@ -519,8 +513,8 @@ class ChunkedStream {
         buff_offset = 0;
         ++buff_idx;
         if (buff_idx >= buffers.size() && remaining > 0) {
-          C10D_THROW_ERROR(
-              DistStoreError,
+          TORCH_CHECK(
+              false,
               "Trying to read past end of buffer. ",
               "buffer_idx: ",
               buff_idx,
@@ -562,8 +556,7 @@ class ChunkedStream {
     uint64_t size = 0;
     if (!read_value(size))
       return false;
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         size <= MAX_STRING_LEN,
         "Invalid string size. ",
         "size: ",
@@ -582,8 +575,7 @@ class ChunkedStream {
     if (!read_value(size))
       return false;
     auto size_in_bytes = size * sizeof(uint8_t);
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         size_in_bytes <= MAX_PAYLOAD_LEN,
         "Invalid payload size. ",
         "size: ",
@@ -890,8 +882,7 @@ class UvClient : public UvTcpSocket {
     uint64_t key_count = 0;
     if (!stream.read_value(key_count))
       return false;
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
         "Too many keys being waited. ",
         "keys: ",
@@ -923,8 +914,7 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
         "Too many keys being waited. ",
         "keys: ",
@@ -996,8 +986,7 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
         "Too many keys with multi_get. ",
         "keys: ",
@@ -1027,8 +1016,7 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK_WITH(
-        DistStoreError,
+    TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
         "Too many keys with multi_get. ",
         "keys: ",
@@ -1125,8 +1113,7 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
       [this](auto status) { this->onConnect(status); });
 
   port_ = tcpServer_->port();
-  TORCH_CHECK_WITH(
-      DistStoreError,
+  TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
       "listen fd ",
       opts.masterListenFd,
@@ -1137,10 +1124,8 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
 }
 
 LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
-  TORCH_CHECK_WITH(
-      DistStoreError, uv_loop_init(&loop_) == 0, "Failed to init uv loop");
-  TORCH_CHECK_WITH(
-      DistStoreError,
+  TORCH_CHECK(uv_loop_init(&loop_) == 0, "Failed to init uv loop");
+  TORCH_CHECK(
       uv_async_init(&loop_, &exit_handle_, LibUVStoreDaemon::on_exit_request) ==
           0,
       "Failed to init uv async event");
@@ -1151,9 +1136,7 @@ LibUVStoreDaemon::~LibUVStoreDaemon() {
   if (!is_running()) {
     uv_close((uv_handle_t*)&exit_handle_, nullptr);
     uv_run(&loop_, UV_RUN_NOWAIT);
-    if (uv_loop_close(&loop_) != 0) {
-      C10D_ERROR("loop cleanup didn't work");
-    }
+    TORCH_CHECK(uv_loop_close(&loop_) == 0, "loop cleanup didn't work");
   } else {
     // the daemon thread cleanup libuv
     dispose();
@@ -1404,7 +1387,7 @@ std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
   res->init(opts);
   return res;
 #else
-  C10D_THROW_ERROR(DistStoreError, "LibUV TCPStore implementation missing");
+  TORCH_CHECK(false, "LibUV TCPStore implementation missing");
 #endif
 }
 

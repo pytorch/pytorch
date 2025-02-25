@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
+    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
@@ -169,6 +170,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("lu_solve"),
     xfail("lu_unpack"),
     xfail("matmul"),
+    xfail("mean"),
     xfail("mm"),
     xfail("mode"),
     xfail("msort"),
@@ -637,6 +639,7 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])

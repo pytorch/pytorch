@@ -109,12 +109,10 @@ register_artifact(
 register_artifact(
     "ir_pre_fusion",
     "Prints the IR before inductor fusion passes.",
-    off_by_default=True,
 )
 register_artifact(
     "ir_post_fusion",
     "Prints the IR after inductor fusion passes.",
-    off_by_default=True,
 )
 register_artifact(
     "compiled_autograd",
