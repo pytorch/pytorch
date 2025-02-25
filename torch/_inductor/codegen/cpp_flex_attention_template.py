@@ -22,9 +22,6 @@ from .cpp_utils import GemmBlocking
 
 log = logging.getLogger(__name__)
 
-from collections import namedtuple
-
-
 # TODO: reuse cpp codegen to generate below pointwise/reduction kernels
 SOFTMAX_FUSIONS = r"""
 // 1) out = exp(a - val)
