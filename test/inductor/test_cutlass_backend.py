@@ -1157,7 +1157,7 @@ class TestCutlassBackend(TestCase):
             self.assertEqual(retcode, 0, repro_message)
 
             # Run the executable generated.
-            if not IS_FBCODE or not IN_RE_WORKER
+            if not IS_FBCODE or not IN_RE_WORKER:
                 retcode = os.system(exe_file.name)
                 self.assertEqual(retcode, 0, repro_message)
 
