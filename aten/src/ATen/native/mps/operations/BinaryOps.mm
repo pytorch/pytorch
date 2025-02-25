@@ -224,7 +224,7 @@ static void div_mode_template(const Tensor& self,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      auto truncTensor = trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor = [mpsGraph truncateWithTensor:divTensor name:nil];
       if (op_name == "fmod_mps_out") {
         auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
                                                    secondaryTensor:secondaryCastTensor
