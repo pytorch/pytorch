@@ -1607,6 +1607,7 @@ class FakeTensorPropTest(TestCase):
 
         self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_torch_load_with_fake_mode(self):
         model = torch.nn.Linear(5, 10)
 
