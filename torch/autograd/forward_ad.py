@@ -128,10 +128,11 @@ def make_dual(tensor, tangent, *, level=None):
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-# This type previously was a opaque leaf type in pytree utilities by subclassing the namedtuple type:
+# This type previously was an opaque leaf type in pytree utilities by subclassing the namedtuple type:
 #
 #     class _UnpackedDualTensor(NamedTuple):
-#         ...
+#         primal: torch.Tensor
+#         tangent: torch.Tensor | None
 #
 #     class UnpackedDualTensor(_UnpackedDualTensor):
 #         pass  # naive subclassing
