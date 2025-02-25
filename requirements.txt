@@ -10,7 +10,7 @@ lintrunner ; platform_machine != "s390x"
 networkx
 ninja
 numpy
-optree>=0.13.0
+git+https://github.com/metaopt/optree.git#egg=optree
 packaging
 psutil
 pyyaml
