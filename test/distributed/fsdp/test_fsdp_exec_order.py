@@ -8,15 +8,17 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -63,7 +65,7 @@ class Model(torch.nn.Module):
         )
         return z
 
-    def get_input(self, device: torch.device):
+    def get_input(self, device):
         return (torch.randn((8, 5)).to(device),)
 
     def get_loss(self, input, output):
@@ -86,22 +88,19 @@ class Model(torch.nn.Module):
         self.use_alt_path = not self.use_alt_path
 
     @staticmethod
-    def wrap(sharding_strategy: ShardingStrategy, device: torch.device):
+    def wrap(sharding_strategy: ShardingStrategy, device):
         model = Model()
-        model.layer1 = FSDP(model.layer1, sharding_strategy=sharding_strategy)
-        model.layer2 = FSDP(model.layer2, sharding_strategy=sharding_strategy)
-        fsdp_model = FSDP(model, sharding_strategy=sharding_strategy)
+        model.layer1 = FSDP(
+            model.layer1, sharding_strategy=sharding_strategy, device_id=device
+        )
+        model.layer2 = FSDP(
+            model.layer2, sharding_strategy=sharding_strategy, device_id=device
+        )
+        fsdp_model = FSDP(model, sharding_strategy=sharding_strategy, device_id=device)
         return fsdp_model.to(device)
 
 
 class TestFSDPExecOrder(FSDPTest):
-    def setUp(self):
-        super().setUp()
-
-    @property
-    def device(self):
-        return torch.device("cuda")
-
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -109,6 +108,7 @@ class TestFSDPExecOrder(FSDPTest):
     )
     def test_invalid_first_iter_order(
         self,
+        device,
         sharding_strategy: ShardingStrategy,
     ):
         """Tests that FSDP errors if the all-gather order differs across ranks
@@ -116,10 +116,10 @@ class TestFSDPExecOrder(FSDPTest):
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         dist.set_debug_level(dist.DebugLevel.DETAIL)
-        fsdp_model = Model.wrap(sharding_strategy, self.device)
+        fsdp_model = Model.wrap(sharding_strategy, device_type)
         if self.rank != 0:
             fsdp_model.flip_path()
-        inp = fsdp_model.module.get_input(self.device)
+        inp = fsdp_model.module.get_input(device_type)
         # Match the error message with the following prefix
         error_regex = "^(Forward order differs across ranks)"
         with self.assertRaisesRegex(RuntimeError, error_regex):
@@ -133,6 +133,7 @@ class TestFSDPExecOrder(FSDPTest):
     @parametrize("iters_before_path_change", [1, 3])
     def test_invalid_later_iter_order(
         self,
+        device,
         sharding_strategy: ShardingStrategy,
         iters_before_path_change: int,
     ):
@@ -141,11 +142,11 @@ class TestFSDPExecOrder(FSDPTest):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
-        fsdp_model = Model.wrap(sharding_strategy, self.device)
+        fsdp_model = Model.wrap(sharding_strategy, device_type)
         for _ in range(iters_before_path_change):
-            inp = fsdp_model.module.get_input(self.device)
+            inp = fsdp_model.module.get_input(device_type)
             output = fsdp_model(*inp)
-            loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+            loss = fsdp_model.module.get_loss(inp, output).to(device_type)
             fsdp_model.module.run_backward(loss)
         # Match the warning message with the following prefix
         regex = (
@@ -163,16 +164,16 @@ class TestFSDPExecOrder(FSDPTest):
         )
         if self.rank != 0:
             fsdp_model.flip_path()
-        inp = fsdp_model.module.get_input(self.device)
+        inp = fsdp_model.module.get_input(device_type)
         # Expect a warning for the forward pass all-gather
         with context:  # warning for forward pass all-gather
             output = fsdp_model(*inp)
-        loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+        loss = fsdp_model.module.get_loss(inp, output).to(device_type)
         fsdp_model.module.run_backward(loss)
         # Run an additional iteration to check that there are no more warnings
-        inp = fsdp_model.module.get_input(self.device)
+        inp = fsdp_model.module.get_input(device_type)
         output = fsdp_model(*inp)
-        loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+        loss = fsdp_model.module.get_loss(inp, output).to(device_type)
         fsdp_model.module.run_backward(loss)
 
     @skip_if_lt_x_gpu(2)
@@ -180,24 +181,24 @@ class TestFSDPExecOrder(FSDPTest):
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
-    def test_train_eval(self, sharding_strategy: ShardingStrategy):
+    def test_train_eval(self, device, sharding_strategy: ShardingStrategy):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
-        fsdp_model = Model.wrap(sharding_strategy, self.device)
+        fsdp_model = Model.wrap(sharding_strategy, device_type)
         NUM_ITERS = 3
         NUM_EPOCHS = 2
         with warnings.catch_warnings(record=True) as w:  # records warnings to `w`
             for _ in range(NUM_EPOCHS):
                 fsdp_model.train()
                 for _ in range(NUM_ITERS):
-                    inp = fsdp_model.module.get_input(self.device)
+                    inp = fsdp_model.module.get_input(device_type)
                     output = fsdp_model(*inp)
-                    loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+                    loss = fsdp_model.module.get_loss(inp, output).to(device_type)
                     fsdp_model.module.run_backward(loss)
                 fsdp_model.eval()
                 for _ in range(NUM_ITERS):
-                    inp = fsdp_model.module.get_input(self.device)
+                    inp = fsdp_model.module.get_input(device_type)
                     output = fsdp_model(*inp)
-                    fsdp_model.module.get_loss(inp, output).to(self.device)
+                    fsdp_model.module.get_loss(inp, output).to(device_type)
         # Check that the order validation warning was not issued (errors do not
         # need to be checked since they will be directly reported)
         warning_prefix = "Forward order differs"
@@ -210,7 +211,7 @@ class TestFSDPExecOrder(FSDPTest):
         # an `AssertionError` will be raised above for both sharding strategies
 
 
-instantiate_parametrized_tests(TestFSDPExecOrder)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestFSDPExecOrder, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

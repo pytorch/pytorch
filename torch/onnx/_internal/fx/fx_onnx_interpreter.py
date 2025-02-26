@@ -5,7 +5,7 @@ import inspect
 import logging
 import operator
 import re
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 import onnxscript
 from onnxscript.function_libs.torch_lib import (
@@ -23,6 +23,10 @@ from torch.onnx._internal.fx import (
     type_utils as fx_type_utils,
 )
 from torch.utils import _pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _fx_node_to_onnx_message_formatter(
@@ -146,8 +150,9 @@ def _retrieve_or_adapt_input_to_graph_set(
                     # scalars are promoted to tensors with shape (1,).
                     with onnxscript.evaluator.default_as(tracer):
                         element_value = onnxscript_apis.torchlib_opset().Reshape(
-                            element_value, [1]
-                        )  # type: ignore[arg-type, type-var]
+                            element_value,  # type: ignore[arg-type, type-var]
+                            [1],  # type: ignore[arg-type, type-var]
+                        )
                 sequence_mixed_elements.append(element_value)
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with

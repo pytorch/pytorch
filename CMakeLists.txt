@@ -252,15 +252,8 @@ cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
-# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
-# Using TH_BINARY_BUILD to check whether is binary build.
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
-if(DEFINED ENV{TH_BINARY_BUILD})
-  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
-                         "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
-else()
-  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
-endif()
+cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -704,6 +697,13 @@ if(ANDROID
   endif()
 endif()
 
+if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
+    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
+      set(USE_KLEIDIAI OFF)
+      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
+    endif()
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
@@ -871,11 +871,6 @@ cmake_dependent_option(
   ON
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
-
-# We are currenlty not using alibi attention for Flash So we disable this
-# feature by default We dont currently document this feature because we don't
-# Suspect users building from source will need this
-add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
@@ -1101,6 +1096,9 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
   endif()
 else()
+  # Define export functions for AOTI.
+  add_compile_definitions(EXPORT_AOTI_FUNCTIONS)
+
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
   # Windows SDK broke compatibility since version 25131, but introduced this

@@ -50,7 +50,7 @@
 /*
 https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
 Use _MSC_FULL_VER to identify current compiler is msvc,
-Windows llvm will not have this defination.
+Windows llvm will not have this definition.
 */
 #define __msvc_cl__
 #endif
@@ -197,7 +197,7 @@ public:
     return vector;
   }
 // Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
-#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ <= 12 && !defined(__clang__) && defined(__ARM_FEATURE_SVE)
   static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
 #else
   static Vectorized<T> blendv(const Vectorized<T>& a,
@@ -294,6 +294,15 @@ public:
     }
     return ret;
   }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i < size(); i++) {
+      ret = f(ret, values[i]);
+      if (++i < size())
+        ret = f(ret, values[i]);
+    }
+    return ret;
+  }
 #else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
@@ -302,11 +311,25 @@ public:
     }
     return ret;
   }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
+    }
+    return ret;
+  }
 #endif
   Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  T reduce(T (*const f)(const T &)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -584,6 +607,12 @@ public:
       ret[i] = std::pow(values[i], exp[i]);
     }
     return ret;
+  }
+   T reduce_add() const {
+    return reduce([](T x, T y) -> T { return x + y; });
+  }
+  T reduce_max() const {
+    return reduce(std::max);
   }
 private:
   template <typename Op>

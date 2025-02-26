@@ -2,7 +2,7 @@
 import math
 
 import torch
-from torch import inf, nan
+from torch import inf, nan, Tensor
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
@@ -38,17 +38,17 @@ class StudentT(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         m = self.loc.clone(memory_format=torch.contiguous_format)
         m[self.df <= 1] = nan
         return m
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         m = self.df.clone(memory_format=torch.contiguous_format)
         m[self.df > 2] = (
             self.scale[self.df > 2].pow(2)
@@ -76,7 +76,7 @@ class StudentT(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
         # parameters seems to help.

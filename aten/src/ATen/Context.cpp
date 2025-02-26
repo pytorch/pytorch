@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
@@ -136,6 +137,18 @@ std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
   return sdp_priority_order;
 }
 
+bool Context::allowTF32OneDNN() const {
+  return allow_tf32_onednn;
+}
+
+void Context::setAllowTF32OneDNN(bool b){
+#ifdef USE_XPU
+  allow_tf32_onednn = b;
+#else
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
@@ -186,6 +199,9 @@ bool Context::userEnabledOverrideableSDP() const {
 
 static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
 static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
+#ifdef USE_ROCM
+static constexpr const auto hipblaslt_allow_tf32 = "HIPBLASLT_ALLOW_TF32";
+#endif
 
 bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
@@ -237,10 +253,24 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
+#ifdef USE_ROCM
+    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    if (allow_tf32 != true) {
+      return false;
+    }
+#endif
   return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
+#ifdef USE_ROCM
+  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  if (allow_tf32 != true) {
+    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
+    return;
+  }
+#endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
 }
 
@@ -300,9 +330,12 @@ at::BlasBackend Context::blasPreferredBackend() {
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
-          "gfx90a", "gfx940", "gfx941", "gfx942",
+          "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
@@ -343,6 +376,39 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #endif
 }
 
+at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+  return rocm_fa_preferred_backend;
+}
+
+void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
+
+  // TODO: add plumbing for hasCK for validity checking
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
+      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  if(b == at::ROCmFABackend::Ck) {
+    static const bool ck_unsupported = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a",  "gfx942"
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if(!ck_unsupported) rocm_fa_preferred_backend = b;
+  }
+  else {
+     rocm_fa_preferred_backend = b;
+  }
+#endif
+  rocm_fa_preferred_backend = b;
+}
+
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -357,6 +423,14 @@ bool Context::allowBF16ReductionCuBLAS() const {
 
 void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
+}
+
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
+}
+
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
 }
 
 

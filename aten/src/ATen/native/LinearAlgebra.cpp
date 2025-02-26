@@ -3037,7 +3037,7 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
 Tensor linalg_norm(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   if (opt_dim.has_value()) {
     TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
-              "dim is specified, it mut be of length 1 or 2. Got ", *opt_dim);
+              "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
   } else {
     TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
                 "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");
@@ -3485,6 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(K % qGroupSize == 0,
+      __func__, ": expect K to be divisible by qGroupSize, got K:", K, ", qGroupSize:", qGroupSize);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
       && qScaleAndZeros.size(2) == 2,
@@ -3570,11 +3572,10 @@ Tensor _weight_int8pack_mm_cpu(
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be contiguous on the last dimension.");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),

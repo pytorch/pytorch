@@ -283,6 +283,7 @@ dispatch_keys = [
     DispatchKey.MPS,
     DispatchKey.XPU,
     DispatchKey.SparseXPU,
+    DispatchKey.SparseCsrXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -373,6 +374,7 @@ class ScalarType(Enum):
     Float8_e5m2fnuz = auto()
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
+    Float8_e8m0fnu = auto()
 
     def __str__(self) -> str:
         return self.name
@@ -625,6 +627,11 @@ class NativeFunction:
             "use_const_ref_for_mutable_tensors", False
         )
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
+
+        if use_const_ref_for_mutable_tensors:
+            assert (
+                not func.arguments.out
+            ), "see https://github.com/pytorch/pytorch/issues/145522"
 
         variants_s = e.pop("variants", "function")
         assert isinstance(variants_s, str)
@@ -1815,7 +1822,7 @@ class Annotation:
             alias_set = f"{alias_set}!"
         alias_set_after = "|".join(self.alias_set_after)
         if alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+            alias_set = f"{alias_set} -> {alias_set_after}"
         return alias_set
 
 
