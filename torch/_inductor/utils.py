@@ -2085,6 +2085,12 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     # AOT won't lift any parameters if we're inlining NN Modules
     # however desugaring subclasses will still add arguments
     # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
+    if (
+        torch._dynamo.config.inline_inbuilt_nn_modules
+        and not torch._dynamo.utils.is_parameter_freezing()
+    ):
+        return 0
+
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
