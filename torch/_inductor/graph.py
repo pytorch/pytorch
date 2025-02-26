@@ -76,6 +76,7 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
+    constrain_to_fake_tensors,
     constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -233,6 +234,13 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
+        if isinstance(
+            cur.target,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
         op = _get_overload_packet(cur)
         if not op:
             continue
@@ -1363,8 +1371,9 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_args:
+                if old_arg is new_arg:
                     continue
+
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
             return
 
@@ -1447,7 +1456,15 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+
+                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
+                        inp_args = arg_kwarg_vals[0]
+                        inp_kwargs = arg_kwarg_vals[1]
+                        args, kwargs = constrain_to_fake_tensors(
+                            args, kwargs, inp_args, inp_kwargs
+                        )
+                    else:
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
