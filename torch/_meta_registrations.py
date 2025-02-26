@@ -411,6 +411,11 @@ def meta_randint(
     device=None,
     pin_memory=None,
 ):
+    low = 0
+    torch._check(
+        high > low,
+        lambda: f"random_ expects 'from' to be less than 'to', but got from={low} >= to={high}",
+    )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -428,6 +433,10 @@ def meta_randint_low(
     device=None,
     pin_memory=None,
 ):
+    torch._check(
+        high > low,
+        lambda: f"random_ expects 'from' to be less than 'to', but got from={low} >= to={high}",
+    )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -5550,6 +5559,14 @@ def meta__scaled_dot_product_flash_attention(
     # capturing or not, but at the time of tracing we don't know if we
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
+    # See [Note] BC breaking change to flash seed/offset
+    if torch.version.hip and torch.cuda.is_available():
+        # Maintian old path on AMD
+        seed = torch.empty((), dtype=torch.long, device="meta")
+        offset = torch.empty((), dtype=torch.long, device="meta")
+    else:
+        seed = torch.empty((2), dtype=torch.uint64, device="meta")
+        offset = torch.empty((), dtype=torch.uint64, device="meta")
 
     return (
         attention,
@@ -5558,8 +5575,8 @@ def meta__scaled_dot_product_flash_attention(
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        seed,
+        offset,
         debug_mask,
     )
 
@@ -5883,11 +5900,17 @@ def meta__flash_attention_forward(
 
     # Cuda Path
     attention = torch.empty_like(query)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
+    if cum_seq_q is None:
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q),
+            dtype=torch.float,
+            device=query.device,
+        )
+    else:
+        total_q = query.size(0)
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
@@ -5904,12 +5927,21 @@ def meta__flash_attention_forward(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    # See Note [Seed and Offset]:
+    # See Note [Seed and Offset]
+    # See [Note] BC breaking change to flash seed/offset
+    seed, offset = None, None
+    if torch.version.hip and torch.cuda.is_available():
+        # Maintian old path on AMD
+        seed = torch.empty((), dtype=torch.long, device="meta")
+        offset = torch.empty((), dtype=torch.long, device="meta")
+    else:
+        seed = torch.empty((2), dtype=torch.uint64, device="meta")
+        offset = torch.empty((), dtype=torch.uint64, device="meta")
     return (
         attention,
         logsumexp,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        seed,
+        offset,
         debug_mask,
     )
 
