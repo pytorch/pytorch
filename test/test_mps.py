@@ -9923,7 +9923,8 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
-    def _test_sdpa_3d_input(self, dtype):
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
 
         q = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
@@ -9950,13 +9951,8 @@ class TestSDPA(TestCaseMPS):
 
             self._compare_tensors(y.cpu(), y_ref)
 
-    def test_sdpa_3d_input_fp32(self):
-        self._test_sdpa_3d_input(torch.float32)
-
-    def test_sdpa_3d_input_fp16(self):
-        self._test_sdpa_3d_input(torch.float16)
-
-    def _test_sdpa_no_mask_5d(
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_no_mask_5d(
         self,
         dtype: torch.dtype,
         B: int = 2,
@@ -9981,13 +9977,8 @@ class TestSDPA(TestCaseMPS):
             y_ref.sum().backward()
             self._compare_tensors(q.grad.cpu(), q.cpu().grad)
 
-    def test_sdpa_no_mask_5d_fp32(self):
-        self._test_sdpa_no_mask_5d(torch.float32)
-
-    def test_sdpa_no_mask_5d_fp16(self):
-        self._test_sdpa_no_mask_5d(torch.float16)
-
-    def _test_sdpa_mask_5d(
+    @parametrize('dtype', [torch.float16, torch.float32])
+    def test_sdpa_mask_5d(
         self,
         dtype: torch.dtype,
         B: int = 2,
@@ -10007,11 +9998,6 @@ class TestSDPA(TestCaseMPS):
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
-    def test_sdpa_mask_5d_fp32(self):
-        self._test_sdpa_mask_5d(torch.float32)
-
-    def test_sdpa_mask_5d_fp16(self):
-        self._test_sdpa_mask_5d(torch.float16)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -13020,6 +13006,7 @@ instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="m
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
+instantiate_parametrized_tests(TestSDPA)
 
 if __name__ == "__main__":
     run_tests()
