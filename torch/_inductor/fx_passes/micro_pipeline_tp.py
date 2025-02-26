@@ -374,30 +374,51 @@ class _ScaledMatmul(_Matmul):
 
     @classmethod
     def from_match(cls, match: list[torch.fx.Node]) -> "_ScaledMatmul":
+        """
+        Accepts list of torch.fx.Nodes and returns a _ScaledMatmul op.
+        Handles 2 cases:
+
+        1. Single node _scaled_mm op.
+        2. 3 node "reshape -> _scaled_mm -> reshape" pattern.
+        """
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten._scaled_mm.default,
             aten.reshape.default,
         )
-        mm_node = match[0] if len(match) == 1 else match[1]
-
         def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
             if idx >= len(node.args):
                 return default
             return node.args[idx]
 
+        is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
+        mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
+
+        # case 1: single node match (mm):
+        # - match[0].args[0] will be the "A tensor" node of scaled_mm
+        # - Has 2D shape
+        # case 2: 3 node match (reshape -> mm -> reshape)
+        # - match[0].args[0] will be the "A tensor" input to the reshape op
+        # - Has 3D+ shape
+        A_node = match[0].args[0]
+        A_scale_node = mm_node.args[2]
+        if is_reshape_mm_reshape_pattern:
+            # scaled_mm's A_scale arg -> parent is reshape op
+            A_scale_reshape_node = A_scale_node.all_input_nodes[0]
+            # reshape node's parent is the original exp2 output, before the reshape.
+            A_scale_node = A_scale_reshape_node.all_input_nodes[0]
+
         return _ScaledMatmul(
             nodes=match,
-            A_node=cast(torch.fx.Node, mm_node.args[0]),
+            A_node=cast(torch.fx.Node, A_node),
             B_node=cast(torch.fx.Node, mm_node.args[1]),
-            A_scale_node=cast(torch.fx.Node, mm_node.args[2]),
+            A_scale_node=cast(torch.fx.Node, A_scale_node),
             B_scale_node=cast(torch.fx.Node, mm_node.args[3]),
             bias_node=get_arg(mm_node, 4, None),
             result_scale_node=get_arg(mm_node, 5, None),
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
         )
-
 
 def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     if node.target != aten.reshape.default:
