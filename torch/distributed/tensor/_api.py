@@ -287,6 +287,7 @@ class DTensor(torch.Tensor):
         r._local_tensor = local_tensor
         return r
 
+    @torch._disable_dynamo
     @_mark_subclass_constructor_exportable_experimental
     def __init__(self, *args, **kwargs):
         pass

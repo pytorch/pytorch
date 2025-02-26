@@ -1346,6 +1346,15 @@ class FxGraphCache:
             pass
 
 
+def run_command_and_check(cmd_: str) -> None:
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
+
+
 @functools.lru_cache(None)
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
@@ -1427,7 +1436,7 @@ class AotCodeCompiler:
         fbcode_aot_cpu_re = (
             config.is_fbcode() and device_type == "cpu" and graph.aot_mode
         )
-        use_relative_path = fbcode_aot_cpu_re
+        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1512,7 +1521,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1520,8 +1529,15 @@ class AotCodeCompiler:
                 output_dir=str(consts_s.parent),
                 BuildOption=object_build_options,
             )
+            compile_cmd = object_builder.get_command_line()
             consts_o = object_builder.get_target_file_path()
-            object_builder.build()
+            if fbcode_aot_cpu_re:
+                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
+                consts_o = str(consts_s.with_suffix(".o"))
+                object_builder.build_fbcode(str(consts_s), consts_o)
+                os.chmod(consts_o, 0o644)
+            else:
+                run_command_and_check(compile_cmd)
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1634,7 +1650,7 @@ class AotCodeCompiler:
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
@@ -1660,7 +1676,12 @@ class AotCodeCompiler:
                 object_builder.save_src_to_cmake(cmake_path, cpp_path)
                 generated_files.append(cmake_path)
             else:
-                object_builder.build()
+                if fbcode_aot_cpu_re:
+                    output_o = str(cpp_path_operator.with_suffix(".o"))
+                    object_builder.build_fbcode(cpp_path, output_o)
+                    os.chmod(output_o, 0o644)
+                else:
+                    run_command_and_check(compile_cmd)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1687,14 +1708,12 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_relative_path=use_relative_path,
+                use_absolute_path=use_absolute_path,
             )
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o, kernels_o]
-                if kernels_o
-                else [output_o, consts_o],
+                sources=[output_o, consts_o, kernels_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1741,7 +1760,16 @@ class AotCodeCompiler:
                     so_builder.save_src_to_cmake(cmake_path, kernel_o)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
-                so_builder.build()
+                if fbcode_aot_cpu_re:
+                    output_so = (
+                        config.aot_inductor.output_path
+                        if specified_artifact_name
+                        else str(cpp_path_operator.with_suffix(".so"))
+                    )
+                    so_builder.build_fbcode([output_o, consts_o], output_so)
+                    os.chmod(output_so, 0o755)
+                else:
+                    run_command_and_check(link_cmd)
 
                 for o_file in [
                     output_o,
@@ -1988,7 +2016,13 @@ def _worker_compile_cpp(
             fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
         )
         if not os.path.exists(binary_path):
-            cpp_builder.build()
+            if config.is_fbcode():
+                cpp_builder.build_fbcode(
+                    fb_input_path,
+                    fb_output_path,
+                )
+            else:
+                cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels

@@ -36,7 +36,8 @@ class TwoTensor(torch.Tensor):
         assert a.stride() == b.stride()
         assert a.storage_offset() == b.storage_offset()
         return out
-
+    
+    @torch._disable_dynamo
     @_mark_subclass_constructor_exportable_experimental
     def __init__(self, a, b, outer_size=None, outer_stride=None):
         self.a = a

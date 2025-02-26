@@ -11126,6 +11126,37 @@ graph():
     return (add_4,)""",
             )
 
+    def test_capture_subclass_constructor_torch_ir(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                two_tensor = TwoTensor(x, TwoTensor(x, x)) + self.buffer
+                val = x + two_tensor
+                return val.b.a
+
+        mod = Foo()
+        gm_torch_ir = _export_to_torch_ir(mod, (torch.randn(4, 4),))
+        self.assertExpectedInline(
+            str(gm_torch_ir.code).strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    two_tensor = torch.testing._internal.two_tensor.TwoTensor(l_x_, l_x_)
+    two_tensor_1 = torch.testing._internal.two_tensor.TwoTensor(l_x_, two_tensor);  two_tensor = None
+    l__self___buffer = self.buffer
+    two_tensor_2 = two_tensor_1 + l__self___buffer;  two_tensor_1 = l__self___buffer = None
+    val = l_x_ + two_tensor_2;  l_x_ = two_tensor_2 = None
+    getattr_1 = val.b;  val = None
+    getattr_2 = getattr_1.a;  getattr_1 = None
+    return pytree.tree_unflatten([getattr_2], self._out_spec)""",
+        )
+
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
