@@ -149,12 +149,13 @@ zip = strict_zip
 # corresponds to top-level invocations of aot_module/aot_function;
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
+AOT_COUNTER = itertools.count()
+
 def reset_aot_counter():
     global AOT_COUNTER
     AOT_COUNTER = itertools.count()
 
 
-AOT_COUNTER = reset_aot_counter()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
