@@ -2440,7 +2440,6 @@
     "tqdm"
   ],
   "torch.utils.tensorboard": [
-    "FileWriter",
     "RecordWriter",
     "SummaryWriter"
   ],
