@@ -3362,7 +3362,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2024, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

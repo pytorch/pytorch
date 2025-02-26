@@ -1,10 +1,25 @@
+"""Metrics collection and management system for Dynamo.
+
+This module provides context managers for gathering and reporting metrics during
+compilation and runtime.
+
+It includes two main components:
+- MetricsContext: A context manager for collecting metrics during compilation, supporting
+  nested contexts and various metric types (counters, sets, key-value pairs)
+- RuntimeMetricsContext: A specialized context for runtime metrics collection that doesn't
+  require explicit context management
+
+The metrics system enables comprehensive monitoring and analysis of both compilation and
+execution performance.
+"""
+
 import time
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, Dict[str, Any], Optional[Type[BaseException]], Optional[BaseException]],
+    [int, int, dict[str, Any], Optional[type[BaseException]], Optional[BaseException]],
     None,
 ]
 
@@ -18,7 +33,7 @@ class MetricsContext:
         all metrics set during the lifetime of the contextmanager.
         """
         self._on_exit = on_exit
-        self._metrics: Dict[str, Any] = {}
+        self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
 
@@ -36,7 +51,7 @@ class MetricsContext:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_value: Optional[BaseException],
         _traceback: Any,
     ) -> None:
@@ -94,7 +109,7 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: Dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any]) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
         metric has been assigned previously in the current context.
@@ -108,7 +123,7 @@ class MetricsContext:
             )
         self._metrics.update(values)
 
-    def update_outer(self, values: Dict[str, Any]) -> None:
+    def update_outer(self, values: dict[str, Any]) -> None:
         """
         Update, but only when at the outermost context.
         """
@@ -136,11 +151,11 @@ class RuntimeMetricsContext:
         context manager.
         """
         self._on_exit = on_exit
-        self._metrics: Dict[str, Any] = {}
+        self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[Dict[str, Any]]
+        self, metric: str, value: int, extra: Optional[dict[str, Any]]
     ) -> None:
         """
         Increment a metric by a given amount.

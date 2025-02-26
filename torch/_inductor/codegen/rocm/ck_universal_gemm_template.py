@@ -2,7 +2,7 @@
 import copy
 import logging
 import random
-from typing import List, Optional
+from typing import Optional
 
 import sympy
 
@@ -81,7 +81,7 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
-            1, // kBatch
+            kBatch, // kBatch
             {{a_elementwise_op}},
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
@@ -141,6 +141,7 @@ class CKGemmTemplate(CKTemplate):
         const int32_t LDB = {{LDB}};
         const int32_t LDC = {{LDC}};
         const int32_t LDD = {{LDD}};
+        const int32_t kBatch = {{kBatch}};
 
         using AElementType = {{a_ck_dtype}};
         using BElementType = {{b_ck_dtype}};
@@ -285,11 +286,11 @@ class CKGemmTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
@@ -683,10 +684,7 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            if self.is_batched:
-                size_arg_strs = ["B", "M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
-            else:
-                size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            # NOTE: size_arg_strs is defined above
             size_arg_vals = (
                 self.size_args()
                 if is_static_problem
@@ -695,6 +693,12 @@ class CKGemmTemplate(CKTemplate):
                 )
             )
             size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
+            runtime_args = dict(
+                zip(
+                    [a.name for a in self.get_runtime_arg_info()],
+                    self.get_runtime_arg_values(),
+                )
+            )
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
@@ -735,6 +739,7 @@ class CKGemmTemplate(CKTemplate):
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
                 **size_args,
+                **runtime_args,
             )
             res += runner_code
 
@@ -832,6 +837,7 @@ class CKGemmTemplate(CKTemplate):
             template.maybe_append_choice(
                 choices,
                 op=op,
+                kBatch=1,
             )
 
     def size_args(self):

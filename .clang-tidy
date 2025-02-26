@@ -1,8 +1,9 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
-# The check bugprone-unchecked-optional-access is also turned off atm
-# because it causes clang-tidy to hang randomly. The tracking issue
+# The check bugprone-unchecked-optional-access is also turned on.
+# Note that it can cause clang-tidy to hang randomly. The tracking issue
 # can be found at https://github.com/llvm/llvm-project/issues/69369.
+# When that happens, we can disable it on the problematic code by NOLINT.
 InheritParentConfig: true
 Checks: '
 bugprone-*,
@@ -12,7 +13,10 @@ bugprone-*,
 -bugprone-lambda-function-name,
 -bugprone-reserved-identifier,
 -bugprone-swapped-arguments,
--bugprone-unchecked-optional-access,
+clang-analyzer-core.*,
+clang-analyzer-cplusplus.*,
+clang-analyzer-nullability.*,
+clang-analyzer-deadcode.*,
 clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
 -cppcoreguidelines-avoid-do-while,

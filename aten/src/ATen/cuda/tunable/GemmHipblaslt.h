@@ -26,36 +26,63 @@
 namespace at::cuda::tunable {
 
 template <typename T>
-constexpr hipblasDatatype_t HipDataTypeFor();
+constexpr hipDataType HipDataTypeFor();
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<float>() {
+constexpr hipDataType HipDataTypeFor<float>() {
   return HIP_R_32F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<Half>() {
+constexpr hipDataType HipDataTypeFor<Half>() {
   return HIP_R_16F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<BFloat16>() {
+constexpr hipDataType HipDataTypeFor<BFloat16>() {
   return HIP_R_16BF;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<double>() {
+constexpr hipDataType HipDataTypeFor<double>() {
   return HIP_R_64F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e4m3fnuz>() {
+constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fnuz>() {
   return HIP_R_8F_E4M3_FNUZ;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2fnuz>() {
   return HIP_R_8F_E5M2_FNUZ;
+}
+
+// This code is instantiated regardless of ROCm version.
+// Prior to ROCm 6.3, we hard-code the known enum values.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fn>() {
+#if ROCM_VERSION >= 60300
+  return HIP_R_8F_E4M3;
+#else
+  return static_cast<hipDataType>(28);
+#endif
+}
+
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
+#if ROCM_VERSION >= 60300
+  return HIP_R_8F_E5M2;
+#else
+  return static_cast<hipDataType>(29);
+#endif
+}
+
+// This type is not intended for matrix types but rather a scale factor.
+// Return a dummy value to satisfy linker.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
+  return static_cast<hipDataType>(500);
 }
 
 template <typename T>
@@ -176,6 +203,26 @@ float GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
 template <typename T>
 float GetBetaFromParams(const ScaledGemmParams<T>* params) {
   return 0.0;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
+  return params->use_rowwise;
 }
 
 template <typename T>
@@ -460,8 +507,18 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+#ifdef HIPBLASLT_VEC_EXT
+        if (GetUseRowwiseFromParams<CT>(params)) {
+          // swapped
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+        }
+        else
+#endif
+        {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+        }
       }
       if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
@@ -567,13 +624,6 @@ auto GetHipBlasLtTypeStringAndOps() {
         HIPBLAS_COMPUTE_32F,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
-
-  // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
-  std::sort(heuristic_result.begin(),
-      heuristic_result.end(),
-      [](hipblasLtMatmulHeuristicResult_t& a, hipblasLtMatmulHeuristicResult_t& b) {
-      return hipblaslt_ext::getIndexFromAlgo(a.algo) < hipblaslt_ext::getIndexFromAlgo(b.algo);
-      });
 
   int returned_algo_count = heuristic_result.size();
   std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;

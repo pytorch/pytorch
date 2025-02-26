@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.jit  # this is needed to avoid a circular import
@@ -190,7 +190,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     def dequantize(self):
         r"""Utility to convert the quantized MHA back to float.
 
-        The motivation for this is that it is not trivial to conver the weights
+        The motivation for this is that it is not trivial to convert the weights
         from the format that is used in the quantized version back to the
         float.
         """
@@ -283,7 +283,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         r"""
         Note::
             Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -351,7 +351,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #

@@ -101,7 +101,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -146,13 +145,11 @@ ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 
 # Check if the compiler is hip-clang.
+#
+# This used to be a useful function but now we can safely always assume hip-clang.
+# Leaving the function here avoids bc-linter errors.
 def is_hip_clang() -> bool:
-    try:
-        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
-        with open(hip_path + "/lib/.hipInfo") as f:
-            return "HIP_COMPILER=clang" in f.read()
-    except OSError:
-        return False
+    return True
 
 
 # TODO Remove once the following submodules are updated
@@ -201,6 +198,7 @@ for hip_platform_file in hip_platform_files:
                 for line in newlines:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
+
 
 hipify_python.hipify(
     project_directory=proj_dir,

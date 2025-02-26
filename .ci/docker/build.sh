@@ -86,6 +86,10 @@ CMAKE_VERSION=3.18.5
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
+if [[ "$image" == *rocm* ]]; then
+  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
+  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -105,54 +109,10 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -208,48 +168,6 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
@@ -292,18 +210,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=6.1
-    NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -311,6 +218,25 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=6.3
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
@@ -525,7 +451,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

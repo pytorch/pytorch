@@ -18,7 +18,8 @@ New operators:
 """
 
 import functools
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import _C
@@ -97,7 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b")
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -108,6 +109,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
+    align_to_window: Optional[bool] = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.
@@ -135,6 +137,12 @@ def stft(
         raise errors.SymbolicValueError(
             msg="STFT does not currently support complex types", value=input
         )
+
+    if align_to_window is not None:
+        raise errors.SymbolicValueError(
+            msg="STFT does not currently support the align_to_window option",
+            value=input,
+        )  # TODO(#145944): add compatibility with align_to_window option.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4

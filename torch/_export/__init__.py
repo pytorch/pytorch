@@ -16,7 +16,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -75,15 +75,15 @@ def aot_compile_warning():
 
 def aot_compile(
     f: Callable,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
-    options: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[dict[str, Any]] = None,
+    options: Optional[dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> Union[List[str], str]:
+) -> Union[list[str], str]:
     """
     Note: this function is not stable yet
 

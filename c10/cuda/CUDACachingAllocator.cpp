@@ -5,7 +5,6 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -31,6 +30,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <regex>
 #include <set>
 #include <utility>
@@ -406,6 +406,7 @@ struct ExpandableSegment {
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           auto h = handles_.at(j).value();
           handles_.at(j) = std::nullopt;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
@@ -444,6 +445,7 @@ struct ExpandableSegment {
     ShareHeader header{getpid(), segment_size_, end - begin};
     buf.write((const char*)&header, sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
       if (!handle.fd) {
         int fd = 0;
@@ -493,6 +495,7 @@ struct ExpandableSegment {
         close((int)pidfd);
         for (auto& h : segment->handles_) {
           C10_CUDA_DRIVER_CHECK(
+              // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
               DriverAPI::get()->cuMemRelease_(h.value().handle));
           h = std::nullopt;
         }
@@ -555,6 +558,7 @@ struct ExpandableSegment {
           ptr_ + i * segment_size_,
           segment_size_,
           0,
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           handles_.at(i).value().handle,
           0ULL));
     }
@@ -579,6 +583,7 @@ struct ExpandableSegment {
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
@@ -973,10 +978,10 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
   if (!nvml_handle) {
     return "";
   }
-  static c10::once_flag nvml_init;
-  c10::call_once(nvml_init, [] {
+  static bool nvml_init [[maybe_unused]] = []() {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-  });
+    return true;
+  }();
 
   cudaDeviceProp prop{};
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
@@ -3258,10 +3263,10 @@ class DeviceCachingAllocator {
 static bool forceUncachedAllocator() {
   // Allow either CUDA or HIP name for env var for maximum user comfort
   // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
-  static bool has_cuda_env =
-      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
-  static bool has_rocm_env =
-      c10::utils::has_env("PYTORCH_NO_HIP_MEMORY_CACHING");
+  static auto has_cuda_env =
+      c10::utils::check_env("PYTORCH_NO_CUDA_MEMORY_CACHING") == true;
+  static auto has_rocm_env =
+      c10::utils::check_env("PYTORCH_NO_HIP_MEMORY_CACHING") == true;
   static bool force_uncached = has_cuda_env || has_rocm_env;
   return force_uncached;
 }
@@ -3294,6 +3299,12 @@ static void uncached_delete(void* ptr) {
 
 static void local_raw_delete(void* ptr);
 
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_destructive_interference_size;
+#else
+static constexpr std::size_t hardware_destructive_interference_size = 64;
+#endif
+
 class NativeCachingAllocator : public CUDAAllocator {
  private:
   // allows this allocator to be turned on and off programmatically
@@ -3302,8 +3313,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
-  // TODO: use std::hardware_destructive_interference_size once available
-  struct alignas(64) AlignedMutex {
+  struct alignas(hardware_destructive_interference_size) AlignedMutex {
     std::mutex m;
   };
 
