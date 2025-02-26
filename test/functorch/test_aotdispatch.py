@@ -84,7 +84,12 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
-from torch.testing._internal.subclasses import BaseWithMeta, LogTensor, WrapperSubclass
+from torch.testing._internal.subclasses import (
+    BaseWithMeta,
+    BaseWithOverride,
+    LogTensor,
+    WrapperSubclass,
+)
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -6442,9 +6447,20 @@ metadata incorrectly.
             return torch.mul(x, 2)
 
         y = fn(t)
-        # assert y.m == "meta"
+        assert y.m == "meta"
         y = torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
-        # assert y.m == "meta"
+        assert y.m == "meta"
+
+    def test_sc_base_with_override(self):
+        t = BaseWithOverride(torch.randn(2, 2))
+
+        def fn(x):
+            x = torch.add(x, 2)
+            x = torch.nn.functional.linear(x, torch.ones(2, 2))
+            return torch.mul(x, 2)
+
+        fn(t)
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(t)
 
     def test_sc_base_local(self):
         with self.assertRaisesRegex(
@@ -6452,7 +6468,7 @@ metadata incorrectly.
         ):
 
             class SC(BaseTensorSubclass):
-                _INNER_TENSORS = ["a"]
+                TSC_INNER_TENSORS = ["a"]
 
                 @staticmethod
                 def __new__(

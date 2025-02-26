@@ -7,7 +7,7 @@ from torch._subclasses.base import BaseTensorSubclass
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(BaseTensorSubclass):
-    INNER_TENSORS = ["a", "b"]
+    TSC_INNER_TENSORS = ["a", "b"]
 
     @staticmethod
     def __new__(cls, a, b, meta, outer_size=None, outer_stride=None):
