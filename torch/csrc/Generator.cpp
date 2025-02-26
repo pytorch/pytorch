@@ -259,6 +259,7 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   PyTuple_SET_ITEM(state.get(), 2, THPGenerator_getState(_self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 2, state.release());
 
+  Py_INCREF(ret);
   return ret.release();
   END_HANDLE_TH_ERRORS
 }
