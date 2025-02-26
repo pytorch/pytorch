@@ -460,9 +460,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            # it doesn't matter what mode we use here because
-            # the implementation of do_auto_functionalize doesn't
-            # interact with FunctionalTensorMode at all
             import torch._inductor.config as inductor_config
 
             if self.export or not inductor_config.enable_auto_functionalized_v2:
