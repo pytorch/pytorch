@@ -606,7 +606,8 @@ def forward_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    k = load_checked_block(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    # NB reversed order to since K is transposed
+    k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
