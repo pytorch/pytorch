@@ -2161,7 +2161,7 @@ class CppKernel(Kernel):
                     worksharing.close()
                 else:
                     worksharing.parallel(threads)
-                loop_nest.mark_parallel(par_depth.parallel_depth)
+                loop_nest.mark_parallel(par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
@@ -5378,14 +5378,13 @@ class LoopNest:
 
     def mark_parallel(self, par_depth):
         assert (
-            par_depth <= self.max_parallel_depth().parallel_depth
+            par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth
         ), "Parallel depth cannot exceed the maximal allowed parallel depth"
         assert self.loops is not None
-        assert len(self.loops) >= par_depth
-        start_depth = self.max_parallel_depth().start_depth
-        loop = self.loops[start_depth]
-        loop.parallel = par_depth
-        for i in range(start_depth + 1, par_depth):
+        assert len(self.loops) >= par_depth.parallel_depth
+        loop = self.loops[par_depth.start_depth]
+        loop.parallel = par_depth.parallel_depth
+        for i in range(par_depth.start_depth + 1, par_depth.parallel_depth):
             self.loops[i].collapsed = True
 
     def tile(self, depth, factor):
