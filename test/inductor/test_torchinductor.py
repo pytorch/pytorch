@@ -12844,6 +12844,13 @@ class CommonTemplate:
 
                 assert len(inps) == 0
 
+    def test_special_polygamma(self):
+        fn = torch.special.polygamma
+        x = torch.tensor(2, dtype=torch.float32)
+        self.common(fn, (0, x))
+        self.common(fn, (1, x))
+        self.common(fn, (2, x))
+
 
 @dataclasses.dataclass
 class TestFailure:
