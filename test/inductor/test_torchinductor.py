@@ -269,7 +269,15 @@ def get_divisible_by_16(cfg):
     # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
     if hasattr(cfg, "divisibility_16"):
         return cfg.divisibility_16
-    return cfg.divisible_by_16
+    elif hasattr(cfg, "divisible_by_16"):
+        return cfg.divisible_by_16
+    # `cfg` example:
+    # {(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}
+    return [
+        key[0]
+        for key, value in cfg.items()
+        if len(key) == 1 and value[0] == ["tt.divisibility", 16]
+    ]
 
 
 class TestCase(InductorTestCase):
@@ -12850,17 +12858,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue(max_live_tensors == 3)
 
         # See https://github.com/pytorch/pytorch/issues/100348
-        def test_inductor_detach_view(self):
+        @parametrize("backend", ["aot_eager", "inductor"])
+        def test_inductor_detach_view(self, backend):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 a = x * 2
                 return a, a.detach()
 
-            fn_opt = torch.compile(fn, backend="inductor")
+            fn_opt = torch.compile(fn, backend=backend)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
             inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
-            out = fn_opt(inp)
             out_ref[0].sum().backward()
+            out = fn_opt(inp)
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
