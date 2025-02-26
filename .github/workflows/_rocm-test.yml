@@ -234,6 +234,7 @@ jobs:
             --shm-size="8g" \
             --tty \
             --detach \
+            --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
