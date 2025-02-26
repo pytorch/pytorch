@@ -235,7 +235,6 @@ IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False,
 )
-IN_RE_WORKER: bool = os.environ.get("INSIDE_RE_WORKER") is not None
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and

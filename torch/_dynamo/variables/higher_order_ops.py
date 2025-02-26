@@ -935,6 +935,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
+        check_meta_consistency_vt(
+            true_r.unpack_var_sequence(tx),
+            false_r.unpack_var_sequence(tx),
+            "true_fn_output",
+            "false_fn_output",
+        )
+
         (
             true_graph,
             false_graph,
