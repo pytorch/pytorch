@@ -3614,6 +3614,46 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
+class TestElasticDistributedSampler(TestCase):
+    def test_iterate_elastic_distributed_sampler(self):
+        class CustomDataset(Dataset):
+            def __init__(self):
+                self.data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            def __len__(self):
+                return len(self.data)
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        from torch.distributed.elastic.utils.data import ElasticDistributedSampler
+        datasets = CustomDataset()
+        sampler = ElasticDistributedSampler(datasets, num_replicas=1, rank=0)
+        expected = [x for x in sampler]
+
+        # Read randomly from any index
+        import random
+        start_index = random.randint(0, len(datasets) - 1)
+        sampler = ElasticDistributedSampler(datasets, num_replicas=1, rank=0, start_index=start_index)
+        index = start_index
+        for x in sampler:
+            self.assertEqual(expected[index], x)
+            index += 1
+
+        # Read randomly from any index when num_replicas is 2
+        start_index = random.randint(0, len(datasets) - 1)
+        sampler = ElasticDistributedSampler(datasets, num_replicas=2, rank=0, start_index=start_index)
+        index = start_index
+        for x in sampler:
+            self.assertEqual(expected[index], x)
+            index += 2
+
+        sampler = ElasticDistributedSampler(datasets, num_replicas=2, rank=1, start_index=start_index)
+        index = start_index + 1
+        for x in sampler:
+            # for padding
+            if (index > len(datasets) - 1):
+                index = index % len(datasets) + start_index
+            self.assertEqual(expected[index], x)
+            index += 2
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
