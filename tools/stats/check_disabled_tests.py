@@ -116,7 +116,7 @@ def get_test_reports(
         os.chdir(temp_dir)
 
         artifact_paths = download_s3_artifacts(
-            "test-reports", workflow_run_id, workflow_run_attempt
+            "test-reports-test-dynamo_wrapped", workflow_run_id, workflow_run_attempt
         )
         for path in artifact_paths:
             unzip(path)
@@ -223,12 +223,12 @@ def save_results(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-    upload_workflow_stats_to_s3(
-        workflow_id,
-        workflow_run_attempt,
-        "rerun_disabled_tests",
-        list(records.values()),
-    )
+    # upload_workflow_stats_to_s3(
+    #     workflow_id,
+    #     workflow_run_attempt,
+    #     "rerun_disabled_tests",
+    #     list(records.values()),
+    # )
 
 
 def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
@@ -245,7 +245,9 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
 
         # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
         # We are only interested in the former here
-        if not is_rerun_disabled_tests(tests):
+        if not is_rerun_disabled_tests(
+            report, workflow_run_id, workflow_run_attempt, tests
+        ):
             continue
 
         for name, stats in tests.items():
