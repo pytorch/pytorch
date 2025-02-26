@@ -95,6 +95,37 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
+
+/**
+ * @brief Prepares matrices for CUBLAS operation
+ *
+ * This constructor prepares tensors for CUBLAS
+ * The main difference is that PyTorch uses row-major as the default and
+ * CUBLAS expects column-major.
+ *
+ * @details
+ * To enable row-major output while using CUBLAS,
+ * we use the mathematical identity that (A × B)^T = B^T × A^T.
+ *
+ * Transpose in this context refers to Cublas's(Fortran) definition of transpose (row-major)
+ * T = row-major, N = col-major
+ *
+ * Example:
+ * For matrices A (M×K)(row-major) and B (K×N)(row-major):
+ *   - Standard multiplication: A × B = (M×K) × (K×N) = M×N result (row-major)
+ *   - Using our transpose trick: (B^T × A^T) = (N×K)(T) × (K×M)(T) = N×M(N)
+ *   - However, since the output form cublas is column-major this is
+ *   - equivalent to an output of size MxN row-major as expected
+ *
+ * The transpose flags are derived from the layouts of the passed in tensors
+ *
+ * @param mat1 First input matrix
+ * @param mat2 Second input matrix
+ * @param c Output matrix (result)
+ * @param scale_a Optional scaling factor for first matrix
+ * @param scale_b Optional scaling factor for second matrix
+ * @param scale_result Optional scaling factor for result
+ */
 struct cublasCommonArgs {
   cublasCommonArgs(
       const Tensor& mat1,
@@ -103,10 +134,10 @@ struct cublasCommonArgs {
       const std::optional<Tensor>& scale_a = std::nullopt,
       const std::optional<Tensor>& scale_b = std::nullopt,
       const std::optional<Tensor>& scale_result = std::nullopt) {
-    bool transpose_result = false, transpose_mat1 = false, transpose_mat2 = false;
+    bool transpose_result = false, transpose_a = false, transpose_b = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
-    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
-    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
+    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_b, transpose_result);
 
     // Handle scale tensors if provided
     if (scale_a && scale_b) {
@@ -123,23 +154,23 @@ struct cublasCommonArgs {
       scale_result_dtype = scale_result->scalar_type();
     }
 
-    auto mat1_sizes = mat1.sizes();
-    auto mat2_sizes = mat2.sizes();
+    // Update transpose flags
     if (transpose_result) {
-      transpose_mat1 = !transpose_mat1;
-      transpose_mat2 = !transpose_mat2;
-      mat1_sizes = mata->sizes();
-      mat2_sizes = matb->sizes();
+      transpose_a = !transpose_a;
+      transpose_b = !transpose_b;
     }
 
-    m = mat1_sizes[transpose_result ? 1 : 0];
-    k = mat1_sizes[transpose_result ? 0 : 1];
-    n = mat2_sizes[transpose_result ? 0 : 1];
-    lda = mata->stride((transpose_mat1 == transpose_result) ? 1 : 0);
-    ldb = matb->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+    auto sizes_a = mata->sizes();
+    auto sizes_b = matb->sizes();
+
+    m = sizes_a[transpose_result ? 1 : 0];
+    k = sizes_a[transpose_result ? 0 : 1];
+    n = sizes_b[transpose_result ? 0 : 1];
+    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0);
+    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0);
     result_ld = result->stride(transpose_result ? 0 : 1);
-    transa = transpose_mat1 ? mata->is_conj() ? 'c' : 't' : 'n';
-    transb = transpose_mat2 ? matb->is_conj() ? 'c' : 't' : 'n';
+    transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
+    transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
   }
 
   // Matrix members
