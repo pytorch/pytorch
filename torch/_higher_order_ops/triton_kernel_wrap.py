@@ -156,8 +156,6 @@ class Op:
     fn_call_name: Optional[str]
     args: list[Union[Param, Intermediate]]
     ret: Intermediate = dataclasses.field(repr=False)
-    # used for scf.yield: see [Note: scf.yield fix-up]
-    sub_idx: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -507,59 +505,9 @@ def ttir_to_functions(
                             op_stack[parent_block_id][op_result].extend(child_ops)
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
-
-                if return_ops and all(
-                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
-                    for op in return_ops
-                ):
-                    # [Note: scf.yield fix-up]
-                    #
-                    # TL;DR: if our scf.yield takes N args, then we'll create N scf.yield ops to handle each of the
-                    # args.
-                    #
-                    #      **Context**:
-                    # During mutation analysis, the analysis pass will identify mutating ops (e.g. tt.store)
-                    # and then DFS upwards towards the parameters of the function. Specifically, the analysis pass
-                    # looks at the mutated arg in tt.store; then looks for its source ops; and then recurses on the
-                    # arguments to each of the source ops.
-                    #
-                    # In the case of scf.if/scf.for, we may have multiple return ops, each passed as an arg
-                    # to scf.yield:
-                    #
-                    # %18:2 = scf.if %... -> (!tt.ptr<f32>, !tt.ptr<f32>) {
-                    #   ...
-                    #   scf.yield %1, %2
-                    # } else {
-                    #   scf.yield %3, %4
-                    # }
-                    #
-                    # And for each of the returns of the scf.if, we'd naively assign the source op of each of the
-                    # return values to be the scf.yields. But the scf.yields take _all_ the returns as arguments.
-                    # Therefore, if _any_ of the return values of the scf.if are mutated, then the analysis pass
-                    # would mark _all_ of the yield args as mutated.
-                    #
-                    #      **Solution**:
-                    # For the purposes of this analysis pass, we create N yield ops - one for each
-                    # return-val/yield-arg. In the example above, we'll have two scf.yield's for each branch of the
-                    # scf.if.
-
+                for scf_result in scf_results:
                     for return_op in return_ops:
-                        for i, (scf_result, yield_arg) in enumerate(
-                            zip(scf_results, return_op.args)
-                        ):
-                            sub_yield_op = Op(
-                                return_op.name,
-                                return_op.fn_call_name,
-                                [yield_arg],
-                                return_op.ret,
-                                sub_idx=i,
-                            )
-                            op_stack[parent_block_id][scf_result].append(sub_yield_op)
-
-                else:
-                    for scf_result in scf_results:
-                        for return_op in return_ops:
-                            op_stack[parent_block_id][scf_result].append(return_op)
+                        op_stack[parent_block_id][scf_result].append(return_op)
             else:
                 raise RuntimeError(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."

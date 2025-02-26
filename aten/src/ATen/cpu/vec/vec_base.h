@@ -50,7 +50,7 @@
 /*
 https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
 Use _MSC_FULL_VER to identify current compiler is msvc,
-Windows llvm will not have this definition.
+Windows llvm will not have this defination.
 */
 #define __msvc_cl__
 #endif
