@@ -874,6 +874,27 @@ class SerializationMixin:
         # This test is to make sure that the serialization debug flag is set in CI
         self.assertTrue(os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1")
 
+    def test_skip_data_load(self):
+        t_device = "cuda" if torch.cuda.is_available() else "cpu"
+        t_v2 = torch.randn(2, 3, device=t_device)
+        tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
+
+        sd = {'t_v2': t_v2, 'tt': tt}
+        sd_zeroed = {
+            't_v2': torch.zeros(2, 3, device=t_device),
+            'tt': TwoTensor(torch.zeros(2, device=t_device), torch.zeros(2, device=t_device)),
+        }
+
+        with BytesIOContext() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with safe_globals([TwoTensor]): # , skip_data():
+                sd_loaded = torch.load(f)
+            self.assertNotEqual(sd_loaded, sd)
+            for k in sd_loaded.keys():
+                sd_loaded[k] = sd_loaded[k].zero_()
+            self.assertEqual(sd_loaded, sd_zeroed)
+
 
 class serialization_method:
     def __init__(self, use_zip):

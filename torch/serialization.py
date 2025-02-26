@@ -16,7 +16,6 @@ import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
 from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -24,6 +23,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
+from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -211,7 +211,7 @@ def get_default_mmap_options() -> Optional[int]:
     return config.load.mmap_flags
 
 
-def _get_storage_alignment() -> Optional[int]:
+def _get_storage_alignment() -> int:
     """
     Gets alignment for storages in torch.save files/
 
@@ -383,16 +383,18 @@ def get_unsafe_globals_in_checkpoint(f: FileLike) -> list[str]:
 
 class skip_data:
     """
-    Context-manager that skips writing storage bytes for ``torch.save`` calls.
+    Context-manager that skips writing/reading storage bytes for ``torch.save`` / ``torch.load`` calls.
 
-    Storages will still be saved, but the space that their bytes would usually be written to
+    For the save path, storages will still be saved, but the space that their bytes would usually be written to
     will be empty space. The storage bytes can then be populated in a separate pass.
+
+    For the load path, tensors will be loaded per the checkpoint but their storages will not be populated with data.
 
     .. warning::
         The ``skip_data`` context manager is an early prototype and is subject to change.
 
     Args:
-        materialize_fake_tensors: Whether to materialize FakeTensors.
+        materialize_fake_tensors: Whether to materialize FakeTensors during save. This is a no-op for the load path.
 
     Example:
         >>> # xdoctest: +SKIP("NamedTemporaryFile on Windows")
@@ -1409,14 +1411,6 @@ def load(
             updated_message += message
         return updated_message + DOCS_MESSAGE
 
-    global _serialization_tls
-    skip_data = _serialization_tls.skip_data
-    if skip_data:
-        raise RuntimeError(
-            "`torch.load` called within a torch.serialization.skip_data context manager "
-            "is not supported yet. Please call torch.load outside the skip_data context manager."
-        )
-
     weights_only_not_set = weights_only is None
 
     if weights_only_not_set:
@@ -1726,6 +1720,9 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if root_key not in deserialized_objects:
                 if torch._guards.active_fake_mode() is not None:
                     obj = cast(Storage, torch.UntypedStorage(nbytes, device="meta"))
+                elif _serialization_tls.skip_data:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes))
+                    obj = restore_location(obj, location)
                 else:
                     obj = cast(Storage, torch.UntypedStorage(nbytes))
                     obj._torch_load_uninitialized = True
@@ -1798,7 +1795,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    if torch._guards.active_fake_mode() is None:
+    if torch._guards.active_fake_mode() is None and not _serialization_tls.skip_data:
         offset = f.tell() if f_should_read_directly else None
         for key in deserialized_storage_keys:
             assert key in deserialized_objects
@@ -1990,6 +1987,9 @@ def _load(
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
             storage._checkpoint_offset = zip_file.get_record_offset(name)
+        elif _serialization_tls.skip_data:
+            nbytes = numel * torch._utils._element_size(dtype)
+            storage = torch.UntypedStorage(nbytes)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)
