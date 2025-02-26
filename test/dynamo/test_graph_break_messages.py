@@ -785,12 +785,6 @@ from user code:
     return torch.ops.mylib.foo(x)""",
         )
 
-    def test_data_dependent_branching_fullgraph(self):
-        pass
-
-    def test_data_dependent_branching_gb(self):
-        pass
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
