@@ -256,7 +256,7 @@ std::tuple<size_t, size_t> getOffset(
     size_t cursor,
     size_t filename_size,
     size_t size,
-    uint64_t alignment) {
+    uint64_t storage_alignment) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -268,8 +268,8 @@ std::tuple<size_t, size_t> getOffset(
       start += sizeof(mz_uint64);
     }
   }
-  size_t mod = start % alignment;
-  size_t next_offset = (mod == 0) ? start : (start + alignment - mod);
+  size_t mod = start % storage_alignment;
+  size_t next_offset = (mod == 0) ? start : (start + storage_alignment - mod);
   std::tuple<size_t, size_t> result(next_offset, start);
   return result;
 }
@@ -279,8 +279,9 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf,
-    uint64_t alignment) {
-  auto [next_offset, start] = getOffset(cursor, filename_size, size, alignment);
+    uint64_t storage_alignment) {
+  auto [next_offset, start] =
+      getOffset(cursor, filename_size, size, storage_alignment);
   size_t padding_size = next_offset - start;
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {
