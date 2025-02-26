@@ -1349,13 +1349,6 @@ class OutputGraph:
 
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
-                # re-setattr the nn_module_proxies. There can be new proxies
-                # inserted during handle_graph_break, which are not reflected in
-                # the root yet.
-                for name, value in self.nn_modules.items():
-                    if not hasattr(root, name):
-                        setattr(root, name, value)
-
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
