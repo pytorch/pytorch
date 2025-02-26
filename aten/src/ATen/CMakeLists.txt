@@ -352,6 +352,8 @@ if(USE_ROCM)
     set(CK_ENABLE_BF16 "ON")
     set(CK_ENABLE_FP8 "ON")
     set(CK_ENABLE_BF8 "ON")
+    set(CK_USE_XDL "ON")
+    set(CK_USE_WMMA "ON")
     configure_file(
       "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
       "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
