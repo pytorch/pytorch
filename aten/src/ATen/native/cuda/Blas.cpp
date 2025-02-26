@@ -100,9 +100,9 @@ struct cublasCommonArgs {
       const Tensor& mat1,
       const Tensor& mat2,
       Tensor& c,
-      const std::optional<Tensor>& scale_a = c10::nullopt,
-      const std::optional<Tensor>& scale_b = c10::nullopt,
-      const std::optional<Tensor>& scale_result = c10::nullopt) {
+      const std::optional<Tensor>& scale_a = std::nullopt,
+      const std::optional<Tensor>& scale_b = std::nullopt,
+      const std::optional<Tensor>& scale_result = std::nullopt) {
     bool transpose_result = false, transpose_mat1 = false, transpose_mat2 = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
