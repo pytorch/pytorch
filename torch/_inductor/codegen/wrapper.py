@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
-log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
@@ -894,9 +893,8 @@ class PythonWrapperCodegen(CodeGen):
         return V.graph.graph_outputs
 
     def codegen_input_size_asserts(self) -> None:
-        for name, buf in self.get_graph_inputs().items():
-            # a graph partition may take an IRNode output from a previous partition
-            if not isinstance(buf, ir.TensorBox):
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -908,7 +906,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in self.get_graph_inputs().items():
+        for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
@@ -1419,11 +1417,7 @@ class PythonWrapperCodegen(CodeGen):
             pass
         else:
             if torch._inductor.config.graph_partition:
-                # a graph partition may take an IRNode output from a previous partition
-                log.warning(
-                    "Skip size and stride assertion for an unknown value type %s",
-                    type(value),
-                )
+                pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
 
@@ -2763,6 +2757,12 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         pass
 
     def write_async_compile_wait(self):
+        pass
+
+    def codegen_input_size_asserts(self) -> None:
+        pass
+
+    def codegen_input_nan_asserts(self) -> None:
         pass
 
     def next_kernel_suffix(self) -> str:
