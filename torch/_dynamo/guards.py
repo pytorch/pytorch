@@ -1691,7 +1691,15 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
-            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented_v2(
+                gb_type="Attempted to guard on uninitialized nn.Module",
+                context="",
+                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
+                f"nn.Module subclass `{type(val)}`.",
+                hints=[
+                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
+                ],
+            )
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -1807,6 +1815,16 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_not_none_guard(
             get_verbose_code_parts(code, guard)
         )
+
+    def MAPPING_KEYS_CHECK(self, guard):
+        """Guard on the key order of types.MappingProxyType object"""
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+
+        code = []
+        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
 
     def DICT_KEYS_MATCH(self, guard):
         """Insert guard to check that the keys of a dict are same"""

@@ -965,7 +965,7 @@ def instantiate_device_type_tests(
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 5 categories:
+# There are 7 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
@@ -976,6 +976,7 @@ def instantiate_device_type_tests(
 #     operator supports in both forward and backward.
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
+# - any_common_cpu_cuda_one: Pick a dtype that supports both CPU and CUDA.
 class OpDTypes(Enum):
     supported = 0  # Test all supported dtypes (default)
     unsupported = 1  # Test only unsupported dtypes
@@ -1002,8 +1003,6 @@ ANY_DTYPE_ORDER = (
     torch.int8,
     torch.uint8,
     torch.bool,
-    torch.float8_e4m3fn,
-    torch.float8_e5m2,
 )
 
 
@@ -1047,6 +1046,8 @@ def _serialize_sample(sample_input):
 #     operator supports. The dtype supports forward and backward if possible.
 #   OpDTypes.none - the test is instantiated without any dtype. The test signature
 #     should not include a dtype kwarg in this case.
+#   OpDTypes.any_common_cpu_cuda_one - the test is instantiated for a dtype
+#     that supports both CPU and CUDA.
 #
 # These options allow tests to have considerable control over the dtypes
 #   they're instantiated for.
