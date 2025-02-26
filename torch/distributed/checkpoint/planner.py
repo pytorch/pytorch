@@ -97,6 +97,9 @@ class SavePlan:
     items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
+    # This is used to indicate that the ranks should
+    # use the cached plans to write data instead.
+    usable: bool = True
 
 
 @dataclass
@@ -202,6 +205,24 @@ class SavePlanner(abc.ABC):
     >>>         metadata = replace(metadata, planner_data=merged_data)
     >>>         return global_plan, metadata
     """
+
+    # Save plan for the current rank as computed by `create_local_plan` API
+    # Cached on the local rank.
+    _cached_save_plan: dict[str, SavePlan] = {}
+    # Final save plan for the current rank.
+    # This is created by merging the plan created by `create_local_plan` API
+    # and the result of `create_global_plan` for the given rank.
+    # This is the final plan computed by the `finish_plan` API that gets
+    # sent to the `write_data`.
+    # Cached on the local rank.
+    _cached_final_save_plan: dict[str, SavePlan] = {}
+    # Collection of all the local plans from all the ranks.
+    # This is the input to the `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_all_plans: dict[str, list[SavePlan]] = {}
+    # Global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_global_plan: dict[str, list[SavePlan]] = {}
 
     @abc.abstractmethod
     def set_up_planner(

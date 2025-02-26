@@ -65,6 +65,9 @@ def mock_triton_hash_with_backend(*args, **kwargs):
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+@test_torchinductor.skip_if_cpp_wrapper(
+    "Not possible to fix until CppWrapperCpu supports triton for CPU"
+)
 class TritonExtensionBackendTests(BaseExtensionBackendTests):
     """
     Test creating a backend for inductor with Triton scheduling.
