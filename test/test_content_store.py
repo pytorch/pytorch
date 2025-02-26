@@ -124,7 +124,9 @@ class TestContentStore(TestCase):
         same_meta_as_x(x6)
 
 
-instantiate_device_type_tests(TestContentStore, globals())
+instantiate_device_type_tests(
+    TestContentStore, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
