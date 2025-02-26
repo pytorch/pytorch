@@ -13230,7 +13230,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_entr_out
+    CPU, CUDA, MPS: special_entr_out
   tags: pointwise
 
 - func: special_ndtri(Tensor self) -> Tensor
