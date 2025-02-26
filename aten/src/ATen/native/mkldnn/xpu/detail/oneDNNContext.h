@@ -42,14 +42,7 @@ struct TORCH_XPU_API GpuEngineManager {
   GpuEngineManager& operator=(GpuEngineManager&&) = default;
 
  protected:
-  GpuEngineManager() {
-    c10::DeviceIndex device_count = c10::xpu::device_count_ensure_non_zero();
-    for (const auto i : c10::irange(device_count)) {
-      engine_pool.push_back(
-          std::make_shared<dnnl::engine>(dnnl::sycl_interop::make_engine(
-              c10::xpu::get_raw_device(i), c10::xpu::get_device_context())));
-    }
-  }
+  GpuEngineManager();
   ~GpuEngineManager() = default;
 
  private:
