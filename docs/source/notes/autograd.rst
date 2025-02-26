@@ -150,7 +150,7 @@ of the model are part of the gradient computation, for example, if you need to
 freeze parts of your pretrained model during model fine-tuning.
 
 To freeze parts of your model, simply apply ``.requires_grad_(False)`` to
-the parameters that you don't want to be updated. And as described above,
+the parameters that you don't want updated. And as described above,
 since computations that use these parameters as inputs would not be recorded in
 the forward pass, they won't have their ``.grad`` fields updated in the backward
 pass because they won't be part of the backward graph in the first place, as
