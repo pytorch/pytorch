@@ -59,7 +59,6 @@ SavedVariable::SavedVariable(
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
-      TORCH_INTERNAL_ASSERT(!data_.defined());
       return;
     }
 
@@ -135,14 +134,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // We want grad_fn here to provide the most helpful debug message to the user
   // if versions don't match
 
-  std::shared_ptr<Node> grad_fn;
-  if (is_inplace_on_view_) {
-    grad_fn = weak_grad_fn_.lock();
-  } else if (!hooks_) {
-    grad_fn = saved_original_ ? data_.grad_fn() : nullptr;
-  } else {
-    grad_fn = grad_fn_;
-  }
+  auto grad_fn = is_inplace_on_view_ ? weak_grad_fn_.lock()
+      : !hooks_ ? saved_original_ ? data_.grad_fn() : nullptr
+                : grad_fn_;
 
   if (!is_leaf_ && !grad_fn) {
     // This issue was introduced when we added logic to save the original
