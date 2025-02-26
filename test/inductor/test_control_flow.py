@@ -894,6 +894,32 @@ class WhileLoopModels:
                 [c, a, b],
             )
 
+    class MixedDevice(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c = c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + 1, a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
+    class MixedDevice2(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + a.sum(), a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1156,6 +1182,34 @@ class WhileLoopTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @parametrize("device", [GPU_TYPE])
+    def test_while_loop_models_with_mixed_device(self, device):
+        self._run_test(
+            model=WhileLoopModels.MixedDevice(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=True,
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
+        ):
+            # Error at front end because device are promoted to a different one
+            # after the first iteration
+            self._run_test(
+                model=WhileLoopModels.MixedDevice2(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(10, 20),
+                ),
+                device=device,
+                dynamic=True,
+            )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

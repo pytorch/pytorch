@@ -7467,7 +7467,7 @@ class WhileLoop(ExternKernel):
             _guard_list_equals(op.get_stride(), bo.get_stride())
             # assume all carried_inputs and outputs are on the same device
             # as the MultiOutputLayout below requires single device
-            assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
+            assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
             assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
