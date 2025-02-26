@@ -1081,6 +1081,7 @@ class TestMkldnn(TestCase):
         self.assertEqual(y, my.to_dense())
 
     def test_mul(self):
+        print("in test_mul")
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
         value = torch.randn(1, dtype=torch.float32).item()
