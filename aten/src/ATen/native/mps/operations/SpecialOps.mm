@@ -24,7 +24,12 @@ static void spherical_bessel_j0_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "spherical_bessel_j0");
 }
 
+static void entr_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "entr");
+}
+
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
 REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_mps)
+REGISTER_DISPATCH(special_entr_stub, &entr_kernel_mps)
 } // namespace at::native
