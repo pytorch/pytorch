@@ -6550,6 +6550,7 @@ class CommonTemplate:
             (torch.randn([8, 8]) + 10,),
         )
 
+    @skip_if_halide  # log2 not implemented for halide
     def test_log_fp64(self):
         def fn(x):
             return torch.log(x), torch.log2(x)
