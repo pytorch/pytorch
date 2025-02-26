@@ -2547,7 +2547,7 @@ class Scheduler:
             global rejected_fusions_rw
             rejected_fusions = []
             rejected_fusions_rw = []
-            only_pointwise = [n for n in node if not n.is_reduction()]
+            only_pointwise = [n for n in nodes if not n.is_reduction()]
             possible_fusions = self.get_possible_fusions(only_pointwise)
             import pprint
             log_file = 'metadata.log'
