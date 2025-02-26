@@ -3,6 +3,7 @@
 import contextlib
 from functools import partial
 from collections import namedtuple
+import os
 import sys
 import torch
 import torch.nn as nn
