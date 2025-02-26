@@ -1183,6 +1183,7 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
+    @requires_gpu
     @parametrize("device", [GPU_TYPE])
     def test_while_loop_models_with_mixed_device(self, device):
         self._run_test(
