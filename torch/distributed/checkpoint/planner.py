@@ -97,9 +97,6 @@ class SavePlan:
     items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
-    # This is used to indicate that the ranks should
-    # use the cached plans to write data instead.
-    usable: bool = True
 
 
 @dataclass
