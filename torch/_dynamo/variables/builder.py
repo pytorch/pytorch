@@ -3061,7 +3061,10 @@ class SourcelessBuilder:
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
         elif isinstance(value, types.MethodType):
-            return UserMethodVariable(value.__func__, value.__self__)
+            return UserMethodVariable(
+                value.__func__,
+                SourcelessBuilder.create(value.__self__),
+            )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
