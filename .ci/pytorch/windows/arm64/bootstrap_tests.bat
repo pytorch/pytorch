@@ -15,7 +15,7 @@ where python
 Echo Installing dependencies...
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install pytest numpy protobuf
+pip install pytest numpy protobuf expecttest
 
 :: find file name for pytorch wheel
 echo Searching for PyTorch wheel...
