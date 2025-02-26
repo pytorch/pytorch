@@ -858,6 +858,9 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
+    def get_name(self):
+        return self.name
+
     def call_function(
         self,
         tx: "InstructionTranslator",
