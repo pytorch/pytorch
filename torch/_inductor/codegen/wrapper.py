@@ -1270,6 +1270,7 @@ class PythonWrapperCodegen(CodeGen):
                 file_path,
             )
         # Execute the code to autotune kernels
+        breakpoint()
         try:
             exec(tuning_code, scope)
         except Exception as e:
