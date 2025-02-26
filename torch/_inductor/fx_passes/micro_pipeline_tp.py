@@ -463,6 +463,11 @@ class _ScaledMatmul(_Matmul):
         A_node = match[0].args[0]
         A_scale_node = mm_node.args[2]
         if is_reshape_mm_reshape_pattern:
+            # To support reshape -> mm -> reshape pattern where scale tensors have been reshaped,
+            # we need to insert a custom view op to reshape the scale tensors back to the original shape,
+            # since the `A node` is using the original shape before the reshape op.
+            # This is a simpler solution than rewriting the pipelined fused_scaled_matmul_reduce_scatter op
+            # to track the scatter_dim and keep it in sync with arbitrary reshape ops.
             A_scale_node = insert_custom_view_op(A_scale_node.graph, A_scale_node, A_node, A_scale_node)
 
         return _ScaledMatmul(
