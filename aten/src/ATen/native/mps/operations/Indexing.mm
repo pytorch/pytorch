@@ -21,6 +21,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -704,34 +705,32 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
-  auto fillPSO = lib.getPipelineStateForFunc("masked_fill_scalar_strided_" + scalarToMetalTypeString(self));
+  const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
+  const bool is_expand = self.is_contiguous() && mask.is_contiguous() && mask.ndimension() < self.ndimension();
+  auto fillPSO = lib.getPipelineStateForFunc(fmt::format("masked_fill_scalar_{}_{}",
+                                                         is_dense        ? "dense"
+                                                             : is_expand ? "broadcast"
+                                                                         : "strided",
+                                                         getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
+      auto mpsScalar = getMPSScalar(value, self.scalar_type());
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:fillPSO];
-      AT_DISPATCH_V2(self.scalar_type(),
-                     "masked_fill__mps",
-                     AT_WRAP([&] {
-                       mtl_setArgs(computeEncoder,
-                                   self,
-                                   *b_mask,
-                                   value.to<scalar_t>(),
-                                   self.sizes(),
-                                   self.strides(),
-                                   b_mask->strides(),
-                                   self.ndimension());
-                     }),
-                     kFloat,
-                     kHalf,
-                     kInt,
-                     kLong,
-                     kShort,
-                     kByte,
-                     kChar,
-                     kBool,
-                     kBFloat16,
-                     kComplexFloat,
-                     kComplexHalf);
+      if (is_dense) {
+        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar.value.i);
+      } else if (is_expand) {
+        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar.value.i, mask.numel());
+      } else {
+        mtl_setArgs(computeEncoder,
+                    self,
+                    *b_mask,
+                    mpsScalar.value.i,
+                    self.sizes(),
+                    self.strides(),
+                    b_mask->strides(),
+                    self.ndimension());
+      }
       mtl_dispatch1DJob(computeEncoder, fillPSO, self.numel());
     }
   });

@@ -330,6 +330,18 @@ kernel void masked_fill_scalar_dense(
 }
 
 template <typename T>
+kernel void masked_fill_scalar_broadcast(
+    device T* input,
+    constant bool* mask,
+    constant T& val,
+    constant uint& mask_numel,
+    uint thread_index [[thread_position_in_grid]]) {
+  if (mask[thread_index % mask_numel]) {
+    input[thread_index] = val;
+  }
+}
+
+template <typename T>
 kernel void masked_fill_scalar_strided(
     device T* input,
     constant bool* mask,
@@ -346,31 +358,25 @@ kernel void masked_fill_scalar_strided(
   }
 }
 
-#define REGISTER_MASKED_FILL_SCALAR(DTYPE)                                 \
-  template [[host_name("masked_fill_scalar_strided_" #DTYPE)]] kernel void \
-  masked_fill_scalar_strided<DTYPE>(                                       \
-      device DTYPE*,                                                       \
-      constant bool*,                                                      \
-      constant DTYPE&,                                                     \
-      constant long*,                                                      \
-      constant long*,                                                      \
-      constant long*,                                                      \
-      device uint&,                                                        \
-      uint);                                                               \
-  template [[host_name("masked_fill_scalar_dense_" #DTYPE)]] kernel void   \
-  masked_fill_scalar_dense<DTYPE>(                                         \
-      device DTYPE*, constant bool*, constant DTYPE&, uint);
+#define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
+  template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
+  masked_fill_scalar_strided<DTYPE>(                                        \
+      device DTYPE*,                                                        \
+      constant bool*,                                                       \
+      constant DTYPE&,                                                      \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      device uint&,                                                         \
+      uint);                                                                \
+  template [[host_name("masked_fill_scalar_dense_" #SIZE)]] kernel void     \
+  masked_fill_scalar_dense<DTYPE>(                                          \
+      device DTYPE*, constant bool*, constant DTYPE&, uint);                \
+  template [[host_name("masked_fill_scalar_broadcast_" #SIZE)]] kernel void \
+  masked_fill_scalar_broadcast<DTYPE>(                                      \
+      device DTYPE*, constant bool*, constant DTYPE&, constant uint&, uint)
 
-REGISTER_MASKED_FILL_SCALAR(float2);
-REGISTER_MASKED_FILL_SCALAR(half2);
-REGISTER_MASKED_FILL_SCALAR(float);
-REGISTER_MASKED_FILL_SCALAR(half);
-#if __METAL_VERSION__ >= 310
-REGISTER_MASKED_FILL_SCALAR(bfloat);
-#endif
-REGISTER_MASKED_FILL_SCALAR(long);
-REGISTER_MASKED_FILL_SCALAR(int);
-REGISTER_MASKED_FILL_SCALAR(short);
-REGISTER_MASKED_FILL_SCALAR(char);
-REGISTER_MASKED_FILL_SCALAR(uchar);
-REGISTER_MASKED_FILL_SCALAR(bool);
+REGISTER_MASKED_FILL_SCALAR(64bit, long);
+REGISTER_MASKED_FILL_SCALAR(32bit, int);
+REGISTER_MASKED_FILL_SCALAR(16bit, short);
+REGISTER_MASKED_FILL_SCALAR(8bit, char);
