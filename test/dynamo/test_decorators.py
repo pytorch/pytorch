@@ -425,8 +425,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.
-        # For both inline_inbuilt_nn_modules True and False, we expect the
-        # tensor to be present in the buffers attribute of the graph.
+        # On 1st compile, we expect the input to be marked as static, with guarded
+        # set depending on the `guarded` flag.
+        # On 2nd compile, we expect the input to be unmarked
+        # if inlining NN modules, we expect metadata to be present on the tensor, indicating
+        # the static address type of the input
+        # if not inlining NN modules, we expect the tensor to be present in the buffers attribute
+        # of the graph.
 
         compiles_with_buffers = 0
         compiles = 0
@@ -434,7 +439,27 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
             nonlocal compiles
-            compiles_with_buffers += len(gm._buffers) > 0
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                input_node = [
+                    n
+                    for n in gm.graph.nodes
+                    if n.op == "placeholder" and n.name == "l_x_"
+                ]
+                self.assertEqual(len(input_node), 1)
+                input_node = input_node[0]
+                if compiles == 0:
+                    self.assertEqual(
+                        input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                        "guarded" if guarded else "unguarded",
+                    )
+                elif compiles == 1:
+                    self.assertFalse(
+                        "_dynamo_static_input_type" in input_node.meta["tensor_dict"]
+                    )
+                else:
+                    raise RuntimeError(f"Unexpected number of compiles: {compiles}")
+            else:
+                compiles_with_buffers += len(gm._buffers) > 0
             compiles += 1
             return gm
 
@@ -447,7 +472,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
-        if guarded:
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
             self.assertEqual(compiles_with_buffers, 1)
 
         inp2 = torch.ones(2)
@@ -457,7 +482,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # should not be incremented
         fn(inp2)
 
-        if guarded:
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
             self.assertEqual(compiles_with_buffers, 1)
 
         self.assertEqual(compiles, 2 if guarded else 1)
