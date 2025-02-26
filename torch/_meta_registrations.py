@@ -7012,6 +7012,7 @@ def meta_local_scalar_dense(self: Tensor):
 
 
 @register_meta(aten.silu)
+@out_wrapper()
 def silu(self: Tensor) -> Tensor:
     return torch.empty_like(self)
 
