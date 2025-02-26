@@ -486,7 +486,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif (
             self.value is types.MethodType
             and len(args) == 2
-            and isinstance(args[0], variables.UserFunctionVariable)
+            and isinstance(
+                args[0], (variables.UserFunctionVariable, variables.GetAttrVariable)
+            )
             and args[0].get_name() in ("__enter__", "__exit__")
             and isinstance(args[1], GenericContextWrappingVariable)
         ):
