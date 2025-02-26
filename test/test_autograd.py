@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import (
@@ -7513,6 +7514,37 @@ for shape in [(1,), ()]:
             model_checkpoint_without_reentrant.parameters(),
         ):
             self.assertEqual(param.grad, checkpoint_param.grad)
+
+    def test_checkpointing_preserves_torch_function_mode_stack(self):
+        log = []
+
+        class Func1(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                log.append("func1")
+                return func(*args, **kwargs)
+
+        class Func2(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                log.append("func2")
+                return func(*args, **kwargs)
+
+        def func(x):
+            return x.sin().cos()
+
+        with Func1():
+            with Func2():
+                a = torch.tensor(1., requires_grad=True)
+
+                log = []
+                out = checkpoint(func, a, use_reentrant=False)
+                self.assertTrue(log[0] == "func2" and log[1] == "func1")
+
+                log = []
+                out.backward()
+
+        self.assertTrue(log[0] == "func2" and log[1] == "func1")
 
     def test_callback_adds_callback(self):
         called = [0]
