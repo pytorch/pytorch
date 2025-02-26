@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import IncorrectUsage, unimplemented, unimplemented_v2
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -335,7 +335,19 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure",
+                    context=str(value),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
+                    hints=[
+                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                        "If this reconstruction graph break occurs while handling another graph break, then resolve the "
+                        "initial graph break.",
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
+                        "reconstruction rules may be fundamentally unreconstructable.",
+                    ],
+                )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
