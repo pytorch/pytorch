@@ -974,12 +974,12 @@ def mps_op_db(op_db: list[OpInfo]) -> list[OpInfo]:
                             )
                             op.decorators = op.decorators + (decorator,)
             
-            if MACOS_VERSION < 14.0:
-                # Skip complex64 dtypes before MacOS14
-                decorator = DecorateInfo(
-                    unittest.skip("Complex dtypes not supported prior to MacOS14"),
-                    dtypes=[torch.complex64],
-                )
-                op.decorators = op.decorators + (decorator,)
+        if MACOS_VERSION < 14.0:
+            # Skip complex64 dtypes before MacOS14
+            decorator = DecorateInfo(
+                unittest.skip("Complex64 dtype not supported prior to MacOS14"),
+                dtypes=[torch.complex64],
+            )
+            op.decorators = op.decorators + (decorator,)
 
     return op_db
