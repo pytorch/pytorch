@@ -292,7 +292,6 @@ PyObject* dynamo__custom_eval_frame(
 }
 
 PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
-  // a dummy C function used in testing
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
