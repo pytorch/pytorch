@@ -405,7 +405,7 @@ class _ScaledMatmul(_Matmul):
         if is_reshape_mm_reshape_pattern:
             # scaled_mm's A_scale arg -> parent is reshape op
             A_scale_reshape_node = A_scale_node.all_input_nodes[0]
-            # reshape node's parent is the original exp2 output, before the reshape.
+            # reshape node's parent is the original scale, before the reshape.
             A_scale_node = A_scale_reshape_node.all_input_nodes[0]
 
         return _ScaledMatmul(
