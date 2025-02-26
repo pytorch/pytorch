@@ -1565,9 +1565,8 @@ class OutputGraph:
 
     def remove_unused_get_attr_nodes(self) -> None:
         for node in reversed(list(self.graph.nodes)):
-            if len(list(node.users)) == 0:
-                if node.op == "get_attr":
-                    self.remove_node(node)
+            if node.op == "get_attr" and len(list(node.users)) == 0:
+                self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
         # NB: It's always OK to drop GraphArg for symbols that ended up being
