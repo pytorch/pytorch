@@ -933,6 +933,8 @@ def _is_namedtuple_instance(tree: Any) -> bool:
 
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
+    # Only namedtuple/structseq types that are not explicitly registered should return `namedtuple/structseq`.
+    # If a namedtuple/structseq type is explicitly registered, then the actual type will be returned.
     if node_type not in SUPPORTED_NODES:
         if is_structseq_class(node_type):
             return structseq
@@ -961,16 +963,18 @@ def tree_is_leaf(
     >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
     False
     """
-    return (is_leaf is not None and is_leaf(tree)) or _get_node_type(
-        tree
-    ) not in SUPPORTED_NODES
+    if is_leaf is not None and is_leaf(tree):
+        return True
+    return _get_node_type(tree) not in SUPPORTED_NODES
 
 
-_is_leaf = deprecated(
+@deprecated(
     "torch.utils._pytree._is_leaf is private and will be removed in a future release. "
     "Please use torch.utils._pytree.tree_is_leaf instead.",
     category=FutureWarning,
-)(tree_is_leaf)
+)
+def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -> bool:
+    return tree_is_leaf(tree, is_leaf=is_leaf)
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
