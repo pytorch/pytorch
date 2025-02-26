@@ -180,6 +180,16 @@ def aot_dispatch_base(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
 
+    if aot_config.enable_log:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "torch._functorch.config",
+                "encoding": "string",
+            },
+            payload_fn=lambda: torch._functorch.config.get_config_copy(),
+        )
+
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
 
