@@ -800,7 +800,7 @@ static SizeInput::DynType get_default_dyn_type() {
 // Only call this function while holding GIL
 static CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
-    const GraphTask& graph_task,
+    GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges,
     THPObjectPtr* graph_arg_inputs,
@@ -808,10 +808,7 @@ static CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks,
     THPObjectPtr* graph_arg_packed_inputs) {
-  const std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
-  std::unordered_map<Node*, int> visited_dependencies;
-  visited_dependencies.reserve(dependencies.size());
-
+  std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
@@ -875,9 +872,9 @@ static CacheNode* _compiled_autograd_impl(
         }
       }
       auto it = dependencies.find(edge.function.get());
-      int count = ++visited_dependencies[it->first];
-      TORCH_INTERNAL_ASSERT(count <= it->second);
-      if (count == it->second) {
+      TORCH_INTERNAL_ASSERT(it != dependencies.end());
+      if (--it->second == 0) {
+        dependencies.erase(it);
         worklist.emplace_back(edge.function);
       }
     }
@@ -1093,7 +1090,7 @@ struct LockGuardWithErrorLogs {
 
 static variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
-    const GraphTask& graph_task,
+    GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
   TORCH_CHECK(
