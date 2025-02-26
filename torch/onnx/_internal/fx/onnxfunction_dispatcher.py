@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import operator
 import types
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch._ops
@@ -19,6 +19,8 @@ from torch.onnx._internal.fx import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         graph_building as onnxscript_graph_building,
@@ -40,7 +42,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     for symbolic_func in default_and_custom_functions:
         overload_func = symbolic_func.onnx_function
         all_function_overload_names += f"ONNX Node: {overload_func.name}[opset={overload_func.opset};is_custom={symbolic_func.is_custom}]. \n"  # noqa: B950
-    return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
+    return f"FX Node: {node.target}. \n{all_function_overload_names}"
 
 
 def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(

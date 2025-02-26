@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 
@@ -257,8 +258,6 @@ scaled_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -339,8 +338,6 @@ scaled_mm_bias_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -427,8 +424,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -438,12 +434,10 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
         f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
     )
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -464,8 +458,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -479,7 +472,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -520,7 +512,7 @@ def tuned_scaled_mm(
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
-    input_nodes: Tuple[Any, ...]
+    input_nodes: tuple[Any, ...]
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
@@ -534,7 +526,7 @@ def tuned_scaled_mm(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices: List[ChoiceCaller] = []
+    choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 

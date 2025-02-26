@@ -227,20 +227,9 @@ inline void _vec_host_softmax_backward_lastdim(
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           const scalar_t* grad_data = grad_data_base + i * dim_size;
           const scalar_t* output_data = output_data_base + i * dim_size;
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-          scalar_t sum;
-          if (log_softmax) {
-            sum = vec::reduce_all<scalar_t>(
+          if constexpr (log_softmax) {
+            auto sum = vec::reduce_all<scalar_t>(
                 [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
-          } else {
-            sum = vec::map2_reduce_all<scalar_t>(
-                [](Vec x, Vec y) { return x * y; },
-                [](Vec x, Vec y) { return x + y; },
-                grad_data,
-                output_data,
-                dim_size);
-          }
-          if (log_softmax) {
             vec::map2(
                 [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
                 grad_input_data,
@@ -248,6 +237,12 @@ inline void _vec_host_softmax_backward_lastdim(
                 output_data,
                 dim_size);
           } else {
+            auto sum = vec::map2_reduce_all<scalar_t>(
+                [](Vec x, Vec y) { return x * y; },
+                [](Vec x, Vec y) { return x + y; },
+                grad_data,
+                output_data,
+                dim_size);
             vec::map2(
                 [sum](Vec x, Vec y) { return (x - Vec(sum)) * y; },
                 grad_input_data,

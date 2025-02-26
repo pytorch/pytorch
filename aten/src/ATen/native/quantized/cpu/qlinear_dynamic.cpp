@@ -3,10 +3,11 @@
 #include <ATen/Context.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/library.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -28,8 +29,6 @@
 #include <algorithm>
 #include <string>
 #include <type_traits>
-
-int register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -68,8 +67,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
           std::to_string(K));
 
   // Calculate statistics for quantization of the input Tensor
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min, x_max;
+  float x_min = std::numeric_limits<float>::quiet_NaN(), x_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
@@ -275,18 +273,14 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  float x_min = 0;
+  float x_max = 0;
   if (input.numel() > 0) {
     x_min = input_contig.min().item<float>();
     x_max = input_contig.max().item<float>();
   } else {
     // On empty input, no output data will be generated,
     // so use arbitrary qparams.
-    x_min = 0;
-    x_max = 0;
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(

@@ -19,9 +19,9 @@ else
     #    it will install Triton from the source.
 
     TRITON_VERSION="pytorch-triton-xpu==$(cat .ci/docker/triton_version.txt)"
-    TRITON_XPU_COMMIT_ID="git$(head -c 8 .ci/docker/ci_commit_pins/triton-xpu.txt)"
+    TRITON_XPU_COMMIT_ID="$(head -c 8 .ci/docker/ci_commit_pins/triton-xpu.txt)"
     if [[ -z "${TRITON_XPU_BUILD_FROM_SOURCE}" ]]; then
-        pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ ${TRITON_VERSION}+${TRITON_XPU_COMMIT_ID}
+        pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ ${TRITON_VERSION}+git${TRITON_XPU_COMMIT_ID}
     else
         TRITON_XPU_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
 

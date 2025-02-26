@@ -1,10 +1,14 @@
 # Owner(s): ["module: linear algebra"]
 
+import contextlib
+import json
+import math
+import re
+import tempfile
 import unittest
 from itertools import product
 from functools import partial
 from typing import Optional
-import re
 
 import torch
 
@@ -16,6 +20,8 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
+    SM89OrLater,
+    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8
 )
@@ -33,18 +39,16 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_WITH_ROCM,
-    skipIfRocm,
     TestCase,
 )
 
 _IS_SM8X = False
-_IS_SM9X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -60,7 +64,7 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super(self.__class__, self).tearDown()
 
-    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False):
+    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False, fp16_accumulate: bool = False):
         #
         # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
         # results from the CUDA invocation of torch.addmm and the CPU invocation
@@ -72,8 +76,10 @@ class TestMatmulCuda(TestCase):
         # which fail the threshold check
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = reduced_precision
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = reduced_precision
+        torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
         make_arg = partial(make_tensor, dtype=dtype, device="cpu")
@@ -81,6 +87,10 @@ class TestMatmulCuda(TestCase):
         m_input = make_arg((n, p))
         m_1 = make_arg((n, m))
         m_2 = make_arg((m, p))
+        # scale to abate overflows in fp16 accum
+        if fp16_accumulate:
+            m_1 = m_1 / 100
+            m_2 = m_2 / 100
         # *(B)FLOAT16 Special Handling*
         # Backend does not tensorize float16 on CPU,
         # and bloat16 may present accuracy issues,
@@ -114,6 +124,7 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(res_cpu, res_cuda)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
@@ -135,6 +146,36 @@ class TestMatmulCuda(TestCase):
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
         self.cublas_addmm(size, dtype, True)
+
+    @onlyCUDA
+    @skipIfRocmVersionLessThan((5, 2))
+    # imported 'tol' as 'xtol' to avoid aliasing in code above
+    @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
+                        torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("size", [100, 1000, 10000])
+    def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype):
+        self.cublas_addmm(size, dtype, False, True)
+
+    @onlyCUDA
+    @skipIfRocm
+    def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
+        orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
+        torch.backends.cuda.matmul.allow_fp16_accumulation = True
+        x = torch.rand(32, 512, 512, device='cuda', dtype=torch.half)
+        w = torch.rand(512, 512, device='cuda', dtype=torch.half)
+        b = torch.rand(512, device='cuda', dtype=torch.half)
+        out = torch.nn.functional.linear(x, w, b)
+        out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), b.cpu())
+        self.assertEqual(out, out_cpu, atol=5e-3, rtol=8e-3)
+
+        a = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        b = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        c = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        out = torch.baddbmm(a, b, c)
+        out_cpu = torch.baddbmm(a.cpu(), b.cpu(), c.cpu())
+        self.assertEqual(out, out_cpu, atol=1e-3, rtol=5e-3)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
     @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})
@@ -212,9 +253,9 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
 
-f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
-if torch.version.hip:
+if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
@@ -351,20 +392,20 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        # hipblaslt does not yet support mixed e4m3_type input
-        if torch.version.hip is None:
-            self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-            self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        with self.assertRaises(RuntimeError):
+        # supported on ROCm but fails on CUDA
+        ctx = self.assertRaises(RuntimeError) if torch.version.hip is None else contextlib.nullcontext()
+        with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
+
+        self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+        self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
-        if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
-        with self.assertRaises(RuntimeError):
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
+        with self.assertRaises(AssertionError if torch.version.hip else RuntimeError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -374,9 +415,10 @@ class TestFP8MatmulCuda(TestCase):
         # hipblaslt does not yet support mixed e4m3_type input
         y_type = e4m3_type if torch.version.hip else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
+        scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
@@ -440,6 +482,9 @@ class TestFP8MatmulCuda(TestCase):
 
         x = torch.empty_strided((16, 16), (16, 1), device="cuda", dtype=base_dtype)
         y = torch.empty_strided((16, 32), (1, 64), device="cuda", dtype=base_dtype)
+
+        x.normal_()
+        y.normal_()
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
@@ -533,8 +578,7 @@ class TestFP8MatmulCuda(TestCase):
             lambda: torch._scaled_mm(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
 
-    @unittest.skipIf(PLATFORM_SUPPORTS_FP8,
-                     "This test is only for devices with compute capability < 8.9")
+    @unittest.skipIf(PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
@@ -562,8 +606,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
-    @skipIfRocm()
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -574,8 +617,8 @@ class TestFP8MatmulCuda(TestCase):
         x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
         y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         out_fp8 = torch._scaled_mm(
             x_fp8,
@@ -597,8 +640,8 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -655,21 +698,21 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape("Expected b.dtype() == at::kFloat8_e4m3fn to be true, but got false."),
+            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
         ):
             torch._scaled_mm(
                 x_fp8,
-                y_fp8.to(torch.float8_e5m2),
+                y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
-    @skipIfRocm()
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
@@ -728,6 +771,45 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support row-wise scaling")
+    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_honor_sm_carveout(self) -> None:
+        torch.manual_seed(42)
+
+        x = torch.randn(8192, 2048, device="cuda", dtype=torch.float32)
+        y = torch.randn(8192, 2048, device="cuda", dtype=torch.float32).t()
+        x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
+        y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
+        x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
+
+        with tempfile.NamedTemporaryFile() as f:
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+                self.assertIsNone(torch._C._get_sm_carveout_experimental())
+                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(0)
+                self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
+                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(66)
+                self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
+                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(None)
+                self.assertIsNone(torch._C._get_sm_carveout_experimental())
+                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+
+            prof.export_chrome_trace(f.name)
+            no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                math.prod(evt.get("args", {}).get("grid", []))
+                for evt in json.load(open(f.name))["traceEvents"]
+                if evt.get("cat", "") == "kernel"
+            ]
+
+            self.assertEqual(no_carveout, no_carveout_again)
+            self.assertNotEqual(no_carveout, carveout_66)
+            self.assertNotEqual(carveout_66, carveout_0)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")

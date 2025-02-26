@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -49,6 +48,10 @@ cxx_pytree.register_pytree_node(
     lambda xs, _: GlobalDummyType(*xs),
     serialized_type_name="GlobalDummyType",
 )
+
+
+class TestEnum(enum.Enum):
+    A = auto()
 
 
 class TestGenericPytree(TestCase):
@@ -801,7 +804,6 @@ if "optree" in sys.modules:
             py_pytree.TreeSpec(tuple, None, []) != py_pytree.TreeSpec(list, None, []),
         )
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -814,20 +816,6 @@ if "optree" in sys.modules:
                 "    *,\n"
                 "    TreeSpec(list, None, [*])])])"
             ),
-        )
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = py_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            """\
-TreeSpec(tuple, None, [*,
-  TreeSpec(list, None, [*,
-    *,
-    TreeSpec(list, None, [*])])])""",
         )
 
     @parametrize(
@@ -957,10 +945,24 @@ TreeSpec(tuple, None, [*,
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
-    def test_pytree_serialize_enum(self):
-        class TestEnum(enum.Enum):
-            A = auto()
+    def test_pytree_serialize_defaultdict_enum(self):
+        spec = py_pytree.TreeSpec(
+            defaultdict,
+            [list, [TestEnum.A]],
+            [
+                py_pytree.TreeSpec(
+                    list,
+                    None,
+                    [
+                        py_pytree.LeafSpec(),
+                    ],
+                ),
+            ],
+        )
+        serialized_spec = py_pytree.treespec_dumps(spec)
+        self.assertIsInstance(serialized_spec, str)
 
+    def test_pytree_serialize_enum(self):
         spec = py_pytree.TreeSpec(dict, TestEnum.A, [py_pytree.LeafSpec()])
 
         serialized_spec = py_pytree.treespec_dumps(spec)
@@ -1164,6 +1166,31 @@ TreeSpec(tuple, None, [*,
         )
         self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
 
+    def test_dataclass(self):
+        @dataclass
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        py_pytree.register_dataclass(Point)
+
+        point = Point(torch.tensor(0), torch.tensor(1))
+        point = py_pytree.tree_map(lambda x: x + 1, point)
+        self.assertEqual(point.x, torch.tensor(1))
+        self.assertEqual(point.y, torch.tensor(2))
+
+    def test_constant(self):
+        @dataclass
+        class Config:
+            norm: str
+
+        py_pytree.register_constant(Config)
+
+        config = Config("l1")
+        elements, spec = py_pytree.tree_flatten(config)
+        self.assertEqual(elements, [])
+        self.assertEqual(spec.context.value, config)
+
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
@@ -1322,21 +1349,12 @@ class TestCxxPytree(TestCase):
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
+        self.assertEqual(
+            repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
         )
 
     @parametrize(

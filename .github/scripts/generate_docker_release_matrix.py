@@ -12,7 +12,6 @@ Will output a condensed version of the matrix. Will include fllowing:
 """
 
 import json
-from typing import Dict, List
 
 import generate_binary_build_matrix
 
@@ -20,8 +19,8 @@ import generate_binary_build_matrix
 DOCKER_IMAGE_TYPES = ["runtime", "devel"]
 
 
-def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
-    ret: List[Dict[str, str]] = []
+def generate_docker_matrix() -> dict[str, list[dict[str, str]]]:
+    ret: list[dict[str, str]] = []
     # CUDA amd64 Docker images are available as both runtime and devel while
     # CPU arm64 image is only available as runtime.
     for cuda, version in generate_binary_build_matrix.CUDA_ARCHES_FULL_VERSION.items():

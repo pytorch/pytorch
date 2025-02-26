@@ -3,20 +3,8 @@ import copy
 import io
 import math
 import weakref
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Mapping,
-    MutableMapping,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -92,10 +80,10 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Iterate through the state dict, applying the given functions to each tensor type.
 
     Args:
@@ -194,8 +182,13 @@ def _iterate_state_dict(
                 ret = ret.to(cpu_device)
 
             if companion_obj is not None:
-                # TODO: support DTensor
-                companion_obj.copy_(ret, non_blocking=non_blocking)
+                if isinstance(companion_obj, DTensor):
+                    assert isinstance(ret, DTensor)
+                    companion_obj._local_tensor.copy_(
+                        ret._local_tensor, non_blocking=non_blocking
+                    )
+                else:
+                    companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
@@ -204,14 +197,14 @@ def _iterate_state_dict(
 
 
 def _gather_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in
     the state_dict.
@@ -292,11 +285,11 @@ def _gather_state_dict(
 
 
 def _offload_state_dict_to_cpu(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Given a state_dict, this API offload all the tensors to CPU memory.
 
@@ -331,12 +324,13 @@ def _offload_state_dict_to_cpu(
     return ret
 
 
+@torch.no_grad()
 def _copy_state_dict(
-    state_dict: Dict[str, Any],
-    copy_state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
+    copy_state_dict: dict[str, Any],
     non_blocking: bool = False,
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
     same structure. Additionally, a copied state dict with the same value references
@@ -380,9 +374,10 @@ def _copy_state_dict(
     )
 
 
+@torch.no_grad()
 def _create_cpu_state_dict(
-    state_dict: Dict[str, Any], pin_memory: bool = False, share_memory: bool = False
-) -> Dict[str, Any]:
+    state_dict: dict[str, Any], pin_memory: bool = False, share_memory: bool = False
+) -> dict[str, Any]:
     """
     Given a state_dict, create another state_dict with the same structure and elements.
     However, all tensors in the returned state_dict are new tensors on CPU. These
@@ -435,10 +430,26 @@ def _create_cpu_state_dict(
         else:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
+    def dtensor_func(
+        obj: DTensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        _: Any,
+    ) -> DTensor:
+        if len(obj.size()) == 0:
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = cast(DTensor, obj.to(device="cpu"))
+        else:
+            ret = copy.deepcopy(obj)
+        ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
+        return ret
+
     ret = _iterate_state_dict(
         state_dict,
         _identity_func,
-        _identity_func,
+        dtensor_func,
         tensor_func,
         pg=None,
         device=None,
@@ -450,8 +461,8 @@ def _create_cpu_state_dict(
 
 
 def _check_state_dict_similarity(
-    state_dict: Dict[str, Any],
-    compared_state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
+    compared_state_dict: dict[str, Any],
 ) -> bool:
     """
     Given two state_dicts, check if the structures are the same. And
@@ -497,9 +508,9 @@ class _TensorInfo(NamedTuple):
 
 
 def _broadcast_tensors(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
-    keys: List[str],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
+    keys: list[str],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
@@ -537,8 +548,8 @@ def _broadcast_tensors(
 
 
 def _distribute_tensors(
-    local_state_dict: Dict[str, Any],
-    keys: List[str],
+    local_state_dict: dict[str, Any],
+    keys: list[str],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
@@ -579,8 +590,8 @@ def _distribute_tensors(
 
 
 def _broadcast_state_dict(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
     strict: bool = False,
@@ -638,8 +649,8 @@ def _broadcast_state_dict(
 
 
 def _distribute_state_dict(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
@@ -672,9 +683,9 @@ def _distribute_state_dict(
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
 PATH_ITEM = Union[str, int]
-OBJ_PATH = Tuple[PATH_ITEM, ...]
-FLATTEN_MAPPING = Dict[str, OBJ_PATH]
-STATE_DICT_TYPE = Dict[str, Any]
+OBJ_PATH = tuple[PATH_ITEM, ...]
+FLATTEN_MAPPING = dict[str, OBJ_PATH]
+STATE_DICT_TYPE = dict[str, Any]
 CONTAINER_TYPE = MutableMapping[PATH_ITEM, Any]
 
 
@@ -704,7 +715,7 @@ def _traverse_state_dict(
 
 def _flatten_state_dict(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+) -> tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
 
@@ -732,14 +743,14 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     """Set ``value`` in ``root_dict`` along the ``path`` object path."""
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
-    def extend_list(lst: List[Any], idx: int) -> None:
+    def extend_list(lst: list[Any], idx: int) -> None:
         while len(lst) <= idx:
             lst.append(None)
 
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, List[Any]] = {} if type(key) == str else []
+        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) == str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
@@ -753,7 +764,7 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
 
     key = path[-1]
     if type(key) == int:
-        extend_list(cast(List[Any], cur_container), key)
+        extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value
 
