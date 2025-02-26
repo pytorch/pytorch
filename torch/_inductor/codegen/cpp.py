@@ -4299,6 +4299,7 @@ class OuterLoopFusedKernel(CppKernel):
         nested_kernels: list[CppKernel] = [
             loop_nest.get_kernel() for loop_nest in self.inner
         ]
+        # TODO(leslie-fang-intel): only enable parallel within all outer loop levels.
         for kernel in nested_kernels:
             # For any ScalarKernel, VecKernel, or Tile2DKernel,
             # they should all have the same call_ranges
