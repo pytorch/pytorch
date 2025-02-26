@@ -57,6 +57,12 @@ echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
 
+:: python install dependencies
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+:: DISTUTILS_USE_SDK should be set after psutil dependency
+set DISTUTILS_USE_SDK=1
+
 :: Print all existing environment variable for debugging
 set
 sccache --stop-server
