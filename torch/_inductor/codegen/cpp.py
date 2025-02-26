@@ -5385,7 +5385,7 @@ class LoopNest:
         start_depth = self.max_parallel_depth().start_depth
         loop = self.loops[start_depth]
         loop.parallel = par_depth
-        for i in range(start_depth, par_depth):
+        for i in range(start_depth + 1, par_depth):
             self.loops[i].collapsed = True
 
     def tile(self, depth, factor):
