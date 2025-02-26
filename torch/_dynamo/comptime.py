@@ -46,7 +46,7 @@ from typing import Optional, Union
 import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented
+from .exc import unimplemented_v2
 from .variables import CellVariable
 from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
@@ -192,7 +192,12 @@ class ComptimeContext:
         """
         Manually trigger a graph break
         """
-        unimplemented(msg)
+        unimplemented_v2(
+            gb_type="ComptimeContext graph break",
+            context=msg,
+            explanation=f"Manually triggered ComptimeContext graph break with message {msg}.",
+            hints=[],
+        )
 
     def graph(self):
         """
