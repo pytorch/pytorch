@@ -1262,33 +1262,27 @@ endif()
 
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
-  if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
-    set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
-  endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS OFF)
-  set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
-  # If linking local protobuf, make sure ONNX has the same protobuf
-  # patches as Caffe2 and Caffe proto. This forces some functions to
-  # not be inline and instead route back to the statically-linked protobuf.
-  if(CAFFE2_LINK_LOCAL_PROTOBUF)
-    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
-  endif()
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
-  if(NOT USE_SYSTEM_ONNX)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
-    if(NOT MSVC)
-      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
-    endif()
-  endif()
-
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
+
   if(NOT USE_SYSTEM_ONNX)
-    include_directories(${ONNX_INCLUDE_DIRS})
+    set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+    set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
+    if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
+      set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
+    endif()
+    # If linking local protobuf, make sure ONNX has the same protobuf
+    # patches as Caffe2 and Caffe proto. This forces some functions to
+    # not be inline and instead route back to the statically-linked protobuf.
+    if(CAFFE2_LINK_LOCAL_PROTOBUF)
+      set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
+    endif()
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
@@ -1311,7 +1305,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     endif()
     set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
     message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
+    caffe2_interface_library(onnx onnx_library)
   endif()
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
