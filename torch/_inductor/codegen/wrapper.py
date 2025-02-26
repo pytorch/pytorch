@@ -2603,8 +2603,10 @@ class PythonWrapperCodegen(CodeGen):
             # If it is already codegened, the parent wrapper already has
             # subgraph fn by name subgraph.graph.name
             with V.set_graph_handler(subgraph.graph):
-                # Call the codegen of subgraph recursively
-                subgraph_code, _ = subgraph.graph.codegen()
+                # do not graph partition for subgraph
+                with config.patch("graph_partition", False):
+                    # Call the codegen of subgraph recursively
+                    subgraph_code, _ = subgraph.graph.codegen()
             self.already_codegened_subgraphs.add(subgraph.graph.name)
             self.define_subgraph_launcher_fn(subgraph_code)
 

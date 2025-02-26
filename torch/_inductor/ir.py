@@ -183,6 +183,7 @@ class GraphPartitionSignature:
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
     input_deallocation: dict[str, bool]
+    skip_cudagraph: bool
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:

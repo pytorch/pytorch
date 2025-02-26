@@ -3965,6 +3965,9 @@ class Scheduler:
         if not node.is_gpu():
             return True
 
+        if node.node is None:
+            return True
+
         if isinstance(node.node, ir.DeviceCopy):
             return True
 
@@ -3972,6 +3975,14 @@ class Scheduler:
             return True
 
         if getattr(node.node, "unbacked_bindings", None):
+            return True
+
+        if any(
+            [
+                isinstance(expr, sympy.Expr) and expr.free_symbols
+                for expr in node.node.layout.size
+            ]
+        ):
             return True
 
         return False
@@ -3993,7 +4004,7 @@ class Scheduler:
         return name_to_node
 
     def get_graph_partition_signature(
-        self, partitions: list[PartitionType]
+        self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
     ) -> list[GraphPartitionSignature]:
         """
         Gets signature for each graph partition, including input nodes, output nodes, and
@@ -4004,7 +4015,9 @@ class Scheduler:
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
 
-        for partition in reversed(partitions):
+        for partition, skip_cudagraph in zip(
+            reversed(partitions), reversed(skip_cudagraphs)
+        ):
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
@@ -4042,6 +4055,7 @@ class Scheduler:
                     input_nodes,
                     output_nodes,
                     input_deallocation,
+                    skip_cudagraph,
                 )
             )
             unmet_output_names = partition_input_names.union(
@@ -4059,20 +4073,26 @@ class Scheduler:
         """
         partitions: list[PartitionType] = []
 
+        skip_cudagraph = True
         cur_partition: PartitionType = []
+        skip_cudagraphs = []
         for node in self.nodes:
-            if self.should_partition(node):
-                if cur_partition:
-                    partitions.append(cur_partition)
-                    cur_partition = []
-                partitions.append([node])
-            else:
-                cur_partition.append(node)
+            should_partition = self.should_partition(node)
+            if cur_partition and skip_cudagraph != should_partition:
+                partitions.append(cur_partition)
+                skip_cudagraphs.append(skip_cudagraph)
+                cur_partition = []
+
+            skip_cudagraph = should_partition
+            cur_partition.append(node)
 
         if cur_partition:
             partitions.append(cur_partition)
+            skip_cudagraphs.append(skip_cudagraph)
 
-        return partitions, self.get_graph_partition_signature(partitions)
+        return partitions, self.get_graph_partition_signature(
+            partitions=partitions, skip_cudagraphs=skip_cudagraphs
+        )
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -4121,11 +4141,10 @@ class Scheduler:
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
 
-            if len(partition) > 1:
-                self._codegen_partition_wrapper(partition, signature)
-            else:
-                # Inline small partitions to avoid overheads from function calls.
+            if signature.skip_cudagraph:
                 self._codegen(partition)
+            else:
+                self._codegen_partition_wrapper(partition, signature)
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
