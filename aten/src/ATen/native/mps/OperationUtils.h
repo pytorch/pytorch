@@ -381,6 +381,10 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
 
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSScalar& s, unsigned idx) {
+  [encoder setBytes:&s.value length:s.size atIndex:idx];
+}
+
 namespace detail {
 template <typename T>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {

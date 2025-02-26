@@ -235,6 +235,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        '_unsafe_masked_index',
         'abs',
         'add',
         'alias_copy',
@@ -284,6 +285,7 @@ def mps_ops_modifier(ops):
         'linalg.svd',
         'mH',
         'mT',
+        'masked_fill',
         'masked_scatter',
         'masked_select',
         'meshgridlist_of_tensors',
@@ -363,7 +365,6 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
-        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -441,7 +442,6 @@ def mps_ops_modifier(ops):
         'logical_xor',
         'logsumexp',
         'long',
-        'masked_fill',
         'masked.mean',
         'masked.prod',
         'masked.std',
@@ -933,9 +933,6 @@ def mps_ops_error_inputs_modifier(ops):
         'gather',
         'scatter',
         'scatter_add',
-
-        # unsupported complex dtypes
-        'masked_fill',
 
         # MPS does not support tensor dimensions > 16
         'amax',
@@ -2282,6 +2279,13 @@ class TestMPS(TestCaseMPS):
             if mask_cpu[i]:
                 dst2[i] = val
         self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
+
+        if MACOS_VERSION >= 14.0:
+            # Regression test for https://github.com/pytorch/pytorch/issues/143477
+            # Allocating 48x25x1024x1024 tensor crashes on MacOS-13
+            mask_bool = torch.triu(torch.ones(1024, 1024, device=device), diagonal=1).bool()
+            attn_scores = torch.rand(48, 25, 1024, 1024, device=device)
+            attn_scores.masked_fill_(mask_bool, 0)
 
     def test_masked_fill__non_contiguous(self):
         shape = (3, 5)
