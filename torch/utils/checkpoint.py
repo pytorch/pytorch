@@ -1521,8 +1521,8 @@ def _checkpoint_without_reentrant_generator(
             with (
                 device_autocast_ctx,   # type: ignore[attr-defined]
                 torch.amp.autocast("cpu", **cpu_autocast_kwargs),
+                _apply_torch_function_mode_stack(torch_function_mode_stack),
                 recompute_context,
-                _apply_torch_function_mode_stack(torch_function_mode_stack)
             ):
                 fn(*args, **kwargs)
 

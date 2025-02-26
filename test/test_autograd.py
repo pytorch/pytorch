@@ -7518,33 +7518,37 @@ for shape in [(1,), ()]:
     def test_checkpointing_preserves_torch_function_mode_stack(self):
         log = []
 
-        class Func1(TorchFunctionMode):
-            def __torch_function__(self, func, types, args, kwargs=None):
-                kwargs = {} if kwargs is None else kwargs
-                log.append("func1")
-                return func(*args, **kwargs)
+        def get_mode_class(n):
+            class Func(TorchFunctionMode):
+                def __torch_function__(self, func, types, args, kwargs=None):
+                    kwargs = {} if kwargs is None else kwargs
+                    log.append(f"mode{n}")
+                    return func(*args, **kwargs)
 
-        class Func2(TorchFunctionMode):
-            def __torch_function__(self, func, types, args, kwargs=None):
-                kwargs = {} if kwargs is None else kwargs
-                log.append("func2")
-                return func(*args, **kwargs)
+            return Func
+
+        Mode1 = get_mode_class(1)
+        Mode2 = get_mode_class(2)
+        Mode3 = get_mode_class(3)
 
         def func(x):
             return x.sin().cos()
 
-        with Func1():
-            with Func2():
+        def context_fn():
+            return Mode3(), Mode3()
+
+        with Mode1():
+            with Mode2():
                 a = torch.tensor(1., requires_grad=True)
 
                 log = []
-                out = checkpoint(func, a, use_reentrant=False)
-                self.assertTrue(log[0] == "func2" and log[1] == "func1")
+                out = checkpoint(func, a, use_reentrant=False, context_fn=context_fn)
+                self.assertTrue(log[-3] == "mode3" and log[-2] == "mode2" and log[-1] == "mode1")
+
 
                 log = []
                 out.backward()
-
-        self.assertTrue(log[0] == "func2" and log[1] == "func1")
+                self.assertTrue(log[-3] == "mode3" and log[-2] == "mode2" and log[1] == "mode1")
 
     def test_callback_adds_callback(self):
         called = [0]
