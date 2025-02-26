@@ -19,7 +19,6 @@ import shutil
 import struct
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -38,7 +37,6 @@ from typing import (
     cast,
     NoReturn,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -524,7 +522,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -804,6 +802,13 @@ class FxGraphHashDetails:
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
+
+        no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
+        # This device index is usually already encoded by the device of the inputs
+        # but fx graphs don't necessarily have tensor inputs. If there aren't any,
+        # we need to guard on the device index in case we allocate cuda tensors
+        if no_tensor_inputs and torch.accelerator.is_available():
+            self.default_cuda_device_index = torch.accelerator.current_device_index()
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
@@ -1341,15 +1346,6 @@ class FxGraphCache:
             pass
 
 
-def run_command_and_check(cmd_: str) -> None:
-    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
-        cmd = shlex.split(cmd_)
-        try:
-            subprocess.check_call(cmd)
-        except subprocess.CalledProcessError as e:
-            raise exc.CppCompileError(cmd, e.output) from e
-
-
 @functools.lru_cache(None)
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
@@ -1431,7 +1427,7 @@ class AotCodeCompiler:
         fbcode_aot_cpu_re = (
             config.is_fbcode() and device_type == "cpu" and graph.aot_mode
         )
-        use_absolute_path = fbcode_aot_cpu_re
+        use_relative_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1516,7 +1512,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=use_relative_path,
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1524,7 +1520,6 @@ class AotCodeCompiler:
                 output_dir=str(consts_s.parent),
                 BuildOption=object_build_options,
             )
-            compile_cmd = object_builder.get_command_line()
             consts_o = object_builder.get_target_file_path()
             if fbcode_aot_cpu_re:
                 # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
@@ -1532,7 +1527,7 @@ class AotCodeCompiler:
                 object_builder.build_fbcode(str(consts_s), consts_o)
                 os.chmod(consts_o, 0o644)
             else:
-                run_command_and_check(compile_cmd)
+                object_builder.build()
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1645,7 +1640,7 @@ class AotCodeCompiler:
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=use_relative_path,
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
@@ -1676,7 +1671,7 @@ class AotCodeCompiler:
                     object_builder.build_fbcode(cpp_path, output_o)
                     os.chmod(output_o, 0o644)
                 else:
-                    run_command_and_check(compile_cmd)
+                    object_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1703,7 +1698,7 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=use_relative_path,
             )
 
             so_builder = CppBuilder(
@@ -1764,7 +1759,7 @@ class AotCodeCompiler:
                     so_builder.build_fbcode([output_o, consts_o], output_so)
                     os.chmod(output_so, 0o755)
                 else:
-                    run_command_and_check(link_cmd)
+                    so_builder.build()
 
                 for o_file in [
                     output_o,
@@ -2791,9 +2786,7 @@ def _cuda_lib_options() -> list[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(device_type="cuda") + [
-        sysconfig.get_config_var("LIBDIR")
-    ]
+    lpaths = cpp_extension.library_paths(device_type="cuda")
     extra_ldflags: list[str] = []
     if is_linux():
         _transform_cuda_paths(lpaths)
