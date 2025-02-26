@@ -442,9 +442,8 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
         # Create shard groups (e.g. (0, 1, 2, 3), (4, 5, 6, 7))
         # and assign the correct shard group to each rank
-        num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = list(range(0, self.world_size // 2)), list(
+            range(self.world_size // 2, self.world_size)
         )
         shard_groups = (
             new_group(shard_rank_lists[0]),
@@ -458,8 +457,8 @@ class DeviceMeshTestNDim(DTensorTestBase):
         # and assign the correct replicate group to each rank
         current_replicate_group = None
         shard_factor = len(shard_rank_lists[0])
-        for i in range(num_node_devices // 2):
-            replicate_group_ranks = list(range(i, num_node_devices, shard_factor))
+        for i in range(self.world_size // 2):
+            replicate_group_ranks = list(range(i, self.world_size, shard_factor))
             replicate_group = new_group(replicate_group_ranks)
             if self.rank in replicate_group_ranks:
                 current_replicate_group = replicate_group
