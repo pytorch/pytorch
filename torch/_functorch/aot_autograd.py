@@ -137,6 +137,7 @@ from .partitioners import default_partition
 
 zip = strict_zip
 
+
 # This global counter increments every time we compile a graph with
 # AOTAutograd.  You can use this to correlate runtime error messages
 # with compile time (e.g., if you get an error at runtime saying
@@ -148,7 +149,12 @@ zip = strict_zip
 # corresponds to top-level invocations of aot_module/aot_function;
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
-AOT_COUNTER = itertools.count()
+def reset_aot_counter():
+    global AOT_COUNTER
+    AOT_COUNTER = itertools.count()
+
+
+AOT_COUNTER = reset_aot_counter()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

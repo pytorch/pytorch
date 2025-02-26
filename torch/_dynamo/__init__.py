@@ -127,6 +127,7 @@ def reset() -> None:
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
+        torch._functorch.aot_autograd.reset_aot_counter()
 
 
 def reset_code_caches() -> None:
