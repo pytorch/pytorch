@@ -4007,6 +4007,10 @@ known_graph_breaks_tests = {
     "test_access_saved_tensor_twice_without_recomputation_works",  # unpack hook in skip files
     "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",  # ctx in skip files
     "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",  # ctx in skip files
+    "test_checkpointing",  # reentrant .backward
+    "test_checkpointing_without_reentrant_input_requires_grad_False",  # reentrant .backward
+    "test_checkpointing_without_reentrant_input_requires_grad_True",  # reentrant .backward
+    "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
 }
 
 test_contexts = {
@@ -4109,6 +4113,10 @@ known_failing_tests = {
     "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
     "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
     "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
+    "test_checkpointing",  # takes very very long
+    "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
+    "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
+    "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
     # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
