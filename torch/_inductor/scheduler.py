@@ -3977,11 +3977,9 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if any(
-            [
-                isinstance(expr, sympy.Expr) and expr.free_symbols
-                for expr in node.node.layout.size
-            ]
+        if hasattr(node.node, "layout") and any(
+            isinstance(expr, sympy.Expr) and expr.free_symbols
+            for expr in node.node.layout.size
         ):
             return True
 
