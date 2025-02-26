@@ -4065,8 +4065,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
