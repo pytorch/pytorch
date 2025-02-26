@@ -22,6 +22,7 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    xfailIfTorchDynamo,
     IS_FBCODE,
     TEST_WITH_ROCM,
     skipIfRocm,
@@ -1338,6 +1339,7 @@ class TestTransformers(NNTestCase):
             ).eval()
             transformer(x, x)
 
+    @xfailIfTorchDynamo
     def test_train_with_is_causal(self, device):
         # training with is_causal
         S, L, E, H = 1, 2, 2, 1
@@ -1741,6 +1743,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False)
 
     # Note: do not truncate the list according to platforms. These tests should always raise errors.
+    @xfailIfTorchDynamo
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_different_datatypes(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
@@ -1761,6 +1764,7 @@ class TestSDPAFailureModes(NNTestCase):
         value = torch.randn(shape, dtype=torch.float16, device='cpu')
         self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
+    @xfailIfTorchDynamo
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_1_dimensional_inputs(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
