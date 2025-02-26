@@ -220,7 +220,7 @@ def cummaxmin(self, dim):
 def logcumsumexp(self, dim):
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 # Stride-related code from _exec_fft in aten/src/ATen/native/mkl/SpectralOps.cpp
@@ -2184,7 +2184,7 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(aten.bernoulli_.float)
@@ -2195,7 +2195,7 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.poisson.default, aten.poisson.out])
@@ -6709,8 +6709,10 @@ def mkldnn_rnn_layer_backward(
 @out_wrapper()
 def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(
-        self, dtype=torch.int32 if out_int32 else torch.int64
-    ).contiguous()
+        self,
+        dtype=torch.int32 if out_int32 else torch.int64,
+        memory_format=torch.contiguous_format,
+    )
 
 
 @register_meta([aten.histc])
@@ -6907,7 +6909,9 @@ def meta_searchsorted(
 
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
-        return torch.empty_like(self, dtype=dtype).contiguous()
+        return torch.empty_like(
+            self, dtype=dtype, memory_format=torch.contiguous_format
+        )
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
 
