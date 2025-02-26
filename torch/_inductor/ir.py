@@ -1521,6 +1521,38 @@ class Reduction(Loops):
         return reduction_hint
 
     @classmethod
+    def check_for_split_dense_dim_reindexing(
+        cls, reduction_numel: _IntLike, input_node: Optional[IRNode]
+    ) -> Optional[int]:
+        """
+        If we are reducing over the full tensor, and it is non-dense in the last dimension,
+        reindex so we reduce over the dense dimension. initially just handle complete
+        reduction case
+        """
+        if input_node is None:
+            return None
+
+        if not V.graph.sizevars.statically_known_equals(
+            input_node.get_numel(), reduction_numel
+        ):
+            return None
+
+        input_node.realize()
+        try:
+            # finalize layout
+            as_storage_and_layout(input_node)
+        except NotImplementedError:
+            return None
+
+        strides = input_node.get_stride()
+
+        for i, s in enumerate(strides[:-1]):
+            if V.graph.sizevars.statically_known_equals(s, 1):
+                return i
+
+        return None
+
+    @classmethod
     def _multilayer_wrap_loader(
         cls,
         loader: Callable[..., OpsValue],
@@ -1531,19 +1563,9 @@ class Reduction(Loops):
         default: Union[_NumLike, Sequence[_NumLike]],
         input_node: Optional[IRNode] = None,
     ) -> Callable[..., object]:
-        dense_index = None
-        if input_node:
-            input_node.realize()
-            # finalize layout
-            as_storage_and_layout(input_node)
-        if input_node and input_node.maybe_get_stride():
-            try:
-                dense_dim = input_node.get_stride().index(1)
-                if dense_dim != len(input_node.get_stride()) - 1:
-                    dense_index = dense_dim
-            except ValueError:
-                pass
-
+        dense_index = cls.check_for_split_dense_dim_reindexing(
+            reduction_numel, input_node
+        )
         reindex = View.dynamic_reshape_indexer(
             reduction_ranges, [reduction_numel], dense_index
         )
