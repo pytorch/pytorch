@@ -20,6 +20,7 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
 
@@ -180,6 +181,11 @@ inline const char* TypeName(Float8_e4m3fnuz v) {
 template <>
 inline const char* TypeName(Float8_e5m2fnuz v) {
   return "Float8_e5m2fnuz";
+}
+
+template <>
+inline const char* TypeName(Float8_e8m0fnu v) {
+  return "Float8_e8m0fnu";
 }
 
 template <>

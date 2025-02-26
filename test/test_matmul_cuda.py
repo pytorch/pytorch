@@ -253,7 +253,7 @@ class TestMatmulCuda(TestCase):
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
-if torch.version.hip:
+if torch.version.hip and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
