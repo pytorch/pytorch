@@ -368,33 +368,28 @@ def _maybe_reshape_scale(tensor_a, scales):
     Returns:
         torch.Tensor: The reshaped scales tensor
     """
-    # Case where scales already has the expected dimensionality
+    # TODO: write tests and clean up this function
     if scales.dim() == tensor_a.dim():
         return scales
-    
-    # Get shape of tensor_a
+
+    assert scales.dim() == tensor_a.dim() - 1
+    assert scales.shape[-1] == 1
+
     a_shape = tensor_a.shape
-    
-    # Handle the case where scales is flattened (A*B, 1)
-    if scales.dim() == 2 and scales.shape[1] == 1:
-        # Check if we can reshape to match tensor_a's first dimensions
-        total_size = scales.shape[0]
-        
-        # Check if the flattened size matches the product of first dimensions
-        first_n_dims = 0
-        prod = 1
-        for i, dim_size in enumerate(a_shape):
-            prod *= dim_size
-            first_n_dims = i + 1
-            if prod == total_size:
-                break
-                
+
+    total_size = scales.shape[0]
+    first_n_dims = 0
+    prod = 1
+    for i, dim_size in enumerate(a_shape):
+        prod *= dim_size
+        first_n_dims = i + 1
         if prod == total_size:
-            # We found a matching product, reshape accordingly
-            new_shape = a_shape[:first_n_dims] + (1,) * (tensor_a.dim() - first_n_dims)
-            return scales.reshape(new_shape).clone()
-    
-    # If we get here, we couldn't automatically determine the reshape pattern
+            break
+            
+    if prod == total_size:
+        new_shape = a_shape[:first_n_dims] + (1,) * (tensor_a.dim() - first_n_dims)
+        return scales.reshape(new_shape).clone()
+
     raise ValueError(f"Cannot automatically reshape scales {scales.shape} to match tensor {a_shape}")
 
 maybe_reshape_scale = inductor_prims.make_prim(
