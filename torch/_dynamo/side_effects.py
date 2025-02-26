@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
 import inspect
@@ -10,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import utils, variables
+from . import graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -18,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import SideEffectsError, unimplemented_v2
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -55,8 +56,22 @@ def _manual_list_update(list_from, list_to):
 
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]
@@ -79,6 +94,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Used by MappingProxyVariable to graph break in case of any mutated
+        # dict
+        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
@@ -168,8 +186,12 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            # TODO plumb HOP information here
+            unimplemented_v2(
+                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
+                context="",
+                explanation="This is not supported.",
+                hints=[],
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
@@ -184,12 +206,22 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented("read deleted attribute")
+            unimplemented_v2(
+                gb_type="Attempted to read a deleted variable",
+                context=f"item: {item}, name: {name}",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return result
 
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
-            unimplemented("Dynamo currently doesn't support writing to such cell")
+            unimplemented_v2(
+                gb_type="Write to immutable cell",
+                context=f"cellvar: {cellvar}, value: {value}",
+                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -200,7 +232,12 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented("cannot read uninitialized cell")
+        unimplemented_v2(
+            gb_type="Read uninitialized cell",
+            context=str(cellvar),
+            explanation="Attempted to read a cell variable that has not been populated yet.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -521,6 +558,15 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if (
+            var.source
+            and isinstance(var, variables.ConstDictVariable)
+            and not isinstance(var, variables.SetVariable)
+        ):
+            self._has_existing_dict_mutation = True
+
+    def has_existing_dict_mutation(self):
+        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -547,7 +593,12 @@ class SideEffects:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
-                    unimplemented("AutogradFunctionContextVariable escaped")
+                    unimplemented_v2(
+                        gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
+                        context="",
+                        explanation="We cannot reconstruct a torch.autograd.Function's context object.",
+                        hints=[],
+                    )
 
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -696,7 +747,14 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented("side effect on existing deque with limited maxlen")
+                    unimplemented_v2(
+                        gb_type="Side effect on existing deque with limited maxlen",
+                        context="",
+                        explanation="This is not supported.",
+                        hints=[
+                            "Don't use a deque with `maxlen` specified.",
+                        ],
+                    )
 
                 # old.extend(new), this runs last
                 cg(var.source)

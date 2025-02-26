@@ -323,8 +323,7 @@ def _full_post_state_dict_hook(
         # Strip prefix out of key if needed as buffer names and param names
         # do not have prefix considered as they are not computed in `state_dict`
         # call.
-        if clean_key.startswith(clean_prefix):
-            clean_key = clean_key[len(clean_prefix) :]
+        clean_key = clean_key.removeprefix(clean_prefix)
 
         # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
