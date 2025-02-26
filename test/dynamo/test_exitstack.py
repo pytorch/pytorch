@@ -3,7 +3,7 @@ import contextlib
 import sys
 import traceback
 import unittest
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, suppress
 
 import torch
 import torch._dynamo.test_case
@@ -591,6 +591,61 @@ class CPythonTestExitStack(CPythonTestBaseExitStack, torch._dynamo.test_case.Tes
         ("__exit__", "raise exc"),
         ("__exit__", "if cb(*exc_details):"),
     ]
+
+
+class TestSuppress(unittest.TestCase):
+    @make_dynamo_test
+    def test_no_result_from_enter(self):
+        with suppress(ValueError) as enter_result:
+            self.assertIsNone(enter_result)
+
+    @make_dynamo_test
+    def test_no_exception(self):
+        with suppress(ValueError):
+            self.assertEqual(pow(2, 5), 32)
+
+    @make_dynamo_test
+    def test_exact_exception(self):
+        with suppress(TypeError):
+            raise TypeError
+
+    @make_dynamo_test
+    def test_exception_hierarchy(self):
+        with suppress(LookupError):
+            "Hello"[50]
+
+    @make_dynamo_test
+    def test_other_exception(self):
+        with self.assertRaises(ZeroDivisionError):
+            with suppress(TypeError):
+                raise ZeroDivisionError
+
+    @make_dynamo_test
+    def test_no_args(self):
+        with self.assertRaises(ZeroDivisionError):
+            with suppress():  # noqa: B022
+                raise ZeroDivisionError
+
+    @make_dynamo_test
+    def test_multiple_exception_args(self):
+        with suppress(ZeroDivisionError, TypeError):
+            raise ZeroDivisionError
+        with suppress(ZeroDivisionError, TypeError):
+            raise TypeError
+
+    @make_dynamo_test
+    def test_cm_is_reentrant(self):
+        ignore_exceptions = suppress(Exception)
+        with ignore_exceptions:
+            pass
+        with ignore_exceptions:
+            raise TypeError
+        with ignore_exceptions:
+            with ignore_exceptions:  # Check nested usage
+                raise ValueError
+            outer_continued = True
+            {}[1]
+        self.assertTrue(outer_continued)
 
 
 if __name__ == "__main__":

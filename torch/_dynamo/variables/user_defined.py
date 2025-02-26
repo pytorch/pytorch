@@ -532,16 +532,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # graph break on any contextlib.* that it is not contextlib.contextmanager
             # Some of the APIs below are not supported because they rely on features
             # that Dynamo doesn't play well today (i.e. contextlib.suppress)
-            if (
-                self.value
-                in (
-                    contextlib._AsyncGeneratorContextManager,
-                    contextlib.closing,
-                    contextlib.redirect_stdout,
-                    contextlib.redirect_stderr,
-                    contextlib.suppress,
-                    contextlib.AsyncExitStack,
-                )
+            if self.value in (
+                contextlib._AsyncGeneratorContextManager,
+                contextlib.closing,
+                contextlib.redirect_stdout,
+                contextlib.redirect_stderr,
+                contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
                 # already ignored on trace_rules.py before #136033 landed
