@@ -8,9 +8,10 @@ import collections
 import dataclasses
 import functools
 import itertools
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Iterable, NewType, Optional, Sequence, Union
+from typing import Any, Callable, NewType, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
