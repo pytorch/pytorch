@@ -357,7 +357,7 @@ python setup.py develop
 
 In this mode PyTorch with Intel GPU support will be built.
 
-Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environmental variables are configured in prior. For build tool support, Visual Studio 2022 is required.
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environmental variables are configured in prior. For build tool support, `Visual Studio 2022` is required.
 
 Then PyTorch can be built with the command:
 
