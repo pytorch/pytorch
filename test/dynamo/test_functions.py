@@ -4536,7 +4536,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             immutable_inputs = torch.fx.immutable_collections.immutable_list(inputs)
             try:
                 immutable_inputs.append(x)
-            except NotImplementedError:
+            except TypeError:
                 pass
             return torch.fx.node.map_aggregate(immutable_inputs, f)
 
