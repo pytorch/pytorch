@@ -68,6 +68,7 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
+    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -353,11 +354,10 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: Union[str, bytes] = "") -> str:
+def code_hash(code: Union[str, bytes], extra: str = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
-    if extra:
-        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
-        hashing_str = hashing_str + b"||" + extra_b
+    if extra != "":
+        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
     return "c" + sha256_hash(hashing_str)
 
 
@@ -2724,10 +2724,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-def _load_triton_kernel_from_source(
-    kernel_name: str, source_code: str
-) -> CachingAutotuner:
-    return getattr(PyCodeCache.load(source_code), kernel_name)
+class TritonCodeCache:
+    @classmethod
+    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
+        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3132,12 +3132,30 @@ class CodeCacheFuture:
         raise NotImplementedError
 
 
-class LambdaFuture(CodeCacheFuture):
+class TritonFuture(CodeCacheFuture):
+    kernel: CachingAutotuner
+
     def __init__(
-        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+        self,
+        kernel: Any,
+        future: Optional[Future[Any]],
     ) -> None:
-        self.result_fn = result_fn
+        self.kernel = kernel
         self.future = future
+
+    def result(self) -> Callable[..., Any]:
+        if self.future is not None:
+            # If the worker failed this will throw an exception.
+            result = self.future.result()
+            assert result is None
+            self.future = None
+            self.kernel.precompile()
+        return self.kernel
+
+
+class LambdaFuture(CodeCacheFuture):
+    def __init__(self, result_fn: Callable[..., Any]) -> None:
+        self.result_fn = result_fn
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()
