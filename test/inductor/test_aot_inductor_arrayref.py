@@ -141,6 +141,12 @@ CPU_TEST_FAILURES = {
     ),
     # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_stack_allocation(is_skip=True),

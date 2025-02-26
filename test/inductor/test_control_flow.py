@@ -196,6 +196,19 @@ class CondModels:
 
             return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
+    class MismatchedOutputSize(torch.nn.Module):
+        def forward(self, p, x, y, z):
+            a = y.shape[0]
+            b = z.shape[0]
+
+            def true_fn(x):
+                return (x + a)[2:].sin()
+
+            def false_fn(x):
+                return (x + b * z)[:2].cos()
+
+            return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -642,6 +655,21 @@ class CondTests(TestCase):
 
         self.assertEqual(counters["pre_grad"], 11)
         self.assertEqual(counters["post_grad"], 11)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_mismatched_branch_output_size(self, device, dynamic):
+        self._run_test(
+            model=CondModels.MismatchedOutputSize(),
+            inputs={
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            },
+            device=device,
+            dynamic=dynamic,
+        )
 
 
 class WhileLoopModels:
