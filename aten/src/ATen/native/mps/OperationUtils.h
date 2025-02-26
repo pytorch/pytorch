@@ -421,9 +421,9 @@ static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& va
 }
 
 template <unsigned idx = 0, typename T, typename... Args>
-static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args&&... args) {
   detail::mtl_setArg(encoder, val, idx);
-  mtl_setArgs<idx + 1>(encoder, args...);
+  mtl_setArgs<idx + 1>(encoder, std::forward<Args>(args)...);
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
