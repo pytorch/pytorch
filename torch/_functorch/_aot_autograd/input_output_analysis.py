@@ -28,6 +28,7 @@ from .schemas import (
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
+    MemoryFormatMeta,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
@@ -61,7 +62,9 @@ def remove_dupe_metadata(
 
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
-        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+        PlainTensorMeta(
+            0, memory_format=MemoryFormatMeta(memory_format=torch.contiguous_format)
+        )
     ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
