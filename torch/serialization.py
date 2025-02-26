@@ -16,7 +16,6 @@ import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
 from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -24,6 +23,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
+from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
