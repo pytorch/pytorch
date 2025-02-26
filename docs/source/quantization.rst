@@ -32,7 +32,7 @@ fake-quantization modules. Note that the entire computation is carried out in
 floating point. At the end of quantization aware training, PyTorch provides
 conversion functions to convert the trained model into lower precision.
 
-At lower level, PyTorch provides a way to represent quantized tensors and
+At a lower level, PyTorch provides a way to represent quantized tensors and
 perform operations with them. They can be used to directly construct models
 that perform all or part of the computation in lower precision. Higher-level
 APIs are provided that incorporate typical workflows of converting FP32 model
