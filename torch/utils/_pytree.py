@@ -329,10 +329,14 @@ def register_constant(cls: type[Any]) -> None:
     def _unflatten(_, context):  # type: ignore[no-untyped-def]
         return context.value
 
+    def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
     _private_register_pytree_node(
         cls,
         _flatten,
         _unflatten,
+        flatten_with_keys_fn=_flatten_with_keys,
     )
 
 
