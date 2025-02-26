@@ -50,6 +50,7 @@ from ..utils import (
     tuple_methods,
 )
 from .base import VariableTracker
+from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -274,19 +275,78 @@ class ExceptionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.exc_type = exc_type
         self.args = args
+        self.__context__ = ConstantVariable(None)
+        self.__cause__ = ConstantVariable(None)
+        self.__suppress_context__ = ConstantVariable(False)
+        self.__traceback__ = ConstantVariable(None)
+
+    def set_context(self, context: "ExceptionVariable"):
+        self.__context__ = context
 
     def reconstruct(self, codegen):
+        if type(self.__context__) is not ConstantVariable:
+            unimplemented("ExceptionVariable with __context__")
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
 
-    def __str__(self):
-        return f"ExceptionVariable({self.exc_type})"
+    def python_type(self):
+        return self.exc_type
 
-    def __repr__(self):
-        return f"ExceptionVariable({self.exc_type})"
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        name = name_var.as_python_constant()
+        if name == "__context__":
+            self.set_context(val)
+        elif name == "__cause__":
+            self.__cause__ = val
+            self.__suppress_context__ = variables.ConstantVariable(True)
+        elif name == "__suppress_context__":
+            self.__suppress_context__ = val
+        elif name == "__traceback__":
+            self.__traceback__ = val
+        else:
+            unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+        return variables.ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        elif name == "with_traceback":
+            [tb] = args
+            self.__traceback__ = tb
+            return self
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__context__":
+            return self.__context__
+        elif name == "__cause__":
+            return self.__cause__
+        elif name == "__suppress_context__":
+            return self.__suppress_context__
+        elif name == "__traceback__":
+            return variables.ConstantVariable(None)
+        elif name == "args":
+            return variables.ListVariable(self.args, source=self.source)
+        return super().var_getattr(tx, name)
+
+    def __str__(self):
+        ctx = self.__context__
+        if type(ctx) is variables.ConstantVariable:
+            ctx = None
+        else:
+            ctx = ctx.exc_type.__name__
+        return f"{self.__class__.__name__}({self.exc_type.__name__}, context={ctx})"
+
+    __repr__ = __str__
 
 
 class UnknownVariable(VariableTracker):
