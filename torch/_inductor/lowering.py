@@ -4407,15 +4407,18 @@ def _low_memory_max_pool2d_with_offsets(
     )
 
     with config.patch(unroll_reductions_threshold=25):
-        return to_dtype(_max_pool2d_with_offsets(
-            x,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            ceil_mode,
-            True,
-        ), torch.int8)
+        return to_dtype(
+            _max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+                True,
+            ),
+            torch.int8,
+        )
 
 
 @register_lowering(
