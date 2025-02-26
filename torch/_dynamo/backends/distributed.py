@@ -1,9 +1,27 @@
 # mypy: ignore-errors
 
+"""
+This module implements distributed training optimizations for TorchDynamo backends.
+
+It provides functionality to optimize models wrapped in DistributedDataParallel (DDP)
+by intelligently splitting compiled graphs to align with DDP's gradient synchronization
+boundaries. Key features include:
+
+- Graph partitioning based on parameter bucket sizes
+- Optimization of allreduce operations for distributed training
+- Support for parameter ignoring and buffer handling
+- Submodule compilation and management
+- Debugging utilities for distributed training
+
+The main component is the DDPOptimizer class, which handles graph splitting and
+recompilation to enable efficient distributed training while maintaining the benefits
+of compilation.
+"""
+
 import logging
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Optional
 from unittest import mock
 
 import torch
@@ -36,11 +54,11 @@ def args_str(args):
 @dataclass
 class Bucket:
     size: int = 0
-    params: List[str] = field(default_factory=list)
-    nodes: List[fx.Node] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
+    nodes: list[fx.Node] = field(default_factory=list)
 
     # param_ids is just used for unit testing
-    param_ids: List = field(default_factory=list)
+    param_ids: list = field(default_factory=list)
 
     # keep track of any buckets that were extended for logging purposes
     opcount_increased_to_capture_external_output: int = 0
@@ -60,7 +78,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
+def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
@@ -405,7 +423,7 @@ class DDPOptimizer:
             ):
                 self.add_param(bucket, param, arg.target)
 
-    def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def compile_fn(self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]):
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler

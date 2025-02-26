@@ -6,7 +6,7 @@ import math
 import types
 import unittest
 import warnings
-from typing import Any, Dict, Set
+from typing import Any
 
 import torch
 import torch._dynamo.config as config
@@ -15,13 +15,18 @@ import torch._functorch.deprecated as deprecated_func
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
+    lookup_inner,
     manual_torch_name_rule_map,
     MOD_INLINELIST,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
-from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
+from torch._dynamo.variables import (
+    SkipFunctionVariable,
+    TorchInGraphFunctionVariable,
+    UserFunctionVariable,
+)
 from torch.testing._internal.common_utils import skipIfWindows
 
 
@@ -103,10 +108,10 @@ class AllowedObjects:
     from the heuristic defined in `gen_allowed_objs_and_ids`.
     """
 
-    object_ids: Dict[int, str]
-    c_binding_in_graph_functions: Set[Any]
-    non_c_binding_in_graph_functions: Set[Any]
-    name_rule_map: Dict[str, Any]
+    object_ids: dict[int, str]
+    c_binding_in_graph_functions: set[Any]
+    non_c_binding_in_graph_functions: set[Any]
+    name_rule_map: dict[str, Any]
 
 
 def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
@@ -473,6 +478,18 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "Otherwise, add it to `manual_torch_name_rule_map` instead."
                 ),
             )
+
+    def test_almost_impossible_missing_name(self):
+        class weird:  # noqa: UP004
+            def __getattribute__(self, name):
+                if name == "__name__":
+                    raise AttributeError("test")
+
+        w = weird()
+        o = set()
+        with self.assertRaises(AttributeError):
+            w.__name__
+        self.assertEqual(lookup_inner(w, name=None, reasons=o), SkipFunctionVariable)
 
 
 class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):

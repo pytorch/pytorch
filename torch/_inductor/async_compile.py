@@ -11,13 +11,15 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import dynamo_timed, set_feature_use
+from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
+    _load_triton_kernel_from_source,
+    code_hash,
     CodeCacheFuture,
     CppCodeCache,
     CppPythonBindingsCodeCache,
@@ -25,8 +27,7 @@ from torch._inductor.codecache import (
     HalideCodeCache,
     LambdaFuture,
     ROCmCodeCache,
-    TritonCodeCache,
-    TritonFuture,
+    torch_key,
 )
 from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
@@ -34,6 +35,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -41,6 +43,7 @@ from torch.utils._triton import has_triton_package
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.hints import HalideMeta
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
@@ -128,6 +131,52 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+@clear_on_fresh_inductor_cache
+class CompiledTritonKernels:
+    """
+    In memory cache for storing compiled triton kernels.
+
+    Each triton kernel is keyed by the hash of its source code. Each value stored
+    in the cache is a return value of AsyncCompile.triton().
+
+    Currently, the cache stores Future objects, but it should be generalizable for any kernels.
+    """
+
+    _cache: dict[str, LambdaFuture] = {}
+
+    @staticmethod
+    def key(kernel_src: str):
+        """
+        Generates a cache key given a triton kernel's full source code.
+        This source includes the inductor meta, compilation metadata, the kernel itself, etc.
+        `kernel_src` should be the exact string passed to async_compile.triton()'s first argument.
+        """
+        # Hashes the kernel source with torch_key into a single hash key
+        return code_hash(kernel_src, extra=torch_key())
+
+    @staticmethod
+    def save(kernel_src: str, future: LambdaFuture):
+        """
+        Saves a compiled triton kernel to the cache.
+        TODO: We store a LambdaFuture as that's the callable returned by async_compile.triton,
+        but the real type we want to return here is actually an abstract triton kernel.
+
+        TODO: Source code here is not just the kernel's source code, but also includes the inductor preamble, etc.
+        so it could be less strict.
+        """
+        key = CompiledTritonKernels.key(kernel_src)
+        CompiledTritonKernels._cache[key] = future
+
+    @staticmethod
+    def get(kernel_src: str, default: Any) -> LambdaFuture:
+        key = CompiledTritonKernels.key(kernel_src)
+        return CompiledTritonKernels._cache.get(key, default)
+
+    @staticmethod
+    def cache_clear():
+        CompiledTritonKernels._cache = {}
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -201,40 +250,84 @@ class AsyncCompile:
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        """
+        Async_compile.triton is more complicated than the other backends because
+        we're trying to optimize compile time as much as possible for this hot callsite.
+
+        First of all, the function is cached by CompiledTritonKernels; if there's a kernel
+        already compiled, we grab it directly from the cache and return.
+
+        Otherwise, if we have multiple compile threads, we kick off triton compilations on each
+        worker process by giving it a kernel and source code to compile. The worker initializes
+        a CachingAutotuner, runs triton compilation, and pickles the kernel back to us.
+        We use TritonCompileResult to represent the objects being pickled back to us by each
+        worker.
+
+        Some maybe not obvious things that are pickled back to us:
+        - Most of the time, we can avoid sending back CachingAutotuner.fn and other metadata
+          and do not have to pay the cost of loading the triton kernel on the parent. But certain
+          cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
+          in the parent lazily when we require it.
+        - The AutotuneCache, if enabled, is constructed on each worker per triton config
+          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+        """
+        if future := CompiledTritonKernels.get(source_code, None):
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            return future
+
+        counters["inductor"]["async_compile_cache_miss"] += 1
+
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
-        _set_triton_ptxas_path()
 
         if os.environ.get("TRITON_INTERPRET", "0") == "1":
             return getattr(
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self.use_process_pool():
-            set_feature_use("parallel_compile_post_warmup", True)
+        load_kernel = functools.partial(
+            _load_triton_kernel_from_source, kernel_name, source_code
+        )
+        is_parallel = self.use_process_pool()
+        set_feature_use("parallel_compile_post_warmup", is_parallel)
+        if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                    extra_env,
-                ),
+
+            task = self.process_pool().submit(
+                _worker_compile_triton,
+                load_kernel,
+                extra_env,
             )
+
+            def reload_kernel_in_parent():
+                # Benchmark how often this happens
+                with dynamo_timed("reload_kernel_in_parent"):
+                    return load_kernel()
+
+            def get_result() -> CachingAutotuner:
+                kernel = task.result()
+                kernel.precompile(
+                    warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                )
+                return kernel
+
+            future = LambdaFuture(get_result, future=task)
+            CompiledTritonKernels.save(source_code, future)
+            return future
         else:
-            set_feature_use("parallel_compile_post_warmup", False)
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
-                kernel.precompile()
-            return kernel
+                _set_triton_ptxas_path()
+                kernel = load_kernel()
+                kernel.precompile(warm_cache_only=False)
+                return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
@@ -250,7 +343,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -299,7 +392,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed(
             "async_compile.wait",
             log_pt2_compile_event=True,

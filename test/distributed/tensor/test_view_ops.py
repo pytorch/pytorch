@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-from typing import cast, List
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -160,7 +160,7 @@ class TestViewOps(DTensorTestBase):
         if op == torch.unbind:
             no_shard_dims.add(kwargs.get("dim", 0))
 
-        sharding_choices = cast(List[Placement], [Replicate()]) + [
+        sharding_choices = cast(list[Placement], [Replicate()]) + [
             Shard(i) for i, s in enumerate(in_shape) if s > 1 and i not in no_shard_dims
         ]
 
@@ -513,7 +513,7 @@ class TestViewOps(DTensorTestBase):
         # test sharded computation correctness
         # NOTE: For the input to torch.view_as_complex, sharding
         #       on the last two dimensions is not supported.
-        sharding_choices: List[Placement] = [Replicate(), Shard(0)]
+        sharding_choices: list[Placement] = [Replicate(), Shard(0)]
         all_sharding_choices = itertools.product(
             *(self.device_mesh.ndim * [sharding_choices])
         )

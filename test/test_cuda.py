@@ -60,7 +60,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    MI300_ARCH,
     NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
@@ -69,7 +68,6 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
-    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -454,7 +452,10 @@ class TestCuda(TestCase):
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
             # different size (128 MiB) expected on MI300 GPU
-            if torch.cuda.get_device_capability() >= (9, 4):
+            gcn_arch = str(
+                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+            )
+            if "gfx94" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -575,6 +576,13 @@ class TestCuda(TestCase):
             torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
+
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
@@ -3415,7 +3423,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -3423,7 +3430,53 @@ print(f"{{r1}}, {{r2}}")
             error_msg = "cuFileHandleRegister failed"
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+                torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+    def test_is_pinned_no_context(self):
+        test_script = """\
+import torch
+import multiprocessing
+
+
+def fork_and_check_is_pinned():
+    # Create a pipe to communicate between parent and child processes
+    parent_conn, child_conn = multiprocessing.Pipe()
+
+    def worker(conn):
+        try:
+            x = torch.randn(10)
+            x.is_pinned(device="cuda")
+            x = torch.ones(10, device="cuda")[0].item()
+            conn.send(x)
+        except Exception as e:
+            conn.send(str(e))
+        finally:
+            conn.close()
+    # Fork a new process
+    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p.start()
+    # Receive the result from the child process
+    result = parent_conn.recv()
+    parent_conn.close()
+    # Wait for the child process to finish
+    p.join()
+    if isinstance(result, str) and result.startswith("Error"):
+        raise RuntimeError(result)
+    return result
+
+x = torch.randn(10)
+# check that is_pinned won't poison future fork
+x.is_pinned(device="cuda")
+ret = fork_and_check_is_pinned()
+print(ret)
+
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "1.0")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -3905,8 +3958,11 @@ class TestCudaMallocAsync(TestCase):
         # relevant field in data structure
         def requested_bytes_alloc_stats(raw_alloc_size, stream):
             start = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
-            torch._C._cuda_cudaCachingAllocator_raw_alloc(raw_alloc_size, stream)
+            mem_ptr = torch._C._cuda_cudaCachingAllocator_raw_alloc(
+                raw_alloc_size, stream
+            )
             finish = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+            torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
             return finish - start
 
         torch.cuda.empty_cache()
@@ -4078,12 +4134,10 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -5134,20 +5188,20 @@ class TestGDS(TestCase):
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
         with TemporaryFileName() as f:
-            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src1.untyped_storage(), offset=0)
             file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
             file.load_storage(dest1.untyped_storage(), offset=0)
             file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
         self.assertEqual(src1, dest1)
         self.assertEqual(src2, dest2)
-        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
