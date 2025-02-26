@@ -2421,9 +2421,15 @@ class PythonWrapperCodegen(CodeGen):
         if not unbacked_bindings:
             return
 
+        # This code is designed to generate code expressions from symbolic paths (keypaths)
+        # associated with certain symbols (unbacked bindings). These keypaths describe how
+        # to access the unbacked symbol in a structured way.
+        # Conretely, we want to generate u0 = outs[0].stride(1), where s = u0, and the keypath
+        # descripes how we generate the expression "outs[0].stride(1)"
         for s, keypath in unbacked_bindings.items():
-
-            def go(expr, keypath):  # type: ignore[no-untyped-def]
+            # `go` recursively constructs a code expression by processing each element of
+            # the keypath and construct the expression incrementally.
+            def go(expr: str, keypath: pytree.KeyPath):
                 if keypath == ():
                     return expr
 
@@ -2450,6 +2456,9 @@ class PythonWrapperCodegen(CodeGen):
                 else:
                     raise AssertionError(f"unrecognized keypath {keypath}")
 
+            # `go_outer` manages the top-level logic for generating the final expression.
+            # It handles special cases for C++ code generation and adjusts
+            # the keypath based on the context (e.g., single vs. multiple outputs).
             def go_outer():  # type: ignore[no-untyped-def]
                 if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,

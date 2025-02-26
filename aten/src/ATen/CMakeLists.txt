@@ -164,9 +164,12 @@ file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # flash_attention sources
-file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
-file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
-file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
+file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
+# Flash attention C++ sources
+file(GLOB flash_attention_cuda_cpp
+    "${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp"
+    "native/transformers/cuda/flash_attn/flash_api.cpp"
+)
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
