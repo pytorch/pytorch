@@ -386,6 +386,7 @@ class _ScaledMatmul(_Matmul):
             aten._scaled_mm.default,
             aten.reshape.default,
         )
+
         def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
             if idx >= len(node.args):
                 return default
@@ -419,6 +420,7 @@ class _ScaledMatmul(_Matmul):
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
         )
+
 
 def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     if node.target != aten.reshape.default:
