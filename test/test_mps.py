@@ -325,6 +325,7 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.entr',
         'special.xlog1py',
         'special.zeta',
         'split',
@@ -649,7 +650,6 @@ def mps_ops_modifier(ops):
         'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
-        'special.entr': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
@@ -715,6 +715,9 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # entr does not support boolean types
+        'special.entr': [torch.bool],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
