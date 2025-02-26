@@ -902,8 +902,6 @@ ERRORINPUT_XFAILLIST = {
     "gather": MPSSkipInfo(TEST_ERROR_INPUTS),
     "scatter": MPSSkipInfo(TEST_ERROR_INPUTS),
     "scatter_add": MPSSkipInfo(TEST_ERROR_INPUTS),
-    # unsupported complex dtypes
-    "masked_fill": MPSSkipInfo(TEST_ERROR_INPUTS),
     # MPS does not support tensor dimensions > 16
     "amax": MPSSkipInfo(TEST_ERROR_INPUTS),
     "amin": MPSSkipInfo(TEST_ERROR_INPUTS),
