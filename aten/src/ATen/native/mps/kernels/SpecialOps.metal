@@ -32,6 +32,8 @@ void kernel spherical_bessel_j0(
       device DTO*, constant DTI*, uint);                                   \
   template [[host_name("spherical_bessel_j0_" #DTO "_" #DTI)]] void kernel \
   spherical_bessel_j0<DTO, DTI>(device DTO*, constant DTI*, uint);
+template [[host_name("entr_" #DTO "_" #DTI)]] void kernel
+entr<DTO, DTI>(device DTO*, constant DTI*, uint);
 
 REGISTER_I0_I1(float, float);
 REGISTER_I0_I1(bool, float);
