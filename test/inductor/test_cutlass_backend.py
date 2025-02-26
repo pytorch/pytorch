@@ -34,7 +34,9 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
+    IN_RE_WORKER,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -338,7 +340,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "autotune_local_cache": False,
                 "cuda.cutlass_max_profiling_configs": 1,
                 "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_swizzle_options": [
@@ -346,6 +347,7 @@ class TestCutlassBackend(TestCase):
                     2,
                     4,
                 ],  # guarantees > 1 choices
+                "force_disable_caches": True,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -824,57 +826,6 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater, "need sm_8x exactly")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-
-        NOTE: For SM90, special alignemnt is needed, since in gemm_template.py,
-        set_alignment has arch specific logic.
-        """
-
-        def mm(a, b):
-            return torch.mm(a, b.to(torch.half))
-
-        # CUTLASS only supports row-major/column-major combination of
-        # layouts for this operation, thus the transpose of tensor b.
-        # Also, for CUTLASS alignment requirements, number of columns
-        # of the first tensor has to be divisible by 16.
-        m, n, k = 128, 16, 128
-        a = torch.randn(m, k).cuda().half()
-        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_local_cache": True,
-                "autotune_fallback_to_aten": False,
-                "use_mixed_mm": True,
-                "mixed_mm_choice": "aten",  # to disable Triton
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
-
-        cache = torch._inductor.codecache.LocalCache().lookup("mixed_mm")
-        assert cache is not None
-        high = cache[
-            f"[('cuda', 'torch.float16', {m}, {k}, {k}, 1, 0), "
-            f"('cuda', 'torch.int8', {k}, {n}, 1, {k}, 0)]"
-        ]["high"]
-        cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
-                cutlass_kernels_count += 1
-        assert cutlass_kernels_count > 0
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1082,29 +1033,21 @@ class TestCutlassBackend(TestCase):
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
         max_autotune_gemm_backends = "CUTLASS"
 
-        def mm(a, b):
-            return torch.mm(a, b.to(torch.half))
-
-        m, n, k = 128, 16, 128
-        a = torch.randn(m, k).cuda().half()
-        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_local_cache": True,
+                "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_fallback_to_aten": False,
                 "cuda.generate_test_runner": True,  # put standalone runner in the generated code
-                "use_mixed_mm": True,
-                "mixed_mm_choice": "aten",
             }
         ):
             from tempfile import NamedTemporaryFile
@@ -1117,9 +1060,9 @@ class TestCutlassBackend(TestCase):
             # Run compilation, check results just in case, and save
             # CUTLASS-based generated code.
             with CUDACompileSourceCapturingContext() as ctx:
-                compiled = torch.compile(mm, dynamic=False)
+                compiled = torch.compile(torch.mm, dynamic=False)
 
-                expected = mm(a, b)
+                expected = torch.mm(a, b)
                 actual = compiled(a, b)
 
                 torch.testing.assert_close(actual, expected)
@@ -1144,21 +1087,26 @@ class TestCutlassBackend(TestCase):
                 Path(cu_file.name), Path(exe_file.name)
             )
 
-            if config.is_fbcode():
+            if IS_FBCODE:
                 # hack to bypass the following error:
                 # error while loading shared libraries: IX}: invalid mode for dlopen(): Invalid argument
                 platform_path = sysconfig.get_config_var("LIBDIR")
-                link_str = " ".join(
-                    [f"-L{platform_path}", "-Xlinker", f"-rpath={platform_path}"]
-                )
-                command = command.replace(link_str, " ")
+                cuda_path = os.path.realpath(os.path.join(platform_path, "libcuda.so"))
+                command = command.replace("-lcuda ", f"-L{cuda_path} ")
+
+            repro_message = (
+                f"Reproduce with: {command}\n"
+                f"exe_file.name: {exe_file.name}\n"
+                f"cu_file.name: {cu_file.name}\n"
+            )
 
             retcode = os.system(command)
-            assert retcode == 0
+            self.assertEqual(retcode, 0, repro_message)
 
             # Run the executable generated.
-            retcode = os.system(exe_file.name)
-            assert retcode == 0
+            if not IS_FBCODE or not IN_RE_WORKER:
+                retcode = os.system(exe_file.name)
+                self.assertEqual(retcode, 0, repro_message)
 
             # Remove temporary files.
             os.remove(cu_file.name)

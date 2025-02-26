@@ -70,7 +70,7 @@ def call_delegate_cpu(
     input_args: list[torch.Tensor],
 ) -> list[torch.Tensor]:
     # FX creates this immutable_dict/list concept. Get rid of this.
-    map_types = {
+    map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }
