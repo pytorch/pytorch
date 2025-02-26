@@ -126,12 +126,12 @@ class CondModels:
             def true_fn(x, y):
                 z1 = x + y
                 z2 = x - y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             def false_fn(x, y):
                 z1 = x - y
                 z2 = x + y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
 
