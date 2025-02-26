@@ -11,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import utils, variables
+from . import graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -210,7 +210,7 @@ class SideEffects:
                 gb_type="Attempted to read a deleted variable",
                 context=f"item: {item}, name: {name}",
                 explanation="",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
         return result
 
@@ -220,7 +220,7 @@ class SideEffects:
                 gb_type="Write to immutable cell",
                 context=f"cellvar: {cellvar}, value: {value}",
                 explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
-                hints=[],
+                hints=[*graph_break_hints.DIFFICULT],
             )
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
@@ -236,7 +236,7 @@ class SideEffects:
             gb_type="Read uninitialized cell",
             context=str(cellvar),
             explanation="Attempted to read a cell variable that has not been populated yet.",
-            hints=[],
+            hints=[*graph_break_hints.USER_ERROR],
         )
 
     def load_global(self, gvar: VariableTracker, name: str):

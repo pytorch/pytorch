@@ -2467,13 +2467,14 @@ def set_example_value(node, example_value):
 def _get_fake_tensor(vt):
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
+        from . import graph_break_hints
         from .exc import unimplemented_v2
 
         unimplemented_v2(
             gb_type="Cannot check Tensor object identity without its fake value",
             context=str(fake_tensor),
             explanation="TensorVariable is missing a fake example_value.",
-            hints=[],
+            hints=[*graph_break_hints.DYNAMO_BUG],
         )
     return fake_tensor
 
@@ -2972,11 +2973,13 @@ def extract_fake_example_value(node, required=True):
     elif required:
         from torch._dynamo.exc import unimplemented_v2
 
+        from . import graph_break_hints
+
         unimplemented_v2(
             gb_type="Missing FakeTensor example value",
             context=str(node),
             explanation=f"`FakeTensor` example value was required for {node} but not available.",
-            hints=[],
+            hints=[*graph_break_hints.DYNAMO_BUG],
         )
     else:
         return None
