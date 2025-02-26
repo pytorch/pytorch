@@ -392,6 +392,7 @@ def _maybe_reshape_scale(tensor_a, scales):
 
     raise ValueError(f"Cannot automatically reshape scales {scales.shape} to match tensor {a_shape}")
 
+# TODO: remove this hack, make an actual custom op
 maybe_reshape_scale = inductor_prims.make_prim(
     "maybe_reshape_scale(Tensor tensor_a, Tensor scales) -> Tensor",
     _maybe_reshape_scale,
