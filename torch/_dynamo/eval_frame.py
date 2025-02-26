@@ -56,10 +56,10 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
+    set_code_exec_strategy,
     set_eval_frame,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
-    skip_code,
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
@@ -86,6 +86,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
+from .types import FrameAction, FrameExecStrategy
 from .utils import common_constant_types, compile_times
 
 
@@ -1884,3 +1885,9 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
+
+
+def skip_code(code: types.CodeType):
+    set_code_exec_strategy(
+        code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+    )

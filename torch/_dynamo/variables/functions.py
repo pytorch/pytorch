@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
+from typing_extensions import Never
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -506,7 +506,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
         except Unsupported as e:
-            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
@@ -1639,8 +1639,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs):
-        ...
+    def call_function(self, tx, args, kwargs): ...
 
 
 class SysFunctionVariable(VariableTracker):
