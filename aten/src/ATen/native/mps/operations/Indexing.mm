@@ -1,4 +1,5 @@
 //  Copyright © 2022 Apple Inc.
+#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -690,6 +691,24 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   return output;
 }
 
+// Checks if one tensor is broadcastable into another
+static bool is_dense_broadcastable(const Tensor& from, const Tensor& into) {
+  if (!from.is_contiguous() || !into.is_contiguous()) {
+    return false;
+  }
+  bool checking_squeezable_dims = false;
+  for (const auto dim : c10::irange(from.ndimension())) {
+    if (checking_squeezable_dims) {
+      if (from.size(-dim - 1) == 1) {
+        continue;
+      }
+      return false;
+    }
+    checking_squeezable_dims = from.size(-dim - 1) != into.size(-dim - 1);
+  }
+  return true;
+}
+
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
   using namespace mps;
 
@@ -702,16 +721,16 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+              "masked_fill not supported for tensors of more than 2**32 elements");
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
-  const bool is_expand = self.is_contiguous() && mask.is_contiguous() && mask.ndimension() < self.ndimension();
-  auto fillPSO = lib.getPipelineStateForFunc(fmt::format("masked_fill_scalar_{}_{}",
-                                                         is_dense        ? "dense"
-                                                             : is_expand ? "broadcast"
-                                                                         : "strided",
-                                                         getBitSizeString(self.scalar_type())));
+  const bool is_dense_broadcast = is_dense_broadcastable(mask, self);
+  const auto flavor = is_dense ? "dense" : is_dense_broadcast ? "broadcast" : "strided";
+  auto fillPSO = lib.getPipelineStateForFunc(
+      fmt::format("masked_fill_scalar_{}_{}", flavor, getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
@@ -719,7 +738,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
       [computeEncoder setComputePipelineState:fillPSO];
       if (is_dense) {
         mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar);
-      } else if (is_expand) {
+      } else if (is_dense_broadcast) {
         mtl_setArgs(computeEncoder, self, mask, mpsScalar, mask.numel());
       } else {
         mtl_setArgs(computeEncoder,
