@@ -367,15 +367,13 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
                     args_schema.append(arg._spec)
-            elif isinstance(arg, torch.Tensor):
-                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
-                args_schema.append(
-                    self._try_replicate_spec_for_scalar_tensor(op_call, arg, mesh)
-                )
-                local_args.append(arg)
             else:
-                args_schema.append(arg)
-                local_args.append(arg)
+                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                tensor_arg = arg if isinstance(arg, torch.Tensor) else torch.tensor(arg)
+                args_schema.append(
+                    self._try_replicate_spec_for_scalar_tensor(op_call, tensor_arg, mesh)
+                )
+                local_args.append(tensor_arg)
 
         for k, v in kwargs.items():
             if isinstance(v, dtensor.DTensor):
@@ -388,15 +386,13 @@ class OpDispatcher:
                 else:
                     mesh = v.device_mesh
                     kwargs_schema[k] = v._spec
-            elif isinstance(v, torch.Tensor):
-                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
-                kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call, v, mesh
-                )
-                local_kwargs[k] = v
             else:
-                kwargs_schema[k] = v
-                local_kwargs[k] = v
+                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                tensor_v = v if isinstance(v, torch.Tensor) else torch.tensor(v)
+                kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
+                    op_call, tensor_v, mesh
+                )
+                local_kwargs[k] = tensor_v
 
         assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
         op_info = OpInfo(

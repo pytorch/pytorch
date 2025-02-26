@@ -609,6 +609,26 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
 
+    @with_comms
+    def test_partial_dtensor_with_scalar(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        torch.manual_seed(0)
+        tensor = torch.rand(1000, 88)
+        # note: when the tensor is smaller, the diff of the full tensor result seems to be bigger.
+        # e.g. It would fail the allclose test if the tensor is [100, 88].
+        # We need to investigate why.
+        tensor_norm = torch.linalg.vector_norm(tensor)
+        tensor_norm += 2
+
+        dtensor = distribute_tensor(tensor, mesh, [Shard(dim=0)])
+        # calling torch.linalg.vector_norm on a DTensor would return a DTensor with _NormPartial placement
+        # so that we can test the _NormPartial DTensor addition with a scalar.
+        dtensor_norm = torch.linalg.vector_norm(dtensor)
+        dtensor_norm += 2
+
+        torch.testing.assert_close(tensor_norm, dtensor_norm.full_tensor())
+
 
 class DTensorMeshTest(DTensorTestBase):
     @property
