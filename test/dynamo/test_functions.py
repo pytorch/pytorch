@@ -2072,6 +2072,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
 
     @make_test
+    def test_sourceless_build_method_type(a, b):
+        cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
+
+        # The type of `cls._make` and `cls._asdict` is method type
+        if callable(getattr(cls, "_asdict", None)) and callable(
+            getattr(cls, "_make", None)
+        ):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_torch_size_hasattr(x):
         if hasattr(x.shape, "_fields"):
             return x + 1
