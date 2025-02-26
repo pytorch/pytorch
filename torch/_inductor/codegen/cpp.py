@@ -3285,7 +3285,7 @@ class CppTile2DKernel(CppVecKernel):
                 self.outer_num_elems,
                 self.inner_num_elems,
             )
-        atomic_add = "true" if (store_mode == "atomic_add") else "false"
+        atomic_add = "true" if (is_store and (store_mode == "atomic_add")) else "false"
         if (isinstance(M, sympy.Expr) and not M.is_number) or (
             isinstance(N, sympy.Expr) and not N.is_number
         ):
