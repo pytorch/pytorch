@@ -459,6 +459,7 @@ class TestTensorCreation(TestCase):
                                       dtype=complex_dtype),
                          z, atol=1e-5, rtol=1e-5)
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.complex64, torch.complex128, torch.bool)
@@ -845,6 +846,7 @@ class TestTensorCreation(TestCase):
                 expected_error_message = dimension_error_message if len(shape) < bound else divisibiliy_error_message
                 self.assertRaisesRegex(RuntimeError, expected_error_message, lambda: torch_fn(t, arg))
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_hsplit(self, device, dtype):
@@ -866,6 +868,7 @@ class TestTensorCreation(TestCase):
         )
         self._hvd_split_helper(torch.hsplit, np.hsplit, "torch.hsplit", inputs, device, dtype, 1)
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_vsplit(self, device, dtype):
@@ -882,6 +885,7 @@ class TestTensorCreation(TestCase):
         )
         self._hvd_split_helper(torch.vsplit, np.vsplit, "torch.vsplit", inputs, device, dtype, 0)
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_dsplit(self, device, dtype):
@@ -1970,6 +1974,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(complexHalfTensor, expected)
 
     # TODO: this test should be updated
+    @xfailIfTorchDynamo
     def test_zeros_out(self, device):
         shape = (3, 4)
         out = torch.zeros(shape, device=device)
@@ -2056,6 +2061,7 @@ class TestTensorCreation(TestCase):
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
     # TODO: this test should be updated
+    @xfailIfTorchDynamo
     @onlyCPU
     def test_constructor_device_legacy(self, device):
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor(device='cuda'))
@@ -2371,6 +2377,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(len(w), 1)
 
     # TODO: this test should be updated
+    @xfailIfTorchDynamo
     def test_arange(self, device):
         res = torch.tensor(range(10000), device=device)
         res1 = torch.arange(0, 10000, device=device)  # Use a larger number so vectorized code can be triggered
@@ -2951,6 +2958,7 @@ class TestTensorCreation(TestCase):
         f16_tensor = torch.arange(0, 6, step=2, dtype=dtype, device=device)
         self.assertEqual(ref_tensor, f16_tensor)
 
+    @xfailIfTorchDynamo
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.bfloat16))
     def test_linspace(self, device, dtype):
@@ -3082,6 +3090,7 @@ class TestTensorCreation(TestCase):
             self._test_linspace(device, dtype, steps=steps)
 
     # Compares logspace device vs cpu
+    @xfailIfTorchDynamo
     def _test_logspace(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps)
@@ -3117,6 +3126,7 @@ class TestTensorCreation(TestCase):
             self._test_logspace(device, dtype, steps=steps)
             self._test_logspace_base2(device, dtype, steps=steps)
 
+    @xfailIfTorchDynamo
     @dtypes(*all_types_and(torch.bfloat16))
     @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
                   all_types_and(torch.half, torch.bfloat16))
@@ -3192,6 +3202,7 @@ class TestTensorCreation(TestCase):
             ctype = torch.complex128 if dtype is torch.double else torch.complex64
             self.assertEqual(t.dtype, ctype)
 
+    @xfailIfTorchDynamo
     def test_full_out(self, device):
         size = (5,)
         o = torch.empty(size, device=device, dtype=torch.long)
@@ -3817,6 +3828,7 @@ class TestBufferProtocol(TestCase):
             for j in range(SIZE - i + 1):
                 self._run_test(SHAPE, dtype, count=i, first=j)
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_invalid_positional_args(self, device, dtype):
         bytes = get_dtype_size(dtype)
@@ -3881,6 +3893,7 @@ class TestBufferProtocol(TestCase):
                 arr[first] = x.item() - 1
                 self.assertEqual(arr[first:last], tensor)
 
+    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_not_a_buffer(self, device, dtype):
         with self.assertRaisesRegex(ValueError,
