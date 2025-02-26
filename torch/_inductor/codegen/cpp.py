@@ -2665,6 +2665,13 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
+            if accu_store:
+                load = (
+                    f"{self._get_vec_type(dtype)}::loadu({var_expr})"
+                    if dtype == torch.float and self.tail_size is None
+                    else f"{self._get_vec_type(dtype)}::loadu({var_expr}, {cexpr_index(self.num_elems)})"
+                )
+                value = f"({value} + {load})"
             if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
@@ -3256,7 +3263,9 @@ class CppTile2DKernel(CppVecKernel):
             and not inner_stride.has(outer_var)
         )
 
-    def gen_transposed_tile_load_store(self, name, var, index, is_store):
+    def gen_transposed_tile_load_store(
+        self, name, var, index, is_store, store_mode=None
+    ):
         # transposed tile load/store outside the kernel inner loop
         dtype = V.graph.get_dtype(name)
         factor = self.tiling_factor
@@ -3276,16 +3285,17 @@ class CppTile2DKernel(CppVecKernel):
                 self.outer_num_elems,
                 self.inner_num_elems,
             )
+        atomic_add = "true" if (store_mode == "atomic_add") else "false"
         if (isinstance(M, sympy.Expr) and not M.is_number) or (
             isinstance(N, sympy.Expr) and not N.is_number
         ):
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]}>"
+                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{atomic_add}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
             )
         else:
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)}>"
+                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)},{atomic_add}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst});"
             )
         if is_store:
@@ -3346,10 +3356,9 @@ class CppTile2DKernel(CppVecKernel):
 
         inner = self.inner_itervar()
         index = self.rename_indexing(index)
-        assert mode is None
         if self.need_vec_transpose(index):
             tile_var = self.gen_transposed_tile_load_store(
-                name, var, index, is_store=True
+                name, var, index, is_store=True, store_mode=mode
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
