@@ -467,8 +467,8 @@ class TestCommon(TestCase):
         skip_view_consistency=False,
     ):
         # NOTE: this test works by comparing the reference
-        ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            ex = None
             if (
                 isinstance(sample.input, torch.Tensor)
                 and sample.input.numel() == 0
