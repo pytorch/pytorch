@@ -1394,8 +1394,6 @@ class CppBuilder:
         self._libraries_args = ""
         self._passthrough_parameters_args = ""
 
-        # When relative path is used, we need to maintain the source dir list.
-        self._orig_source_paths = []
         self._output_dir = ""
         self._target_file = ""
 
@@ -1430,7 +1428,8 @@ class CppBuilder:
                 # Will create another temp director for building, so do NOT use
                 # use the absolute path.
                 inp_name = [os.path.basename(i) for i in sources]
-                self._orig_source_paths = sources
+                self._target_file = os.path.basename(self._target_file)
+
             self._sources_args = " ".join(inp_name)
         else:
             self._sources_args = " ".join(sources)
@@ -1517,9 +1516,7 @@ class CppBuilder:
             libraries_args=self._libraries_args,
             libraries_dirs_args=self._libraries_dirs_args,
             passthrough_args=self._passthrough_parameters_args,
-            target_file=os.path.basename(self._target_file)
-            if self._use_relative_path
-            else self._target_file,
+            target_file=self._target_file,
         )
         return command_line
 
@@ -1528,19 +1525,25 @@ class CppBuilder:
 
     # Given a path to an input cpp file and an output path,
     # Attempts to compile the file, storing the output in "output_path"
-    def build_fbcode_re(
+    def build_fbcode(
         self,
+        input_path: Union[str, list[str]],
+        output_path: str,
     ) -> None:
         from torch._inductor.codecache import cpp_prefix_path
 
         with dynamo_timed("compile_file"):
+            input_paths = [input_path] if isinstance(input_path, str) else input_path
+            input_files = [
+                os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
+            ]
             command = self.get_command_line().split()
             try:
                 assert config.is_fbcode(), "compile_file() is only used in fbcode"
                 # Need to copy our header into the same folder as the sourcecode.
                 header_path = cpp_prefix_path()
                 header_name = os.path.basename(header_path)
-                output_path = self._target_file
+                output_name = os.path.basename(output_path)
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
                 # This is where all of the ATen/c10/Torch includes come from.
@@ -1549,22 +1552,16 @@ class CppBuilder:
                     # Copy everything to tmp compilation folder
                     shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                     shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
-                    for src in self._orig_source_paths:
-                        shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
+                    for p, f in zip(input_paths, input_files):
+                        shutil.copy(p, os.path.join(tmp_dir, f))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
                     # Run the build
-                    tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
-                    )
+                    output_file_path = _run_build_command(command, tmp_dir, output_name)
                     # Copy output from the build
                     if os.path.exists(output_path):
                         os.remove(output_path)
-                    shutil.copy(tmp_output_path, output_path)
-                    if output_path.endswith(".o"):
-                        os.chmod(output_path, 0o644)
-                    elif output_path.endswith(".so"):
-                        os.chmod(output_path, 0o755)
+                    shutil.copy(output_file_path, output_path)
             except subprocess.CalledProcessError as e:
                 output = e.output.decode("utf-8")
                 raise exc.CppCompileError(command, output) from e
@@ -1574,9 +1571,6 @@ class CppBuilder:
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
         """
-        if self._use_relative_path:
-            # _use_relative_path indicates this is a remote build
-            return self.build_fbcode_re()
         _create_if_dir_not_exist(self._output_dir)
         _build_tmp_dir = os.path.join(
             self._output_dir, f"{self._name}_{_BUILD_TEMP_DIR}"
