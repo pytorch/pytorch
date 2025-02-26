@@ -7018,7 +7018,11 @@ def silu(self: Tensor) -> Tensor:
 
 @register_meta(aten.sigmoid)
 def sigmoid(self: Tensor) -> Tensor:
-    return torch.empty_like(self)
+    _, result_dtype = elementwise_dtypes(
+        self,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    return torch.empty_like(self, dtype=result_dtype)
 
 
 @register_meta(aten._softmax)
@@ -7029,14 +7033,13 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
 
-    res = torch.empty_like(x)
-    res = res.contiguous()
     result_dtype = result_dtype if not half_to_float else computation_dtype
-    res = res.to(result_dtype)
+    res = torch.empty_like(x, dtype=result_dtype, memory_format=torch.contiguous_format)
     return res
 
 
 @register_meta(aten.embedding)
+@out_wrapper()
 def embedding(
     weight: Tensor,
     indices: Tensor,
@@ -7049,7 +7052,7 @@ def embedding(
     indices_shape = indices.shape
 
     if indices.ndim == 0:
-        out_shape = (weight_shape[1],)
+        out_shape: tuple[int, ...] = (weight_shape[1],)
     elif indices.ndim == 1:
         out_shape = (indices_shape[0], weight_shape[1])
     else:
