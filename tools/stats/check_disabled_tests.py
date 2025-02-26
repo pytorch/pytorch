@@ -223,12 +223,12 @@ def save_results(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-    # upload_workflow_stats_to_s3(
-    #     workflow_id,
-    #     workflow_run_attempt,
-    #     "rerun_disabled_tests",
-    #     list(records.values()),
-    # )
+    upload_workflow_stats_to_s3(
+        workflow_id,
+        workflow_run_attempt,
+        "rerun_disabled_tests",
+        list(records.values()),
+    )
 
 
 def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
