@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import logging
-from typing import Any, Dict, Optional, Protocol, Tuple, Union
+from typing import Any, Optional, Protocol, Union
 
 import torch
 from torch._library.utils import parse_namespace
@@ -56,7 +56,7 @@ class HasStaticMethodFromReal(Protocol):
 
 class FakeClassRegistry:
     def __init__(self) -> None:
-        self._registered_class: Dict[str, Any] = {}
+        self._registered_class: dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:
         return full_qualname in self._registered_class
@@ -289,8 +289,16 @@ def _full_qual_class_name(qualname: str) -> str:
     return "__torch__.torch.classes." + ns + "." + name
 
 
+def _is_script_object(obj: Any) -> bool:
+    return isinstance(
+        obj, torch.ScriptObject
+    ) and obj._type().qualified_name().startswith(  # type: ignore[attr-defined]
+        "__torch__.torch.classes"
+    )
+
+
 # Return the namespace and class name from fully qualified name.
-def _ns_and_class_name(full_qualname: str) -> Tuple[str, str]:
+def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")
     assert len(splits) == 5, f"Could not split {full_qualname=}"
     _torch, _torch_ns, _classes, ns, class_name = splits

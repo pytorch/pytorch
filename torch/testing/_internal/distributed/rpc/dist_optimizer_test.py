@@ -98,8 +98,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -126,8 +126,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -161,8 +161,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -232,8 +232,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule, args=(False,))

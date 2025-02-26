@@ -14,11 +14,10 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
-#include <c10/util/string_view.h>
-#include <c10/util/Array.h>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string_view>
 
 namespace sdp {
 
@@ -54,8 +53,6 @@ inline c10::SymFloat calculate_scale(
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
   return c10::SymFloat(softmax_scale);
 }
-
-using c10::array_of;
 
 inline bool input_requires_grad(sdp_params const& params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||

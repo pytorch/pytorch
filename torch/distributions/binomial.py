@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
@@ -92,27 +93,27 @@ class Binomial(Distribution):
         return constraints.integer_interval(0, self.total_count)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.total_count * self.probs
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.total_count * self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):

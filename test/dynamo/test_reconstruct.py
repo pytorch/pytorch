@@ -3,7 +3,6 @@
 import contextlib
 import dis
 import unittest
-from typing import List
 
 import torch
 import torch._dynamo.test_case
@@ -19,7 +18,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     def register_bytecode_hook(self, fn):
         def hook(code, out_code):
             fn(list(dis.get_instructions(out_code)))
-            return code
+            return None
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
@@ -33,7 +32,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         Emit code to reconstruct only the key that changed
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct only d[40]
@@ -57,7 +56,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         If something is pop'ed from the dict, we reconstruct everything
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
@@ -84,7 +83,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         If something is pop'ed from the dict, we reconstruct everything
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
@@ -128,7 +127,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         If something is deleted from the dict, we reconstruct everything
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
@@ -154,7 +153,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         dict.get shouldn't affect anything
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             self.assertEqual(build_map[0].argval, 1)
@@ -180,7 +179,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         If dict.clear() is used, we reconstruct everything
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
@@ -206,7 +205,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         If dict is created inside a function, everything needs to be reconstructed
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
@@ -231,7 +230,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         PyTorch shouldn't codegen any key/value when functional_call is used
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             # don't reconstruct anything
             self.assertEqual(len(build_map), 0)
@@ -260,7 +259,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         PyTorch shouldn't codegen any key/value when functional_call is used
         """
 
-        def hook(instructions: List[dis.Instruction]):
+        def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
             # don't reconstruct anything
             self.assertEqual(len(build_map), 0)

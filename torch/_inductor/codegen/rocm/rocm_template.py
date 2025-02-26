@@ -2,7 +2,9 @@
 import functools
 import itertools
 import logging
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Optional
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta
@@ -18,15 +20,22 @@ from .rocm_template_buffer import ROCmTemplateBuffer
 log = logging.getLogger(__name__)
 
 
+# FIXME: unify with the CUDA version
+@dataclass(frozen=True)
+class ArgInfo:
+    name: str
+    ty: str
+
+
 class ROCmTemplate(KernelTemplate):
     index_counter = itertools.count()
 
     def __init__(
         self,
         name: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -65,6 +74,8 @@ class ROCmTemplate(KernelTemplate):
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), ROCmTemplateKernel(
             kernel_name=kernel_name,
+            runtime_arg_info=self.get_runtime_arg_info(),
+            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
@@ -95,11 +106,14 @@ class ROCmTemplate(KernelTemplate):
         size_args_ints = [
             V.graph.sizevars.size_hint(arg) for arg in size_args
         ]  # resolve to ints for benchmarking
+        # The runtime args come right after the size args
+        runtime_args = self.get_runtime_arg_values(**kwargs)
+        extra_args = size_args_ints + runtime_args
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=size_args_ints,
+            extra_args=extra_args,
             source_code=code,
         )
 
@@ -109,6 +123,8 @@ class ROCmTemplate(KernelTemplate):
         ):
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",
+                runtime_arg_info=self.get_runtime_arg_info(),
+                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
             )
             render = functools.partial(
                 self.render,
@@ -170,3 +186,9 @@ class ROCmTemplate(KernelTemplate):
 
     def render(self, **kwargs) -> str:
         raise NotImplementedError
+
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return []
+
+    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
+        return []

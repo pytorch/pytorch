@@ -54,8 +54,12 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        with fresh_inductor_cache(), torch._inductor.config.patch(
-            force_shape_pad=self._force_shape_pad
+        # enable_cpp_symbolic_shape_guards has impact on this benchmark
+        # Keep using False value for consistency.
+        with (
+            fresh_inductor_cache(),
+            torch._inductor.config.patch(force_shape_pad=self._force_shape_pad),
+            torch._dynamo.config.patch("enable_cpp_symbolic_shape_guards", False),
         ):
             opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
                 self.m.cuda() if self._is_gpu else self.m

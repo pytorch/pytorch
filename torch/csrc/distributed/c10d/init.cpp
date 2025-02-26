@@ -545,17 +545,32 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
-          py::init<
-              std::vector<at::Tensor>,
-              std::vector<std::vector<size_t>>,
-              std::vector<size_t>,
-              c10::intrusive_ptr<::c10d::ProcessGroup>,
-              std::vector<bool>,
-              int64_t,
-              bool,
-              bool,
-              std::unordered_map<size_t, std::string>,
-              int64_t>(),
+          py::init(
+              [](std::vector<at::Tensor> params,
+                 std::vector<std::vector<size_t>> bucket_indices,
+                 const std::vector<size_t>& per_bucket_size_limits,
+                 c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
+                 std::vector<bool> expect_sparse_gradients,
+                 int64_t bucket_bytes_cap,
+                 bool find_unused_parameters,
+                 bool gradient_as_bucket_view,
+                 std::unordered_map<size_t, std::string> param_to_name_mapping,
+                 int64_t first_bucket_bytes_cap) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
+                return std::make_unique<::c10d::Reducer>(
+                    std::move(params),
+                    std::move(bucket_indices),
+                    std::move(process_group),
+                    std::move(expect_sparse_gradients),
+                    bucket_bytes_cap,
+                    find_unused_parameters,
+                    gradient_as_bucket_view,
+                    std::move(param_to_name_mapping),
+                    first_bucket_bytes_cap);
+              }),
           py::arg("params"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
@@ -566,8 +581,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
-          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
-          py::call_guard<py::gil_scoped_release>())
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -702,9 +716,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
-          py::init<std::shared_ptr<::c10d::Reducer>>(),
-          py::arg("reducer"),
-          py::call_guard<py::gil_scoped_release>())
+          py::init([](const std::shared_ptr<::c10d::Reducer>& reducer) {
+            // gil_scoped_release is not safe as a call_guard in init.
+            // https://github.com/pybind/pybind11/issues/5473
+            py::gil_scoped_release nogil{};
+
+            return std::make_unique<::c10d::Logger>(reducer);
+          }),
+          py::arg("reducer"))
       .def(
           "set_construction_data_and_log",
           &::c10d::Logger::set_construction_data_and_log,
@@ -934,9 +953,10 @@ This class does not support ``__members__`` property.)");
       "_register_work",
       [](const at::Tensor& tensor,
          const c10::intrusive_ptr<::c10d::Work>& work) {
-        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
-            ->ref_py_object();
-        ::c10d::register_work(tensor, work);
+        py::object obj = py::cast(work);
+        auto holder = c10::make_intrusive<::c10d::PyProcessGroup::PyWorkHolder>(
+            work, obj);
+        ::c10d::register_work(tensor, holder);
       },
       py::arg("tensor"),
       py::arg("work"));
@@ -1612,6 +1632,10 @@ Example::
                       bool multiTenant,
                       std::optional<int> masterListenFd,
                       bool useLibUV) {
+            // gil_scoped_release is not safe as a call_guard in init.
+            // https://github.com/pybind/pybind11/issues/5473
+            py::gil_scoped_release nogil{};
+
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               if (worldSize.value() == 0) {
@@ -1644,7 +1668,6 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
-          py::call_guard<py::gil_scoped_release>(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",
@@ -1920,14 +1943,20 @@ communication mechanism.
               py::arg("size"),
               R"(Create a new ProcessGroup instance.)")
           .def(
-              py::init<
-                  const c10::intrusive_ptr<::c10d::Store>&,
-                  int,
-                  int>(),
+              py::init([](
+                const c10::intrusive_ptr<::c10d::Store>& store,
+                int rank,
+                int size) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
+                return c10::make_intrusive<::c10d::ProcessGroup>(
+                    store, rank, size);
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::call_guard<py::gil_scoped_release>(),
               R"(Create a new ProcessGroup instance.)")
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
@@ -2737,7 +2766,9 @@ Arguments:
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "mem_allocator", &::c10d::Backend::getMemAllocator);
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
@@ -2753,12 +2784,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               py::init([](const std::string& backend,
                           const std::chrono::milliseconds& timeout) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
                 return c10::make_intrusive<::c10d::Backend::Options>(
                     backend, timeout);
               }),
               py::arg("backend"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
 
@@ -2802,12 +2836,19 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
   processGroupGloo
       .def(
-          py::init<
-              const c10::intrusive_ptr<::c10d::Store>&,
-              int,
-              int,
-              c10::intrusive_ptr<::c10d::ProcessGroupGloo::Options>>(),
-          py::call_guard<py::gil_scoped_release>(),
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 const c10::intrusive_ptr<::c10d::ProcessGroupGloo::Options>&
+                     options) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
+                return c10::make_intrusive<::c10d::ProcessGroupGloo>(
+                    store, rank, size, options);
+              }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
@@ -2818,6 +2859,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                       int rank,
                       int size,
                       std::chrono::milliseconds timeout) {
+            // gil_scoped_release is not safe as a call_guard in init.
+            // https://github.com/pybind/pybind11/issues/5473
+            py::gil_scoped_release nogil{};
+
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
@@ -2845,7 +2890,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
-          py::call_guard<py::gil_scoped_release>(),
           R"(Create a new ProcessGroupGloo instance.)")
       .def(
           "_set_default_timeout",
@@ -2870,12 +2914,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::init(
                   [](const c10::intrusive_ptr<::c10d::Backend>& backend,
                      const c10::intrusive_ptr<::c10d::Backend>& gloo_backend) {
+                    // gil_scoped_release is not safe as a call_guard in init.
+                    // https://github.com/pybind/pybind11/issues/5473
+                    py::gil_scoped_release nogil{};
                     return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
                         backend, gloo_backend);
                   }),
               py::arg("backend"),
-              py::arg("gloo_backend"),
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("gloo_backend"))
           .def_property_readonly(
               "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg);
 #endif
@@ -2885,12 +2931,18 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", backend)
           .def(
-              py::init<
-                  const c10::intrusive_ptr<::c10d::Store>&,
-                  int,
-                  int,
-                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
-              py::call_guard<py::gil_scoped_release>(),
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
+                              options) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
+                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
+                    store, rank, size, std::move(options));
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
@@ -2901,6 +2953,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
                 auto options = ::c10d::ProcessGroupNCCL::Options::create();
                 options->is_high_priority_stream = false;
                 options->timeout = timeout;
@@ -2911,7 +2967,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>(),
               R"(Create a new ProcessGroupNCCL instance.)")
           .def(
               "_shutdown",
@@ -2974,13 +3029,17 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
-#ifdef NCCL_HAS_COMM_CTA_CGA
+#ifdef NCCL_HAS_CONFIG
   py::class_<ncclConfig_t>(
       processGroupNCCL,
       "NCCLConfig",
@@ -3006,7 +3065,7 @@ for details.
           [](ncclConfig_t& self, const char* tmp) {
             self.netName = strdup(tmp);
           });
-#endif
+#endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -3042,7 +3101,7 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-#ifdef NCCL_HAS_COMM_CTA_CGA
+#ifdef NCCL_HAS_CONFIG
       .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
 #endif
       .def_readwrite(
@@ -3083,13 +3142,16 @@ Example::
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
                 return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
                     store, rank, size);
               }),
               py::arg("store"),
               py::arg("rank"),
-              py::arg("size"),
-              py::call_guard<py::gil_scoped_release>());
+              py::arg("size"));
 #endif
 
 #ifdef USE_C10D_UCC
@@ -3101,14 +3163,17 @@ Example::
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
                 return c10::make_intrusive<::c10d::ProcessGroupUCC>(
                     store, rank, size, timeout);
               }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>());
+              py::arg("timeout") = kProcessGroupDefaultTimeout);
 #endif
 
   py::enum_<::c10d::OpType>(module, "OpType")
@@ -3138,6 +3203,12 @@ Example::
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
+  py::enum_<::c10d::ErrorType>(module, "ErrorType")
+      .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
+      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
+      .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
+      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
