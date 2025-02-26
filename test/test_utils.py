@@ -12,7 +12,7 @@ import textwrap
 import traceback
 import unittest
 import warnings
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.cuda
@@ -439,7 +439,7 @@ class TestCheckpoint(TestCase):
         # get de-allocated directly. So using cuda memory usage as a proxy
 
         def _do_test(fn, should_free):
-            stats: List[int] = []
+            stats: list[int] = []
 
             def track(x, idx):
                 # Track that at each step of the backward, some Tensor were
@@ -1203,7 +1203,7 @@ def f(x):
     return g(x) + 1
 """
 
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         scope = {"__compile_source__": source}
         exec(source, scope, out)
 

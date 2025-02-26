@@ -98,7 +98,7 @@ static inline scalar_t* {{kernel_name}}_conditional_data_ptr(scalar_t* ptr, scal
 }
 
 template <typename scalar_t,
-          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
+          typename std::enable_if_t<c10::is_reduced_floating_point_v<scalar_t>, int> = 0>
 static inline scalar_t* {{kernel_name}}_conditional_data_ptr(float* ptr, scalar_t* ptr2) {
   return ptr2;
 }
@@ -320,7 +320,7 @@ extern "C"
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
-  constexpr bool is_reduced_type = std::is_reduced_floating_point_v<scalar_t>;
+  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};

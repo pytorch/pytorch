@@ -173,13 +173,13 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     return out
 
 
-def _dense_to_ordered(dense_mask) -> Tuple:
+def _dense_to_ordered(dense_mask) -> Tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
-        num_blocks_in_row.to(torch.int32).contiguous(),
-        col_indices.to(torch.int32).contiguous(),
+        num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
+        col_indices.to(torch.int32, memory_format=torch.contiguous_format),
     )
 
 
@@ -758,7 +758,9 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm = _dense_to_ordered(full_blocks)
+        full_bm: Tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+            full_blocks
+        )
     else:
         full_bm = (None, None)
 
@@ -969,12 +971,13 @@ def _nested_mod_func_adapter(
     if is_score_mod:
 
         def nt_score_mod(score, b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             return torch.where(
                 is_same_sequence,
-                orig_mod_func(score, b, h, q_nested, kv_nested),  # type: ignore[call-arg]
+                orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
                 # don't allow inter-sequence attention
                 float("-inf"),
             )
@@ -983,11 +986,12 @@ def _nested_mod_func_adapter(
     else:
 
         def nt_mask_mod(b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             # don't allow inter-sequence attention
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
+            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
 
         return nt_mask_mod
 

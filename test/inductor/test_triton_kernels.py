@@ -1920,14 +1920,16 @@ def forward(self, arg0_1, arg1_1):
         def kernel(X):
             return
 
-        @torch.compile(backend=backend)
+        @torch.compile(fullgraph=True, backend=backend)
         def f(x):
             kernel[(1,)](x, num_ctas=1)
             kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
             return x
 
-        x = torch.randn(4, device=GPU_TYPE)
-        f(x)
+        msg = "Passing num_ctas directly to the Triton kernel is not supported. Please use a Config in @triton.autotune instead."
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.randn(4, device=GPU_TYPE)
+            f(x)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -3132,7 +3134,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(opname, code)
 
     @requires_gpu
-    @patch.object(torch._dynamo.config, "cache_size_limit", 1)
+    @patch.object(torch._dynamo.config, "recompile_limit", 1)
     def test_triton_dynamic_grid_no_recompile(self):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -3649,12 +3651,197 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # this should cause an exception, since pre_hook is not allowed
-        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
+        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported."
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(
                 add, mode="reduce-overhead", fullgraph=True, backend=backend
             )
             add_compiled(x, y).mean()
+
+    @requires_gpu
+    @common_utils.parametrize("non_strict", [True, False])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("with_perf_model", [True, False])
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, non_strict):
+        # for non-strict mode
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        records = {}
+
+        def early_config_prune(configs, named_args, **kwargs):
+            # we need to save the records to the returned config
+            records["run_early_config_prune"] = True
+            if "N" in kwargs and kwargs["N"] == 1024:
+                records["capture_kwargs"] = True
+            # named args are: dst, src, add_float
+            if "dst" in named_args and "src" in named_args and len(named_args) == 3:
+                records["capture_named_args"] = True
+            return [configs[0]]
+
+        def perf_model(*args, **kwargs):
+            records["run_perf_model"] = True
+            return kwargs["BLOCK_SIZE"] * -1
+
+        if with_perf_model:
+            prune_configs_by = {"perf_model": perf_model, "top_k": 1}
+        else:
+            prune_configs_by = {"early_config_prune": early_config_prune}
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+            ],
+            key=["N"],
+            prune_configs_by=prune_configs_by,
+        )
+        @triton.jit
+        def prune_by_kernel(
+            dst,
+            src,
+            add_float,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(src + offsets, mask=offsets < N)
+            # we only modify dst if our perf_model is applied (and a BLOCK_SIZE of 128 is selected)
+            if BLOCK_SIZE == 128:
+                x = x + add_float
+            tl.store(dst + offsets, x, mask=offsets < N)
+
+        def f(
+            dst: torch.Tensor,
+            src: torch.Tensor,
+            add_float: float,
+            N: int,
+        ) -> None:
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            if non_strict:
+                torch.library.wrap_triton(prune_by_kernel)[grid](
+                    dst, src, add_float, N=N
+                )
+            else:
+                prune_by_kernel[grid](dst, src, add_float, N=N)
+
+        if non_strict:
+            decorator = torch.library.triton_op(
+                f"{libname}::{opname}", mutates_args={"dst"}
+            )(f)
+        else:
+            # we can just pass the function 'f' for dynamo
+            decorator = f
+
+        compiled_f = torch.compile(decorator, backend=backend)
+        N = 1024
+        src = torch.randn(N, device=GPU_TYPE)
+        dst = torch.empty(N, device=GPU_TYPE)
+        compiled_f(dst, src, 1.5, N)
+
+        if with_perf_model:
+            # when applying the perf_model: kwargs["BLOCK_SIZE"] * -1, the largest config (BLOCK_SIZE==128) is selected
+            self.assertEqual(len(records), 1)
+            self.assertEqual(src + 1.5, dst)
+        else:
+            # without the perf_model, the BLOCK_SIZE==32, and as a result dst is not modified and remains equal to src
+            self.assertEqual(src, dst)
+            self.assertEqual(len(records), 3)
+            self.assertTrue(records["run_early_config_prune"])
+            self.assertTrue(records["capture_kwargs"])
+            self.assertTrue(records["capture_named_args"])
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("with_perf_model", [True, False])
+    def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
+        """
+        We want to recompile if anyone changes configs in the autotuner object
+        In short if for example the following sequence of events happens:
+        1. foo = torch.compile(bar)
+        1. call foo
+        2. autotuner.configs = [new configs list]
+        3. call foo
+
+        A recompile event should occur, which we check with Dynamo counters
+        This tests that we are installing guards on input objects properly
+        """
+
+        # We don't modify records here because we are testing whether or not
+        # recompiles occur/guards are installed
+        # If we modified the non-local records dict here, this would trigger
+        # recompile events.
+        def early_config_prune(configs, named_args, **kwargs):
+            return [configs[0]]
+
+        def perf_model(*args, **kwargs):
+            return kwargs["BLOCK_SIZE"] * -1
+
+        if with_perf_model:
+            prune_configs_by = {"perf_model": perf_model, "top_k": 1}
+        else:
+            prune_configs_by = {"early_config_prune": early_config_prune}
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+            ],
+            key=["N"],
+            prune_configs_by=prune_configs_by,
+        )
+        @triton.jit
+        def prune_by_kernel(
+            dst,
+            src,
+            add_float,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(src + offsets, mask=offsets < N)
+            # Let's make sure we always select a block size of 128 based on our perf_model
+            if BLOCK_SIZE == 128:
+                x = x + add_float
+            tl.store(dst + offsets, x, mask=offsets < N)
+
+        torch._dynamo.reset()
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend=backend)
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def f(dst, src, add_float, N):
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            prune_by_kernel[grid](dst, src, add_float, N=N)
+
+        N = 1024
+        src = torch.randn(N, device=GPU_TYPE)
+        dst = torch.empty(N, device=GPU_TYPE)
+
+        # first compilation, this prunes the configs
+        f(dst, src, 1.5, N)
+
+        self.assertEqual(counter.op_count, 1)
+
+        f(dst, src, 1.5, N)
+
+        # this should not trigger a recompilation
+        # this is because we modified the test to not touch the records dict
+        # as we do in test_triton_kernel_prune_configs_by. If we kept it, it would trigger a recompile here.
+        self.assertEqual(counter.op_count, 1)
+
+        # Modify the autotuner object
+        prune_by_kernel.configs = [triton.Config(kwargs={"BLOCK_SIZE": 64})]
+
+        # Calling the kernel after modifying the autotuner should
+        # trigger a recompile
+        f(dst, src, 1.5, N)
+
+        self.assertEqual(counter.op_count, 2)
+
+        # there should be no recompile here
+        f(dst, src, 1.5, N)
+
+        self.assertEqual(counter.op_count, 2)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

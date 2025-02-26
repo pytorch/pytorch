@@ -3037,7 +3037,7 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
 Tensor linalg_norm(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   if (opt_dim.has_value()) {
     TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
-              "dim is specified, it mut be of length 1 or 2. Got ", *opt_dim);
+              "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
   } else {
     TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
                 "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");

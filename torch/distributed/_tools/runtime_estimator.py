@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Set
 from typing_extensions import Self
 
 import torch
@@ -241,7 +241,7 @@ class RuntimeEstimator(TorchDispatchMode):
         return (pytree.tree_map(map_out, r), mean_op_time)
 
     @classmethod
-    def _benchmark_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
+    def _benchmark_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using benchmarking.
 
@@ -275,7 +275,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
     @classmethod
-    def _roofline_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
+    def _roofline_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using a roofline cost model.
 

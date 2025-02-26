@@ -13,6 +13,7 @@ from enum import Enum
 from functools import partial, wraps
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterable,
@@ -20,9 +21,10 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
@@ -61,6 +63,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 try:
     import psutil  # type: ignore[import]
@@ -1440,9 +1445,9 @@ class deviceCountAtLeast:
 
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta and PRIVATEUSE1)
-def onlyNativeDeviceTypes(fn):
+def onlyNativeDeviceTypes(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @wraps(fn)
-    def only_fn(self, *args, **kwargs):
+    def only_fn(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         if self.device_type not in NATIVE_DEVICES:
             reason = f"onlyNativeDeviceTypes: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
@@ -1849,7 +1854,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: Optional[List[Tuple[int, int]]] = None):
+def skipCUDAVersionIn(versions: Optional[List[tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1867,7 +1872,7 @@ def skipCUDAVersionIn(versions: Optional[List[Tuple[int, int]]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Optional[Tuple[int, int]] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):

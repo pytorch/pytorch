@@ -25,7 +25,7 @@ from copy import deepcopy
 from functools import partial, reduce
 from itertools import product
 from operator import mul
-from typing import List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.autograd._functions
@@ -10091,14 +10091,14 @@ TORCH_LIBRARY(test_multigrad_all_hooks, m) {
 
     def test_multi_grad_any_hooks(self):
         hook_id = 0
-        any_hook_handles: List[RemovableHandle] = []
+        any_hook_handles: list[RemovableHandle] = []
 
         class MultiOutputModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(3, 3)
 
-            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 z = self.lin(x)
                 out = torch.sin(z), torch.cos(z)
                 nonlocal hook_id
@@ -10123,7 +10123,7 @@ TORCH_LIBRARY(test_multigrad_all_hooks, m) {
                 z = y[0] + y[1]
                 return self.mod2(z)
 
-        hook_order: List[int] = []
+        hook_order: list[int] = []
         hook_count = 0
 
         def hook(hook_id: int, *unused):
@@ -13975,7 +13975,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             counter = [0]
 
             @torch.library.custom_op("mylib::sin_with_extra", mutates_args=())
-            def sin_with_extra(x: torch.Tensor) -> Tuple[torch.Tensor, int]:
+            def sin_with_extra(x: torch.Tensor) -> tuple[torch.Tensor, int]:
                 counter[0] += 1
                 return x.sin(), 2
 

@@ -184,7 +184,7 @@ class NNModuleToString:
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
                 module_str = f"{module_str}.cuda()"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
@@ -203,7 +203,9 @@ class NNModuleToString:
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            model_str += (
+                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            )
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -212,7 +214,7 @@ class NNModuleToString:
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
+            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
         # attrs = dir(gm)
@@ -248,6 +250,31 @@ def _cuda_system_info_comment():
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
+
+
+def generate_env_vars_string(*, stable_output=False):
+    """
+    Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
+    """
+    if stable_output:
+        return "# env var omitted due to stable_output=True"
+
+    allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
+    skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+
+    def filter(key):
+        return any(string in key for string in allow_list) and key not in skip_list
+
+    config_lines = [
+        f"os.environ['{key}'] = '{value}'"
+        for key, value in os.environ.items()
+        if filter(key)
+    ]
+    config_string = "\n".join(config_lines)
+    return f"""\
+import os
+{config_string}
+    """
 
 
 def generate_config_string(*, stable_output=False):

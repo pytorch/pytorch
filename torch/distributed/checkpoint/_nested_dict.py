@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Tuple
+from typing import Dict
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
@@ -27,7 +27,7 @@ FLATTEN_MAPPING = Dict[str, OBJ_PATH]
 # TODO: Update Docstring for nested_dict.py
 def flatten_state_dict(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+) -> tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
 

@@ -27,6 +27,7 @@ from typing import (
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import (
@@ -36,6 +37,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+from torch._inductor.utils import get_gpu_type, is_gpu
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -338,7 +340,9 @@ class TuningProcessPool:
             # Don't use multiple devices
             return [None]
 
-        count = torch.cuda.device_count()
+        gpu_type = get_gpu_type()
+        device_interface = get_interface_for_device(gpu_type)
+        count = device_interface.device_count()
 
         # If the user specified the visible devices in the env, use those.
         if CUDA_VISIBLE_DEVICES in os.environ:
@@ -590,18 +594,26 @@ class GPUDeviceBenchmarkMixin:
             tensor.device.index
             for tensor in [*input_tensors, output_tensor]
             if isinstance(tensor, torch.Tensor)
-            and tensor.is_cuda
+            and is_gpu(tensor.device.type)
             and tensor.device.index is not None
         )
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        device_type = next(
+            (
+                tensor.device.type
+                for tensor in input_tensors
+                if is_gpu(tensor.device.type)
+            ),
+            "cuda",
+        )
+        device_interface = get_interface_for_device(device_type)
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
         else:
-            device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
+            device_idx = device_interface.current_device()
+        with device_interface.device(device_idx):  # type: ignore[attr-defined]
             out = benchmarker.benchmark_gpu(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            device_interface.synchronize()  # shake out any CUDA errors
 
         return out
 
@@ -667,9 +679,11 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if output_tensor.device.type == "cpu":
             stream = 0
         else:
-            from torch._C import _cuda_getCurrentRawStream as get_raw_stream
-
-            stream = get_raw_stream(self.output_tensor_meta.device.index)
+            device_type = output_tensor.device.type
+            device_interface = get_interface_for_device(device_type)
+            stream = device_interface.get_raw_stream(
+                self.output_tensor_meta.device.index
+            )
 
         if self.workspace_arg is not None:
             # Create a function that handles both workspace creation and kernel execution

@@ -3,7 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from typing import Any, Callable, cast, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional, Sequence
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -122,10 +123,10 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: tuple[Placement, ...],
         run_check: bool,
         shape: Optional[torch.Size] = None,
-        stride: Optional[Tuple[int, ...]] = None,
+        stride: Optional[tuple[int, ...]] = None,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
@@ -229,6 +230,9 @@ class DTensor(torch.Tensor):
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
     requires every Tensor argument of the operator be DTensor.
 
+    .. note:: Directly using the Tensor subclass constructor here is not the recommended way to create a ``DTensor``
+        (i.e. it does not handle autograd correctly hence is not the public API). Please refer to the `create_dtensor`_
+        section to see how to create a ``DTensor``.
     """
 
     _local_tensor: torch.Tensor
@@ -354,7 +358,7 @@ class DTensor(torch.Tensor):
         *,
         run_check: bool = False,
         shape: Optional[torch.Size] = None,
-        stride: Optional[Tuple[int, ...]] = None,
+        stride: Optional[tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -581,7 +585,7 @@ class DTensor(torch.Tensor):
         return self._spec.mesh
 
     @property
-    def placements(self) -> Tuple[Placement, ...]:
+    def placements(self) -> tuple[Placement, ...]:
         """
         The placements attribute of this DTensor that describes the layout of this
         DTensor on the its DeviceMesh.
@@ -603,6 +607,16 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __create_chunk_list__(self):
+        """
+        Return a list of ChunkStorageMetadata, which is a dataclass that describes the size/offset of the local shard/replica
+        on current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually only
+        has one element.
+
+        This dunder method is primariy used for distributed checkpoint purpose.
+
+        Returns:
+            A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
+        """
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -627,6 +641,8 @@ def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
+    *,
+    src_data_rank: Optional[int] = 0,
 ) -> DTensor:
     """
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
@@ -650,6 +666,14 @@ def distribute_tensor(
             number of elements as ``device_mesh.ndim``. If not specified, we will
             by default replicate the tensor across the ``device_mesh`` from the
             first rank of each dimension of the `device_mesh`.
+
+    Keyword args:
+        src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is
+            used by :meth:`distribute_tensor` to scatter/broadcast the shards/replicas to other ranks.
+            By default, we use ``group_rank=0`` on each DeviceMesh dimension as the source data to preserve
+            the single-device semantic. If passing ``None`` explicitly, :meth:`distribute_tensor` simply uses
+            its local data instead of trying to preserve the single-device semantic via scatter/broadcast.
+            Default: 0
 
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
@@ -735,10 +759,14 @@ def distribute_tensor(
                 # normalize shard placement dim
                 placement = Shard(placement.dim + tensor.ndim)
                 placements[idx] = placement
-            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
+            local_tensor = placement._shard_tensor(
+                local_tensor, device_mesh, idx, src_data_rank
+            )
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
-            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
+            local_tensor = placement._replicate_tensor(
+                local_tensor, device_mesh, idx, src_data_rank
+            )
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
@@ -764,6 +792,7 @@ def distribute_tensor(
     )
 
 
+@deprecated("Please use `distribute_tensor` with `src_data_rank=None` instead.")
 def _shard_tensor(
     full_tensor: torch.Tensor,
     placements: Sequence[Shard],
@@ -798,17 +827,7 @@ def _shard_tensor(
         >>> full_tensor = torch.arange(world_size, device=f"cuda:{rank}")
         >>> dtensor = _shard_tensor(full_tensor, [Shard(1)], device_mesh)
     """
-    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-
-    shape, offset = compute_local_shape_and_global_offset(
-        full_tensor.shape, device_mesh, placements
-    )
-    slices = [
-        slice(cur_offset, cur_offset + cur_shape)
-        for cur_shape, cur_offset in zip(shape, offset)
-    ]
-    local_tensor = full_tensor[slices]
-    return DTensor.from_local(local_tensor, device_mesh, placements)
+    return distribute_tensor(full_tensor, device_mesh, placements, src_data_rank=None)
 
 
 def distribute_module(

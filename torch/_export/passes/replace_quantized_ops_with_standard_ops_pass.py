@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.export._trace
@@ -136,13 +136,13 @@ def insert_dequantized_node(
         raise RuntimeError(f"Unsupported dequantization scheme: {qscheme}")
 
 
-def get_qmin_qmax(dtype: torch.dtype) -> Tuple[Union[int, float], Union[int, float]]:
+def get_qmin_qmax(dtype: torch.dtype) -> tuple[Union[int, float], Union[int, float]]:
     return calculate_qmin_qmax(None, None, False, dtype, False)  # type: ignore[arg-type]
 
 
 def insert_qmin_qmax_node(
     gm: torch.fx.GraphModule, dtype_node: Union[torch.dtype, torch.fx.Node]
-) -> Tuple[torch.fx.Node, torch.fx.Node]:
+) -> tuple[torch.fx.Node, torch.fx.Node]:
     q_min_max_node = gm.graph.call_function(
         calculate_qmin_qmax, (None, None, False, dtype_node, False)
     )
@@ -169,7 +169,7 @@ def get_script_object(
 def insert_weight_and_bias_get_attr_node_from_get_attr_to_scriptobject(
     gm: torch.fx.GraphModule,
     param_node: torch.fx.Node,
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     """Directly inline tensor from a get_attr fx node."""
     mod = get_script_object(gm, param_node)
     w_qtensor, b_qtensor = mod.unpack()  # type: ignore[attr-defined]
@@ -186,7 +186,7 @@ def insert_weight_and_bias_get_attr_node_from_get_attr_to_qtensor(
     gm: torch.fx.GraphModule,
     get_attr_to_weight_node: torch.fx.Node,
     get_attr_to_bias_node: Optional[torch.fx.Node],
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     assert isinstance(get_attr_to_weight_node.target, str)
     w_qtensor = getattr(gm, get_attr_to_weight_node.target)
     w_attr_name = f"dequantized_{get_attr_to_weight_node.target}_w"
@@ -209,7 +209,7 @@ def insert_weight_and_bias_get_attr_node(
     b_qtensor: Optional[torch.Tensor],
     w_attr_name: str,
     b_attr_name: str,
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     w_tensor = get_tensor_from_qtensor(w_qtensor)
     _assign_attr(w_tensor, gm, w_attr_name)
     w_tensor_attr = gm.graph.get_attr(w_attr_name)

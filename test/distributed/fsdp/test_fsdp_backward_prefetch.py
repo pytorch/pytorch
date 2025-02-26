@@ -16,9 +16,11 @@ from torch.distributed.fsdp._runtime_utils import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
+
+device_type = torch.device(get_devtype())
 
 NUM_ITERS = 2
 DECODER_PARAM_FQNS = [
@@ -81,14 +83,13 @@ class TestBackwardPrefetch(FSDPTest):
     def _dist_train(self, backward_prefetch=BackwardPrefetch.BACKWARD_PRE):
         rank = self.rank
         orig_get_handle_to_prefetch = _get_handle_to_prefetch
-
         torch.manual_seed(0)
         policy = ModuleWrapPolicy(
             {nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
         )
         model = FSDP(
-            nn.Transformer(d_model=1024, nhead=8, device="cuda"),
-            device_id=torch.cuda.current_device(),
+            nn.Transformer(d_model=1024, nhead=8, device=device_type),
+            device_id=device_type.type,
             auto_wrap_policy=policy,
             use_orig_params=True,
             backward_prefetch=backward_prefetch,
@@ -97,8 +98,8 @@ class TestBackwardPrefetch(FSDPTest):
 
         # prepare input
         torch.manual_seed(rank + 1)
-        src = torch.randn((10, 1, 1024), device="cuda")
-        tgt = torch.randn((20, 1, 1024), device="cuda")
+        src = torch.randn((10, 1, 1024), device=device_type)
+        tgt = torch.randn((20, 1, 1024), device=device_type)
 
         # monkey patch
         all_handle_fqns: List[List[str]] = []

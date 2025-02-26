@@ -1,20 +1,20 @@
 from collections import defaultdict
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 from torch import nn, Tensor
 
 
 # Type helpers
-InputsType = Union[Tensor, Tuple[Tensor, ...]]
+InputsType = Union[Tensor, tuple[Tensor, ...]]
 # A Getter takes in a device and returns a callable and the inputs to that callable
-GetterReturnType = Tuple[Callable[..., Tensor], InputsType]
+GetterReturnType = tuple[Callable[..., Tensor], InputsType]
 GetterType = Callable[[torch.device], GetterReturnType]
 # V here refers to the v in either vjp, jvp, vhp or hvp
-VType = Union[None, Tensor, Tuple[Tensor, ...]]
+VType = Union[None, Tensor, tuple[Tensor, ...]]
 # Type used to store timing results. The first key is the model name, the second key
 # is the task name, the result is a Tuple of: speedup, mean_before, var_before, mean_after, var_after.
-TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
+TimingResultType = Dict[str, Dict[str, tuple[float, ...]]]
 
 
 # Utilities to make nn.Module "functional"
@@ -44,7 +44,7 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
 
-def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
+def extract_weights(mod: nn.Module) -> tuple[tuple[Tensor, ...], List[str]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -65,7 +65,7 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     return params, names
 
 
-def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -> None:
+def load_weights(mod: nn.Module, names: List[str], params: tuple[Tensor, ...]) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
     Note that the `params` are regular Tensors (that can have history) and so are left
@@ -77,7 +77,7 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
 
 # Utilities to read/write markdown table-like content.
 def to_markdown_table(
-    res: TimingResultType, header: Optional[Tuple[str, ...]] = None
+    res: TimingResultType, header: Optional[tuple[str, ...]] = None
 ) -> str:
     if header is None:
         header = ("model", "task", "mean", "var")

@@ -6,7 +6,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
 from tabulate import tabulate
@@ -26,7 +26,7 @@ from torch.nn.attention.flex_attention import (
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
-torch._dynamo.config.cache_size_limit = 1000
+torch._dynamo.config.recompile_limit = 1000
 
 
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -41,7 +41,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    shape: Tuple[int]  # [B, Hq, M, Hkv, N, D]
+    shape: tuple[int]  # [B, Hq, M, Hkv, N, D]
     attn_type: str
     dtype: torch.dtype
     calculate_bwd_time: bool
@@ -149,7 +149,7 @@ def generate_inputs(
 
 
 def generate_jagged_inputs(
-    shape: Tuple[int],
+    shape: tuple[int],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -221,7 +221,7 @@ def run_single_backend_sdpa(
 ) -> ExperimentResults:
     backend_context = get_backend_context(backend)
     with backend_context:
-        device = torch.device("cuda")
+        _device = torch.device("cuda")
         eager_sdpa = generate_eager_sdpa(
             config.attn_type, config.shape, config.dtype, block_mask, score_mod
         )
@@ -372,8 +372,6 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
         nested_tensors=config.attn_type == "document_mask",
     )
-    is_decoding = q_seq_len == 1
-
     score_mod = generate_score_mod(config.attn_type, config.shape)
     block_mask, mask_kwargs = generate_block_mask(config.attn_type, config.shape)
     kernel_options = get_kernel_options(config.attn_type, config.shape)
@@ -613,7 +611,7 @@ softcap_value = 50
 dropout_p = 0.0
 
 
-def generate_score_mod(attn_type: str, shape: Tuple[int]) -> Callable | None:
+def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
@@ -655,7 +653,7 @@ sliding_window_size = 512
 prefix_length = 512
 
 
-def generate_block_mask(attn_type: str, shape: Tuple[int]):
+def generate_block_mask(attn_type: str, shape: tuple[int]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
 
@@ -730,7 +728,7 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
     return block_mask, mask_mod_kwargs
 
 
-def get_kernel_options(attn_type: str, shape: Tuple[int]):
+def get_kernel_options(attn_type: str, shape: tuple[int]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     kernel_opt_training_dict = {
@@ -817,7 +815,7 @@ def get_backend_context(backend: str):
 
 
 def generate_FA_callable(
-    attn_type: str, shape: Tuple[int], dtype: torch.dtype, backend: str, **kwargs
+    attn_type: str, shape: tuple[int], dtype: torch.dtype, backend: str, **kwargs
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -884,7 +882,7 @@ def generate_FA_callable(
 
 
 def generate_FD_callable(
-    attn_type: str, shape: Tuple[int], dtype: torch.dtype
+    attn_type: str, shape: tuple[int], dtype: torch.dtype
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -931,7 +929,7 @@ def generate_FD_callable(
 
 
 def generate_attn_mask_linear_score_mod(
-    shape: Tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+    shape: tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
 ):
     B, Hq, M, N = shape
     if block_mask is None and score_mod is None:
@@ -956,7 +954,7 @@ def generate_attn_mask_linear_score_mod(
 
 def generate_eager_sdpa(
     attn_type: str,
-    shape: Tuple[int],
+    shape: tuple[int],
     dtype: torch.dtype,
     block_mask: BlockMask,
     score_mod: Callable | None = None,
@@ -1027,7 +1025,7 @@ def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
     batch_sizes: List[int],
-    num_heads: List[Tuple[int, int]],
+    num_heads: List[tuple[int, int]],
     seq_lens: List[int],
     head_dims: List[int],
     score_mods_str: List[str],

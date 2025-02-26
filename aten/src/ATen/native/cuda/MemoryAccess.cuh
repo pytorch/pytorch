@@ -1,12 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <type_traits>
 #include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>

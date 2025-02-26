@@ -1,6 +1,6 @@
 import itertools
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Set
 
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -21,7 +21,7 @@ class EinsumDims:
     rhs_out_only_dims: List[str]
 
     @classmethod
-    def parse_equation(cls, equation: str) -> Tuple[List[str], str]:
+    def parse_equation(cls, equation: str) -> tuple[List[str], str]:
         # parse einop equation and extract arg specs
         """
         Parse the einsum equation str to input dim chars and output dim char

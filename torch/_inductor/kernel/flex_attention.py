@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Union
 
 import sympy
 
@@ -688,7 +688,7 @@ class Mode(Enum):
     bwd = auto()
 
 
-def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
@@ -721,7 +721,7 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
@@ -769,14 +769,14 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, mode=Mode.fwd)
     else:
         return _get_rocm_config(query, mode=Mode.fwd)
 
 
-def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, mode=Mode.bwd)
     else:
@@ -1208,7 +1208,7 @@ def flex_attention(
     )
 
     choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    configs: List[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
         configs += [
@@ -2294,7 +2294,7 @@ def flex_attention_backward(*args, **kwargs):
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    configs: List[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]

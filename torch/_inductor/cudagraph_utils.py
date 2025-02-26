@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -53,7 +53,7 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
+    constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
 
@@ -292,7 +292,7 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    fn_cache: Dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1

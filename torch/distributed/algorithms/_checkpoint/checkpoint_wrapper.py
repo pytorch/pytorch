@@ -3,7 +3,7 @@ import warnings
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional
 
 import torch
 import torch.nn as nn
@@ -57,7 +57,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
         self,
         *args,
         **kwargs,
-    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+    ) -> Iterator[tuple[str, torch.nn.Parameter]]:
         """
         Override :meth:`named_parameters()` to intercept parameter names.
 

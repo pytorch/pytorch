@@ -28,6 +28,7 @@ from torch._dynamo.debug_utils import (
     extra_deps,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -264,6 +265,7 @@ def generate_compiler_repro_string(
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 from torch import tensor, device
 import torch.fx as fx

@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import List, Tuple
+from typing import List
 
 import torch
 from torch import Tensor
@@ -266,12 +266,12 @@ def varlen_pytorch_lstm_creator(**kwargs):
 def varlen_lstm_factory(cell, script):
     def dynamic_rnn(
         sequences: List[Tensor],
-        hiddens: Tuple[Tensor, Tensor],
+        hiddens: tuple[Tensor, Tensor],
         wih: Tensor,
         whh: Tensor,
         bih: Tensor,
         bhh: Tensor,
-    ) -> Tuple[List[Tensor], Tuple[List[Tensor], List[Tensor]]]:
+    ) -> tuple[List[Tensor], tuple[List[Tensor], List[Tensor]]]:
         hx, cx = hiddens
         hxs = hx.unbind(1)
         cxs = cx.unbind(1)
@@ -406,12 +406,12 @@ def lstm_inputs(
 def lstm_factory(cell, script):
     def dynamic_rnn(
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         wih: Tensor,
         whh: Tensor,
         bih: Tensor,
         bhh: Tensor,
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         hx, cx = hidden
         outputs = []
         inputs = input.unbind(0)
@@ -432,12 +432,12 @@ def lstm_factory(cell, script):
 def lstm_factory_premul(premul_cell, script):
     def dynamic_rnn(
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         wih: Tensor,
         whh: Tensor,
         bih: Tensor,
         bhh: Tensor,
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         hx, cx = hidden
         outputs = []
         inputs = torch.matmul(input, wih.t()).unbind(0)
@@ -458,12 +458,12 @@ def lstm_factory_premul(premul_cell, script):
 def lstm_factory_premul_bias(premul_cell, script):
     def dynamic_rnn(
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         wih: Tensor,
         whh: Tensor,
         bih: Tensor,
         bhh: Tensor,
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         hx, cx = hidden
         outputs = []
         inpSize = input.size()
@@ -506,8 +506,8 @@ def lstm_factory_simple(cell, script):
 
 def lstm_factory_multilayer(cell, script):
     def dynamic_rnn(
-        input: Tensor, hidden: Tuple[Tensor, Tensor], params: List[Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        input: Tensor, hidden: tuple[Tensor, Tensor], params: List[Tensor]
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         params_stride = 4  # NB: this assumes that biases are there
         hx, cx = hidden
         hy, cy = hidden  # for scoping...

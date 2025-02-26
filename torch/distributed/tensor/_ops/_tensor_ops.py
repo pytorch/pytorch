@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Sized, Tuple
+from typing import cast, List, Optional, Sequence, Sized
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -63,6 +63,7 @@ register_op_strategy(
         aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
+        aten.view.dtype,
         aten.zero_.default,
     ]
 )(default_strategy)
@@ -288,7 +289,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
 def unshard_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """Disallow the given tensor dimension to be sharded."""
     return tuple(
         p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
@@ -298,7 +299,7 @@ def unshard_tensor_dim(
 
 def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """Force the given tensor dimension to be replicated."""
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
@@ -620,7 +621,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(values_spec, DTensorSpec)
     assert isinstance(multi_indices_spec, list)
     multi_indices_spec = cast(List[Optional[DTensorSpec]], multi_indices_spec)
-    valid_indices_spec: List[Tuple[int, DTensorSpec]] = [
+    valid_indices_spec: List[tuple[int, DTensorSpec]] = [
         (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
     ]
 

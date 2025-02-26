@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
 
 import torch
 
@@ -120,6 +120,12 @@ class DeviceInterface:
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False):
         raise NotImplementedError
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
     def memory_allocated(device: _device_t = None) -> int:
@@ -338,6 +344,37 @@ class CpuInterface(DeviceInterface):
             return CpuDeviceProperties(cpu_count)
 
 
+class MpsInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return torch.backends.mps.is_macos_or_newer(14, 0)
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        if dtype == torch.float64:
+            return False
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+
+    @staticmethod
+    def is_available() -> bool:
+        return torch.backends.mps.is_available()
+
+    @staticmethod
+    def current_device():
+        return 0
+
+    @staticmethod
+    def synchronize(device: _device_t = None):
+        torch.mps.synchronize()
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            return {}
+
+
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -360,7 +397,7 @@ def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInt
     raise NotImplementedError(f"No interface for device {device}")
 
 
-def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterface]]]:
+def get_registered_device_interfaces() -> Iterable[tuple[str, Type[DeviceInterface]]]:
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
@@ -377,5 +414,6 @@ def init_device_reg():
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("cpu", CpuInterface)
+    register_interface_for_device("mps", MpsInterface)
 
     _device_initialized = True

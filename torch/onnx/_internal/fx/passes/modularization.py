@@ -107,12 +107,12 @@ class _ModuleMeta:
         """
         return self._raw_meta
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, _ModuleMeta):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, _ModuleMeta):
             return False
         return (
-            self._module_name == __value._module_name
-            and self._module_class == __value._module_class
+            self._module_name == other._module_name
+            and self._module_class == other._module_class
         )
 
     def __hash__(self) -> int:
@@ -286,10 +286,10 @@ class _ModuleStackMeta:
         """Pushes a module meta to the stack."""
         self._module_stack.append(module_meta)
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, _ModuleStackMeta):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, _ModuleStackMeta):
             return False
-        return self._module_stack == __value._module_stack
+        return self._module_stack == other._module_stack
 
     @property
     def raw_meta(self) -> dict[str, tuple[str, type]] | None:

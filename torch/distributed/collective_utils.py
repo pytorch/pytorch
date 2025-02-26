@@ -10,7 +10,7 @@ Each should also handle single rank scenario.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Generic, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, cast, Generic, List, Optional, TypeVar, Union
 
 import torch.distributed as dist
 
@@ -149,7 +149,7 @@ def all_gather(
         all_gather_object_enforce_type(pg, total_list, sync_obj)
         # Each rank will throw RuntimeError in case of failure on any rank.
         stage_name = cast(SyncPayload[T], total_list[0]).stage_name
-        exception_list: List[Tuple[int, Exception]] = []
+        exception_list: List[tuple[int, Exception]] = []
         ret_list: List[T] = []
         error_msg: str = ""
 

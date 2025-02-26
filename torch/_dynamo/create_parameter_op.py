@@ -1,6 +1,6 @@
 import threading
 from contextlib import contextmanager
-from typing import Any, Generator, Tuple
+from typing import Any, Generator
 
 import torch
 
@@ -24,7 +24,7 @@ class TracableCreateParameter(torch.autograd.Function):
         return placeholder.set_(tensor)
 
     @staticmethod
-    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> Tuple[None, torch.Tensor]:
+    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> tuple[None, torch.Tensor]:
         grad = grad_outputs[0]
         return None, grad  # grad flows to placeholder
 
@@ -38,7 +38,7 @@ def tracable_create_parameter(
 
 
 def new_parameter_placeholder(
-    size: Tuple[int, ...], dtype: torch.dtype, device: torch.device, requires_grad: bool
+    size: tuple[int, ...], dtype: torch.dtype, device: torch.device, requires_grad: bool
 ) -> torch.nn.Parameter:
     """Create a placeholder to be passed to the above functions"""
     result = torch.nn.Parameter(

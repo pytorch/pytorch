@@ -31,8 +31,7 @@ def _device_constructors():
         torch.linspace,
         torch.logspace,
         torch.nested.nested_tensor,
-        # This function doesn't actually take a device argument
-        # torch.normal,
+        torch.normal,
         torch.ones,
         torch.rand,
         torch.randn,

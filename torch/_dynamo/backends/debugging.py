@@ -312,7 +312,7 @@ class ExplainOutput:
 
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
+            output += f"  Break Reason {idx + 1}:\n"
             output += f"    Reason: {break_reason.reason}\n"
             output += "    User Stack:\n"
             for frame_summary in break_reason.user_stack:
@@ -321,14 +321,14 @@ class ExplainOutput:
         if self.ops_per_graph is not None:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
-                output += f"  Ops {idx+1}:\n"
+                output += f"  Ops {idx + 1}:\n"
                 for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
             output += "Out Guards:\n"
             for i, guard in enumerate(self.out_guards):
-                output += f"  Guard {i+1}:\n"
+                output += f"  Guard {i + 1}:\n"
                 output += f"    {str(guard)}"
 
         if self.compile_times is not None:

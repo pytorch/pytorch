@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, List, Tuple
+from typing import Any, List
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -39,7 +39,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
 
     @staticmethod
     def __new__(
-        cls, local_shards: List[torch.Tensor], local_offsets: List[Tuple[int, ...]]
+        cls, local_shards: List[torch.Tensor], local_offsets: List[tuple[int, ...]]
     ) -> "LocalShardsWrapper":
         assert len(local_shards) > 0
         assert len(local_shards) == len(local_offsets)

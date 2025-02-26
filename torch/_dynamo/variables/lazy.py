@@ -1,8 +1,10 @@
 import collections
 import functools
-from typing import Any, Callable, Dict, final, Optional, Tuple, Union
+import inspect
+from typing import Any, Callable, Dict, final, Optional, Union
 from typing_extensions import Self
 
+from ..utils import is_function_or_wrapper
 from .base import VariableTracker
 from .tensor import SymNodeVariable
 
@@ -106,7 +108,7 @@ class LazyVariableTracker(VariableTracker):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[Dict[int, Tuple[Any, Any]]] = None,
+        cache: Optional[Dict[int, tuple[Any, Any]]] = None,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.
@@ -141,6 +143,34 @@ class LazyVariableTracker(VariableTracker):
         # save `value` to keep it alive and ensure id() isn't reused
         cache[idx] = (result, value)
         return result
+
+    def is_hashable(self) -> bool:
+        # Checks that the underlying value is hashable without realizing the VT.
+        # This is used by ConstDictVariable tracker to find if the key LazyVT
+        # can be hashed.
+        def _helper(value: Any) -> bool:
+            # TODO: Add support for more types
+            return (
+                inspect.isbuiltin(value)
+                or issubclass(type(value), type)
+                or is_function_or_wrapper(value)
+            )
+
+        assert not self.is_realized()
+        value = self._cache.value
+        if isinstance(value, tuple):
+            return all(_helper(v) for v in value)
+        return _helper(value)
+
+    def original_value(self) -> Any:
+        # Returns the value without realizing the VT.
+        assert not self.is_realized()
+        return self._cache.value
+
+    def original_source(self) -> Any:
+        # Returns the source without realizing the VT.
+        assert not self.is_realized()
+        return self._cache.source
 
 
 class LazySymNodeFormatString:

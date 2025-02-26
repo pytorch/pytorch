@@ -2,7 +2,7 @@
 
 # mypy: ignore-errors
 
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Union
 
 from core.api import AutoLabels, GroupedBenchmark, TimerArgs
 
@@ -66,7 +66,7 @@ TL;DR
 
 # Allow strings in definition for convenience, and None to signify a base
 # case. (No subsequent entry needed. See the "add" example above.)
-Label = Tuple[str, ...]
+Label = tuple[str, ...]
 _Label = Union[Label, Optional[str]]
 
 _Value = Union[
@@ -82,4 +82,4 @@ Definition = Dict[_Label, _Value]
 FlatIntermediateDefinition = Dict[Label, Union[TimerArgs, GroupedBenchmark]]
 
 # Final parsed schema.
-FlatDefinition = Tuple[Tuple[Label, AutoLabels, TimerArgs], ...]
+FlatDefinition = tuple[tuple[Label, AutoLabels, TimerArgs], ...]

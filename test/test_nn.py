@@ -7139,6 +7139,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
+    @largeTensorTest("40GB", device="cuda")
+    def test_layer_norm_large_tensor(self):
+        # test for https://github.com/pytorch/pytorch/issues/136291
+        device = torch.device("cuda")
+        b, n, dp = 16, 3000, 16
+        pairwise_repr = torch.randn(b, n, n, dp)
+
+        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
+        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
+        # we want a smaller copy to compare the results
+        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
+        norm = attn_bias_norm(pairwise_repr)
+        norm_small = attn_bias_norm(pairwise_small)
+
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # Check output to make sure it is correct.
+        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
         x = torch.randn(4, 8, 32, 32)
@@ -9961,7 +9979,8 @@ class TestNNDeviceType(NNTestCase):
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
-    @dtypes(torch.half)
+    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
@@ -9969,6 +9988,10 @@ class TestNNDeviceType(NNTestCase):
         out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         del x
         self.assertTrue(torch.allclose(out, out_ref))
+
+        x = torch.ones((17, 256, 512, 512), dtype=dtype).cuda().to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10325,6 +10348,13 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.double)
+    def test_softmax_double(self, device, dtype):
+        logits = torch.randn(5, 513, dtype=dtype, device=device)
+        expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
+        self.assertEqual(expected_ones, torch.ones_like(expected_ones))
 
     @onlyCUDA
     @dtypes(torch.half)

@@ -4,7 +4,7 @@ import functools
 import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -123,7 +123,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
             return lowerings[target](*args, **kwargs)
 
-    def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
+    def output(self, target: str, args: tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 
@@ -148,7 +148,7 @@ class TracingOpsHandler(WrapperHandler[T]):
     def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args: Tuple[object]) -> torch.fx.Node:
+    def output(self, *args: tuple[object]) -> torch.fx.Node:
         return self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )

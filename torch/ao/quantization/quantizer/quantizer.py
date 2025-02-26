@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -81,7 +81,7 @@ an input edge or an output value
 input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
 output value is an fx Node
 """
-EdgeOrNode = Union[Tuple[Node, Node], Node]
+EdgeOrNode = Union[tuple[Node, Node], Node]
 EdgeOrNode.__module__ = "torch.ao.quantization.quantizer.quantizer"
 
 
@@ -100,7 +100,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     """Quantization spec for the Tensors whose quantization parameters are derived from other Tensors"""
 
     derived_from: List[EdgeOrNode]
-    derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]]
+    derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]]
     dtype: torch.dtype
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None

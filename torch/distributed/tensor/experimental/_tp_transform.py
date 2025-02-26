@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import operator
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
+from typing import Any, cast, Dict, List, Optional, Sequence
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -229,7 +229,7 @@ def _mark_sharding(
                         op_schema,
                     )
                 else:
-                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(
+                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(  # type: ignore[assignment]
                         op_schema,
                     )
                 placement_strategies[node] = PlacementStrategy(
@@ -265,7 +265,7 @@ def _get_output_spec_from_output_sharding(
 def _create_placement_strategy(
     node: Node,
     mesh: DeviceMesh,
-    placements: Tuple[Placement, ...],
+    placements: tuple[Placement, ...],
     input_specs: Optional[Sequence[DTensorSpec]] = None,
 ) -> PlacementStrategy:
     """
@@ -486,7 +486,7 @@ def _clean_up_graph_metadata(gm: torch.fx.GraphModule) -> None:
 
 def _get_input_node_specs(
     node: Node, placement_strategies: Dict[Node, PlacementStrategy]
-) -> Tuple[DTensorSpec, ...]:
+) -> tuple[DTensorSpec, ...]:
     """
     Get the input specs of a node.
     """

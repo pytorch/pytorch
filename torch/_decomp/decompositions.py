@@ -1633,7 +1633,9 @@ def native_layer_norm_backward(
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
     grad_out_cast, input_cast, weight_cast, bias_cast = (
-        x.to(computation_dtype).contiguous() if x is not None else x
+        x.to(computation_dtype, memory_format=torch.contiguous_format)
+        if x is not None
+        else x
         for x in (grad_out, input, weight, bias)
     )
     assert grad_out_cast is not None

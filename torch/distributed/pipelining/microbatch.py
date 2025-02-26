@@ -73,7 +73,7 @@ class TensorChunkSpec:
 
     @staticmethod
     def from_tuple(
-        chunk_dims: Tuple[int, ...],
+        chunk_dims: tuple[int, ...],
     ):
         """
         A helper for creating a tuple of `TensorChunkSpec` from a tuple of chunk
@@ -242,12 +242,12 @@ def _shard_dict_of_args(
 
 
 def split_args_kwargs_into_chunks(
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]],
     chunks: int,
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
     kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-) -> Tuple[List[Tuple], List[Dict]]:
+) -> tuple[List[Tuple], List[Dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
     according to  their respective chunking specs.

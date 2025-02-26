@@ -6,7 +6,8 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist

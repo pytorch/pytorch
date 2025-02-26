@@ -2696,7 +2696,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            y = t.sum()
+            _y = t.sum()
             with self.assertRaises(ZeroDivisionError):
                 with woohoo() as x:
                     self.assertEqual(state, [1])
@@ -2718,7 +2718,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal frames
-            y = t.sum()
+            _y = t.sum()
             try:
                 with f():
                     1 / 0
@@ -2745,7 +2745,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal frames
-            y = t.sum()
+            _y = t.sum()
             try:
                 with f():
                     raise RuntimeErrorSubclass(42)
@@ -2777,7 +2777,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
                 @torch.compile(backend="eager", fullgraph=True)
                 def fn(t):
                     nonlocal frames
-                    y = t.sum()
+                    _y = t.sum()
                     try:
                         with f():
                             raise stop_exc

@@ -408,7 +408,27 @@ class ConfigModule(ModuleType):
         setattr(module, constant_name, val)
 
     def _is_default(self, name: str) -> bool:
-        return self._config[name].user_override is _UNSET_SENTINEL
+        """
+        Returns true if the config is at its default value.
+        configs overriden by the env are not considered default.
+        """
+        config_val = self._config[name]
+        # The config is not overridden by the user, and the env_value_default
+        # is different from the default value (meaning user has set the env to
+        # change the default value).
+        not_set_env_default = (
+            config_val.env_value_default is _UNSET_SENTINEL
+            or config_val.env_value_default == config_val.default
+        )
+        not_set_env_force = (
+            config_val.env_value_force is _UNSET_SENTINEL
+            or config_val.env_value_force == config_val.default
+        )
+        return (
+            config_val.user_override is _UNSET_SENTINEL
+            and not_set_env_default
+            and not_set_env_force
+        )
 
     def _get_dict(
         self,

@@ -260,7 +260,10 @@ class PackageImporter(Importer):
 
             if typename == "storage":
                 storage_type, key, location, size = data
-                dtype = storage_type.dtype
+                if storage_type is torch.UntypedStorage:
+                    dtype = torch.uint8
+                else:
+                    dtype = storage_type.dtype
 
                 if key not in loaded_storages:
                     load_tensor(

@@ -7,7 +7,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>

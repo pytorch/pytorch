@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -239,6 +240,9 @@ class TORCH_API Context {
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
+  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  void setROCmFAPreferredBackend(at::ROCmFABackend);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Operations in PyTorch that normally act nondeterministically, but have an
@@ -428,6 +432,10 @@ class TORCH_API Context {
 #endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
+  at::ROCmFABackend rocm_fa_preferred_backend =
+      c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
+      ? at::ROCmFABackend::Ck
+      : at::ROCmFABackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -476,8 +484,22 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
       Backend::MPS, s);
 }
 
+// Note [at::hasXXX() vs. at::globalContext().hasXXX()]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// The purpose of `at::hasXXX()` is to check if device XXX is available at
+// runtime. In contrast, `at::globalContext().hasXXX()` determines whether
+// support for device XXX was included in the PyTorch build (enabled at compile
+// time) or if a device XXX extension has already been registered with PyTorch.
+//
+// `at::globalContext().hasXXX()` is often used in functions like
+// `getAccelerator()` instead of `at::hasXXX()` to avoid initializing the
+// runtime for device XXX (which can poison child processes while detecting the
+// current accelerator).
+
 inline bool hasCUDA() {
-  return globalContext().hasCUDA();
+  return globalContext().hasCUDA() &&
+      (detail::getCUDAHooks().deviceCount() > 0);
 }
 
 inline bool hasMTIA() {
@@ -505,7 +527,7 @@ inline bool hasMAIA() {
 }
 
 inline bool hasXPU() {
-  return globalContext().hasXPU();
+  return globalContext().hasXPU() && (detail::getXPUHooks().deviceCount() > 0);
 }
 
 inline bool hasHPU() {
@@ -557,45 +579,28 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
+    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
-  // NB: Sometimes we build with CUDA, but we don't have any GPUs
-  // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
-  if (hasCUDA() && cuda_num_gpus > 0) {
-    for (const auto i : c10::irange(cuda_num_gpus)) {
-      auto cuda_gen = globalContext().defaultGenerator(
-          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
-        cuda_gen.set_current_seed(seed);
-      }
-    }
-  }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
-  if (hasXPU() && xpu_num_gpus) {
-    for (const auto i : c10::irange(xpu_num_gpus)) {
-      auto xpu_gen = globalContext().defaultGenerator(
-          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
-        xpu_gen.set_current_seed(seed);
-      }
-    }
+  const auto opt_device_type = at::getAccelerator();
+  if (!opt_device_type.has_value()) {
+    return;
   }
-
-  if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(mps_gen.mutex());
-    mps_gen.set_current_seed(seed);
+  const auto num_gpus = globalContext()
+                            .getAcceleratorHooksInterface(opt_device_type)
+                            .deviceCount();
+  for (const auto i : c10::irange(num_gpus)) {
+    auto gen = globalContext().defaultGenerator(
+        Device(opt_device_type.value(), static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
   }
 }
 

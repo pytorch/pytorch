@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, List, NamedTuple, Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -16,7 +16,7 @@ class TensorMeta(NamedTuple):
     # intentionally to stay simple only for sharding
     # propagation purposes.
     shape: torch.Size
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     dtype: torch.dtype
 
 
@@ -24,7 +24,7 @@ class TensorMeta(NamedTuple):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Tuple[Placement, ...]
+    placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
@@ -68,20 +68,20 @@ class DTensorSpec:
             self._hash = self._hash_impl()
         return self._hash
 
-    def __eq__(self, __o: object) -> bool:
+    def __eq__(self, other: object, /) -> bool:
         if not (
-            isinstance(__o, DTensorSpec)
-            and self.mesh == __o.mesh
-            and self.placements == __o.placements
+            isinstance(other, DTensorSpec)
+            and self.mesh == other.mesh
+            and self.placements == other.placements
         ):
             return False
-        if self.tensor_meta is None or __o.tensor_meta is None:
-            return self.tensor_meta == __o.tensor_meta
+        if self.tensor_meta is None or other.tensor_meta is None:
+            return self.tensor_meta == other.tensor_meta
 
         return (
-            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
+            self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
+            and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
         )
 
     def __str__(self) -> str:
@@ -107,7 +107,7 @@ class DTensorSpec:
         return self.tensor_meta.shape
 
     @property
-    def stride(self) -> Tuple[int, ...]:
+    def stride(self) -> tuple[int, ...]:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return self.tensor_meta.stride

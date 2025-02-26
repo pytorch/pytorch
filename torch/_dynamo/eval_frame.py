@@ -17,6 +17,7 @@ import inspect
 import logging
 import os
 import sys
+import sysconfig
 import textwrap
 import threading
 import traceback
@@ -34,7 +35,6 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -78,7 +78,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
@@ -574,6 +574,10 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
+                except ShortenTraceback as e:
+                    # Failures in the backend likely don't have useful
+                    # data in the TorchDynamo frames, so we strip them out.
+                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
@@ -809,8 +813,10 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
-        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
 
 def is_dynamo_supported():
@@ -1007,7 +1013,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        flat_args: Tuple[Any],
+        flat_args: tuple[Any],
         matched_input_elements_positions: List[int],
         flat_results: List[Any],
         matched_output_elements_positions: List[int],
@@ -1374,7 +1380,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -1465,7 +1471,7 @@ def export(
         graph = None
         out_guards = None
         graph_captured_input = None
-        graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+        graph_captured_result: Optional[tuple[torch.Tensor, ...]] = None
         fake_mode = None
         result_traced = None
 

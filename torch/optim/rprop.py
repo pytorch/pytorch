@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
 from typing import cast, List, Optional, Tuple, Union

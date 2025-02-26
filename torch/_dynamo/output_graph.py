@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import inspect
 import itertools
 import logging
 import operator
@@ -11,18 +12,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import sympy
 
@@ -32,7 +22,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._dynamo.exc import TensorifyScalarRestartAnalysis
+from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -426,7 +416,7 @@ class OutputGraph:
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: List[
-            Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
+            tuple[Callable[..., object], tuple[object, ...], Dict[str, object]]
         ] = []
         self.random_values_var = None
 
@@ -637,7 +627,7 @@ class OutputGraph:
         Saves to out if it is provided. Else saves to the tracing context's global_state.
         """
         global_state = cast(
-            Dict[str, Tuple[Callable[..., Any], bool]],
+            Dict[str, tuple[Callable[..., Any], bool]],
             out
             if out is not None
             else self.tracing_context.global_context.global_state,
@@ -1269,7 +1259,7 @@ class OutputGraph:
         Momentarily restores the global state to what it was prior to tracing the current output
         """
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
-        current_global_state: Dict[str, Tuple[Any, bool]] = {}
+        current_global_state: Dict[str, tuple[Any, bool]] = {}
         self.save_global_state(out=current_global_state)
         try:
             # Set to state prior to tracing the graph
@@ -1472,13 +1462,13 @@ class OutputGraph:
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
-        except TensorifyScalarRestartAnalysis:
+        except (TensorifyScalarRestartAnalysis, ShortenTraceback):
             raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
-                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                    e.__traceback__
-                ) from None
+                raise BackendCompilerFailed(
+                    self.compiler_fn, e, inspect.currentframe()
+                ).with_traceback(e.__traceback__) from None
             msg = (
                 "Backend compiler failed with a fake tensor exception at \n"
                 f"{self.root_tx.format_frame_summary()}"
@@ -1490,9 +1480,9 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(
+                self.compiler_fn, e, inspect.currentframe()
+            ).with_traceback(e.__traceback__) from None
 
         signpost_event(
             "dynamo",

@@ -17,6 +17,8 @@ def parallelize_module(  # type: ignore[return]
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
     parallelize_plan: Optional[Union[ParallelStyle, Dict[str, ParallelStyle]]] = None,
+    *,
+    src_data_rank: Optional[int] = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
@@ -42,6 +44,12 @@ def parallelize_module(  # type: ignore[return]
             input/output for Tensor Parallelism or it can be a dict of module
             FQN and its corresponding :class:`ParallelStyle` object. If not
             specified, the call will do nothing at the moment.
+    Keyword args:
+        src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is used by
+            :meth:`distribute_tensor` to scatter/broadcast the shards/replicas to other ranks. By default,
+            we use ``group_rank=0`` on each DeviceMesh dimension as the source data to preserve the single-device
+            semantic. If passing ``None`` explicitly, :meth:`parallelize_module` simply uses its local data instead
+            of trying to preserve the single-device semantic via scatter/broadcast. Default: 0
     Return:
         A :class:`nn.Module` object parallelized.
 
@@ -76,6 +84,7 @@ def parallelize_module(  # type: ignore[return]
     # been initialized.
 
     if isinstance(parallelize_plan, ParallelStyle):
+        parallelize_plan.src_data_rank = src_data_rank
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
@@ -99,11 +108,19 @@ def parallelize_module(  # type: ignore[return]
                             path_splits
                         )  # rest of the path after `atom`
                         parallelize_module(
-                            submodule, device_mesh, {leaf_path: parallelize_style}
+                            submodule,
+                            device_mesh,
+                            {leaf_path: parallelize_style},
+                            src_data_rank=src_data_rank,
                         )
                     else:
                         # otherwise, directly apply style to this submodule
-                        parallelize_module(submodule, device_mesh, parallelize_style)
+                        parallelize_module(
+                            submodule,
+                            device_mesh,
+                            parallelize_style,
+                            src_data_rank=src_data_rank,
+                        )
         return module
     else:
         raise TypeError(  # pyre-ignore[7]

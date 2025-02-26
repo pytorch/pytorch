@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Union
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -137,11 +137,11 @@ def _find_matches(
     root: GraphModule,
     graph: Graph,
     pattern_to_fuse_handler_cls: Dict[Pattern, Callable],
-) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
+) -> Dict[str, tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
     modules = dict(root.named_modules())
     # node name -> (root_node, match_value)
     match_map: Dict[
-        str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]
+        str, tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]
     ] = {}
     # a map from node to the matched subpattern
     node_to_subpattern: Dict[Node, Any] = {}

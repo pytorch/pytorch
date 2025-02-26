@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -2047,7 +2047,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
-                        metrics_context.update_outer({"is_forward": False})
+                        CompileEventLogger.compilation_metric(is_forward=False)
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )

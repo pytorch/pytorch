@@ -2392,7 +2392,7 @@ TEST(FuturesTest, Basic) {
 // Sparse CUDA tensor test
 TEST(FutureTest, SparseTensor) {
   // Skip test if CUDA is not available.
-  bool has_cuda = at::globalContext().hasCUDA();
+  bool has_cuda = at::hasCUDA();
   if (!has_cuda) {
     LOG(INFO) << "CUDA not available, skipping test";
   }

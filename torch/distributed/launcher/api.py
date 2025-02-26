@@ -9,7 +9,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -163,7 +163,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint

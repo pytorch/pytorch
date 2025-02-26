@@ -68,17 +68,29 @@ s3_upload() {
   local pkg_type
   extension="$1"
   pkg_type="$2"
-  s3_root_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}"
+  s3_key_prefix="${pkg_type}/${UPLOAD_CHANNEL}"
   if [[ -z ${UPLOAD_SUBFOLDER:-} ]]; then
-    s3_upload_dir="${s3_root_dir}/"
+    s3_upload_dir="${UPLOAD_BUCKET}/${s3_key_prefix}/"
   else
-    s3_upload_dir="${s3_root_dir}/${UPLOAD_SUBFOLDER}/"
+    s3_key_prefix="${s3_key_prefix}/${UPLOAD_SUBFOLDER}"
+    s3_upload_dir="${UPLOAD_BUCKET}/${s3_key_prefix}/"
   fi
   (
     for pkg in ${PKG_DIR}/*.${extension}; do
       (
         set -x
         ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_upload_dir}"
+        if [[ ${pkg_type} == "whl" ]]; then
+          dry_run_arg="--dry-run"
+          if [[ "${DRY_RUN}" = "disabled" ]]; then
+            dry_run_arg=""
+          fi
+          uv run scripts/release/upload_metadata_file.py \
+            --package "${pkg}" \
+            --bucket "${UPLOAD_BUCKET}" \
+            --key-prefix "${s3_key_prefix}" \
+            ${dry_run_arg}
+        fi
       )
     done
   )
@@ -86,7 +98,7 @@ s3_upload() {
 
 # Install dependencies (should be a no-op if previously installed)
 conda install -yq anaconda-client
-pip install -q awscli
+pip install -q awscli uv
 
 case "${PACKAGE_TYPE}" in
   conda)

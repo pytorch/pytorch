@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -149,7 +149,7 @@ class CppTemplateKernel(CppKernel):
         )
         return f"{inner_name}[{cexpr_index(index)}]"
 
-    def slice_nd(self, node, ranges: List[Tuple[Any, Any]]) -> ir.ReinterpretView:
+    def slice_nd(self, node, ranges: List[tuple[Any, Any]]) -> ir.ReinterpretView:
         """
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.

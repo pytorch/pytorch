@@ -2,7 +2,7 @@
 import copy
 import warnings
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 import torch
 from torch._subclasses import FakeTensor
@@ -243,7 +243,7 @@ def _is_activation_post_process_node(
 
 def _get_dtype_and_is_dynamic(
     obs_or_fq: Optional[ObserverOrFakeQuantize],
-) -> Tuple[Optional[torch.dtype], bool]:
+) -> tuple[Optional[torch.dtype], bool]:
     """Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
@@ -430,8 +430,8 @@ def _get_standalone_module_configs(
     prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
     parent_backend_config: Optional[BackendConfig],
-) -> Tuple[
-    QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Optional[BackendConfig]
+) -> tuple[
+    QConfigMapping, tuple[Any, ...], PrepareCustomConfig, Optional[BackendConfig]
 ]:
     """
     Returns the standalone module QConfigMapping and PrepareCustomConfig
@@ -1957,7 +1957,7 @@ def _run_prepare_fx_on_standalone_modules(
 def _save_state(
     observed: GraphModule,
     node_name_to_qconfig: Dict[str, QConfigAny],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
     prepare_custom_config: PrepareCustomConfig,
     equalization_node_name_to_qconfig: Dict[str, Any],
     qconfig_mapping: QConfigMapping,
@@ -1979,8 +1979,8 @@ def prepare(
     model: GraphModule,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     is_qat: bool,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-    example_inputs: Tuple[Any, ...],
+    node_name_to_scope: Dict[str, tuple[str, type]],
+    example_inputs: tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
     _equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,

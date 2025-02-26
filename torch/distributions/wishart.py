@@ -5,7 +5,7 @@ from numbers import Number
 from typing import Optional, Union
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
@@ -18,7 +18,7 @@ __all__ = ["Wishart"]
 _log_2 = math.log(2)
 
 
-def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
+def _mvdigamma(x: Tensor, p: int) -> Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
     return torch.digamma(
         x.unsqueeze(-1)
@@ -26,7 +26,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     ).sum(-1)
 
 
-def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
+def _clamp_above_eps(x: Tensor) -> Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
 
@@ -76,10 +76,10 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[torch.Tensor, Number],
-        covariance_matrix: Optional[torch.Tensor] = None,
-        precision_matrix: Optional[torch.Tensor] = None,
-        scale_tril: Optional[torch.Tensor] = None,
+        df: Union[Tensor, Number],
+        covariance_matrix: Optional[Tensor] = None,
+        precision_matrix: Optional[Tensor] = None,
+        scale_tril: Optional[Tensor] = None,
         validate_args=None,
     ):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
@@ -107,7 +107,7 @@ class Wishart(ExponentialFamily):
 
         if self.df.le(event_shape[-1] - 1).any():
             raise ValueError(
-                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1]-1}."
+                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
             )
 
         if scale_tril is not None:
@@ -178,20 +178,20 @@ class Wishart(ExponentialFamily):
         return new
 
     @lazy_property
-    def scale_tril(self):
+    def scale_tril(self) -> Tensor:
         return self._unbroadcasted_scale_tril.expand(
             self._batch_shape + self._event_shape
         )
 
     @lazy_property
-    def covariance_matrix(self):
+    def covariance_matrix(self) -> Tensor:
         return (
             self._unbroadcasted_scale_tril
             @ self._unbroadcasted_scale_tril.transpose(-2, -1)
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
-    def precision_matrix(self):
+    def precision_matrix(self) -> Tensor:
         identity = torch.eye(
             self._event_shape[-1],
             device=self._unbroadcasted_scale_tril.device,
@@ -202,17 +202,17 @@ class Wishart(ExponentialFamily):
         )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         factor = self.df - self.covariance_matrix.shape[-1] - 1
         factor[factor <= 0] = nan
         return factor.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df.view(self._batch_shape + (1, 1)) * (
@@ -238,7 +238,7 @@ class Wishart(ExponentialFamily):
 
     def rsample(
         self, sample_shape: _size = torch.Size(), max_try_correction=None
-    ) -> torch.Tensor:
+    ) -> Tensor:
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
@@ -326,7 +326,7 @@ class Wishart(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2

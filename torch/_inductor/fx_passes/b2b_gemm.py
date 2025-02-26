@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -612,7 +612,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> Tuple[bool, OrderedSet[torch.fx.Node]]:
+    ) -> tuple[bool, OrderedSet[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
         with no other input nodes for the intermediates and dst;

@@ -847,6 +847,29 @@ class TestDeserialize(TestCase):
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
+    def test_sym_bool_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z == 2)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0]),))
+
+    def test_sym_int_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z % 3 == 0)
+                torch._check(z == 3)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0, 1, 0]),))
+
     def test_shape(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

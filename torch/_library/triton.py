@@ -4,7 +4,7 @@ from typing import Any, Callable, Generator, Iterable, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
-from .custom_ops import custom_op
+from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 
 
@@ -106,7 +106,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Any:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch

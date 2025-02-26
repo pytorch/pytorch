@@ -10,7 +10,7 @@ import re
 import tempfile
 import threading
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch._dynamo
@@ -45,7 +45,7 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 
 def safe_schema_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
@@ -61,7 +61,7 @@ def safe_schema_check(
 
 def safe_autograd_registration_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
@@ -80,7 +80,7 @@ def safe_autograd_registration_check(
 
 def safe_fake_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
@@ -94,7 +94,7 @@ def safe_fake_check(
 
 def safe_aot_autograd_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     dynamic: bool,
     *,
@@ -618,7 +618,7 @@ def should_print_better_repro() -> None:
 
 def opcheck(
     op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
@@ -672,7 +672,7 @@ class OpCheckError(Exception):
 def generate_repro(
     test: str,
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     *,
     save_data: bool,

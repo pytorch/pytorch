@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,7 @@ class _ParamUsageInfo(NamedTuple):
     """
 
     module: nn.Module
-    named_params: List[Tuple[str, nn.Parameter]]
+    named_params: List[tuple[str, nn.Parameter]]
 
 
 class _ExecutionInfo:
@@ -119,7 +119,7 @@ class _ExecOrderTracer:
         # Below are the expected arguments to `call_module()`
         module: nn.Module,
         forward: Callable,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> Any:
         """
@@ -164,7 +164,7 @@ class _ExecOrderTracer:
         # Below are the expected arguments to `create_proxy()`
         kind: str,
         target: torch.fx.node.Target,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
@@ -210,7 +210,7 @@ class _ExecOrderTracer:
         curr_module = exec_info.curr_module
         if kind in ("call_function", "call_method"):
             if args is not None:
-                named_params: List[Tuple[str, nn.Parameter]] = []
+                named_params: List[tuple[str, nn.Parameter]] = []
                 for arg in args:
                     if (
                         isinstance(arg, torch.fx.Proxy)

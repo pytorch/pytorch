@@ -398,7 +398,7 @@ import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
 from importlib import metadata
-from typing import Callable, List, Optional, Set, Tuple, Type, Union
+from typing import Callable, List, Optional, Set, Type, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -770,7 +770,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], List[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     assert 0 < min_nodes <= max_nodes

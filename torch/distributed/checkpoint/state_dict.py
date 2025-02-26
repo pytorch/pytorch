@@ -16,7 +16,6 @@ from typing import (
     no_type_check,
     Optional,
     Set,
-    Tuple,
     Union,
 )
 
@@ -80,7 +79,7 @@ _STATE = "state"
 FQNS_T = Set[str]
 PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
 ValueType = Union[
-    PrimitiveType, List[PrimitiveType], Tuple[PrimitiveType], Dict[str, "ValueType"]
+    PrimitiveType, List[PrimitiveType], tuple[PrimitiveType], Dict[str, "ValueType"]
 ]
 DictValueType = Dict[str, ValueType]
 ListDictValueType = List[DictValueType]
@@ -263,7 +262,7 @@ def _iterate_valid_model_state(model):
 
 def _verify_options(
     model: nn.Module,
-    optims: Tuple[torch.optim.Optimizer, ...],
+    optims: tuple[torch.optim.Optimizer, ...],
     optim_only: bool,
     *,
     submodules: Optional[Set[nn.Module]] = None,
@@ -749,7 +748,7 @@ def _unflatten_optim_state_dict(
 @torch.no_grad()
 def _get_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     info: _StateDictInfo,
 ) -> OptimizerStateType:
     if not info.handle_optim:
@@ -885,7 +884,7 @@ def _split_optim_state_dict(
 @torch.no_grad()
 def _load_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     state_dict: OptimizerStateType,
     info: _StateDictInfo,
 ) -> None:
@@ -1064,7 +1063,7 @@ def get_state_dict(
     *,
     submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
-) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
+) -> tuple[Dict[str, ValueType], OptimizerStateType]:
     """
     Return the model state_dict and optimizers state_dict.
 
@@ -1379,7 +1378,7 @@ def _patch_model_state_dict(
 def _patch_optimizer_state_dict(
     model: nn.Module,
     *,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optimizers``.

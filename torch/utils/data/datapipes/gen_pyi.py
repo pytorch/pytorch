@@ -2,7 +2,7 @@
 import os
 import pathlib
 from collections import defaultdict
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Union
 
 
 def materialize_lines(lines: List[str], indentation: int) -> str:
@@ -19,7 +19,7 @@ def gen_from_template(
     dir: str,
     template_name: str,
     output_name: str,
-    replacements: List[Tuple[str, Any, int]],
+    replacements: List[tuple[str, Any, int]],
 ):
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
@@ -75,7 +75,7 @@ def extract_class_name(line: str) -> str:
 
 def parse_datapipe_file(
     file_path: str,
-) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
     """Given a path to file, parses the file and returns a dictionary of method names to function signatures."""
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
     doc_string_dict = defaultdict(list)
@@ -127,7 +127,7 @@ def parse_datapipe_file(
 
 def parse_datapipe_files(
     file_paths: Set[str],
-) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
     (
         methods_and_signatures,
         methods_and_class_names,

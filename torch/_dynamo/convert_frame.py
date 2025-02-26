@@ -19,11 +19,10 @@ import threading
 import time
 import traceback
 import typing
-import warnings
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -66,7 +65,7 @@ from .bytecode_transformation import (
 from .cache_size import (
     CacheSizeRelevantForFrame,
     compute_cache_size,
-    exceeds_cache_size_limit,
+    exceeds_recompile_limit,
     is_recompilation,
 )
 from .eval_frame import (
@@ -82,6 +81,7 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     RecompileLimitExceeded,
+    ShortenTraceback,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -619,7 +619,7 @@ def _compile(
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
-    closure: Tuple[CellType],
+    closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
@@ -699,14 +699,6 @@ def _compile(
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
-
-        # The config.dead_code_elimination flag is deprecated
-        # See https://github.com/pytorch/pytorch/issues/136862 for more information
-        if not config.dead_code_elimination:
-            warnings.warn(
-                "The config.dead_code_elimination flag is deprecated, it's now always true."
-            )
-
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
@@ -911,7 +903,7 @@ def _compile(
                 cache_entry, frame
             )
 
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size, compile_id)
+        exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -934,12 +926,12 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.fail_on_cache_limit_hit:
+            if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+                    f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
-                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
             ):
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
@@ -1047,6 +1039,7 @@ def _compile(
                     ValidationException,
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
+                    ShortenTraceback,
                 ),
             ):
                 raise
@@ -1155,6 +1148,9 @@ def _compile(
                     dynamo_time_before_restart
                 ),
             }
+            # TODO: replace with CompileEventLogger.compilation_metrics
+            # There are some columns here not in PT2 Compile Events
+            # so we need to slightly change it
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 

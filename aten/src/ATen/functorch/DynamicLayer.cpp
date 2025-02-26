@@ -41,6 +41,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
@@ -50,6 +51,7 @@ DynamicLayer::DynamicLayer(
       interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value());
       break;
     case TransformType::Functionalize:
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Functionalize(layerId, functionalize_add_back_views.value());
       break;
     default:
@@ -345,9 +347,7 @@ void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int6
     if (!ivalue.isTensor()) {
       continue;
     }
-    Tensor value = ivalue.toTensor();
-    Tensor replacement = func(value, flag);
-    args[idx] = std::move(replacement);
+    args[idx] = func(ivalue.toTensor(), flag);
     // sanity checks
     if (ivalue.toTensor().defined()) {
       TORCH_INTERNAL_ASSERT(args[idx].toTensor().defined());

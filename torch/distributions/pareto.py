@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -39,17 +40,17 @@ class Pareto(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         # mean is inf for alpha <= 1
         a = self.alpha.clamp(min=1)
         return a * self.scale / (a - 1)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.scale
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         # var is inf for alpha <= 2
         a = self.alpha.clamp(min=2)
         return self.scale.pow(2) * a / ((a - 1).pow(2) * (a - 2))

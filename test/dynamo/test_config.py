@@ -66,8 +66,8 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "verbose",
             "verify_correctness",  # will not affect model, will raise RuntimeError
             # (no silent change to compilation behaviour)
-            "cache_size_limit",
-            "accumulated_cache_size_limit",
+            "recompile_limit",
+            "accumulated_recompile_limit",
             "replay_record_enabled",
             "cprofile",  # only wraps _compile, not graph
             "repro_after",

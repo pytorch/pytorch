@@ -1,5 +1,4 @@
 # mypy: ignore-errors
-import collections
 import dataclasses
 import functools
 import inspect
@@ -18,14 +17,13 @@ import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
     DefaultsSource,
     GetItemSource,
-    ODictGetItemSource,
     TypeSource,
     WeakRefCallSource,
 )
@@ -193,18 +191,6 @@ class SuperVariable(VariableTracker):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source
             ).call_function(tx, args, kwargs)
-        elif (
-            inner_fn is collections.OrderedDict.__getitem__
-            and isinstance(self.objvar, variables.UserDefinedObjectVariable)
-            and self.objvar.source
-            and len(args) == 1
-            and len(kwargs) == 0
-            and args[0].is_python_constant()
-        ):
-            key = args[0].as_python_constant()
-            value = collections.OrderedDict.__getitem__(self.objvar.value, key)
-            source = ODictGetItemSource(self.objvar.source, key)
-            return VariableTracker.build(tx, value, source)
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
@@ -227,6 +213,27 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif inner_fn is object.__getattribute__:
+            # object.__getattribute__ has no side-effects. We can directly call
+            # __getattribute__ to access the attribute.
+            attr_name = args[0].value
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self.objvar, attr_name
+            ):
+                result = tx.output.side_effects.load_attr(
+                    self.objvar, attr_name, deleted_ok=True
+                )
+                if isinstance(result, variables.DeletedVariable):
+                    raise_observed_exception(AttributeError, tx)
+                return result
+
+            try:
+                attr_value = self.objvar.value.__getattribute__(attr_name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+
+            source = self.source and AttrSource(self.source, attr_name)
+            return VariableTracker.build(tx, attr_value, source)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -1017,6 +1024,10 @@ class GetAttrVariable(VariableTracker):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
+        # When Dynamo interprets `obj.__dict__`, it often represents the result
+        # as a `GetAttrVariable(obj_var, "__dict__")`.  To support method calls
+        # on cases where `obj.__dict__` returns a dict object or a dict view as
+        # `MappingProxyType`, we need the following logic.
         if (
             name in ("__getitem__", "get")
             and self.name == "__dict__"
@@ -1065,6 +1076,15 @@ class GetAttrVariable(VariableTracker):
                 return variables.ConstantVariable(True)
             else:
                 return variables.ConstantVariable(False)
+
+        elif (
+            name == "__setitem__"
+            and self.name == "__dict__"
+            and not kwargs
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+        ):
+            # Bypass any custom setattr as we are updating the `__dict__` itself
+            return self.obj.method_setattr_standard(tx, args[0], args[1])
 
         return super().call_method(tx, name, args, kwargs)
 

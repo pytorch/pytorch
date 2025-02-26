@@ -54,7 +54,7 @@ jobs:
             docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
-            rocm_version: "6.2.4"
+            rocm_version: "6.3"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40

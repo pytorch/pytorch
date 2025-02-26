@@ -15,14 +15,14 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Tuple
+from typing import Any, Container, Dict, Hashable, List, Optional
 
 import torch
-from torch._guards import CompileId
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction
+from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -50,58 +50,18 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-
-
-try:
-    import triton
-except ImportError:
-    triton = None
-
-if triton is not None:
-    from triton import Config
-    from triton.compiler import CompiledKernel
-    from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import KernelInterface
-
-    from . import triton_helpers
-
-    try:
-        from triton.runtime.autotuner import PTXASError
-    except ImportError:
-
-        class PTXASError(Exception):  # type: ignore[no-redef]
-            pass
-
-    try:
-        from triton.compiler.compiler import ASTSource
-    except ImportError:
-        ASTSource = None
-
-    try:
-        from triton.backends.compiler import GPUTarget
-    except ImportError:
-        GPUTarget = None
-else:
-    from types import ModuleType
-
-    class OutOfResources(Exception):  # type: ignore[no-redef]
-        pass
-
-    class PTXASError(Exception):  # type: ignore[no-redef]
-        pass
-
-    Config = object
-    KernelInterface = object
-    ASTSource = None
-    GPUTarget = None
-    triton_helpers = ModuleType("triton_helpers")
-
-try:
-    autograd_profiler = torch.autograd.profiler
-except AttributeError:  # Compile workers only have a mock version of torch
-
-    class autograd_profiler:  # type: ignore[no-redef]
-        _is_profiler_enabled = False
+from .triton_compat import (
+    ASTSource,
+    autograd_profiler,
+    cc_warp_size,
+    CompiledKernel,
+    Config,
+    GPUTarget,
+    KernelInterface,
+    OutOfResources,
+    PTXASError,
+    triton,
+)
 
 
 log = logging.getLogger(__name__)
@@ -128,7 +88,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
+    xyz_options: tuple[tuple[int, Optional[int], Optional[int]], ...]
     configs: List[Config] = []
     warp_size = device_props.warp_size
     # CPU target has no concept of "warp"
@@ -429,18 +389,13 @@ class CachingAutotuner(KernelInterface):
     def _precompile_config(self, cfg: Config, warm_cache_only: bool):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
-        for k, v in cfg.kwargs.items():
-            if self.device_props.type == "hip":
-                if k == "matrix_instr_nonkdim":
-                    compile_meta["matrix_instr_nonkdim"] = v
-                    continue
-                if k == "waves_per_eu":
-                    compile_meta["waves_per_eu"] = v
-                    continue
-                if k == "kpack":
-                    compile_meta["kpack"] = v
-                    continue
-            compile_meta["constants"][k] = v
+        cfg_kwargs = cfg.kwargs
+        if self.device_props.type == "hip":
+            cfg_kwargs = {**cfg_kwargs}
+            for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
+                if k in cfg_kwargs:
+                    compile_meta[k] = cfg_kwargs.pop(k)
+        compile_meta["constants"].update(cfg_kwargs)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -456,59 +411,39 @@ class CachingAutotuner(KernelInterface):
         else:
             triton_helpers.set_driver_to_gpu()
 
-        if ASTSource:
-            compile_args = (
-                ASTSource(
-                    self.fn,
-                    compile_meta["signature"],
-                    compile_meta["constants"],
-                    compile_meta["configs"][0],
-                ),
-            )
+        if not ASTSource:
+            raise RuntimeError("Installed triton version too old, please upgrade")
 
-            cc_str = str(compile_meta["cc"])
-            if "gfx10" in cc_str or "gfx11" in cc_str:
-                rocm_warp_size = 32
-            else:
-                rocm_warp_size = 64
+        compile_args = (
+            ASTSource(
+                self.fn,
+                compile_meta["signature"],
+                compile_meta["constants"],
+                compile_meta["configs"][0],
+            ),
+        )
 
-            if GPUTarget:
-                target = GPUTarget(
-                    compile_meta["device_type"],
-                    compile_meta["cc"],
-                    rocm_warp_size if torch.version.hip else 32,
-                )
-            else:
-                target = (
-                    (compile_meta["device_type"], compile_meta["cc"])
-                    if not torch.version.hip
-                    else [
-                        compile_meta["device_type"],
-                        compile_meta["cc"],
-                        rocm_warp_size,
-                    ]
-                )
+        target = GPUTarget(
+            compile_meta["device_type"],
+            compile_meta["cc"],
+            cc_warp_size(compile_meta["cc"]),
+        )
 
-            options = {
-                "num_warps": compile_meta["num_warps"],
-                "num_stages": compile_meta["num_stages"],
-                "debug": compile_meta["debug"],
-                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
-            }
-            if self.device_props.type == "hip":
-                if "waves_per_eu" in compile_meta:
-                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
-                if "matrix_instr_nonkdim" in compile_meta:
-                    options["matrix_instr_nonkdim"] = compile_meta[
-                        "matrix_instr_nonkdim"
-                    ]
-            compile_kwargs = {
-                "target": target,
-                "options": options,
-            }
-        else:
-            compile_args = (self.fn,)
-            compile_kwargs = compile_meta
+        options = {
+            "num_warps": compile_meta["num_warps"],
+            "num_stages": compile_meta["num_stages"],
+            "debug": compile_meta["debug"],
+            "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
+        }
+        if self.device_props.type == "hip":
+            if "waves_per_eu" in compile_meta:
+                options["waves_per_eu"] = compile_meta["waves_per_eu"]
+            if "matrix_instr_nonkdim" in compile_meta:
+                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+        compile_kwargs = {
+            "target": target,
+            "options": options,
+        }
 
         if warm_cache_only:
             binary = triton.compile(*compile_args, **compile_kwargs)
@@ -590,139 +525,68 @@ class CachingAutotuner(KernelInterface):
                 else binary.metadata
             ),
             "shared": binary_shared,
+            "num_warps": (
+                binary.num_warps
+                if hasattr(binary, "num_warps")
+                else binary.metadata.num_warps
+            ),
+            "cta_args": (
+                (
+                    binary.num_ctas,
+                    *get_first_attr(binary, "cluster_dims", "clusterDims"),
+                )
+                if hasattr(binary, "num_ctas")
+                else (
+                    (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
+                    if hasattr(binary, "metadata")
+                    else ()
+                )
+            ),
+            "function": get_first_attr(binary, "function", "cu_function"),
+            "runner": get_first_attr(binary, "run", "c_wrapper"),
         }
 
-        scope["num_warps"] = (
-            binary.num_warps
-            if hasattr(binary, "num_warps")
-            else binary.metadata.num_warps
-        )
-
-        scope["cta_args"] = (
-            (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
-            if hasattr(binary, "num_ctas")
-            else (
-                (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
-                if hasattr(binary, "metadata")
-                else ()
-            )
-        )
-
-        scope["function"] = get_first_attr(binary, "function", "cu_function")
-
-        def get_launch_args_without_kernel_launch_metadata(
-            grid,
-            grid_0,
-            grid_1,
-            grid_2,
-            stream,
-            function,
-            metadata,
-            bin,
-            launch_enter_hook,
-            launch_exit_hook,
-            num_warps,
-            shared,
-            cta_args,
-            args,
-        ):
-            """
-            Construct launch args before CompiledKernel.launch_metadata is added.
-            """
-            return (
-                grid_0,
-                grid_1,
-                grid_2,
-                num_warps,
-                *cta_args,
-                shared,
-                stream,
-                function,
-                launch_enter_hook,
-                launch_exit_hook,
-                metadata,
-            )
-
-        # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
-        # `bin.launch_metadata` is relatively expensive, and returns None unless a
-        # `launch_enter_hook` is installed.  So if we don't have that hook installed,
-        # we want to burn None in to the launch args with zero overhead.
-        # See https://github.com/pytorch/pytorch/issues/123597
-        if binary.launch_enter_hook:
-
-            def get_launch_args_with_kernel_launch_metadata(
-                grid,
-                grid_0,
-                grid_1,
-                grid_2,
-                stream,
-                function,
-                metadata,
-                bin,
-                launch_enter_hook,
-                launch_exit_hook,
-                num_warps,
-                shared,
-                cta_args,
-                args,
-            ):
-                """
-                Construct launch args after CompiledKernel.launch_metadata is added
-                by https://github.com/openai/triton/pull/3492 .
-                """
-                return (
-                    grid_0,
-                    grid_1,
-                    grid_2,
-                    stream,
-                    function,
-                    metadata,
-                    bin.launch_metadata(grid, stream, *args),
-                    launch_enter_hook,
-                    launch_exit_hook,
+        if not hasattr(binary, "launch_metadata"):
+            # launch args before CompiledKernel.launch_metadata is added.
+            # TODO(jansel): delete this branch in mid-2025
+            runner_args = [
+                "grid_0",
+                "grid_1",
+                "grid_2",
+                "num_warps",
+                "*cta_args",
+                "shared",
+                "stream",
+                "function",
+                "launch_enter_hook",
+                "launch_exit_hook",
+                "metadata",
+                *call_args,
+            ]
+        else:  # args after CompiledKernel.launch_metadata: https://github.com/openai/triton/pull/3492
+            # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
+            # `bin.launch_metadata` is relatively expensive, and returns None unless a
+            # `launch_enter_hook` is installed.  So if we don't have that hook installed,
+            # we want to burn None in to the launch args with zero overhead.
+            # See https://github.com/pytorch/pytorch/issues/123597
+            if binary.launch_enter_hook:
+                launch_metadata = (
+                    f"bin.launch_metadata(grid, stream, {', '.join(call_args)})"
                 )
-
-        else:
-
-            def get_launch_args_with_kernel_launch_metadata(
-                grid,
-                grid_0,
-                grid_1,
-                grid_2,
-                stream,
-                function,
-                metadata,
-                bin,
-                launch_enter_hook,
-                launch_exit_hook,
-                num_warps,
-                shared,
-                cta_args,
-                args,
-            ):
-                """
-                Construct launch args after CompiledKernel.launch_metadata is added
-                by https://github.com/openai/triton/pull/3492 .
-                """
-                return (
-                    grid_0,
-                    grid_1,
-                    grid_2,
-                    stream,
-                    function,
-                    metadata,
-                    None,
-                    launch_enter_hook,
-                    launch_exit_hook,
-                )
-
-        scope["get_launch_args"] = (
-            get_launch_args_with_kernel_launch_metadata
-            if hasattr(binary, "launch_metadata")
-            else get_launch_args_without_kernel_launch_metadata
-        )
-
-        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
+            else:
+                launch_metadata = "None"
+            runner_args = [
+                "grid_0",
+                "grid_1",
+                "grid_2",
+                "stream",
+                "function",
+                "metadata",
+                launch_metadata,
+                "launch_enter_hook",
+                "launch_exit_hook",
+                *call_args,
+            ]
 
         exec(
             f"""
@@ -731,14 +595,7 @@ class CachingAutotuner(KernelInterface):
                     grid_0, grid_1, grid_2 = grid(grid_meta)
                 else:
                     grid_0, grid_1, grid_2 = grid
-
-                args = {', '.join(call_args)},
-                launch_args = get_launch_args(
-                    grid, grid_0, grid_1, grid_2, stream, function,
-                    metadata, bin, launch_enter_hook, launch_exit_hook,
-                    num_warps, shared, cta_args, args
-                )
-                runner(*launch_args, *args)
+                runner({', '.join(runner_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -873,7 +730,7 @@ class CachingAutotuner(KernelInterface):
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[List[Any], Dict[str, Any]]:
         """
         Prepare new args and kwargs by cloning any in-place buffers
         (that are not in the provided exclusion list), to avoid autotune
@@ -896,7 +753,7 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args, **kwargs) -> tuple[List[Any], Dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
@@ -905,8 +762,6 @@ class CachingAutotuner(KernelInterface):
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-            compile_id=CompileId.from_string(self.inductor_meta.get("compile_id")),
-            is_forward=self.inductor_meta.get("is_forward"),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1359,7 +1214,7 @@ def cached_autotune(
 
 def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
-    seen = OrderedSet[str]()
+    seen: OrderedSet[Hashable] = OrderedSet()
     pruned_configs = []
 
     for cfg in configs:

@@ -3,7 +3,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 from functools import partial, reduce
 
 import torch
@@ -455,7 +455,7 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
+    pg_map: Dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
     pg_backend_config: Dict[dist.ProcessGroup, str]

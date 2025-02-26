@@ -904,6 +904,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 std::string TupleType::str() const {
   std::stringstream ss;
   if (schema_ && name().has_value()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ss << name()->qualifiedName();
   } else {
     ss << "(";

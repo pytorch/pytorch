@@ -14,7 +14,6 @@ import math
 import operator
 import random
 import re
-import sys
 import types
 import warnings
 import weakref
@@ -36,7 +35,11 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_metrics_context
+from torch._dynamo.utils import (
+    get_metrics_context,
+    is_int_specialization_case,
+    is_torch_sym,
+)
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -76,11 +79,11 @@ from ..source import (
     CallMethodItemSource,
     ConstDictKeySource,
     ConvertIntSource,
+    DictGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
     is_constant_source,
-    is_from_defaults,
     is_from_optimizer_source,
     LocalSource,
     NumpyTensorSource,
@@ -98,6 +101,7 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -137,8 +141,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    HFPretrainedConfigVariable,
-    PythonSysModulesVariable,
     SetVariable,
 )
 from .distributed import (
@@ -401,20 +403,6 @@ class VariableBuilder:
             NumpyNdarrayVariable,
         }
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
-        }
-
     def get_source(self):
         return self.source
 
@@ -584,37 +572,15 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                TypingVariable(k): UserDefinedObjectVariable(
-                    v,
-                    source=GetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-            # Optimisation for the common case strings, ints, etc
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -643,13 +609,18 @@ class VariableBuilder:
                     source_key = ConstDictKeySource(self.get_source(), i)
                     key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -725,12 +696,12 @@ class VariableBuilder:
                 if not ConstantVariable.is_literal(k):
                     unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
-                    self.tx, GetItemSource(keywords_source, k)
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
@@ -848,9 +819,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
                 unimplemented(
@@ -946,9 +914,7 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
-            value.node, torch.nested._internal.nested_int.NestedIntNode
-        ):
+        elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
@@ -1245,13 +1211,18 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(self.get_source(), i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
@@ -1540,30 +1511,7 @@ class VariableBuilder:
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                # Assume integers from global variables want to be specialized
-                not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly), unless explicitly disabled
-                or (
-                    self.source.guard_source().is_specialized_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or (
-                    self.source.guard_source().is_unspecialized_builtin_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or is_from_defaults(self.source)
-                # TODO: Delete this condition when rollout is done.  NB: this
-                # condition never evaluates True in open source
-                or (
-                    not justknobs_check(
-                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
-                    )
-                    and value in self._common_constants()
-                )
-            ):
+            if is_int_specialization_case(value, self.source):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
@@ -2173,7 +2121,7 @@ def _dataclasses_fields_lambda(obj):
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = GetItemSource(
+            source = DictGetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
         items.append(UserDefinedObjectVariable(field, source=source))

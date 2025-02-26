@@ -2,18 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Sequence, Union
 
 import sympy
 from sympy import Expr
@@ -41,8 +30,8 @@ log = logging.getLogger(__name__)
 def evaluate_expr(
     shape_env: ShapeEnv,
     expr: Union[sympy.Basic, bool],
-    axioms: Optional[Tuple[sympy.Expr]] = None,
-    var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
+    axioms: Optional[tuple[sympy.Expr]] = None,
+    var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
@@ -95,7 +84,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Expr] = {}
+        cache: Dict[tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -117,7 +106,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Any] = {}
+        cache: Dict[tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -158,7 +147,7 @@ class SizeVarAllocator:
                 var_to_range[var] = ValueRanges(0, IntInfinity())
 
         var_to_range_tuple = cast(
-            Tuple[Tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
+            tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
             tuple(var_to_range.items()),
         )
 
@@ -565,7 +554,7 @@ class SizeVarAllocator:
         exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
@@ -757,7 +746,7 @@ class SizeVarAllocator:
 
     def expand_floor_div(
         self, index: sympy.Expr
-    ) -> Union[bool, Tuple[sympy.Expr, sympy.Expr]]:
+    ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
         be simplfied.

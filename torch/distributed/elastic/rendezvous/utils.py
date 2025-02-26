@@ -13,7 +13,7 @@ import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 
 __all__ = ["parse_rendezvous_endpoint"]
@@ -66,7 +66,7 @@ def _try_parse_port(port_str: str) -> Optional[int]:
 
 def parse_rendezvous_endpoint(
     endpoint: Optional[str], default_port: int
-) -> Tuple[str, int]:
+) -> tuple[str, int]:
     """Extract the hostname and the port number from a rendezvous endpoint.
 
     Args:
@@ -165,7 +165,7 @@ def _matches_machine_hostname(host: str) -> bool:
     return False
 
 
-def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
+def _delay(seconds: Union[float, tuple[float, float]]) -> None:
     """Suspend the current thread for ``seconds``.
 
     Args:
@@ -195,7 +195,7 @@ class _PeriodicTimer:
     class _Context:
         interval: float
         function: Callable[..., None]
-        args: Tuple[Any, ...]
+        args: tuple[Any, ...]
         kwargs: Dict[str, Any]
         stop_event: Event
 

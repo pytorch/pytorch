@@ -25,7 +25,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -95,14 +94,14 @@ class _TensorLoader(ABC):
         pass
 
     @abstractmethod
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
     def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: List[tuple[int, object]] = []
 
     def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
@@ -110,7 +109,7 @@ class _SerialCpuLoader(_TensorLoader):
     def start_loading(self) -> None:
         pass
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -130,7 +129,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: List[tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -150,7 +149,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self) -> List[Tuple[torch.Tensor, object]]:
+    def _drain(self) -> List[tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -184,7 +183,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self) -> Iterable[Tuple[torch.Tensor, object]]:
+    def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
@@ -202,7 +201,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()

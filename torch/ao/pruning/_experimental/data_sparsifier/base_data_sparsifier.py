@@ -4,7 +4,7 @@ import copy
 import sys
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import nn
@@ -61,7 +61,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         >>> # tensor_1 and tensor_2 will have sparsity_level of 0.7 but tensor_3 will have sparsity_level=0.3
     """
 
-    def __init__(self, data_list: Optional[List[Tuple[str, Any]]] = None, **defaults):
+    def __init__(self, data_list: Optional[List[tuple[str, Any]]] = None, **defaults):
         super().__init__(defaults=defaults)
 
         self._container = _Container()

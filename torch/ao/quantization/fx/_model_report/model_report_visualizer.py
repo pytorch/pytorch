@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict as OrdDict
-from typing import Any, Dict, List, OrderedDict, Set, Tuple
+from typing import Any, Dict, List, OrderedDict, Set
 
 import torch
 
@@ -181,7 +181,7 @@ class ModelReportVisualizer:
         self,
         filtered_data: OrderedDict[str, Dict[str, Any]],
         tensor_features: List[str],
-    ) -> Tuple[List, List]:
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
@@ -238,7 +238,7 @@ class ModelReportVisualizer:
         filtered_data: OrderedDict[str, Any],
         channel_features: List[str],
         num_channels: int,
-    ) -> Tuple[List, List]:
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the channels headers and table
 
@@ -297,7 +297,7 @@ class ModelReportVisualizer:
 
     def generate_filtered_tables(
         self, feature_filter: str = "", module_fqn_filter: str = ""
-    ) -> Dict[str, Tuple[List, List]]:
+    ) -> Dict[str, tuple[List, List]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
@@ -467,7 +467,7 @@ class ModelReportVisualizer:
 
     def _get_plottable_data(
         self, feature_filter: str, module_fqn_filter: str
-    ) -> Tuple[List, List[List], bool]:
+    ) -> tuple[List, List[List], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 

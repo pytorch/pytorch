@@ -61,7 +61,7 @@ class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags
     ):
-        ep = torch.export.export(model, example_inputs)
+        ep = torch.export.export(model, example_inputs, strict=True)
         found_tags = True
         not_found_nodes = ""
         for from_node, tag in from_node_to_tags.items():

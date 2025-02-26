@@ -14,6 +14,7 @@
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
+#include <ATen/ops/angle_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
@@ -291,6 +292,40 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
     return [mpsGraph notWithTensor:inputTensor name:nil];
   });
   return output;
+}
+
+Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
+  if (mps::supportsComplex()) {
+    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
+      auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
+      return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
+    });
+    return output;
+  } else {
+    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex imput on macOS13")
+    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      // On macOS 13 with non-complex input, realPartOfTensor and imaginaryPartOfTensor are
+      // not available, and NaN is not propagated correctly:
+      auto imagPart = [mpsGraph constantWithScalar:0.0 shape:inputTensor.shape dataType:inputTensor.dataType];
+      auto result = [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
+      auto nanMask = [mpsGraph isNaNWithTensor:inputTensor name:nil];
+      return [mpsGraph selectWithPredicateTensor:nanMask
+                             truePredicateTensor:inputTensor
+                            falsePredicateTensor:result
+                                            name:nil];
+    });
+    return output;
+  }
+}
+
+Tensor angle_mps(const Tensor& self) {
+  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)
+      ? c10::typeMetaToScalarType(c10::get_default_dtype())
+      : c10::toRealValueType(self.scalar_type());
+  Tensor result = at::empty({0}, self.options().dtype(float_type));
+  return angle_out_mps(self, result);
 }
 
 TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {

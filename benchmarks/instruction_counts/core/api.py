@@ -7,7 +7,7 @@ import enum
 import itertools as it
 import re
 import textwrap
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 from worker.main import WorkerTimerArgs
 
@@ -159,11 +159,11 @@ class GroupedBenchmark:
 
     # Described above
     setup: GroupedSetup
-    signature_args: Optional[Tuple[str, ...]]
+    signature_args: Optional[tuple[str, ...]]
     signature_output: Optional[str]
     torchscript: bool
     autograd: bool
-    num_threads: Tuple[int, ...]
+    num_threads: tuple[int, ...]
 
     @classmethod
     def init_from_stmts(
@@ -175,7 +175,7 @@ class GroupedBenchmark:
         signature: Optional[str] = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, Tuple[int, ...]] = 1,
+        num_threads: Union[int, tuple[int, ...]] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks from free-form statements.
 
@@ -223,7 +223,7 @@ class GroupedBenchmark:
         signature: Optional[str] = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, Tuple[int, ...]] = 1,
+        num_threads: Union[int, tuple[int, ...]] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks using torch.nn Modules.
 
@@ -260,8 +260,8 @@ class GroupedBenchmark:
         cls,
         py_block: str = "",
         cpp_block: str = "",
-        num_threads: Union[int, Tuple[int, ...]] = 1,
-    ) -> Dict[Union[Tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+        num_threads: Union[int, tuple[int, ...]] = 1,
+    ) -> Dict[Union[tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
         py_cases, py_setup, py_global_setup = cls._parse_variants(
             py_block, Language.PYTHON
         )
@@ -279,7 +279,7 @@ class GroupedBenchmark:
         # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
-        variants: Dict[Union[Tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        variants: Dict[Union[tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
 
         seen_labels: Set[str] = set()
         for label in it.chain(py_cases.keys(), cpp_cases.keys()):
@@ -333,7 +333,7 @@ class GroupedBenchmark:
     @staticmethod
     def _parse_signature(
         signature: Optional[str],
-    ) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+    ) -> tuple[Optional[tuple[str, ...]], Optional[str]]:
         if signature is None:
             return None, None
 
@@ -341,7 +341,7 @@ class GroupedBenchmark:
         if match is None:
             raise ValueError(f"Invalid signature: `{signature}`")
 
-        args: Tuple[str, ...] = tuple(match.groups()[0].split(", "))
+        args: tuple[str, ...] = tuple(match.groups()[0].split(", "))
         output: str = match.groups()[1].strip()
 
         if "," in output:
@@ -357,7 +357,7 @@ class GroupedBenchmark:
     @staticmethod
     def _model_from_py_stmt(
         py_stmt: Optional[str],
-        signature_args: Optional[Tuple[str, ...]],
+        signature_args: Optional[tuple[str, ...]],
         signature_output: Optional[str],
     ) -> str:
         if py_stmt is None:
@@ -376,10 +376,10 @@ class GroupedBenchmark:
 
     @staticmethod
     def _make_model_invocation(
-        signature_args: Tuple[str, ...],
+        signature_args: tuple[str, ...],
         signature_output: Optional[str],
         runtime: RuntimeMode,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         py_prefix, cpp_prefix = "", ""
         if signature_output is not None:
             py_prefix = f"{signature_output} = "
@@ -415,7 +415,7 @@ class GroupedBenchmark:
     @staticmethod
     def _parse_variants(
         block: str, language: Language
-    ) -> Tuple[Dict[str, List[str]], str, str]:
+    ) -> tuple[Dict[str, List[str]], str, str]:
         block = textwrap.dedent(block).strip()
         comment = "#" if language == Language.PYTHON else "//"
         label_pattern = f"{comment} @(.+)$"

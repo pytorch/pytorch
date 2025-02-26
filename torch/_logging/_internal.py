@@ -844,7 +844,7 @@ class TorchLogsFormatter(logging.Formatter):
         filepath = make_module_path_relative(record.pathname)
 
         prefix = (
-            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.process} "
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
             f"{filepath}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )

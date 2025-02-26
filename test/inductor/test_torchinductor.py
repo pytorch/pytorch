@@ -32,6 +32,7 @@ import torch._inductor.aoti_eager
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -40,11 +41,13 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
+from torch._guards import CompileContext, CompileId
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
+from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -52,6 +55,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
 )
@@ -1290,12 +1294,16 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            self.assertEqual(
-                " ".join(code).count(
-                    "view_dtype" if config.cpp_wrapper else "aten.view"
-                ),
-                3,
-            )
+            # cpp_wrapper falls back to Python function calls with complex inputs, so
+            # there are still two calls to aten.view when it's enabled.
+            code = " ".join(code)
+            if config.cpp_wrapper:
+                self.assertEqual(code.count("view_dtype"), 1)
+                # The additional 2 counts here come from error messages containing this
+                # string.
+                self.assertEqual(code.count("aten.view"), 4)
+            else:
+                self.assertEqual(code.count("aten.view"), 3)
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -5195,17 +5203,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
-    def test_var_mean(self):
+    @parametrize("tile_reduction", (False, True))
+    def test_var_mean(self, tile_reduction: bool):
         def fn(x):
             return (
                 *torch.var_mean(x, -1),
                 *torch.var_mean(x, [1, 3]),
             )
 
-        self.common(
-            fn,
-            (torch.randn([1, 2, 4, 8]),),
-        )
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": tile_reduction,
+                "triton.tile_reductions": tile_reduction,
+            }
+        ):
+            self.common(
+                fn,
+                (torch.randn([1, 2, 4, 8]),),
+            )
 
     def test_var_correction(self):
         def fn(x):
@@ -6159,6 +6174,48 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
+    def test_adaptive_pool_errors_with_long(self):
+        class Model(torch.nn.Module):
+            def __init__(self, pool_operator):
+                super().__init__()
+                self.pool = pool_operator
+
+            def forward(self, x):
+                x = torch.argmax(x, dim=1)
+                x = self.pool(x)
+                return x
+
+        for dim in (1, 2, 3):
+            op_inst = eval(f"torch.nn.AdaptiveMaxPool{dim}d(5)")
+            model = Model(op_inst).to(self.device)
+            x = torch.randn([1] * (dim + 2)).to(self.device)
+            model = torch.compile(model, fullgraph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                model(x)
+
+    def test_adaptive_avg_pool_errors_with_long(self):
+        class Model(torch.nn.Module):
+            def __init__(self, pool_operator):
+                super().__init__()
+                self.pool = pool_operator
+
+            def forward(self, x):
+                x = torch.argmax(x, dim=1)
+                x = self.pool(x)
+                return x
+
+        for dim in (1, 2, 3):
+            op_inst = eval(f"torch.nn.AdaptiveAvgPool{dim}d(5)")
+            model = Model(op_inst).to(self.device)
+            x = torch.randn([1] * (dim + 2)).to(self.device)
+            model = torch.compile(model, fullgraph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                model(x)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -6172,6 +6229,99 @@ class CommonTemplate:
                 fn,
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x):
+            return x.sin().cos().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def c(x):
+            return x.cos().sin().softmax(-1)
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (coda_a0,) = run_and_get_kernels(a, x)
+        _, (coda_b0,) = run_and_get_kernels(b, x)
+        _, (coda_c0,) = run_and_get_kernels(c, x)
+        self.assertEqual(coda_a0, coda_c0)
+
+        # compile in a different order
+        torch.compiler.reset()
+        _, (coda_c1,) = run_and_get_kernels(c, x)
+        _, (coda_a1,) = run_and_get_kernels(a, x)
+        _, (coda_b1,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a1)
+        self.assertEqual(coda_b0, coda_b1)
+        self.assertEqual(coda_c0, coda_c1)
+
+        # force a different CompileId
+        torch.compiler.reset()
+        CompileContext_init = CompileContext.__init__
+        with patch.object(
+            CompileContext,
+            "__init__",
+            lambda self, _: CompileContext_init(self, CompileId(999, 999)),
+        ):
+            _, (coda_a2,) = run_and_get_kernels(a, x)
+            _, (coda_c2,) = run_and_get_kernels(c, x)
+            _, (coda_b2,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a2)
+        self.assertEqual(coda_b0, coda_b2)
+        self.assertEqual(coda_c0, coda_c2)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_on_graph_break(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile()
+        def b(x):
+            x = a(x)
+            torch._dynamo.graph_break()
+            x = a(x)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (code0, code1) = run_and_get_kernels(b, x)
+        self.assertEqual(code0, code1)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_with_suffix(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x, y):
+            x = x.cos().sin().softmax(-1)
+            x = torch.matmul(x, y)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        y = torch.randn(256, 256, device=self.device)
+        _, (code0,) = run_and_get_kernels(a, x)
+        _, (code1,) = run_and_get_kernels(b, x, y)
+        self.assertEqual(code0, code1)
 
     def test_flip(self):
         def fn(x):
@@ -7120,7 +7270,7 @@ class CommonTemplate:
         for ref, test in zip(refs, tests):
             torch.testing.assert_close(ref, test)
 
-    @torch._dynamo.config.patch(cache_size_limit=10)
+    @torch._dynamo.config.patch(recompile_limit=10)
     def test_tensor_index_put_slice(self):
         def fn(a, version):
             x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
@@ -7226,18 +7376,16 @@ class CommonTemplate:
         def fn(x):
             return x.isinf(), x.isnan()
 
-        self.common(
-            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
-        )
-        self.common(
-            fn,
-            [
-                torch.tensor(
-                    [1, float("inf"), 2, float("-inf"), float("nan")],
-                    dtype=torch.float64,
-                )
-            ],
-        )
+        values = [1, float("inf"), 2, float("-inf"), float("nan")]
+        device_interface = get_interface_for_device(self.device)
+        for dtype in [torch.float32, torch.float64]:
+            ctx = (
+                contextlib.nullcontext()
+                if device_interface.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
+            with ctx:
+                self.common(fn, [torch.tensor(values, dtype=dtype)])
 
     @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
@@ -8508,6 +8656,26 @@ class CommonTemplate:
         self.assertGreaterEqual(c0.min(), 0)
         self.assertGreater(c0.max(), 2**40)
         self.assertLess(c0.max(), 2**50)
+
+    def test_randint_distribution(self):
+        @torch.compile(fullgraph=True)
+        def fn(n_argsmax, size):
+            return torch.randint(n_max, (size,), device=self.device)
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+
+        size = 1_000_000
+        n_max = int(0.75 * 2**32)
+        n_bins = 8
+
+        res = fn(n_max, size)
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
     def test_like_rands(self):
@@ -12014,6 +12182,50 @@ class CommonTemplate:
         run(9)
         self.assertEqual(cnts.frame_count, 4)
 
+    @dynamo_config.patch(error_on_recompile=True)
+    def test_no_specization_over_symbolic_value(self):
+        def fn(x):
+            s0 = x.shape[0]
+            y = torch.full((1,), s0)
+            return x + y
+
+        arg1 = torch.ones(10)
+        arg2 = torch.ones(11)
+        ref1 = fn(arg1)
+        ref2 = fn(arg2)
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True, backend="inductor")
+        res1 = opt_fn(arg1)
+        res2 = opt_fn(arg2)
+
+        self.assertEqual(res1, ref1)
+        self.assertEqual(res2, ref2)
+
+    def test_conv_shape_check(self):
+        # https://github.com/pytorch/pytorch/issues/144013
+        class Model(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                conv_t_cls = eval(f"torch.nn.ConvTranspose{dim}d")
+                self.conv_t = conv_t_cls(
+                    1, 1, kernel_size=(2,) * dim, padding=(1,) * dim
+                )
+
+            def forward(self, x):
+                x = self.conv_t(x)
+                x = torch.sigmoid(x)  # tigger condition
+                return x
+
+        for dim in (1, 2, 3):
+            inputs = torch.randn((1,) * (dim + 2))
+            model = Model(dim)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = model(inputs)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = torch.compile(model)(inputs)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -12622,6 +12834,23 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
 
+        @config.patch("triton.skip_l1_cache", True)
+        def test_skip_l1_cache(self):
+            @torch.compile
+            def f(a, b):
+                return a + b
+
+            N = 512
+            inps = (torch.randn(N, device=GPU_TYPE), torch.randn(N, device=GPU_TYPE))
+            code = run_and_get_triton_code(f, *inps)
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertExpectedInline(
+                "\n".join(lines),
+                """\
+    tmp0 = tl.load(in_ptr0 + (x0), xmask, cache_modifier='.cg')
+    tmp1 = tl.load(in_ptr1 + (x0), xmask, cache_modifier='.cg')""",
+            )
+
         @config.patch("triton.use_block_ptr", True)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
@@ -13070,6 +13299,191 @@ if HAS_GPU and not TEST_WITH_ASAN:
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
 
+        # TODO: Enable this case after pad_mm is enabled on XPU.
+        @expectedFailureXPU
+        @torch._functorch.config.patch("donated_buffer", True)
+        @torch._inductor.config.patch("force_shape_pad", True)
+        def test_donated_buffer_inplace_gpt(self):
+            # model implementation from llm.c:
+            # https://github.com/karpathy/llm.c/blob/master/train_gpt2.py
+            class NewGELU(nn.Module):
+                def forward(self, input):
+                    return (
+                        0.5
+                        * input
+                        * (
+                            1.0
+                            + torch.tanh(
+                                math.sqrt(2.0 / math.pi)
+                                * (input + 0.044715 * torch.pow(input, 3.0))
+                            )
+                        )
+                    )
+
+            class CausalSelfAttention(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    assert config.n_embd % config.n_head == 0
+                    # key, query, value projections for all heads, but in a batch
+                    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+                    # output projection
+                    self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+                    self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+                    # regularization
+                    self.n_head = config.n_head
+                    self.n_embd = config.n_embd
+                    # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
+                    self.register_buffer(
+                        "bias",
+                        torch.tril(
+                            torch.ones(config.block_size, config.block_size)
+                        ).view(1, 1, config.block_size, config.block_size),
+                    )
+
+                def forward(self, x):
+                    (
+                        B,
+                        T,
+                        C,
+                    ) = (
+                        x.size()
+                    )  # batch size, sequence length, embedding dimensionality (n_embd)
+                    # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+                    qkv = self.c_attn(x)
+                    q, k, v = qkv.split(self.n_embd, dim=2)
+                    k = k.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    q = q.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    v = v.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                    y = (
+                        y.transpose(1, 2).contiguous().view(B, T, C)
+                    )  # re-assemble all head outputs side by side
+                    # output projection
+                    y = self.c_proj(y)
+                    return y
+
+            class MLP(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
+                    self.gelu = NewGELU()
+                    self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+                    self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+
+                def forward(self, x):
+                    x = self.c_fc(x)
+                    x = self.gelu(x)
+                    x = self.c_proj(x)
+                    return x
+
+            class Block(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.ln_1 = nn.LayerNorm(config.n_embd)
+                    self.attn = CausalSelfAttention(config)
+                    self.ln_2 = nn.LayerNorm(config.n_embd)
+                    self.mlp = MLP(config)
+
+                def forward(self, x):
+                    x = x + self.attn(self.ln_1(x))
+                    x = x + self.mlp(self.ln_2(x))
+                    return x
+
+            class GPTConfig:
+                block_size: int = 1024
+                vocab_size: int = 50257
+                n_layer: int = 1
+                n_head: int = 12
+                n_embd: int = 768
+
+            class GPT(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.config = config
+
+                    self.transformer = nn.ModuleDict(
+                        dict(
+                            wte=nn.Embedding(config.vocab_size, config.n_embd),
+                            wpe=nn.Embedding(config.block_size, config.n_embd),
+                            h=nn.ModuleList(
+                                [Block(config) for _ in range(config.n_layer)]
+                            ),
+                            ln_f=nn.LayerNorm(config.n_embd),
+                        )
+                    )
+                    self.lm_head = nn.Linear(
+                        config.n_embd, config.vocab_size, bias=False
+                    )
+                    self.lm_head.LLMC_SKIP_INIT = (
+                        1  # don't init this one, we will tie weights
+                    )
+                    self.transformer.wte.weight = (
+                        self.lm_head.weight
+                    )  # https://paperswithcode.com/method/weight-tying
+
+                def forward(self, idx, targets):
+                    device = idx.device
+                    b, t = idx.size()
+                    assert (
+                        t <= self.config.block_size
+                    ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    pos = torch.arange(
+                        0, t, dtype=torch.long, device=device
+                    )  # shape (t)
+
+                    # forward the GPT model itself
+                    tok_emb = self.transformer.wte(
+                        idx
+                    )  # token embeddings of shape (b, t, n_embd)
+                    pos_emb = self.transformer.wpe(
+                        pos
+                    )  # position embeddings of shape (t, n_embd)
+                    x = tok_emb + pos_emb
+
+                    for block in self.transformer.h:
+                        x = block(x)
+                    x = self.transformer.ln_f(x)
+
+                    logits = self.lm_head(x)
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)),
+                        targets.view(-1),
+                        ignore_index=-1,
+                    )
+
+                    return loss
+
+            B, T = 1, 1024
+            ctx = torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16)
+
+            model = GPT(GPTConfig())
+            model.train()
+            model.to(GPU_TYPE)
+            model = torch.compile(model)
+
+            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
+            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
+
+            def wrapper(x, y):
+                with ctx:
+                    loss = model(x, y)
+                loss.backward()
+
+            _, code = run_and_get_code(wrapper, x, y)
+
+            # The cpp_wrapper code is significantly more complex, so skip checking for exact
+            # code lines.
+            if not config.cpp_wrapper:
+                FileCheck().check_regex(
+                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+                ).run(code[1])
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
@@ -13081,7 +13495,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def forward(self, x):
                 return self.gru(x)
 
-        @expectedFailureXPU
         def test_rnn_compile_safe(self):
             device = torch.device(GPU_TYPE)
             model = RNNTest.Model().to(device)

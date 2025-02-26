@@ -403,6 +403,12 @@ public:
   Vectorized<float> pow(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
   }
+  float reduce_add() const {
+    return _mm512_reduce_add_ps(values);
+  }
+  float reduce_max() const {
+    return _mm512_reduce_max_ps(values);
+  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

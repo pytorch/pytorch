@@ -257,7 +257,7 @@ class ModelReport:
 
     def generate_model_report(
         self, remove_inserted_observers: bool
-    ) -> Dict[str, Tuple[str, Dict]]:
+    ) -> Dict[str, tuple[str, Dict]]:
         r"""
         Generates all the requested reports.
 

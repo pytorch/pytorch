@@ -1151,7 +1151,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="There is a performance drop")
-        warnings.filterwarnings("ignore", message="Please use torch.vmap")
+        warnings.filterwarnings("ignore", message="Please use `torch.vmap`")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
@@ -1394,9 +1394,9 @@ def _get_notallclose_msg(
     )
     mode = "computed with forward mode " if is_forward_ad else ""
     return (
-        prefix + "Jacobian %smismatch for output %d with respect to input %d,\n"
-        "numerical:%s\nanalytical:%s\n"
-        % (mode, output_idx, input_idx, numerical, analytical)
+        prefix
+        + f"Jacobian {mode}mismatch for output {output_idx:d} with respect to input {input_idx:d},\n"
+        f"numerical:{numerical}\nanalytical:{analytical}\n"
     )
 
 

@@ -619,9 +619,11 @@ def build_torchaudio(
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
+    host.run_cmd(
+        f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
         && ./packaging/ffmpeg/build.sh \
-        && {build_vars} python3 setup.py bdist_wheel")
+        && {build_vars} python3 setup.py bdist_wheel"
+    )
 
     wheel_name = host.list_dir("audio/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("audio", "dist", wheel_name))

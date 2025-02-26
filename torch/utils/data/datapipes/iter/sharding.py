@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from enum import IntEnum
-from typing import Dict, Sized, Tuple
+from typing import Dict, Sized
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -43,7 +43,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     def __init__(self, source_datapipe: IterDataPipe, sharding_group_filter=None):
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
-        self.groups: Dict[int, Tuple[int, int]] = {}
+        self.groups: Dict[int, tuple[int, int]] = {}
         self.num_of_instances = 1
         self.instance_id = 0
         self._update_num_of_instances()

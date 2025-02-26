@@ -9,13 +9,17 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint._fsspec_filesystem import (
+    FileSystem,
+    FsspecReader,
+    FsspecWriter,
+)
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -32,8 +36,8 @@ def with_temp_dir(
 
     @wraps(func)
     def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:
-        # Only create temp_dir when rank is 0
-        if dist.get_rank() == 0:
+        # Only create temp_dir when rank is 0 (or no pg)
+        if not dist.is_initialized() or dist.get_rank() == 0:
             temp_dir = tempfile.mkdtemp()
             print(f"Using temp directory: {temp_dir}")
         else:
@@ -41,13 +45,14 @@ def with_temp_dir(
         object_list = [temp_dir]
 
         # Broadcast temp_dir to all the other ranks
-        dist.broadcast_object_list(object_list)
+        if dist.is_initialized():
+            dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
 
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.get_rank() == 0:
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     return wrapper
@@ -169,6 +174,30 @@ class TestFSSpec(ShardedTensorTestBase):
                 {"random": t2},
                 storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
             )
+
+
+class TestFileSystem(TestCase):
+    @with_temp_dir
+    def test_remove_on_fail(self):
+        fs = FileSystem()
+        path = fs.init_path(self.temp_dir)
+
+        write_file = fs.concat_path(path, "writeable")
+        with self.assertRaises(OSError):
+            with fs.create_stream(write_file, "w") as s:
+                s.write("aaa")
+                raise OSError("fail")
+        self.assertFalse(fs.exists(write_file))
+
+        read_file = fs.concat_path(path, "readable")
+        with fs.create_stream(read_file, "w") as s:
+            s.write("bbb")
+        self.assertTrue(fs.exists(read_file))
+
+        with self.assertRaises(OSError):
+            with fs.create_stream(read_file, "r") as s:
+                raise OSError("fail")
+        self.assertTrue(fs.exists(read_file))
 
 
 if __name__ == "__main__":

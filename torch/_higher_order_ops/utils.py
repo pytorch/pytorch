@@ -167,7 +167,9 @@ def _detect_input_alias(gm):
 
             def check_alias(out):
                 if (
-                    out is not None
+                    # out can be an integer
+                    isinstance(out, torch.fx.Node)
+                    and out is not None
                     and "val" in out.meta
                     and isinstance(out.meta["val"], torch.Tensor)
                 ):
