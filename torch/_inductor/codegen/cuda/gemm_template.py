@@ -6,8 +6,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
-from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
-
 from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import (
@@ -48,7 +46,7 @@ PT_EXPORT {{kernel_call_signature}} {
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw, swizzle,
+  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
@@ -122,7 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
-  arguments.scheduler.max_swizzle_size = {{swizzle}};
+  arguments.scheduler.max_swizzle_size = swizzle;
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -335,6 +333,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     int ldb = {{kernel.get_layout_args()[4]}};
     int ldc = {{kernel.get_layout_args()[5]}};
     int ldd = {{kernel.get_layout_args()[6]}};
+    uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
 
     using ElementA = {{kernel.cutlass_dtype(X)}};
     using ElementB = {{kernel.cutlass_dtype(W)}};
@@ -739,6 +738,35 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
         return new_op
 
+    def _dtype_match(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
+        """
+        Checking dtypes of A, B, acc, D here.
+
+        Empirically speaking, CUTLASS2x ops have same dtype for C and D.
+        """
+        X = self.input_nodes[0]
+        W = self.input_nodes[1]
+
+        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
+            [X.get_dtype(), W.get_dtype()],
+        )
+        if not (
+            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
+            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
+            and cutlass_utils.dtype_match(
+                self.output_node.get_layout().dtype, op.D.element
+            )
+            and cutlass_utils.dtype_match(
+                accumulator_torch_dtype, op.accumulator_type()
+            )
+        ):
+            return False
+
+        return True
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -752,16 +780,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         Takes memory layout, dtype and support for EVT operations into account,
         and filters potentially problematic ops.
 
-        Returns None if the op is not suitable, otherwise returns the op to be used.
-
-        The return op might be mutated. However, the configuration name should stay the same.
-        This means DataType of a, b, acc, c, d, and the layouts of a and b cannot change.
-
-        TODO: figure out how alignment should be handled.
+        Returns None if the op is not suitable, otherwise returns the op to be used, which might
+        have been mutated.
         """
 
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         if (
@@ -780,36 +804,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if not self._shape_match(op):
             return None
 
-        # Filter ops by dtypes. need to check A, B, acc, C (if exists), D
-        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
-            [X.get_dtype(), W.get_dtype()],
-        )
-        if not (
-            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
-            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
-            and cutlass_utils.dtype_match(
-                accumulator_torch_dtype, op.accumulator_type()
-            )
-        ):
-            return None
-        assert try_import_cutlass()
-        from cutlass_library.library import DataType  # type: ignore[import]
-
-        if op.C.element == DataType.void:
-            # expect no bias
-            if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
-                return None
-        else:
-            # expect bias, need to check dtype
-            if not (
-                len(self.input_nodes) >= 3
-                and self.input_nodes[2] is not None
-                and cutlass_utils.dtype_match(W.get_dtype(), op.C.element)
-            ):
-                return None
-        if not cutlass_utils.dtype_match(
-            self.output_node.get_layout().dtype, op.D.element
-        ):
+        # Filter ops by dtypes.
+        if not self._dtype_match(op):
             return None
 
         # Filter ops by input layouts.
@@ -821,7 +817,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Filter ops by alignment.
         if not self._alignment_match(op):
-            log.debug("Skipping due to alignment mismatch")
+            log.debug(
+                "Skipping due to alignment mismatch. op: %s", op.configuration_name()
+            )
             return None
 
         # Update op.
@@ -837,6 +835,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             and self.set_alignment(self.output_node.get_layout(), op.D)
         )
         if not status:
+            log.debug("Skipping due to alignment setting failure. op: %s", op)
             return None
 
         # Set epilogue.
@@ -856,6 +855,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # Set bias layout and alignment.
         status = self._set_bias_layout_and_alignment(op)
         if not status:
+            log.debug(
+                "Skipping due to bias layout and alignment setting failure. op: %s", op
+            )
             return None
 
         return op
@@ -897,11 +899,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-                    else:
-                        log.debug(
-                            "Skipping op %s, since it is already in the list",
-                            filter_res.configuration_name(),
-                        )
         log.info("Got cutlass configs: total number of ops: %d, ", len(res))
         return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
@@ -1020,7 +1017,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
-            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -1062,7 +1058,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1200,8 +1196,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.get_size()[1] == W.get_size()[0]
+        return True
 
     def _alignment_match(
         self,
@@ -1213,14 +1208,46 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
-        if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
-            # bias exists
-            Bias = self.input_nodes[2]
-            bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
+        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
+        if has_bias:
+            bias = self.input_nodes[2]
+            bias_layout = CUTLASSGemmTemplate.cutlass_layout(bias.get_layout())
             op.C.layout = bias_layout
-            status = self.set_alignment(Bias.get_layout(), op.C)
+            status = self.set_alignment(bias.get_layout(), op.C)
             if not status:
                 return False
+        return True
+
+    def _dtype_match(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
+        """
+        Checking dtypes of C (i.e. bias) here, since that is the one not checked in the base class.
+        """
+
+        if not super()._dtype_match(op):
+            return False
+
+        assert cutlass_utils.try_import_cutlass()
+        from cutlass_library.library import DataType  # type: ignore[import]
+
+        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
+
+        if op.C.element == DataType.void:
+            if has_bias:
+                # op expects no bias, but bias exists
+                return False
+        else:
+            # op expects bias. Needs to check if bias exists and is of the right dtype
+            if not (
+                has_bias
+                and cutlass_utils.dtype_match(
+                    self.input_nodes[2].get_dtype(), op.C.element
+                )
+            ):
+                return False
+
         return True
 
     def _define_gemm_instance(
@@ -1286,7 +1313,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
-        swizzle: int,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
@@ -1332,7 +1358,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             M="M",
             N="N",
             epilogue_args=epilogue_args,
-            swizzle=swizzle,
         )
         assert epilogue_template is not None
 

@@ -9,7 +9,7 @@ import operator
 import sys
 import time
 from collections import defaultdict
-from typing import Any, DefaultDict, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -112,6 +112,8 @@ def reorder_comms_preserving_peak_memory(
     total_moves = 0
     # TODO - experiment with whether this limit is useful, setting `len(snodes)` disables it
     PER_COLLECTIVE_PREFETCH_LIMIT = len(snodes)
+    if config.reorder_prefetch_limit is not None:
+        PER_COLLECTIVE_PREFETCH_LIMIT = config.reorder_prefetch_limit
 
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
         snodes, graph_inputs
@@ -137,7 +139,6 @@ def reorder_comms_preserving_peak_memory(
             if contains_wait(snode):
                 # TODO - if the wait is for a collective that started before this collective or on another stream,
                 # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
-                # torch.distributed.breakpoint()
                 break
 
             compute_time += runtimes[snode]
@@ -163,7 +164,27 @@ def reorder_comms_preserving_peak_memory(
                     limiting_factor[snode] = "collective ordering"
                     break
                 dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
-                if any(o.get_name() in dep_names for o in prev_snode.get_outputs()):
+                if any(
+                    o.get_name() in dep_names for o in prev_snode.get_outputs()
+                ) and not contains_wait(prev_snode):
+                    """
+                    snode (op7) is a collective, and it has a fake-dep on op1, another collective.
+                    However due to how wait-node is implemented as mutation,
+                    op7 also depends on op1's wait node (op2) which prevents scheduling op7 earlier
+                    [rank0]:(Pdb) [rank0]:op7: ExternKernelSchedulerNode(_CollectiveKernel)
+                    [rank0]:op7.writes = [StarDep(name='buf8', mode=None)]
+                    [rank0]:op7.unmet_dependencies = [StarDep(name='buf7', mode=None), WeakDep(name='buf3',
+                            mutating_buf='buf8')]
+                    [rank0]:op7.met_dependencies = []
+                    [rank0]:op7.outputs = [
+                    [rank0]:    buf8: _CollectiveKernel
+                    [rank0]:    buf8.layout = FixedLayout('cuda:0', torch.bfloat16, size=[256], stride=[1])
+                    [rank0]:    buf8.users = [NodeUser(node=ExternKernelSchedulerNode(name='op8'), can_inplace=False,
+                                is_weak=False)]
+                    [rank0]:]
+                    [rank0]:op7.node.kernel = torch.ops._c10d_functional.all_gather_into_tensor.default
+                    """
+
                     limiting_factor[snode] = "data dependency"
                     break
                 if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
@@ -225,149 +246,6 @@ def reorder_comms_preserving_peak_memory(
         )
 
     return snodes
-
-
-def sink_comms_and_waits(
-    snodes: list[BaseSchedulerNode],
-    graph_inputs: OrderedSet[str],
-    graph_outputs: OrderedSet[str],
-) -> list[BaseSchedulerNode]:
-    """
-    Sinks waits as late as possible, and then sinks comms as late as possible but earlier than waits.
-    Keeps comms in original order relative to each other.
-
-    Used as a precursor to a pass that raises comms up to a point respecting peak memory
-
-    Args:
-        snodes: the nodes to be scheduled.
-
-    Returns:
-        The new schedule order.
-
-    """
-    # We assign each node a tuple of scores (score_0, score_1, score_2),
-    # decreasing in importance, with a lower value indicating a higher ranking:
-    #
-    # - score_1: 1 if the node is a wait node, 2 if a comm node, 0 otherwise. This score ensures
-    # that wait nodes are deferred as late as possible.
-    # - score_2: the index of the node in the original topological order. This
-    # score provides stability in case of ties.
-    #
-    buf_name_to_snode = {}
-    name_to_fused_node = {}
-    scores_1, scores_2 = {}, {}
-    for idx, snode in enumerate(snodes):
-        for buf_name in snode.get_buffer_names():
-            buf_name_to_snode[buf_name] = snode
-
-        for op_name in snode.get_operation_names():
-            name_to_fused_node[op_name] = snode
-        name_to_fused_node[snode.get_name()] = snode
-
-        node_name = snode.get_name()
-        if contains_collective(snode):
-            scores_1[node_name] = 2
-        else:
-            scores_1[node_name] = 0
-        scores_2[node_name] = idx
-
-    class Runnable:
-        def __init__(self, snode) -> None:
-            self.snode = snode
-            name = next(iter(snode.get_operation_names()))
-            fused_name = name_to_fused_node[name].get_name()
-            self.score = (
-                scores_1[fused_name],
-                scores_2[fused_name],
-            )
-
-        def __lt__(self, other):
-            return self.score < other.score
-
-    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
-        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
-        for snode in snodes
-    }
-
-    ready: list[Runnable] = []
-    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
-
-    for snode, deps in unmet_deps.items():
-        if len(deps) == 0:
-            heapq.heappush(ready, Runnable(snode))
-        for dep in deps:
-            buffer_users[dep].add(snode)
-    scheduled = []
-
-    pending_waits: DefaultDict[
-        BaseSchedulerNode, OrderedSet[BaseSchedulerNode]
-    ] = defaultdict(OrderedSet)
-    orphaned_waits = []
-
-    def defer_waits_but_mark_dependents_ready(snode):
-        assert contains_collective(snode)
-        assert len(snode.get_buffer_names()) == 1
-        buf_name = next(iter(snode.get_buffer_names()))
-        assert len(buffer_users[buf_name]) == 1
-        wait_snode = next(iter(buffer_users[buf_name]))
-        unmet_deps[wait_snode].remove(buf_name)
-        assert (
-            len(wait_snode.get_buffer_names()) == 2
-        ), f"{wait_snode.get_buffer_names()}"
-        i = iter(wait_snode.get_buffer_names())
-        # why are there 2 buffers for a wait?
-        _ = next(i)
-        second_buf_name = next(i)
-        buf_name = second_buf_name
-
-        orphaned = True
-
-        for user_snode in unmet_deps:
-            if buf_name in unmet_deps[user_snode]:
-                orphaned = False
-                unmet_deps[user_snode].remove(buf_name)
-                pending_waits[user_snode].add(wait_snode)
-                if len(unmet_deps[user_snode]) == 0:
-                    heapq.heappush(ready, Runnable(user_snode))
-        if orphaned:
-            orphaned_waits.append(wait_snode)
-
-    def schedule(snode):
-        """
-        Schedules `snode` and put all unblocked nodes onto the ready queue.
-        """
-
-        if snode in pending_waits:
-            for wait_snode in pending_waits[snode]:
-                if wait_snode not in scheduled:
-                    scheduled.append(wait_snode)
-            pending_waits.pop(snode)
-
-        scheduled.append(snode)
-        if contains_collective(snode):
-            defer_waits_but_mark_dependents_ready(snode)
-        else:
-            for buf_name in snode.get_buffer_names():
-                for snode in buffer_users[buf_name]:
-                    unmet_deps[snode].remove(buf_name)
-                    if len(unmet_deps[snode]) == 0:
-                        heapq.heappush(ready, Runnable(snode))
-                        # print(node_summary(snode))
-
-    while len(ready):
-        snode = heapq.heappop(ready).snode
-        schedule(snode)
-
-    while len(orphaned_waits):
-        schedule(orphaned_waits.pop())
-
-    for snode, deps in unmet_deps.items():
-        assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
-        )
-    assert len(scheduled) == len(snodes), (len(scheduled), len(snodes))
-    return scheduled
 
 
 def _schedule_for_comm(
@@ -536,20 +414,13 @@ def decide_global_ordering_of_comms(
     if not torch.distributed.is_available():
         return nodes
 
-    # TODO: its not bad to keep this strict ordering enforcement, but the implementation is problematic.
-    # Given input collectives/waits as C0, W0, C1, W1, ...
-    # we should add a dep from C1 to C0 but in practice we are adding a dep from C1 to W1, i think.
-    # (perhaps becuase of how wait_tensor IR is implemented).
-    # this breaks comm reordering where we want to be free to schedule C0, C1, W0, W1 but are prohibited by
-    # this weak dep
+    comm_nodes = [n for n in nodes if contains_collective(n)]
 
-    # comm_nodes = [n for n in nodes if contains_collective(n)]
-
-    # for i in range(1, len(comm_nodes)):
-    #     # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-    #     mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
-    #     for buf in comm_nodes[i - 1].get_buffer_names():
-    #         comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
+    for i in range(1, len(comm_nodes)):
+        # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
+        mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
+        for buf in comm_nodes[i - 1].get_buffer_names():
+            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
     return nodes
 
@@ -602,8 +473,7 @@ def visualize_overlap(order):
 
     # TODO - 'overlap' log category doesn't respect debug/info distinction so this always prints, annoying
     def step_log(step, msg):
-        # overlap_log.debug(f"{step:>6}: {msg}")
-        pass
+        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
 
     for step, snode in enumerate(order):
         if cur_comm_node is None:
