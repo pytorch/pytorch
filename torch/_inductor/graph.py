@@ -1038,10 +1038,10 @@ class GraphLowering(torch.fx.Interpreter):
                 and next(iter(V.graph.current_node.users)).target
                 is torch._prims.rng_prims.graphsafe_run_with_rng_state
             )
-            obj = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = obj  # type: ignore[assignment]
+            gen = ir.GeneratorState(name=target, device=example.device)
+            self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
-            return obj
+            return gen
 
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into

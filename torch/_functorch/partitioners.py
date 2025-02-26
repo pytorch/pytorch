@@ -635,25 +635,33 @@ def apply_graphsafe_rng_functionalization(
     """
     Note [CUDA Graph Safe RNG Functionalization]
 
-    CUDA Graph capture is not compatible with get_rng_state and set_rng_state. As an alternative mechanism to
-    setting the same rng state in the forward and backward for an rng op, we use `graphsafe_set_state`.
+    CUDA Graph capture doesn't work with get_rng_state and set_rng_state because these functions operate on CPU values,
+    while CUDA Graph RNG capture uses on-device CUDA tensors. To solve this, we use graphsafe_set_state with a
+    CUDA Generator registered to the CUDA Graph before capture begins. graphsafe_set_state updates the generator's pointer
+    to reference a different GeneratorImpl, ensuring subsequent calls are correctly forwarded to the desired generator
+    (and its cuda-tensor RNG state during graph capture).
 
-    `graphsafe_set_state` takes in a CUDA Generator that registered is to the CUDA Graph
-    prior to CUDA Graph Capture. For each forward, backward pair of an rng operator, we construct a pair of generators
-    which are initialized with the same value. Then, each fwd and bwd invocation of the op will advance the respective generator an
-    equal amount. This keeps the generators in sync so that each forward and backward invocation gets rng op outputs with the same value.
+    For each RNG operation's forward/backward pair:
 
-    In the case that forward is invoked multiple times before invoking the backward, so that the forward & backward are out of sync,
-    we will save the rng state of the forward that so that we can update state of the backward Generator prior to invoking the backward.
-    Before each CUDA Graph replay, `replay_prologue` will update the cuda tensors which were captured as rng pointers with its current rng
-    state, which makes it so the updated state of the backward Generator is reflected in the graph replay.
+    - We create two generators initialized with identical values
+    - Each forward and backward call advances its respective generator equally
+    - This keeps generators synchronized so forward and backward operations use matching RNG values
 
-    For more context, see: https://github.com/pytorch/pytorch/issues/113541
+    When forward is called multiple times before backward (causing desynchronization):
 
-    This function modifies the forward and backward computation graphs by:
-    1. Creating RNG state placeholders for both passes
-    2. Updating the forward node to use graph-safe RNG state
-    3. Updating the backward node to use graph-safe RNG state
+    - We save the forward RNG state
+    - We update the backward Generator's state before executing backward
+
+    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
+    changes are reflected during replay.
+
+    This function modifies both forward and backward computation graphs by:
+
+    Creating RNG state placeholders for both passes
+    Updating the forward node to use graph-safe RNG state
+    Updating the backward node to use graph-safe RNG state
+
+    For more details: https://github.com/pytorch/pytorch/issues/113541
     """
     device_idx = device.index
     assert device_idx is not None

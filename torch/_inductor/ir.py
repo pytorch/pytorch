@@ -7566,9 +7566,6 @@ class NonTensorObj(IRNode):
 class TorchBindObject(NonTensorObj):
     from torch._library.fake_class_registry import FakeScriptObject
 
-
-@ir_dataclass
-class TorchBindObject(NonTensorObj):
     name: str
     value: Union[FakeScriptObject, torch.ScriptObject]
 
