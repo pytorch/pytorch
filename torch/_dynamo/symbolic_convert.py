@@ -54,7 +54,14 @@ from torch._guards import tracing, TracingContext
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
-from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
+from . import (
+    config,
+    exc,
+    graph_break_hints,
+    logging as torchdynamo_logging,
+    trace_rules,
+    variables,
+)
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -615,9 +622,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         gb_type="Assertion failed on symbolic shapes",
                         context=str(sym_expr),
                         explanation="",
-                        hints=[
-                            "Did you make sure your code works without compile?",
-                        ],
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
                 self.jump(inst)
                 return
@@ -885,7 +890,7 @@ class BytecodeDistpatchTableMeta(type):
                 gb_type="Missing bytecode handler",
                 context=opname,
                 explanation=f"Dynamo does not know how to handle the bytecode instruction {opname}",
-                hints=[],
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
         dispatch_table = {
@@ -1245,6 +1250,7 @@ class InstructionTranslatorBase(
                         explanation=f"Could not find an implicit local variable with name `{name}`",
                         hints=[
                             "This happens in dict/list comprehensions",
+                            *graph_break_hints.USER_ERROR,
                         ],
                     )
             else:
@@ -1252,7 +1258,7 @@ class InstructionTranslatorBase(
                     gb_type="Attempted to read undefined local variable",
                     context=f"LOAD_FAST {name}",
                     explanation=f"Could not find a local variable with name `{name}`",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
 
         # for continuation functions
@@ -1443,7 +1449,7 @@ class InstructionTranslatorBase(
                     gb_type="Import failure",
                     context=f"module_name: {module_name}, fromlist: {fromlist}, level={level}",
                     explanation="Failure when attempting to import.",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
 
             if level != 0:
@@ -1617,7 +1623,7 @@ class InstructionTranslatorBase(
             gb_type="Failed to raise exception",
             context=str(exc),
             explanation="Attempted to raise a non-Exception type/value.",
-            hints=[],
+            hints=[*graph_break_hints.USER_ERROR],
         )
 
     def RAISE_VARARGS(self, inst):
@@ -1860,7 +1866,7 @@ class InstructionTranslatorBase(
                 gb_type="Exception with bad expected type",
                 context=str(expected_exc_types),
                 explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
 
         if sys.version_info >= (3, 11):
@@ -1869,7 +1875,7 @@ class InstructionTranslatorBase(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
                     explanation=f"Except expects to recieve an object of Exception type but received {exc_instance}.",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
 
         if isinstance(expected_exc_types, TupleVariable):
@@ -1885,7 +1891,7 @@ class InstructionTranslatorBase(
                     gb_type="Exception with non-type expectation",
                     context=str(expected_type),
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
             if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
                 exc_instance.exc_type, expected_type.fn
@@ -1934,7 +1940,7 @@ class InstructionTranslatorBase(
                 gb_type="Variadic function call with bad flags",
                 context=f"flags: {inst.argval}",
                 explanation=f"Attempted to call a variadic function (CALL_FUNCTION_EX) with bad flags {inst.argval}",
-                hints=[],
+                hints=[*graph_break_hints.DYNAMO_BUG],
             )
 
         if sys.version_info >= (3, 13):
@@ -2011,7 +2017,7 @@ class InstructionTranslatorBase(
                 gb_type="Variadic function call with bad args/kwargs type",
                 context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
                 explanation="Expected args to be a list and kwargs to be a dict",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
 
         # Map to a dictionary of str -> VariableTracker
@@ -2188,7 +2194,7 @@ class InstructionTranslatorBase(
                     context=str(seq),
                     explanation=f"{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK "
                     "bytecode (`[*x, *y, ...]`).",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
         self.push(cls(items, mutation_type=ValueMutationNew()))
 
@@ -2321,7 +2327,7 @@ class InstructionTranslatorBase(
                 context=str(seq),
                 explanation=f"{seq} cannot be unpacked into a list for the UNPACK_SEQUENCE bytecode "
                 "(i.e. `a, b, c = d`).",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
         if len(val) != inst.argval:
             unimplemented_v2(
@@ -2329,7 +2335,7 @@ class InstructionTranslatorBase(
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
                 explanation=f"{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode "
                 "(i.e. `a, b, c = d`) with unexpected length.",
-                hints=[],
+                hints=[*graph_break_hints.DYNAMO_BUG],
             )
         for i in reversed(val):
             self.push(i)
@@ -2354,9 +2360,8 @@ class InstructionTranslatorBase(
             unimplemented_v2(
                 gb_type="Failed to unpack object for UNPACK_EX",
                 context=str(seq),
-                explanation=f"{seq} cannot be unpacked into a list for the UNPACK_EX bytecode "
-                "(i.e. `a, *b, c = d`).",
-                hints=[],
+                explanation=f"{seq} cannot be unpacked into a list for the UNPACK_EX bytecode.",
+                hints=[*graph_break_hints.USER_ERROR],
             )
 
     def NOP(self, inst):
@@ -2456,7 +2461,7 @@ class InstructionTranslatorBase(
                         gb_type="BUILD_STRING key conflict",
                         context=f"format_string_parts: {format_string_parts}, kwargs: {kwargs}, part.sym_kwargs: {part.sym_kwargs}",
                         explanation="Failed to build format string due to key conflict",
-                        hints=[],
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
                 kwargs.update(part.sym_kwargs)
             else:
@@ -2464,7 +2469,7 @@ class InstructionTranslatorBase(
                     gb_type="BUILD_STRING type error",
                     context=str(part),
                     explanation="Format string part type is not correct - expected constant or format string.",
-                    hints=[],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
         self.push(
             variables.StringFormatVariable.create(
@@ -2791,7 +2796,7 @@ class InstructionTranslatorBase(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
                 explanation=f"Attempted to load uninitialized local variable {inst.argval}",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
         self.LOAD_FAST(inst)
 
@@ -2824,7 +2829,7 @@ class InstructionTranslatorBase(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
                 context=f"CALL_INTRINSIC_1 operand: {inst.argval}",
                 explanation=f"No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
-                hints=[],
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
     def END_SEND(self, inst):
@@ -3552,7 +3557,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     gb_type="Encountered unconverted argument when attempting to inline",
                     context=f"func: {func}, arg: {v}",
                     explanation="An argument to an inlined function was not successfully converted to a VariableTracker.",
-                    hints=[],
+                    hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
         code: types.CodeType = func.get_code()

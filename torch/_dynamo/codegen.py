@@ -23,7 +23,7 @@ from typing import Optional, Union
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
 
-from . import utils
+from . import graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -342,8 +342,7 @@ class PyCodegen:
                     hints=[
                         "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
                         "that Dynamo cannot reconstruct, then remove it from the return statement.",
-                        "If this reconstruction graph break occurs while handling another graph break, then resolve the "
-                        "initial graph break.",
+                        *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
