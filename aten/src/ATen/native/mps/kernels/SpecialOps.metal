@@ -30,19 +30,18 @@ void kernel entr(
     device T0* output,
     constant T1* input,
     uint index [[thread_position_in_grid]]) {
-  output[index] =
-      c10::metal::entr(static_cast<T0>(input[index]));
+  output[index] = c10::metal::entr(static_cast<T0>(input[index]));
 }
 
-#define REGISTER_I0_I1(DTI, DTO)                                           \
-  template [[host_name("i0_" #DTO "_" #DTI)]] void kernel i0<DTO, DTI>(    \
-      device DTO*, constant DTI*, uint);                                   \
-  template [[host_name("i1_" #DTO "_" #DTI)]] void kernel i1<DTO, DTI>(    \
-      device DTO*, constant DTI*, uint);                                   \
-  template [[host_name("spherical_bessel_j0_" #DTO "_" #DTI)]] void kernel \
-  spherical_bessel_j0<DTO, DTI>(device DTO*, constant DTI*, uint);
-template [[host_name("entr_" #DTO "_" #DTI)]] void kernel
-entr<DTO, DTI>(device DTO*, constant DTI*, uint);
+#define REGISTER_I0_I1(DTI, DTO)                                            \
+  template [[host_name("i0_" #DTO "_" #DTI)]] void kernel i0<DTO, DTI>(     \
+      device DTO*, constant DTI*, uint);                                    \
+  template [[host_name("i1_" #DTO "_" #DTI)]] void kernel i1<DTO, DTI>(     \
+      device DTO*, constant DTI*, uint);                                    \
+  template [[host_name("spherical_bessel_j0_" #DTO "_" #DTI)]] void kernel  \
+  spherical_bessel_j0<DTO, DTI>(device DTO*, constant DTI*, uint);          \
+  template [[host_name("entr_" #DTO "_" #DTI)]] void kernel entr<DTO, DTI>( \
+      device DTO*, constant DTI*, uint);
 
 REGISTER_I0_I1(float, float);
 REGISTER_I0_I1(bool, float);
