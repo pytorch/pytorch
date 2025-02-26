@@ -202,6 +202,45 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_nn_fold(self):
+        # Fix https://github.com/pytorch/pytorch/issues/147848
+
+        class Model(torch.nn.Module):
+            def __init__(self, output_size, kernel_size, stride) -> None:
+                super().__init__()
+                self.fold = torch.nn.Fold(
+                    output_size=output_size, kernel_size=kernel_size, stride=stride
+                )
+
+            def forward(self, x):
+                x = self.fold(x)
+                return x
+
+        output_sizes = [(64, 64), (64, 64)]
+        kernel_sizes = [(32, 32), (32, 32)]
+        strides = [(1, 1), (2, 2)]
+        input_sizes = [(1, 32 * 32, 1089), (1, 64 * 64, 289)]
+
+        for idx in range(len(output_sizes)):
+            output_size = output_sizes[idx]
+            kernel_size = kernel_sizes[idx]
+            stride = strides[idx]
+            input_size = input_sizes[idx]
+
+            for num_threads in [1, None]:
+                torch._dynamo.reset()
+                metrics.reset()
+                v = torch.randn(*input_size)
+                mod = Model(output_size, kernel_size, stride).eval()
+                with contextlib.nullcontext() if (
+                    num_threads != 1
+                ) else set_num_threads(1):
+                    with torch.no_grad():
+                        self.common(
+                            mod,
+                            (v,),
+                        )
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
@@ -997,6 +1036,19 @@ class CPUReproTests(TestCase):
         self.common(
             fn,
             (torch.randn(8),),
+        )
+
+    def test_low_fp_index_expr_issue_147279(self):
+        # https://github.com/pytorch/pytorch/issues/147279
+        def fn(start, end, dtype, dim):
+            return torch.sum(
+                torch.arange(start=start, end=end, dtype=dtype),
+                dim=dim,
+            )
+
+        self.common(
+            fn,
+            (300, 400, torch.float16, (0,)),
         )
 
     def test_index_put(self):
@@ -4052,8 +4104,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 2 generated kernels (one for var_mean, the other for result)
-                check_metrics_vec_kernel_count(2)
+                # 3 generated kernels (first one for var_mean, last two for result)
+                check_metrics_vec_kernel_count(3)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
