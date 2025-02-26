@@ -3062,10 +3062,11 @@ class SourcelessBuilder:
             return MethodWrapperVariable(value)
         elif (
             isinstance(value, types.MethodType)
-            # Now only a class object is allowed to be sourceless
+            # We only support sourceless class objects
             # An instance variable is not allowed and it should have source
             and isinstance(value.__self__, (type, abc.ABCMeta))
         ):
+            assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
         elif isinstance(value, torch.fx.graph_module.GraphModule):
