@@ -2439,10 +2439,6 @@
     "load_url",
     "tqdm"
   ],
-  "torch.utils.tensorboard": [
-    "RecordWriter",
-    "SummaryWriter"
-  ],
   "torch.ao.quantization.experimental.APoT_tensor": [
     "APoTQuantizer"
   ],
