@@ -713,7 +713,6 @@ def mps_ops_modifier(ops):
         'angle': [torch.int64],
 
         # Operations not supported for integral types
-        'special.entr': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
