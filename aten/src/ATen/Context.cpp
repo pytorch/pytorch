@@ -332,7 +332,10 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
@@ -430,6 +433,18 @@ void Context::setAllowFP16AccumulationCuBLAS(bool b) {
   allow_fp16_accumulation_cublas = b;
 }
 
+std::optional<int32_t> Context::_SMCarveout_EXPERIMENTAL() const {
+  return sm_carveout;
+}
+
+void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int32_t> c) {
+  if (c.has_value()) {
+    TORCH_WARN_ONCE(
+      "Setting the SM carveout for matmuls is a temporary experimental mitigation for performance issues, "
+      "while more robust solutions are developed. It may be removed at any moment without notice.");
+  }
+  sm_carveout = c;
+}
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
