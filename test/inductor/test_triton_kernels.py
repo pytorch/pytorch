@@ -8,6 +8,7 @@ import logging
 import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
+import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
@@ -15,6 +16,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import config as inductor_config, metrics
+from torch._inductor.pattern_matcher import (
+    CallFunctionVarArgs,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
 from torch._library import capture_triton
 from torch.testing import FileCheck
@@ -3373,6 +3379,75 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         z = add(x, y)
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
+
+    @requires_gpu
+    def test_preserves_strides(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        x = torch.randn(4, 4, 2, 2, device="cuda")
+        other = torch.randn(4, 4, 2, 2, device="cuda")
+
+        def f(x, other):
+            y = x.transpose(2, 3).contiguous().transpose(2, 3)
+            z = y.sin().transpose(2, 3)
+            grid = (z.numel(),)
+            out = torch.empty_like(other)
+            add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
+            return out
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.aten.permute(*args, **kwargs).clone(
+                    memory_format=torch.channels_last
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with config.patch(
+            post_grad_custom_post_pass=g,
+        ):
+            f_compile = torch.compile(f)
+            self.assertEqual(f(x, other), f_compile(x, other))
+            self.assertTrue(called)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])

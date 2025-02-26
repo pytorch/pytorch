@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, trace_rules
+from . import config, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -104,7 +104,7 @@ from .exc import (
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
-    unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from .guards import (
@@ -535,7 +535,16 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         if is_generator(code):
-            unimplemented("generator")
+            unimplemented_v2(
+                gb_type="Attempt to trace generator",
+                context="",
+                explanation="Generators cannot be compiled directly with `torch.compile`.",
+                hints=[
+                    "Call a generator from inside of a non-generator Python function and "
+                    "compile that function instead.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
@@ -793,7 +802,14 @@ def _compile(
                 # We now have a new "last attempt", reset the clock
                 last_attempt_start_time = time.time()
                 if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
+                    unimplemented_v2(
+                        gb_type="Excessive RestartAnalysis() calls",
+                        context="",
+                        explanation="Dynamo attempted to trace the same frame 100+ times. "
+                        "Giving up on compiling as the compile time tradeoff is likely not "
+                        "worth the performance gain.",
+                        hints=[],
+                    )
             except exc.SkipFrame as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                     TensorifyState.clear()
@@ -962,7 +978,15 @@ def _compile(
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented(f"{limit_type} reached")
+                unimplemented_v2(
+                    gb_type="Dynamo cache limit exceeded",
+                    context=f"Limit type: {limit_type}",
+                    explanation="Dynamo attempted to recompile the code object too many times, "
+                    f"exceeding the {limit_type} cache size limit."
+                    "Giving up on compiling as the compile time tradeoff is likely not "
+                    "worth the performance gain.",
+                    hints=[],
+                )
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
