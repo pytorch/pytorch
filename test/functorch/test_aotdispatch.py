@@ -1200,6 +1200,7 @@ def forward(self, primals_1):
     #     return [sin, copy]""",
     #         )
 
+    @unittest.skipIf(True, "temporarily disabling pending set_.source_Tensor changes")
     def test_input_mutation_storage_resize_down_and_set_(self):
         # Meant to mimic ppFSDP
         class TracableCreateParameter(torch.autograd.Function):

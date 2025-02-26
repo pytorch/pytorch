@@ -401,7 +401,12 @@ Tensor& set_storage_meta__symint(
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride) {
   checkSetStorage(
-      result, storage, storage_offset, size, stride, /*from_meta_impl=*/true);
+      result,
+      storage,
+      storage_offset,
+      size,
+      stride,
+      /*check_offset_in_bounds=*/false);
 
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
