@@ -5784,7 +5784,7 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel, configs, self.kwargs, restore_value_args, reset_to_zero_args
         )
         raw_args = [
-            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
+            (k, self.get_kwargs_value(k)) for k in self.ordered_kwargs_for_cpp_kernel
         ]
 
         # NOTE: raw_args doesn't include autotuned args.
@@ -5810,9 +5810,9 @@ class UserDefinedTritonKernel(ExternKernel):
             REMOVED = object()
             raw_args = [
                 (
-                    (idx, arg)
-                    if (arg is not None)
-                    or (arg is None and idx in constexpr_indices_set)
+                    (idx, arg)  # type: ignore[misc]
+                    if (arg[1] is not None)
+                    or (arg[1] is None and idx in constexpr_indices_set)
                     else (idx, REMOVED)
                 )
                 for idx, arg in enumerate(raw_args)
@@ -5845,11 +5845,17 @@ class UserDefinedTritonKernel(ExternKernel):
 
                 triton_meta["configs"][0].equal_to_1 = equal_to_1
 
+        # Create a mapping from kwargs to the raw_args we are passing in.
+        raw_keys = [k for (k, v) in raw_args]
+        raw_args = [v for (k, v) in raw_args]
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
+            self.fx_node.name,
             raw_args,
+            raw_keys,
             self.grid,
             configs,
             triton_meta,

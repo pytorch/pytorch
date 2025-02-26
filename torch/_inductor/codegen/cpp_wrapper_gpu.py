@@ -196,6 +196,7 @@ class CppWrapperGpu(CppWrapperCpu):
         super().__init__()
         self.grid_id = count()
         self._load_kernel_cache: dict[Hashable, str] = {}
+        self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
 
     @staticmethod
     def create(
@@ -232,6 +233,9 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def get_autotuning_input_name(self, idx):
+        return f"{self.autotune_input_prefix}_{idx}"
 
     def codegen_inputs(self):
         # See Note: [Input Alignment handling in Inductor]
@@ -311,7 +315,9 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
+        original_name: str,
         raw_args: list[Any],
+        original_kwargs: list[str],
         grid: list[Any],
         configs,
         triton_meta,
@@ -325,7 +331,9 @@ class CppWrapperGpu(CppWrapperCpu):
             PythonWrapperCodegen.generate_user_defined_triton_kernel(
                 self,
                 kernel_name,
+                original_name,
                 raw_args,
+                original_kwargs,
                 grid,
                 configs,
                 triton_meta,
@@ -500,6 +508,8 @@ class CppWrapperGpu(CppWrapperCpu):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        original_triton_name: Optional[str] = None,
+        original_triton_kwargs: Optional[list[str]] = None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -544,6 +554,8 @@ class CppWrapperGpu(CppWrapperCpu):
                 triton_meta,
                 autotune_configs,
                 grid_extra_kwargs,
+                original_triton_name,
+                original_triton_kwargs,
             )
 
         if device_index is None:

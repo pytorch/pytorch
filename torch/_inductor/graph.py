@@ -385,6 +385,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
 
+        # record intermediate results for input of UsedDefinedTritonKernels
+        # This will be used if autotuning is done in one pass.
+        self.autotuning_inputs: Optional[list[torch.Tensor]] = None
+        self.autotuning_mapping: Optional[dict[str, dict[str, int]]] = None
+
         # current_device is set only during codegen of a device-specific kernel
         # a graph can have many devices
         self.current_device: Optional[torch.device] = None
@@ -1826,20 +1831,69 @@ class GraphLowering(torch.fx.Interpreter):
                 self.const_module.wrapper_code.src_to_kernel
             )
 
+    def extract_autotune_inputs(
+        self, example_inputs: list[Union[int, float, torch.Tensor]]
+    ) -> None:
+        import copy
+
+        cloned_gm = copy.deepcopy(self.orig_gm)
+        triton_nodes = []
+        for node in cloned_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+            ):
+                triton_nodes.append(node)
+
+        triton_inputs: dict[str, Any] = {}
+        visited_inputs: dict[Any, int] = {}
+        new_outputs: list[torch.fx.Node] = []
+        for node in triton_nodes:
+            kwargs = node.kwargs["kwargs"]
+            # identify which args might be mutated, those should be cloned.
+            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
+                node.kwargs["kernel_idx"],
+                node.kwargs["constant_args_idx"],
+                {
+                    k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+                    for k, v in kwargs.items()
+                },
+            )
+
+            new_kwargs: dict[str, int] = {}
+            with cloned_gm.graph.inserting_before(node):
+                for k, v in kwargs.items():
+                    if k in mutated:
+                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        new_kwargs[k] = len(new_outputs)
+                        new_outputs.append(new_node)
+                        continue
+
+                    if v in visited_inputs:
+                        new_kwargs[k] = visited_inputs[v]
+                        continue
+                    visited_inputs[v] = len(new_outputs)
+                    new_outputs.append(v)
+                    new_kwargs[k] = visited_inputs[v]
+            triton_inputs[node.name] = new_kwargs
+
+        for node in cloned_gm.graph.nodes:
+            if node.op == "output":
+                node.args = (tuple(new_outputs),)
+                break
+
+        cloned_gm.recompile()
+        runner = torch.fx.Interpreter(cloned_gm)
+        self.autotuning_inputs = runner.run(example_inputs)
+        self.autotuning_mapping = triton_inputs
+
     def codegen_with_cpp_wrapper(self) -> tuple[str, list[tuple[int, Node]]]:
         """
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
         if any(device in self.device_types for device in ["cuda", "xpu"]):
-            if config.triton.autotune_at_compile_time:
-                # If autotune_at_compile_time is True, we can do the codegen in one-pass
-                # TODO: once autotune_at_compile_time is stable, we should delete the else branch
-                return self.codegen()
-            else:
-                # first pass
-                self.cpp_wrapper = False
-                compiled = self.compile_to_module().call
 
+            def extract_real_inputs() -> list[Union[int, float, torch.Tensor]]:
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
                 ) -> Union[int, float, torch.Tensor]:
@@ -1906,7 +1960,26 @@ class GraphLowering(torch.fx.Interpreter):
                         assert isinstance(mutated_inp, torch.Tensor)
                         real_inputs[idx] = clone_preserve_strides(mutated_inp)
                         del mutated_inp
+                return real_inputs
 
+            if config.triton.autotune_at_compile_time:
+                # If autotune_at_compile_time is True, we can do the codegen in one-pass
+                # We will construct the autotuning values if user defined kernel exists.
+                user_defined_kernels = False
+                for op in self.operations:
+                    if isinstance(op, ir.UserDefinedTritonKernel):
+                        user_defined_kernels = True
+                        break
+                if user_defined_kernels:
+                    real_inputs = extract_real_inputs()
+                    self.extract_autotune_inputs(real_inputs)
+                return self.codegen()
+            else:
+                # first pass
+                self.cpp_wrapper = False
+                compiled = self.compile_to_module().call
+
+                real_inputs = extract_real_inputs()
                 with torch.utils._python_dispatch._disable_current_modes():
                     compiled(real_inputs)
                 del real_inputs
