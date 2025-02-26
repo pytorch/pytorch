@@ -693,7 +693,7 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
     dict["max"] = stat.max;
     dict["min"] = stat.min;
     dict["count"] = stat.count;
-    dict["avg"] = stat.total / stat.count;
+    dict["avg"] = stat.count == 0 ? 0 : stat.total / stat.count;
     return dict;
   };
 
