@@ -1273,7 +1273,6 @@ class Reduction(Loops):
         reduction_ranges: Sequence[_IntLike],
         reduction_type: str,
         src_dtype: torch.dtype,
-        dst_dtype: torch.dtype,
     ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
@@ -1308,7 +1307,7 @@ class Reduction(Loops):
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
-                    ops.index_expr(flatten_index(rindex), dst_dtype),
+                    ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
             return lambda index: fn(index)[1]
@@ -1396,7 +1395,7 @@ class Reduction(Loops):
                 device=device,
                 dtype=dst_dtype,
                 inner_fn=cls._unroll_reduction_fn(
-                    inner_fn, reduction_ranges, reduction_type, src_dtype, dst_dtype
+                    inner_fn, reduction_ranges, reduction_type, src_dtype
                 ),
                 ranges=ranges,
             )
@@ -1846,7 +1845,7 @@ class WelfordReduction(Reduction):
         #         device,
         #         dst_dtype,
         #         cls._unroll_reduction_fn(
-        #             inner_fn, reduction_ranges, reduction_type, src_dtype, dst_dtype
+        #             inner_fn, reduction_ranges, reduction_type, src_dtype,
         #         ),
         #         ranges,
         #     )

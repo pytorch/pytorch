@@ -4328,7 +4328,6 @@ def _max_pool2d_with_offsets(
     padding,
     dilation,
     ceil_mode=False,
-    assert_fallback=None,
     int_dtype=torch.int64,
 ):
     x.realize_hint()
@@ -4372,7 +4371,7 @@ def _max_pool2d_with_offsets(
         reduction_type="argmax",
         input_node=x,
         device=x.get_device(),
-        dst_dtype=int_dtype,
+        dst_dtype=torch.int64,
         src_dtype=dtype,
         inner_fn=fn_inner,
         ranges=new_size,
@@ -4408,7 +4407,7 @@ def _low_memory_max_pool2d_with_offsets(
     )
 
     with config.patch(unroll_reductions_threshold=25):
-        return _max_pool2d_with_offsets(
+        return to_dtype(_max_pool2d_with_offsets(
             x,
             kernel_size,
             stride,
@@ -4416,8 +4415,7 @@ def _low_memory_max_pool2d_with_offsets(
             dilation,
             ceil_mode,
             True,
-            int_dtype=torch.int8,
-        )
+        ), torch.int8)
 
 
 @register_lowering(
