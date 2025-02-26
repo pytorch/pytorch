@@ -620,7 +620,6 @@ class ScanAutogradOp(torch.autograd.Function):
         ctx,
         fw_graph,
         joint_graph,
-        reverse,
         num_leaves_init,
         num_leaves_xs,
         carry_mask,
@@ -630,7 +629,6 @@ class ScanAutogradOp(torch.autograd.Function):
         *flat_args,
     ):
         ctx._joint_graph = joint_graph
-        ctx._reverse = reverse
         ctx._num_leaves_init = num_leaves_init
         ctx._num_leaves_xs = num_leaves_xs
         init, xs, additional_inputs = ScanAutogradOp.unpack_list(
@@ -652,7 +650,7 @@ class ScanAutogradOp(torch.autograd.Function):
 
         with torch._C._AutoDispatchBelowAutograd():
             carry, carries_outs = _extract_carry_and_out(
-                scan_op(fw_graph, init, xs, reverse, additional_inputs),
+                scan_op(fw_graph, init, xs, additional_inputs),
                 num_leaves_init,
             )
 
@@ -705,7 +703,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Collect the saved items from the forward
         joint_graph = ctx._joint_graph
-        reverse = ctx._reverse
         num_leaves_init = ctx._num_leaves_init
         num_leaves_xs = ctx._num_leaves_xs
         num_leaves_ys = ctx._num_leaves_ys
@@ -720,24 +717,10 @@ class ScanAutogradOp(torch.autograd.Function):
         def prepare_carries_for_bwd(init, carries):
             # Prepare the carries for the backward path.
             # This requires to concatenate the init and the carries
-            # and to flip them along the 0-th dim in case the reverse flag is used
-            if reverse:
-                return [
-                    torch.cat([torch.unsqueeze(i, 0), torch.flip(c[1:], [0])], dim=0)
-                    for i, c in zip(init, carries)
-                ]
-            else:
-                return [
-                    torch.cat([torch.unsqueeze(i, 0), c[:-1]], dim=0)
-                    for i, c in zip(init, carries)
-                ]
-
-        def flip(xs):
-            # If needed, we flip the g_xs along the 0-th dim
-            if reverse:
-                return [torch.flip(el, [0]) for el in xs]
-
-            return xs
+            return [
+                torch.cat([torch.unsqueeze(i, 0), c[:-1]], dim=0)
+                for i, c in zip(init, carries)
+            ]
 
         def prepare_initial_gradients(
             flat_grads,
@@ -750,10 +733,6 @@ class ScanAutogradOp(torch.autograd.Function):
             g_c_T, g_ys, _ = ScanAutogradOp.unpack_list(
                 list(flat_grads), num_leaves_init, num_leaves_ys
             )
-
-            # In case the reverse flag is used, the upstream g_ys need to be flipped along the 0-th dim
-            if reverse:
-                g_ys = [torch.flip(g, [0]) for g in g_ys]
 
             # The initial gradients for the additional_inputs are all zeros
             g_additional_inputs = [
@@ -806,14 +785,16 @@ class ScanAutogradOp(torch.autograd.Function):
                 num_leaves_init,
                 num_leaves_ys,
             )
-            xs = flip(xs)
             carries = prepare_carries_for_bwd(init, carries)
+            
+            bwd_scan_xs = [*g_ys, *carries, *xs]
+
+            bwd_scan_xs = [torch.flip(elem, [0]) for elem in bwd_scan_xs]
 
             g_outs = scan_op(
                 joint_graph,
                 [*g_additional_inputs, *g_c_T],
-                [*g_ys, *carries, *xs],
-                True,
+                bwd_scan_xs,
                 additional_inputs,
             )
 
@@ -826,7 +807,7 @@ class ScanAutogradOp(torch.autograd.Function):
                 g_outs, num_additional_inputs, num_leaves_init
             )
 
-            g_xs = flip(g_xs)
+            g_xs = [torch.flip(elem, [0]) for elem in g_xs]
 
         new_g_additional_inputs = mask_list(
             additional_inputs_mask,
@@ -839,11 +820,11 @@ class ScanAutogradOp(torch.autograd.Function):
 
         g_xs = mask_list(xs_mask, g_xs, [torch.zeros_like(x) for x in xs])
         g_init = mask_list(carry_mask, g_init, [torch.zeros_like(el) for el in g_init])
-        return *[None] * 9, *g_init, *g_xs, *new_g_additional_inputs
+        return *[None] * 8, *g_init, *g_xs, *new_g_additional_inputs
 
 
 @scan_op.py_impl(DispatchKey.Autograd)
-def scan_autograd(combine_fn, init, xs, reverse, additional_inputs):
+def scan_autograd(combine_fn, init, xs, additional_inputs):
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
     # TODO: Figure out how to do this in dispatcher so that we don't have to do this check here
@@ -853,7 +834,7 @@ def scan_autograd(combine_fn, init, xs, reverse, additional_inputs):
         (init, xs, additional_inputs),
     ):
         with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(combine_fn, init, xs, reverse, additional_inputs)
+            return scan_op(combine_fn, init, xs, additional_inputs)
 
     # TODO: The create_fw_bw is always invoked twice:
     # Once in the forward path and
@@ -863,7 +844,7 @@ def scan_autograd(combine_fn, init, xs, reverse, additional_inputs):
         # This clause is hit in the case of double backward.
         # Currently scan does not support this and thus we just dummy call another scan
         with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(combine_fn, init, xs, reverse, additional_inputs)
+            return scan_op(combine_fn, init, xs, additional_inputs)
 
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
@@ -880,7 +861,6 @@ def scan_autograd(combine_fn, init, xs, reverse, additional_inputs):
     flat_out = ScanAutogradOp.apply(
         fw_graph,
         joint_graph,
-        reverse,
         num_leaves_init,
         num_leaves_xs,
         carry_mask,

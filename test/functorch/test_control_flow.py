@@ -3514,7 +3514,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    select_copy = torch.select_copy(elem, 0, 0)
+    elem_1 = torch.flip(elem, [0]);  elem = None
+    select_copy = torch.select_copy(elem_1, 0, 0)
     v = l_init_ + select_copy;  v = None
     x = l_init_ + select_copy;  select_copy = x = None
     scan_combine_fn_0 = self.scan_combine_fn_0
