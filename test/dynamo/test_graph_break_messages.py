@@ -788,6 +788,55 @@ from user code:
     return torch.ops.mylib.foo(x)""",
         )
 
+    def test_data_dependent_branching_fullgraph(self):
+        def fn(x):
+            if x.sum() > 0:
+                return x.sin()
+            return x.cos()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    if x.sum() > 0:""",
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_data_dependent_branching_gb(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x.sin()
+            return x.cos()
+
+        torch.compile(fn, backend="eager")(torch.randn(3))
+
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_graph_break_messages.py:N
+Graph Break Reason: Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+User code traceback:
+  File "test_graph_break_messages.py", line N, in fn
+    if x.sum() > 0:
+""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

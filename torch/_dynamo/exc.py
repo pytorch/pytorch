@@ -469,6 +469,28 @@ def unimplemented_v2_with_warning(
     unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
 
 
+def format_graph_break_message(
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+):
+    explanation = textwrap.indent(explanation, "    ").lstrip()
+    hints_str = "\n".join(
+        "  Hint: " + textwrap.indent(hint, "    ").lstrip() for hint in hints
+    )
+    context = textwrap.indent(context, "    ").lstrip()
+
+    msg = f"""\
+{gb_type}
+  Explanation: {explanation}
+{hints_str}
+
+  Developer debug context: {context}
+"""
+    return msg
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -489,19 +511,7 @@ def unimplemented_v2(
         hints: List of user-facing hints for the graph break.
     """
 
-    explanation = textwrap.indent(explanation, "    ").lstrip()
-    hints_str = "\n".join(
-        "  Hint: " + textwrap.indent(hint, "    ").lstrip() for hint in hints
-    )
-    context = textwrap.indent(context, "    ").lstrip()
-
-    msg = f"""\
-{gb_type}
-  Explanation: {explanation}
-{hints_str}
-
-  Developer debug context: {context}
-"""
+    msg = format_graph_break_message(gb_type, context, explanation, hints)
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
