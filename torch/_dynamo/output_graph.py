@@ -1349,6 +1349,13 @@ class OutputGraph:
 
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
+                # There is a rare scenario where codegen_suffix adds a new entry
+                # to self.nn_modules while `root` knows only about the
+                # nn_modules at the time of its creation. This causes failures
+                # while creating the graph module because self.graph and root
+                # are out of sync. This only happens for `get_attr` nodes, so
+                # here we clean up the get_attr nodes that are unused.
+                self.remove_unused_get_attr_nodes()
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
@@ -1555,6 +1562,12 @@ class OutputGraph:
     def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
         return result
+
+    def remove_unused_get_attr_nodes(self) -> None:
+        for node in reversed(list(self.graph.nodes)):
+            if len(list(node.users)) == 0:
+                if node.op == "get_attr":
+                    self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
         # NB: It's always OK to drop GraphArg for symbols that ended up being
