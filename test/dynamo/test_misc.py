@@ -7858,6 +7858,54 @@ utils_device.CURRENT_DEVICE == None""".split(
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y, y)
 
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_int_sources(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_tensor_sources(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_graph_break(self):
+        counter = CompileCounter()
+
+        def foo(x):
+            return x * x
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            x = x * x
+            torch._dynamo.graph_break()
+            return foo(x)
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        # 2 since graph break produces 2 graphs. NB: there are no recompiles
+        self.assertEqual(counter.frame_count, 2)
+
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])
 

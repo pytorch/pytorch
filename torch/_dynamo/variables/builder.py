@@ -275,6 +275,7 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
+_DYNAMIC_SOURCES: Optional[set[str]] = None
 
 
 DimList = list
@@ -1955,7 +1956,10 @@ class VariableBuilder:
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif (
+                not config.assume_static_by_default
+                or self.source.name() in get_dynamic_sources()
+            ):
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2639,6 +2643,15 @@ def get_automatic_dynamic_shapes_mark_as():
         )
 
 
+def get_dynamic_sources() -> set[str]:
+    global _DYNAMIC_SOURCES
+    if _DYNAMIC_SOURCES is not None:
+        return _DYNAMIC_SOURCES
+
+    _DYNAMIC_SOURCES = set(torch.compiler.config.dynamic_sources.split(","))
+    return _DYNAMIC_SOURCES
+
+
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
 @dataclasses.dataclass
@@ -2669,6 +2682,7 @@ def _automatic_dynamic(
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
+    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2807,7 +2821,7 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic:
+        if marked_dynamic or source.name() in dynamic_sources:
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
