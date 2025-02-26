@@ -25,6 +25,15 @@ void kernel spherical_bessel_j0(
       c10::metal::spherical_bessel_j0(static_cast<T0>(input[index]));
 }
 
+template <typename T0, typename T1>
+void kernel entr(
+    device T0* output,
+    constant T1* input,
+    uint index [[thread_position_in_grid]]) {
+  output[index] =
+      c10::metal::entr(static_cast<T0>(input[index]));
+}
+
 #define REGISTER_I0_I1(DTI, DTO)                                           \
   template [[host_name("i0_" #DTO "_" #DTI)]] void kernel i0<DTO, DTI>(    \
       device DTO*, constant DTI*, uint);                                   \
