@@ -730,15 +730,22 @@ def extract_loop_body_with_args(
         if isinstance(read, MemoryDep) and read.replacement:
             # find out the indirect var in memdep's indexing expr, e.g. indirect0 in
             # index0 = 4096*indirect0 + p1
-            indirect_load_dim_indexing_expr = None
-            indirect_vars = [
-                free_symbol
-                for free_symbol in read.index.free_symbols
-                if free_symbol in repl_reverse
-            ]
-            if len(indirect_vars) != 1:
+            (
+                additive_symbol,
+                coefficient,
+                multiplied_symbol,
+            ) = extract_coefficient_pattern(read.index)
+            if any(
+                x is None for x in (additive_symbol, coefficient, multiplied_symbol)
+            ):
                 continue
-            indirect_var = indirect_vars[0]
+            # check if the coefficient is the stride
+
+            # check the indirect variable
+            indirect_load_dim_indexing_expr = None
+            indirect_var = multiplied_symbol
+            if not is_indirect(indirect_var.name):
+                continue
             # find out its corresponding set_indirect node, e.g. set_indirect0
             set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
             if (
@@ -766,20 +773,10 @@ def extract_loop_body_with_args(
             if indirect_load_dim_indexing_expr is None:
                 continue
             broadcast_dim_indexing = None
-            other_free_symbols = [
-                free_symbol
-                for free_symbol in read.index.free_symbols
-                if free_symbol not in repl_reverse
-            ]
-            if len(other_free_symbols) != 1:
-                continue
-            # find out the only free symbol in memdep's indexing expr, e.g. p1 in
-            # index0 = 4096*indirect0 + p1
-            other_free_symbol = other_free_symbols[0]
             replacement = dict(read.replacement)
             replacement_reverse = {v: k for k, v in replacement.items()}
-            assert other_free_symbol in replacement_reverse
-            d_symbol = replacement_reverse[other_free_symbol]
+            assert additive_symbol in replacement_reverse
+            d_symbol = replacement_reverse[additive_symbol]
             d_p_replacement = {v: k for k, v in fn.replacement.items()}
             broadcast_dim_indexing = d_p_replacement[d_symbol]
             # add this indirect broadcast dimension pair, e.g., (p0, p1) to the memdep
@@ -935,3 +932,57 @@ def extract_free_symbols(
     ):
         fn(*args)
     return handler.symbols
+
+
+def extract_coefficient_pattern(
+    expr: sympy.Expr,
+) -> tuple[
+    Optional[sympy.Symbol], Optional[Union[int, sympy.Integer]], Optional[sympy.Symbol]
+]:
+    """
+    Extracts a pattern of the form 'symbol + coefficient*symbol' from a sympy expression.
+
+    Returns:
+        A tuple (additive_symbol, coefficient, multiplied_symbol) if the pattern is found,
+        or (None, None, None) otherwise.
+
+    Example:
+        For 'c1 + 4096*tmp0', returns (c1, 4096, tmp0)
+    """
+    if not isinstance(expr, sympy.Add):
+        return None, None, None
+
+    terms = expr.args
+    if len(terms) != 2:
+        return None, None, None
+
+    # Try to find one symbol term and one Mul term
+    additive_symbol = None
+    mul_term = None
+
+    for term in terms:
+        if isinstance(term, sympy.Symbol):
+            additive_symbol = term
+        elif isinstance(term, sympy.Mul) and any(
+            isinstance(arg, sympy.Symbol) for arg in term.args
+        ):
+            mul_term = term
+
+    if additive_symbol is None or mul_term is None:
+        return None, None, None
+
+    # Extract the coefficient and the multiplied symbol from the Mul
+    coeff = None
+    multiplied_symbol = None
+
+    for arg in mul_term.args:
+        if isinstance(arg, sympy.Symbol):
+            multiplied_symbol = arg
+        elif isinstance(arg, (int, sympy.core.numbers.Integer)):
+            coeff = arg
+
+    # Return None if we didn't find a valid coefficient
+    if coeff is None or multiplied_symbol is None:
+        return None, None, None
+
+    return additive_symbol, coeff, multiplied_symbol

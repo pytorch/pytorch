@@ -66,8 +66,6 @@ from .simd_kernel_features import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
-import re
-
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -78,8 +76,6 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 pexpr = PythonPrinter().doprint
 
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
-
-INDIRECT_PATTERN = re.compile(r"indirect|tmp")
 
 
 @dataclasses.dataclass
