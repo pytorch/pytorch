@@ -357,6 +357,52 @@ class _Matmul:
             B_node=cast(torch.fx.Node, mm_node.args[1]),
         )
 
+def _maybe_reshape_scale(tensor_a, scales):
+    """
+    Reshape scales tensor to match the dimensions of tensor_a.
+    
+    Args:
+        tensor_a (torch.Tensor): The reference tensor
+        scales (torch.Tensor): The scales tensor to be reshaped
+    
+    Returns:
+        torch.Tensor: The reshaped scales tensor
+    """
+    # Case where scales already has the expected dimensionality
+    if scales.dim() == tensor_a.dim():
+        return scales
+    
+    # Get shape of tensor_a
+    a_shape = tensor_a.shape
+    
+    # Handle the case where scales is flattened (A*B, 1)
+    if scales.dim() == 2 and scales.shape[1] == 1:
+        # Check if we can reshape to match tensor_a's first dimensions
+        total_size = scales.shape[0]
+        
+        # Check if the flattened size matches the product of first dimensions
+        first_n_dims = 0
+        prod = 1
+        for i, dim_size in enumerate(a_shape):
+            prod *= dim_size
+            first_n_dims = i + 1
+            if prod == total_size:
+                break
+                
+        if prod == total_size:
+            # We found a matching product, reshape accordingly
+            new_shape = a_shape[:first_n_dims] + (1,) * (tensor_a.dim() - first_n_dims)
+            return scales.reshape(new_shape).clone()
+    
+    # If we get here, we couldn't automatically determine the reshape pattern
+    raise ValueError(f"Cannot automatically reshape scales {scales.shape} to match tensor {a_shape}")
+
+maybe_reshape_scale = inductor_prims.make_prim(
+    "maybe_reshape_scale(Tensor tensor_a, Tensor scales) -> Tensor",
+    _maybe_reshape_scale,
+    doc="Reshape scales to match tensor dims if necessary",
+)
+
 
 @dataclass
 class _ScaledMatmul(_Matmul):
@@ -387,6 +433,24 @@ class _ScaledMatmul(_Matmul):
             aten.reshape.default,
         )
 
+
+        def insert_custom_view_op(graph, insert_after_node, tensor_node, scale_node):
+            """Insert a custom view function after a specific node in an FX graph."""
+            with graph.inserting_after(insert_after_node):
+                view_node = graph.call_function(
+                    maybe_reshape_scale,
+                    args=(tensor_node, scale_node),
+                    kwargs={}
+                )
+                
+                # Redirect users to the new node
+                users = list(insert_after_node.users)
+                for user in users:
+                    if user is not view_node:
+                        user.replace_input_with(insert_after_node, view_node)
+                
+                return view_node
+
         def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
             if idx >= len(node.args):
                 return default
@@ -403,11 +467,11 @@ class _ScaledMatmul(_Matmul):
         # - Has 3D+ shape
         A_node = match[0].args[0]
         A_scale_node = mm_node.args[2]
+        new_A_scale_node = None
         if is_reshape_mm_reshape_pattern:
-            # scaled_mm's A_scale arg -> parent is reshape op
-            A_scale_reshape_node = A_scale_node.all_input_nodes[0]
-            # reshape node's parent is the original scale, before the reshape.
-            A_scale_node = A_scale_reshape_node.all_input_nodes[0]
+            new_A_scale_node = insert_custom_view_op(A_scale_node.graph, A_scale_node, A_node, A_scale_node)
+        if new_A_scale_node is not None:
+            A_scale_node = new_A_scale_node
 
         return _ScaledMatmul(
             nodes=match,
