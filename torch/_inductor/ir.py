@@ -7407,8 +7407,11 @@ class WhileLoop(ExternKernel):
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
         all_inputs = carried_inputs + additional_inputs
 
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+        fx_carried_inputs = V.graph.current_node.args[-2]
+        fx_additional_inputs = V.graph.current_node.args[-1]
+        fx_all_inputs = fx_carried_inputs + fx_additional_inputs  # type: ignore[operator]
         fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
+        fake_carried_inputs = [x.meta["val"] for x in fx_carried_inputs]  # type: ignore[union-attr]
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
@@ -7420,6 +7423,26 @@ class WhileLoop(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_all_inputs)
+                    # For body_fn, we require its output to have the exact same stride
+                    # as inputs because the previous output is the input of next iteration.
+                    #
+                    # This cannot be automatically done in graph lowering because body_fn's graph outputs
+                    # are not user-facing so the special handling for strides of user-facing output in graph
+                    # lowering is not applicable.
+                    if subgraph is body_fn:
+                        assert len(subgraph.graph.graph_outputs) == len(
+                            fake_carried_inputs
+                        )
+                        subgraph.graph.graph_outputs = [
+                            ExternKernel.require_exact_strides(
+                                out, fake_out.stride(), allow_padding=False
+                            )
+                            if not isinstance(out, ShapeAsConstantBuffer)
+                            else out
+                            for out, fake_out in zip(
+                                subgraph.graph.graph_outputs, fake_carried_inputs
+                            )
+                        ]
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
