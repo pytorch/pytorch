@@ -653,6 +653,7 @@ def _distribute_state_dict(
     local_state_dict: dict[str, Any],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
+    cpu_offload: bool = False,
 ) -> None:
     # Full_state_dict = True, broadcast_from_rank0 = False here. Each rank has
     # full_state_dict. Skip the broadcast in ``_broadcast_state_dict`` and
@@ -677,6 +678,8 @@ def _distribute_state_dict(
                 )
             else:
                 local_state_dict[key] = value.detach().to(device)
+        if cpu_offload:
+            local_state_dict[key] = local_state_dict[key].cpu()
 
 
 # These APIs are from torch.distributed.checkpoint.

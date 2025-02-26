@@ -593,7 +593,12 @@ def _load_model_state_dict(
                 cpu_offload=info.cpu_offload,
             )
         elif info.full_state_dict:
-            _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
+            _distribute_state_dict(
+                state_dict,
+                local_state_dict,
+                device=devices.pop(),
+                cpu_offload=info.cpu_offload,
+            )
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
