@@ -2760,10 +2760,20 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         pass
 
     def codegen_input_size_asserts(self) -> None:
-        pass
+        if self.partition_signatures:
+            # graph partition does not need input size asserts since
+            # it is already done in the parent wrapper
+            return
+
+        super().codegen_input_size_asserts()
 
     def codegen_input_nan_asserts(self) -> None:
-        pass
+        if self.partition_signatures:
+            # graph partition does not need input nan asserts since
+            # it is already done in the parent wrapper
+            return
+
+        super().codegen_input_nan_asserts()
 
     def next_kernel_suffix(self) -> str:
         # Ensures that subgraphs kernels do not clash with each other
