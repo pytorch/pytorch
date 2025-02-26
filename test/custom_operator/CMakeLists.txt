@@ -11,6 +11,7 @@ find_package(Torch REQUIRED)
 add_library(custom_ops SHARED op.cpp)
 set_property(TARGET custom_ops PROPERTY CXX_STANDARD 17)
 
+message("!!!!!!!!! TORCH_LIBRARIES: ${TORCH_LIBRARIES}")
 target_compile_features(custom_ops PUBLIC cxx_range_for)
 target_link_libraries(custom_ops "${TORCH_LIBRARIES}")
 target_compile_definitions(custom_ops PRIVATE custom_ops_EXPORTS)

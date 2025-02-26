@@ -23,8 +23,10 @@ set_property(
   ${MKL_ROOT}/lib ${MKL_ROOT}/lib/intel64 ${MKL_ROOT}/lib/intel64_win ${MKL_ROOT}/lib/win-x64)
 
 if(UNIX)
-  # if(USE_STATIC_MKL AND 0)
-  if(USE_STATIC_MKL)
+  # Disable it for it will caused torch_cuda_linalg link failed.
+  # Link: https://github.com/pytorch/pytorch/issues/146551#issuecomment-2655672240
+  # TODO: if torch_cuda_linalg USE mkl, need to find link mkl directly, but not torch_cpu.so.
+  if(USE_STATIC_MKL AND NOT USE_CUDA)
     foreach(MKL_LIB_PATH IN LISTS MKL_LIBRARIES)
       if(NOT EXISTS "${MKL_LIB_PATH}")
         continue()

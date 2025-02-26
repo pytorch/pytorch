@@ -297,7 +297,6 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         SET(_found_tbb TRUE)
       ELSE()
         SET(lib_names ${_library})
-        message("!!!!! lib_names: ${lib_names}.${SHARED_SO_VERSION_NUM}")
         FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names} ${lib_names}.${SHARED_SO_VERSION_NUM})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
