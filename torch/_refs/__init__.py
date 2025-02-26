@@ -5216,7 +5216,10 @@ def linspace(
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
         if isinstance(start, TensorLikeType):
-            return start.detach()
+            # we need to convert tensor(0,) to torch.Size([1])
+            if len(start.shape) == 0:
+                return torch.full((steps,), start.item(), dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+            return start.clone()
         else:
             return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
