@@ -1018,6 +1018,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     unimplemented(
                         f"""
 For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <{type_name}>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
   * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
@@ -1033,14 +1034,17 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             # the spec not a graphable type, so we still have to reconstruct it
             # into a python object, and store it as a constant attribute on the
             # fx graph.
-            #
-            # TODO handle `pytree._register_constant`-ed values.
             try:
                 input_spec = input_spec_vt.as_python_constant()
             except NotImplementedError:
                 unimplemented(
                     """
-This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been (or needs to be) `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+TODO werid case, a user registered type whose `pytree_flatten` that puts some
+non-reconstructible object into the context (which then got stored into the spec).
+
+https://github.com/pytorch/pytorch/pull/146367#discussion_r1969985257
+
+What's the workaround? Should they just use `pytree.register_constant`?
 """  # NOQA: B950
                 )
 

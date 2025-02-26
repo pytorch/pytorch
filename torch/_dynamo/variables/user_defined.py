@@ -764,6 +764,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def as_python_constant(self):
+        # For any `pytree.register_constant`-ed class, `torch.compile` can
+        # assume the instances of this class won't change (TODO clarify more)
+        import torch.utils._pytree as pytree
+
+        if pytree.is_constant_cls(self.value_type):
+            if self.source is not None:
+                # TODO we already have `ID_MATCH` guard, emit a new hash guard
+                # for extra safety?
+                # TODO check for side effect on this object? What about nested
+                # attributes (e.g., `x.y` didn't get mutated, but `x.y.z` did)?
+                # The latter is somewhat infeasible to check completely.
+                return self.value
+            # TODO else the object was constructed during Dynamo tracing,
+            # reconstructing this in general is hard... Just suggest normal pytree
+            # registration?
+        return super().as_python_constant()
+
     def guard_as_python_constant(self):
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
@@ -1352,7 +1370,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         import torch.utils._pytree as pytree
 
-        if not istype(self.value, (pytree.TreeSpec, pytree.LeafSpec)):
+        if not istype(
+            self.value, (pytree.TreeSpec, pytree.LeafSpec, pytree.ConstantNode)
+        ):
             # TODO loosen this restriction and fix `as_proxy`.
             raise NotImplementedError(
                 "currently can't reconstruct arbitrary frozen dataclass instances"

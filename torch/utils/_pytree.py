@@ -290,6 +290,18 @@ def register_dataclass(cls: type[Any]) -> None:
     torch.export.register_dataclass(cls)
 
 
+def _constant_flatten(x):  # type: ignore[no-untyped-def]
+    return [], ConstantNode(x)
+
+
+def _constant_unflatten(_, context):  # type: ignore[no-untyped-def]
+    return context.value
+
+
+def _constant_flatten_with_keys(x):  # type: ignore[no-untyped-def]
+    return [], ConstantNode(x)
+
+
 def register_constant(cls: type[Any]) -> None:
     """Registers a type as a pytree node with no leaves.
 
@@ -323,24 +335,22 @@ def register_constant(cls: type[Any]) -> None:
 
     """
 
-    def _flatten(x):  # type: ignore[no-untyped-def]
-        return [], ConstantNode(x)
-
-    def _unflatten(_, context):  # type: ignore[no-untyped-def]
-        return context.value
-
-    def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
-        return [], ConstantNode(x)
-
     _private_register_pytree_node(
         cls,
-        _flatten,
-        _unflatten,
-        flatten_with_keys_fn=_flatten_with_keys,
+        _constant_flatten,
+        _constant_unflatten,
+        flatten_with_keys_fn=_constant_flatten_with_keys,
     )
 
 
-@dataclasses.dataclass
+def is_constant_cls(cls: type[Any]) -> bool:
+    node = SUPPORTED_NODES.get(cls, None)
+    if node is None:
+        return False
+    return node.flatten_fn is _constant_flatten
+
+
+@dataclasses.dataclass(frozen=True)
 class ConstantNode:
     value: Any
 

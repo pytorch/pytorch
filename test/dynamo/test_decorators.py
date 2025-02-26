@@ -441,6 +441,59 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_pre_existing_register_constant_type(self):
+        class State:
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return 42
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        def fn(x, s):
+            res = trace_me(x, s)
+            return res
+
+        x, s = torch.ones(10), State()
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, s)
+        res = opt_fn(x, s)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_newly_constructed_trace_register_constant_type_(self):
+        class State:
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return 42
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        def fn(x):
+            s = State()
+            res = trace_me(x, s)
+            return res
+
+        x = torch.ones(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_tuple_and_sym_int_output(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x):
