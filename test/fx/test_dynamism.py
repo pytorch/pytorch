@@ -71,10 +71,6 @@ class TestDynamism(TestCase):
                 super().__init__()
                 self.y = Y(n_input, n_output)
 
-<<<<<<< HEAD
-=======
-            @torch.compile(delay=1)
->>>>>>> 64069d2d231 ([experimental] delayed compile)
             def forward(self, x):
                 return self.y(x)
 
@@ -112,10 +108,6 @@ class TestDynamism(TestCase):
                 "L['self']['n_output']": (False,),
             }
         }
-<<<<<<< HEAD
-=======
-        print(result)
->>>>>>> 64069d2d231 ([experimental] delayed compile)
         self.assertEqual(result, expected)
 
 
