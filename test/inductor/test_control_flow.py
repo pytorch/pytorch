@@ -126,12 +126,12 @@ class CondModels:
             def true_fn(x, y):
                 z1 = x + y
                 z2 = x - y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             def false_fn(x, y):
                 z1 = x - y
                 z2 = x + y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
 
@@ -898,7 +898,7 @@ class WhileLoopModels:
         def __init__(self, device):
             super().__init__()
             self.conv2d = torch.nn.Conv2d(
-                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), device=device
+                512, 512, (3, 3), stride=(1, 1), padding=(1, 1), device=device
             )
 
         def forward(self, c, x):
@@ -1195,12 +1195,12 @@ class WhileLoopTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
-    @parametrize("dynamic", [False])
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
     def test_while_loop_with_conv(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.Conv(device),
-            inputs=(torch.randn(4, 4, 9, 9),),
+            inputs=(torch.randn(2, 512, 9, 9),),
             device=device,
             dynamic=dynamic,
         )
