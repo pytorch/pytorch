@@ -119,7 +119,10 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn), mock.patch(
+                "torch._functorch.aot_autograd.AOT_COUNTER",
+                new_callable=itertools.count,
+            ):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
@@ -3330,7 +3333,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graphs.append(gm)
                 return inner_compiler_fn(gm)
 
-            with compiled_autograd._enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn), mock.patch(
+                "torch._functorch.aot_autograd.AOT_COUNTER",
+                new_callable=itertools.count,
+            ):
                 res = fn(x)
                 res.sum().backward()
 
