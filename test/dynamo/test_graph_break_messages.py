@@ -632,7 +632,8 @@ Graph break under GenericContextWrappingVariable
 
 
 from user code:
-""",
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break()""",
         )
 
         self.assertExpectedInline(

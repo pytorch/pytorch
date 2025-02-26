@@ -530,5 +530,22 @@ inline float xlog1py(T x, T y) {
   return x * log1p(y);
 }
 
+template <typename T>
+inline float entr(T a) {
+  if (a != a) {
+    return a;
+  }
+
+  if (a > 0) {
+    return -a * ::metal::log(a);
+  }
+
+  if (a == 0) {
+    return 0;
+  }
+
+  return -INFINITY;
+}
+
 } // namespace metal
 } // namespace c10
