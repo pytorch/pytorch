@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 
 from contextlib import nullcontext
-from typing import Optional, Union
+from functools import wraps
+from typing import Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,7 +29,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -43,7 +43,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: GraphModule,
+        subgraph: Callable,
         identifier: Optional[str],
         operands: Union[
             list[Union[torch.Tensor, int, torch.SymInt]],
@@ -94,6 +94,58 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
                 )(func, args)
 
     return func(*args, **kwargs)
+
+
+def export_cache(name):
+    """
+    export_cache is a hackier version of @mark_compiled_region. 
+    
+    In strict-export, the behavior will be the same as @mark_compiled_region,
+    which is that it will differentiate calls to the same function by
+    strict-exporting each function call, and compare the graphs and inputs to
+    determine if we should deduplicate the graphs.
+
+    But when compiling with non-strict export, @export_cache will
+    differentiate calls to the same function by **only the input metadata**. It
+    also differs in that it can only differentiate calls to *different
+    functions* based on the ``name`` argument.
+    """
+    assert "invoke_subgraph" not in name
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if torch.compiler.is_dynamo_compiling():
+                return invoke_subgraph_placeholder(func, *args, **kwargs)
+
+            elif torch.compiler.is_compiling():
+                if len(args) >= 1 and isinstance(args[0], torch.nn.Module):
+                    # For annotations on methods, we need to lift the module
+                    # params/buffers as inputs
+                    inputs: List[torch.Tensor] = []
+                    keys: List[str] = []
+                    for n, p in args[0].named_parameters():
+                        keys.append(n)
+                        inputs.append(p)
+                    for n, b in args[0].named_buffers():
+                        keys.append(n)
+                        inputs.append(b)
+
+                    def _func_wrapper(*inputs):
+                        user_inputs = inputs[len(keys) :]
+                        return func(args[0], *user_inputs)
+
+                    inputs.extend(args[1:])
+                    return invoke_subgraph(_func_wrapper, name, inputs)
+
+                return invoke_subgraph(func, name, args)
+
+            else:
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def mark_compile_region(fn=None):
@@ -320,15 +372,28 @@ def _(mode, subgraph, identifier, operands):
         return subgraph(*operands)
 
 
+def hash_identifier_and_inputs(identifier, operands):
+    def hash_shape(shape):
+        return tuple([s if isinstance(s, int) else str(s.node.expr) for s in shape])
+
+    parsed_operands = tuple(
+        (
+            hash_shape(t.shape),
+            hash_shape(t.stride()),
+            t.dtype,
+            t.requires_grad,
+            t.device,
+        )
+        if isinstance(t, torch.Tensor)
+        else hash_shape([t])
+        for t in operands
+    )
+    return hash((identifier, parsed_operands))
+
+
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
-    # Check if we have already traced the subgraph.
-    graph = None
-    invoke_subgraph_cache = get_invoke_subgraph_cache(proxy_mode)
-    if invoke_subgraph_cache:
-        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
-
-    if graph is None:
+    def trace_invoke_subgraph(subgraph, operands):
         graph = reenter_make_fx(subgraph)(*operands)
 
         from torch._guards import detect_fake_mode
@@ -345,7 +410,36 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
         proxy_mode.tracer.root.register_module(qualname, graph)
-        if invoke_subgraph_cache:
+
+        return graph, qualname
+
+    invoke_subgraph_cache = get_invoke_subgraph_cache(proxy_mode)
+    assert invoke_subgraph_cache is not None
+    if "invoke_subgraph" not in identifier:
+        # HACK: Nonstrict export case, dynamo will set the identifier to be "invoke_subgraph"
+        key = hash_identifier_and_inputs(identifier, operands)
+        qualname = invoke_subgraph_cache.get_proxy_dispatch_identifier(key)
+        if qualname is not None:
+            # If we have already traced the subgraph.
+            graph = invoke_subgraph_cache.get_proxy_dispatch_entry(qualname)
+            assert graph is not None
+
+        else:
+            graph, qualname = trace_invoke_subgraph(subgraph, operands)
+            invoke_subgraph_cache.add_proxy_dispatch_identifier(key, qualname)
+            invoke_subgraph_cache.add_proxy_dispatch_entry(qualname, graph)
+
+        # Unique name for the subgraph. In the non-strict export case, the
+        # existing identifier is just a string differentiating between functions
+        # annotated with @export_cache. In the strict export case, dynamo will
+        # provide us with unique identifiers.
+        identifier = qualname
+
+    else:
+        # Check if we have already traced the subgraph.
+        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
+        if graph is None:
+            graph, qualname = trace_invoke_subgraph(subgraph, operands)
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
     node_args = (graph, identifier, operands)

@@ -673,6 +673,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_identifiers: dict[str, str] = {}
+        self.proxy_dispatch_identifiers: dict[str, str] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
@@ -691,6 +692,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_proxy_dispatch_identifier(self, cache_key: str, identifier: str):
+        self.proxy_dispatch_identifiers[cache_key] = identifier
+
+    def get_proxy_dispatch_identifier(self, cache_key: str) -> Optional[str]:
+        return self.proxy_dispatch_identifiers.get(cache_key, None)
 
 
 class HopDispatchSetCache:
