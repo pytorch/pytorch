@@ -2096,7 +2096,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     @torch.no_grad
@@ -2120,7 +2120,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
         if dtype == torch.half:
@@ -2150,7 +2150,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol), torch.amp.autocast("cpu"):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2176,7 +2176,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(v).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     @torch.no_grad
@@ -2225,7 +2225,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
         self.assertEqual(
-            counters["inductor"]["cpp_templated_kernel_counter"],
+            counters["inductor"]["select_algorithm_autotune"],
             1 if order[0] == (0, 1, 2) else 0,
         )
 
@@ -2249,7 +2249,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     @torch.no_grad
@@ -2270,7 +2270,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     @torch.no_grad
@@ -2306,7 +2306,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(epilogue, other).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2339,7 +2339,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2375,7 +2375,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (x, w),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
 
     @patches
     @torch.no_grad
@@ -2504,7 +2504,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2540,7 +2540,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v, noise), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2600,7 +2600,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v, arg5), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2630,7 +2630,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
