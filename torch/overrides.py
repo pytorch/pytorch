@@ -2074,6 +2074,18 @@ def _pop_mode():
 
 
 @contextlib.contextmanager
+def _apply_torch_function_mode_stack(mode_stack):
+    stack_len = len(mode_stack)
+    try:
+        for mode in mode_stack:
+            _push_mode(mode)
+        yield
+    finally:
+        for _ in range(stack_len):
+            _pop_mode()
+
+
+@contextlib.contextmanager
 def _pop_mode_temporarily():
     old = _pop_mode()
     try:

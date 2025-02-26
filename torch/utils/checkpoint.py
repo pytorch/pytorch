@@ -15,6 +15,8 @@ from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.overrides import _get_current_function_mode_stack, _apply_torch_function_mode_stack
+
 
 __all__ = [
     "checkpoint",
@@ -1496,6 +1498,8 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    torch_function_mode_stack = _get_current_function_mode_stack()
+
     def recompute_fn(*inputs):
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
@@ -1514,7 +1518,12 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            with (
+                device_autocast_ctx,   # type: ignore[attr-defined]
+                torch.amp.autocast("cpu", **cpu_autocast_kwargs),
+                recompute_context,
+                _apply_torch_function_mode_stack(torch_function_mode_stack)
+            ):
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
