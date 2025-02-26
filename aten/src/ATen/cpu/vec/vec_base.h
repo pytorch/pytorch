@@ -50,7 +50,7 @@
 /*
 https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
 Use _MSC_FULL_VER to identify current compiler is msvc,
-Windows llvm will not have this definition.
+Windows llvm will not have this defination.
 */
 #define __msvc_cl__
 #endif
@@ -282,9 +282,9 @@ public:
     }
     return false;
   }
-// MSVC versions between 14.36 and 14.42 has a loop unrolling bug on Windows Arm64
+// TODO: Remove this once the issue with MSVC is fixed
 //       See https://developercommunity.visualstudio.com/t/MSVC-loop-unrolling-problem-194033813-/10720692
-#if defined(_WIN32) && defined(__aarch64__) && ((_MSVC_VER >= 1936) && (_MSVC_VER <= 1942))
+#if defined(_WIN32) && defined(__aarch64__)
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {

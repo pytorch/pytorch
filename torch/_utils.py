@@ -9,9 +9,9 @@ import warnings
 from collections import defaultdict
 from types import ModuleType
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
+from typing_extensions import deprecated, ParamSpec
 
 import torch
-from typing_extensions import deprecated, ParamSpec
 
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):

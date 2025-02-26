@@ -16,6 +16,7 @@ import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
 from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
+from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -23,7 +24,6 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
-from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -1322,16 +1322,10 @@ def load(
         >>> # xdoctest: +SKIP("undefined filepaths")
         >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location=torch.device("cpu"),
-        ...     weights_only=True,
-        ... )
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
         >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location=lambda storage, loc: storage,
-        ...     weights_only=True,
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
         ... )
         # Load all tensors onto GPU 1
         >>> torch.load(
@@ -1340,11 +1334,7 @@ def load(
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location={"cuda:1": "cuda:0"},
-        ...     weights_only=True,
-        ... )
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open("tensor.pt", "rb") as f:
