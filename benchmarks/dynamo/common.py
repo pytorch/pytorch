@@ -2386,8 +2386,6 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
-                elif current_device == "hpu":
-                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2395,8 +2393,6 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
-                elif current_device == "hpu":
-                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2547,8 +2543,6 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
-                elif current_device == "hpu":
-                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2556,8 +2550,6 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
-                elif current_device == "hpu":
-                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2878,7 +2870,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu, cuda or hpu"
+        "--devices", "--device", "-d", action="append", help="cpu or cuda"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(

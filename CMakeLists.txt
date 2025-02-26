@@ -872,6 +872,11 @@ cmake_dependent_option(
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
+# We are currenlty not using alibi attention for Flash So we disable this
+# feature by default We dont currently document this feature because we don't
+# Suspect users building from source will need this
+add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
+
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(

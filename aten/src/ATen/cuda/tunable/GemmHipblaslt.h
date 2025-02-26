@@ -26,63 +26,36 @@
 namespace at::cuda::tunable {
 
 template <typename T>
-constexpr hipDataType HipDataTypeFor();
+constexpr hipblasDatatype_t HipDataTypeFor();
 
 template <>
-constexpr hipDataType HipDataTypeFor<float>() {
+constexpr hipblasDatatype_t HipDataTypeFor<float>() {
   return HIP_R_32F;
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<Half>() {
+constexpr hipblasDatatype_t HipDataTypeFor<Half>() {
   return HIP_R_16F;
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<BFloat16>() {
+constexpr hipblasDatatype_t HipDataTypeFor<BFloat16>() {
   return HIP_R_16BF;
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<double>() {
+constexpr hipblasDatatype_t HipDataTypeFor<double>() {
   return HIP_R_64F;
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fnuz>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e4m3fnuz>() {
   return HIP_R_8F_E4M3_FNUZ;
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2fnuz>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
   return HIP_R_8F_E5M2_FNUZ;
-}
-
-// This code is instantiated regardless of ROCm version.
-// Prior to ROCm 6.3, we hard-code the known enum values.
-template <>
-constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fn>() {
-#if ROCM_VERSION >= 60300
-  return HIP_R_8F_E4M3;
-#else
-  return static_cast<hipDataType>(28);
-#endif
-}
-
-template <>
-constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
-#if ROCM_VERSION >= 60300
-  return HIP_R_8F_E5M2;
-#else
-  return static_cast<hipDataType>(29);
-#endif
-}
-
-// This type is not intended for matrix types but rather a scale factor.
-// Return a dummy value to satisfy linker.
-template <>
-constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
-  return static_cast<hipDataType>(500);
 }
 
 template <typename T>

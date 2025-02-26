@@ -81,7 +81,7 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
-            kBatch, // kBatch
+            1, // kBatch
             {{a_elementwise_op}},
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
@@ -141,7 +141,6 @@ class CKGemmTemplate(CKTemplate):
         const int32_t LDB = {{LDB}};
         const int32_t LDC = {{LDC}};
         const int32_t LDD = {{LDD}};
-        const int32_t kBatch = {{kBatch}};
 
         using AElementType = {{a_ck_dtype}};
         using BElementType = {{b_ck_dtype}};
@@ -684,7 +683,10 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            # NOTE: size_arg_strs is defined above
+            if self.is_batched:
+                size_arg_strs = ["B", "M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            else:
+                size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
             size_arg_vals = (
                 self.size_args()
                 if is_static_problem
@@ -693,12 +695,6 @@ class CKGemmTemplate(CKTemplate):
                 )
             )
             size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
-            runtime_args = dict(
-                zip(
-                    [a.name for a in self.get_runtime_arg_info()],
-                    self.get_runtime_arg_values(),
-                )
-            )
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
@@ -739,7 +735,6 @@ class CKGemmTemplate(CKTemplate):
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
                 **size_args,
-                **runtime_args,
             )
             res += runner_code
 
@@ -837,7 +832,6 @@ class CKGemmTemplate(CKTemplate):
             template.maybe_append_choice(
                 choices,
                 op=op,
-                kBatch=1,
             )
 
     def size_args(self):

@@ -782,7 +782,6 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
-            breakpoint()
             super().__init__(
                 torch._C.PyTorchFileWriter(
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
@@ -1355,16 +1354,10 @@ def load(
         >>> # xdoctest: +SKIP("undefined filepaths")
         >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location=torch.device("cpu"),
-        ...     weights_only=True,
-        ... )
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
         >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location=lambda storage, loc: storage,
-        ...     weights_only=True,
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
         ... )
         # Load all tensors onto GPU 1
         >>> torch.load(
@@ -1373,11 +1366,7 @@ def load(
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location={"cuda:1": "cuda:0"},
-        ...     weights_only=True,
-        ... )
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open("tensor.pt", "rb") as f:
