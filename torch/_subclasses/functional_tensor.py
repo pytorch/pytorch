@@ -466,9 +466,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             import torch._inductor.config as inductor_config
 
             if self.export or not inductor_config.enable_auto_functionalized_v2:
-                return do_auto_functionalize(func, args, kwargs)
+                return do_auto_functionalize(self, func, args, kwargs)
             else:
-                return do_auto_functionalize_v2(func, args, kwargs)
+                return do_auto_functionalize_v2(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
