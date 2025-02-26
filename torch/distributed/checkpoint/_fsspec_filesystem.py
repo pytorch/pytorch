@@ -8,11 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Union
 
-
-try:
-    from fsspec.core import url_to_fs
-except ImportError:
-    pass
+from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (

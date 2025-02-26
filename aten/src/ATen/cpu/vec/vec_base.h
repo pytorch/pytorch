@@ -50,7 +50,7 @@
 /*
 https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
 Use _MSC_FULL_VER to identify current compiler is msvc,
-Windows llvm will not have this defination.
+Windows llvm will not have this definition.
 */
 #define __msvc_cl__
 #endif
@@ -197,7 +197,7 @@ public:
     return vector;
   }
 // Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
-#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ <= 12 && !defined(__clang__) && defined(__ARM_FEATURE_SVE)
   static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
 #else
   static Vectorized<T> blendv(const Vectorized<T>& a,
