@@ -63,7 +63,7 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
-#elif defined(__ARM_FEATURE_BF16) && defined(HAVE_SVE256_CPU_DEFINITION)
+#elif defined(HAVE_SVE256_BF16_CPU_DEFINITION)
   SVE256 = 1,
   SVE256_BF16 = 1,
 #elif defined(HAVE_SVE256_CPU_DEFINITION)

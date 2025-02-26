@@ -197,6 +197,8 @@ class VecSVE256_BF16(VecSVE256):
     ]
     _arch_flags = "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256"
 
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
@@ -405,7 +407,7 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "aarch64":
         if torch.backends.cpu.get_cpu_capability() == "SVE256_BF16":
             isa_list.append(VecSVE256_BF16())
-        if torch.backends.cpu.get_cpu_capability() == "SVE256":
+        elif torch.backends.cpu.get_cpu_capability() == "SVE256":
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
