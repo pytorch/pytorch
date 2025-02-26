@@ -282,9 +282,9 @@ public:
     }
     return false;
   }
-// TODO: Remove this once the issue with MSVC is fixed
+// MSVC versions between 14.36 and 14.42 has a loop unrolling bug on Windows Arm64
 //       See https://developercommunity.visualstudio.com/t/MSVC-loop-unrolling-problem-194033813-/10720692
-#if defined(_WIN32) && defined(__aarch64__)
+#if defined(_WIN32) && defined(__aarch64__) && ((_MSVC_VER >= 1936) && (_MSVC_VER <= 1942))
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
