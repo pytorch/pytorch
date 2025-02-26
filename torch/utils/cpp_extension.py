@@ -842,7 +842,7 @@ class BuildExtension(build_ext):
         def win_cuda_flags(cflags):
             return (COMMON_NVCC_FLAGS +
                     cflags + _get_cuda_arch_flags(cflags))
-        
+
         def win_hip_flags(cflags):
             return (COMMON_HIPCC_FLAGS + COMMON_HIP_FLAGS + cflags + _get_rocm_arch_flags(cflags))
 
@@ -885,7 +885,7 @@ class BuildExtension(build_ext):
                         if IS_HIP_EXTENSION:
                             nvcc = _get_hipcc_path()
                         else:
-                            nvcc = _join_cuda_home('bin', 'nvcc')     
+                            nvcc = _join_cuda_home('bin', 'nvcc')
                         if isinstance(self.cflags, dict):
                             cflags = self.cflags['nvcc']
                         elif isinstance(self.cflags, list):
@@ -894,7 +894,7 @@ class BuildExtension(build_ext):
                             cflags = []
 
                         if IS_HIP_EXTENSION:
-                            cflags = win_hip_flags(cflags)   
+                            cflags = win_hip_flags(cflags)
                         else:
                             cflags = win_cuda_flags(cflags) + ['-std=c++17', '--use-local-env']
                             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -948,7 +948,7 @@ class BuildExtension(build_ext):
                                              depends, extra_postargs)
             # Replace space with \ when using hipcc (hipcc passes includes to clang without ""s so clang sees space in include paths as new argument)
             if IS_HIP_EXTENSION:
-                pp_opts = ["-I{}".format(s[2:].replace(" ", "\\")) if s.startswith('-I') else s for s in pp_opts]              
+                pp_opts = ["-I{}".format(s[2:].replace(" ", "\\")) if s.startswith('-I') else s for s in pp_opts]
             common_cflags = extra_preargs or []
             cflags = []
             if debug:
@@ -960,7 +960,7 @@ class BuildExtension(build_ext):
                 _set_hipcc_runtime_lib(is_standalone, debug)
                 common_cflags.extend(COMMON_HIP_FLAGS)
             else:
-                common_cflags.extend(COMMON_MSVC_FLAGS) 
+                common_cflags.extend(COMMON_MSVC_FLAGS)
             with_cuda = any(map(_is_cuda_file, sources))
 
             # extra_postargs can be either:
@@ -992,7 +992,7 @@ class BuildExtension(build_ext):
                 else:
                     cuda_post_cflags = list(extra_postargs)
                 if IS_HIP_EXTENSION:
-                    cuda_post_cflags = win_hip_flags(cuda_post_cflags)  
+                    cuda_post_cflags = win_hip_flags(cuda_post_cflags)
                 else:
                     cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
             cflags = _nt_quote_args(cflags)
@@ -2113,7 +2113,7 @@ def _get_hipcc_path():
         return _join_rocm_home('bin', 'hipcc.bat')
     else:
         return _join_rocm_home('bin', 'hipcc')
-    
+
 def _write_ninja_file_and_compile_objects(
         sources: list[str],
         objects,
