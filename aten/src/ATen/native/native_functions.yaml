@@ -4167,7 +4167,7 @@
     MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
 
-- func: _weight_int4pack_mm_with_scale_and_zeros(Tensor self, Tensor mat2, int qGroupSize, Tensor qScale, Tensor qZeros) -> Tensor
+- func: _weight_int4pack_mm_with_scales_and_zeros(Tensor self, Tensor mat2, int qGroupSize, Tensor qScale, Tensor qZeros) -> Tensor
   dispatch:
     XPU: _weight_int4pack_mm_xpu
 

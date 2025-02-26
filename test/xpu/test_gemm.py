@@ -1185,7 +1185,7 @@ class TestBasicGEMM(TestCase):
             return b_int4pack, scales, zeros
 
         def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
-            return torch._weight_int4pack_mm_with_scale_and_zeros(
+            return torch._weight_int4pack_mm_with_scales_and_zeros(
                 a, b_int4pack, q_group, qscale, qzeros
             )
 

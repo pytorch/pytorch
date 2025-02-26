@@ -25,7 +25,7 @@ sycl::event woq_matmul_int4(
   at::Device cur_device = at::Device(at::kXPU, at::xpu::current_device());
   TORCH_CHECK(
       cur_device == mat1_.device(),
-      "_weight_int4pack_mm_with_scale_and_zeros input should be on current device.");
+      "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
