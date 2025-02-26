@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """
 # Inductor Pattern Matcher
 
@@ -49,7 +50,7 @@ import textwrap
 import typing
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
@@ -260,7 +261,7 @@ class Match:
                     fwd_only, run_functional_passes=run_functional_passes
                 )
             replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])  # type: ignore[arg-type]
             )
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
@@ -651,9 +652,8 @@ class _TargetArgsExpr(_TargetExpr):
         if len(_kwargs) < len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
 
-            assert callable(node.target)
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs
+                node.target, node.args, node.kwargs  # type: ignore[arg-type]
             )
 
             if normalized_args_and_kwargs is None:
@@ -1080,8 +1080,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "call_function":
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
-                    assert callable(target)
-                    result = graph.call_function(target, args, kwargs)
+                    result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
                     _transfer_meta(
                         new_meta=result.meta,
                         old_node=node,
@@ -1130,8 +1129,7 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            assert isinstance(replacement_graph, torch.fx.GraphModule)
-            replacement = Replacer(replacement_graph).run(*args)
+            replacement = Replacer(replacement_graph).run(*args)  # type: ignore[arg-type]
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -1209,7 +1207,7 @@ class ReplacementPatternEntry(PatternEntry):
                     idx = maybe_getitem(user)
                     if idx is None:
                         raise AssertionError("can't handle")
-                    replace(user, new[idx])
+                    replace(user, new[idx])  # type: ignore[index]
                 graph.erase_node(old)
 
             if len(output_nodes) == len(replacement):
@@ -1328,11 +1326,10 @@ def register_replacement(
                 )
 
         args = list(
-            torch.fx.map_arg(
+            torch.fx.map_arg(  # type: ignore[arg-type]
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
-
         sym_args: list[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
@@ -1628,7 +1625,7 @@ def gen_register_replacement(
     )
 
 
-@functorch_config.patch(functionalize_rng_ops=False)  # type: ignore[misc]
+@functorch_config.patch(functionalize_rng_ops=False)
 def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
@@ -1753,12 +1750,10 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     ):
         return False
     if node.op == "call_function":
-        assert callable(node.target)
-        if _mutation_op_re.search(node.target.__name__):
+        if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True
     elif node.op == "call_method":
-        assert isinstance(node.target, str)
-        if _mutation_op_re.search(node.target):
+        if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
     return node.kwargs.get("out") is not None
 
@@ -1782,13 +1777,13 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     return mutation_region_id
 
 
-def should_compute_mutation_region_ids(graph: torch.fx.Graph) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta  # type: ignore[arg-type]
 
 
-def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
+def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
-    for nd in graph.nodes:
+    for nd in graph.nodes:  # type: ignore[union-attr]
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
@@ -1826,8 +1821,8 @@ class PatternMatcherPass:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
             )
-        if should_compute_mutation_region_ids(graph):
-            compute_mutation_region_ids(graph)
+        if should_compute_mutation_region_ids(graph):  # type: ignore[arg-type]
+            compute_mutation_region_ids(graph)  # type: ignore[arg-type]
         get_mutation_region_id_partial = functools.partial(
             get_mutation_region_id, graph
         )
@@ -1863,17 +1858,14 @@ class PatternMatcherPass:
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
-                        and len(
-                            OrderedSet(map(get_mutation_region_id_partial, m.nodes))
-                        )
-                        != 1
+                        and len(OrderedSet(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if is_match(m) and entry.extra_check(m):
                         count += 1
-                        entry.apply(m, graph, node)
+                        entry.apply(m, graph, node)  # type: ignore[arg-type]
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
@@ -1968,17 +1960,14 @@ def fx_to_pattern(
         def run_node(self, n: torch.fx.Node) -> Any:
             rv = super().run_node(n)
             if n.op == "output" and isinstance(rv, tuple):
-                args = n.args[0]
-                assert isinstance(args, Collection)
-                assert len(rv) == len(args)
-                for r, arg in zip(rv, args):
+                assert len(rv) == len(n.args[0])  # type: ignore[arg-type]
+                for r, arg in zip(rv, n.args[0]):  # type: ignore[arg-type]
                     r.users = len(arg.users)
             else:
                 rv.users = len(n.users)
             return rv
 
-    assert isinstance(gm, torch.fx.GraphModule)
-    pattern = Converter(gm).run()
+    pattern = Converter(gm).run()  # type: ignore[arg-type]
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
@@ -2048,7 +2037,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     GraphPatternEntry(
         pattern=pattern, handler=pointless_view, extra_check=_return_true
     ).register(matcher_pass.patterns)
-    matcher_pass.apply(gm.graph)
+    matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
@@ -2148,12 +2137,11 @@ _seen_patterns = OrderedSet[str]()
 def get_arg_value(
     node: torch.fx.Node, arg_number: int, kwarg_name: Optional[str] = None
 ) -> Any:
-    if len(node.args) > arg_number:
-        return node.args[arg_number]
-    elif kwarg_name is None:
-        return None
-    else:
-        return node.kwargs.get(kwarg_name)
+    return (
+        node.args[arg_number]
+        if len(node.args) > arg_number
+        else node.kwargs.get(kwarg_name)  # type: ignore[arg-type]
+    )
 
 
 def filter_nodes(nodes: Iterable[torch.fx.Node], fn: Any) -> list[torch.fx.Node]:
@@ -2170,6 +2158,5 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
      as a function.
     """
     if node.op == "call_module":
-        assert isinstance(node.target, str)
-        return _get_attr(node.graph.owning_module, node.target).__class__
+        return _get_attr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
     return node.target

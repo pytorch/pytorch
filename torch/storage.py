@@ -9,11 +9,11 @@ import io
 import threading
 import warnings
 from typing import Any, cast, Optional as _Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
