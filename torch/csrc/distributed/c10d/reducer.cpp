@@ -1185,7 +1185,7 @@ void Reducer::initialize_buckets(
             << "Reducer: default comm backend not found, skipping bucket memory optimization";
       }
       if (ddpDisableCommMem == 0 && backend != nullptr &&
-          backend->supportsTensorAlloc()) {
+          backend->supportsTensorAlloc(options.device().index())) {
         // Comm-optimized memory pool is available, use it to allocate tensor
         LOG(INFO)
             << "Reducer: found comm-optimized memory allocator, using it to create bucket";
