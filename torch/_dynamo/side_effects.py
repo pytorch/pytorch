@@ -11,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import graph_break_hints, utils, variables
+from . import utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -19,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented_v2
+from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -186,12 +186,8 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
-            # TODO plumb HOP information here
-            unimplemented_v2(
-                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
-                context="",
-                explanation="This is not supported.",
-                hints=[],
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
@@ -206,22 +202,12 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented_v2(
-                gb_type="Attempted to read a deleted variable",
-                context=f"item: {item}, name: {name}",
-                explanation="",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
+            unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
-            unimplemented_v2(
-                gb_type="Write to immutable cell",
-                context=f"cellvar: {cellvar}, value: {value}",
-                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
-                hints=[*graph_break_hints.DIFFICULT],
-            )
+            unimplemented("Dynamo currently doesn't support writing to such cell")
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -232,12 +218,7 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented_v2(
-            gb_type="Read uninitialized cell",
-            context=str(cellvar),
-            explanation="Attempted to read a cell variable that has not been populated yet.",
-            hints=[*graph_break_hints.USER_ERROR],
-        )
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -593,12 +574,7 @@ class SideEffects:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
-                    unimplemented_v2(
-                        gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
-                        context="",
-                        explanation="We cannot reconstruct a torch.autograd.Function's context object.",
-                        hints=[],
-                    )
+                    unimplemented("AutogradFunctionContextVariable escaped")
 
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -747,14 +723,7 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented_v2(
-                        gb_type="Side effect on existing deque with limited maxlen",
-                        context="",
-                        explanation="This is not supported.",
-                        hints=[
-                            "Don't use a deque with `maxlen` specified.",
-                        ],
-                    )
+                    unimplemented("side effect on existing deque with limited maxlen")
 
                 # old.extend(new), this runs last
                 cg(var.source)
