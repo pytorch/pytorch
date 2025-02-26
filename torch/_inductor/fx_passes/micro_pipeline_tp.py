@@ -467,11 +467,8 @@ class _ScaledMatmul(_Matmul):
         # - Has 3D+ shape
         A_node = match[0].args[0]
         A_scale_node = mm_node.args[2]
-        new_A_scale_node = None
         if is_reshape_mm_reshape_pattern:
-            new_A_scale_node = insert_custom_view_op(A_scale_node.graph, A_scale_node, A_node, A_scale_node)
-        if new_A_scale_node is not None:
-            A_scale_node = new_A_scale_node
+            A_scale_node = insert_custom_view_op(A_scale_node.graph, A_scale_node, A_node, A_scale_node)
 
         return _ScaledMatmul(
             nodes=match,
