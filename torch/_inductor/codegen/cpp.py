@@ -5344,13 +5344,13 @@ class LoopNest:
         2) All reduction or non-reduction levels
         When the loop is split at the top level, the max depth is 1.
         When the range of the first inner loop is much larger than the range of all outer loops,
-        change the starting depth of parallelization to the first inner loop, and set the max depth to 1.
+        change the starting depth of parallelization to the first inner loop.
         """
         if self.loops is None:
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
-        max_depth = 0
         start_depth = 0
+        max_depth = 0
         is_reduction = self.loops[0].is_reduction
         loop_sizes = sympy.Integer(1)
         for loop in self.loops:
@@ -5359,6 +5359,8 @@ class LoopNest:
             loop_sizes = loop_sizes * loop.size
             max_depth += 1
 
+        # When the range of the first inner loop is much larger than the range of all outer loops,
+        # change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
             max_depth < len(self.loops)
             and isinstance(loop_sizes, sympy.Integer)
@@ -5366,18 +5368,24 @@ class LoopNest:
             and loop_sizes * 300 < self.loops[max_depth].size
         ):
             start_depth = max_depth
-            max_depth = 1
+            max_depth = 0
+            is_reduction = self.loops[start_depth].is_reduction
+            for i in range(start_depth, len(self.loops)):
+                if self.loops[i].is_reduction != is_reduction:
+                    break
+                max_depth += 1
         return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
-    def mark_parallel(self, parallel_depth):
+    def mark_parallel(self, par_depth):
         assert (
-            parallel_depth <= self.max_parallel_depth().parallel_depth
+            par_depth <= self.max_parallel_depth().parallel_depth
         ), "Parallel depth cannot exceed the maximal allowed parallel depth"
         assert self.loops is not None
-        assert len(self.loops) >= parallel_depth
-        loop = self.loops[self.max_parallel_depth().start_depth]
-        loop.parallel = parallel_depth
-        for i in range(1, parallel_depth):
+        assert len(self.loops) >= par_depth
+        start_depth = self.max_parallel_depth().start_depth
+        loop = self.loops[start_depth]
+        loop.parallel = par_depth
+        for i in range(start_depth, par_depth):
             self.loops[i].collapsed = True
 
     def tile(self, depth, factor):
