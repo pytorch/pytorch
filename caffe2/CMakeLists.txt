@@ -980,16 +980,7 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE
-        USE_FLASH_ATTENTION
-        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
-        FLASHATTENTION_DISABLE_SOFTCAP
-        FLASH_NAMESPACE=pytorch_flash
-        UNFUSE_FMA                      # Addressing issue #121558
-      )
-    target_include_directories(torch_cuda PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
-    )
+    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1381,13 +1372,7 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_hip PRIVATE
-        USE_FLASH_ATTENTION
-        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
-        FLASHATTENTION_DISABLE_SOFTCAP
-        FLASH_NAMESPACE=pytorch_flash
-        UNFUSE_FMA                      # Addressing issue #121558
-      )
+    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)

@@ -269,15 +269,7 @@ def get_divisible_by_16(cfg):
     # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
     if hasattr(cfg, "divisibility_16"):
         return cfg.divisibility_16
-    elif hasattr(cfg, "divisible_by_16"):
-        return cfg.divisible_by_16
-    # `cfg` example:
-    # {(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}
-    return [
-        key[0]
-        for key, value in cfg.items()
-        if len(key) == 1 and value[0] == ["tt.divisibility", 16]
-    ]
+    return cfg.divisible_by_16
 
 
 class TestCase(InductorTestCase):
@@ -12260,17 +12252,6 @@ class CommonTemplate:
         b = torch.randint(size=(512,), low=0, high=4095)
 
         self.common(forward, (a, b))
-
-    def test_isin_tensor_scalar(self):
-        for invert in [True, False]:
-            torch._dynamo.reset()
-            elements = 1
-            test_elements = torch.tensor([1, 2, 3, 4])
-            self.common(torch.isin, (elements, test_elements), {"invert": invert})
-            torch._dynamo.reset()
-            elements = torch.tensor([1, 2, 3, 4])
-            test_elements = 1
-            self.common(torch.isin, (elements, test_elements), {"invert": invert})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
