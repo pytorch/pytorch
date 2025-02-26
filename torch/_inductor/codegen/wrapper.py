@@ -2424,11 +2424,13 @@ class PythonWrapperCodegen(CodeGen):
         # This code is designed to generate code expressions from symbolic paths (keypaths)
         # associated with certain symbols (unbacked bindings). These keypaths describe how
         # to access the unbacked symbol in a structured way.
-        # Conretely, we want to generate u0 = outs[0].stride(1), where s = u0, and the keypath
-        # descripes how we generate the expression "outs[0].stride(1)"
+        # For example, we might want to generate "u0 = outs[0].stride(1)"", where s = u0, and the keypath
+        # describes the structure of "outs[0].stride(1)", like [SequenceKey(0), CallMethodKey("stride"), SequenceKey[1]].
         for s, keypath in unbacked_bindings.items():
             # `go` recursively constructs a code expression by processing each element of
             # the keypath and construct the expression incrementally.
+            # For example, given output name outs and keypath [SequenceKey(0), CallMethodKey("stride", 1)],
+            # it generates "outs[0]" based on SequenceKey(0), then recursively go("outs[0]", [CallMethodKey("stride"), ...])
             def go(expr: str, keypath: pytree.KeyPath):
                 if keypath == ():
                     return expr
