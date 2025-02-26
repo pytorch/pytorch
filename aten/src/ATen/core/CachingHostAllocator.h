@@ -10,6 +10,8 @@
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
+using namespace c10::CachingAllocator;
+
 /**
  * HostBlock is typically a fundamental memory block used in pinned memory. It
  * is likely related to Event and Stream of device runtime. It is probably a
@@ -41,35 +43,6 @@ namespace {
   // NOLINTNEXTLINE(misc-definitions-in-headers)
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
-
-// Struct containing timing information for CUDA alloc/free calls.
-struct DurationStat {
-  void increase(int64_t amount) {
-    total += amount;
-    count += 1;
-    max = std::max(amount, max);
-    if (min == 0) {
-      min = amount;
-    } else {
-      min = std::min(amount, min);
-    }
-  }
-
-  void reset_accumulated() {
-    total = 0;
-    count = 0;
-  }
-
-  void reset_peak() {
-    min = 0;
-    max = 0;
-  }
-
-  int64_t total = 0;
-  int64_t max = 0;
-  int64_t min = 0;
-  int64_t count = 0;
-};
 
 // Struct containing memory allocator summary statistics for host.
 struct HostStats {
@@ -372,10 +345,8 @@ struct CachingHostAllocatorImpl {
   HostStats getStats() {
     HostStats stats;
 
-    // Flush any available blocks into the free_list. Not strictly necessary,
-    // but it will yield more accurate stats.
-    // @REVIEW: do we want this here or not?
-    process_events();
+    // To keep getStats lightweight we do *not* flush any available blocks
+    // into the free_list. This may skew the stats a bit.
 
     auto add_bucket_stats = [](Stat& accumulator, const Stat& other) {
       accumulator.allocated += other.allocated;

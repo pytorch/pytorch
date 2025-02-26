@@ -4,6 +4,8 @@
 
 namespace c10::CachingDeviceAllocator {
 
+using namespace c10::CachingAllocator;
+
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
   // COUNT: allocations requested by client code

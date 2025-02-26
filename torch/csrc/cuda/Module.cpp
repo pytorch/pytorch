@@ -593,9 +593,9 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
-  using c10::Stat;
-  using c10::StatArray;
-  using c10::StatType;
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
   using c10::CachingDeviceAllocator::DeviceStats;
 
   const auto statToDict = [](const Stat& stat) {
@@ -670,11 +670,11 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
 PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
-  using at::DurationStat;
   using at::HostStats;
-  using c10::Stat;
-  using c10::StatArray;
-  using c10::StatType;
+  using c10::CachingAllocator::DurationStat;
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;

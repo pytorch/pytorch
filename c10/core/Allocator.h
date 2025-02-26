@@ -331,6 +331,7 @@ struct GatheredContext {
   virtual ~GatheredContext() = default;
 };
 
+namespace CachingAllocator {
 struct Stat {
   void increase(size_t amount) {
     current += static_cast<int64_t>(amount);
@@ -380,4 +381,33 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
+// Structure for keeping timing information
+struct DurationStat {
+  void increase(int64_t amount) {
+    total += amount;
+    count += 1;
+    max = std::max(amount, max);
+    if (min == 0) {
+      min = amount;
+    } else {
+      min = std::min(amount, min);
+    }
+  }
+
+  void reset_accumulated() {
+    total = 0;
+    count = 0;
+  }
+
+  void reset_peak() {
+    min = 0;
+    max = 0;
+  }
+
+  int64_t total = 0;
+  int64_t max = 0;
+  int64_t min = 0;
+  int64_t count = 0;
+};
+} // namespace CachingAllocator
 } // namespace c10

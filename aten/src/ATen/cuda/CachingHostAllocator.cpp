@@ -88,7 +88,6 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
-    // @REVIEW: should we use steady clock or high precision clock?
     auto start = std::chrono::system_clock::now();
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_use_cuda_host_register()) {
