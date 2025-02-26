@@ -95,9 +95,7 @@ def generate_partition_key(repo: str, doc: dict[str, Any]) -> str:
     test_name = doc["test_name"]
     filename = doc["filename"]
 
-    hash_content = hashlib.md5(
-        json.dumps(doc).encode("utf-8"), usedforsecurity=False
-    ).hexdigest()
+    hash_content = hashlib.md5(json.dumps(doc).encode("utf-8")).hexdigest()
     return f"{repo}/{workflow_id}/{job_id}/{test_name}/{filename}/{hash_content}"
 
 
