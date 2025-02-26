@@ -366,12 +366,18 @@ conv3d_template = TritonTemplate(
 """,
 )
 
-aten_convolution = ExternKernelChoice(
+aten_convolution_out = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
     has_out_variant=False,
-    op_overload=aten.convolution.default,
+    op_overload=aten.convolution.out,
 )
+# aten_convolution = ExternKernelChoice(
+#     torch.convolution,
+#     "at::convolution",
+#     has_out_variant=False,
+#     op_overload=aten.convolution.default,
+# )
 
 
 def conv1x1_via_mm(x, w, *, out):
@@ -611,7 +617,7 @@ def convolution(
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
         choices = [
-            aten_convolution.bind(
+            aten_convolution_out.bind(
                 args,
                 layout,
                 ordered_kwargs_for_cpp_kernel,
