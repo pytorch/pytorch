@@ -714,18 +714,18 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
                                                          getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto mpsScalar = getMPSScalar(value, self.scalar_type());
       auto computeEncoder = stream->commandEncoder();
+      auto mpsScalar = getMPSScalar(value, self.scalar_type());
       [computeEncoder setComputePipelineState:fillPSO];
       if (is_dense) {
-        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar.value.i);
+        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar);
       } else if (is_expand) {
-        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar.value.i, mask.numel());
+        mtl_setArgs(computeEncoder, self, mask, mpsScalar, mask.numel());
       } else {
         mtl_setArgs(computeEncoder,
                     self,
                     *b_mask,
-                    mpsScalar.value.i,
+                    mpsScalar,
                     self.sizes(),
                     self.strides(),
                     b_mask->strides(),
