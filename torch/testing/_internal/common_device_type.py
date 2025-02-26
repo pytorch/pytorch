@@ -9,21 +9,10 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
+from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -505,7 +494,7 @@ class DeviceTypeTestBase(TestCase):
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
-                    param_kwargs: Dict[str, Any] = {}
+                    param_kwargs: dict[str, Any] = {}
                     _update_param_kwargs(param_kwargs, "dtype", dtype)
 
                     # Note that an empty test suffix is set here so that the dtype can be appended
@@ -728,7 +717,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = []
+    test_bases: list[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -976,7 +965,7 @@ def instantiate_device_type_tests(
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 5 categories:
+# There are 7 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
@@ -987,6 +976,7 @@ def instantiate_device_type_tests(
 #     operator supports in both forward and backward.
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
+# - any_common_cpu_cuda_one: Pick a dtype that supports both CPU and CUDA.
 class OpDTypes(Enum):
     supported = 0  # Test all supported dtypes (default)
     unsupported = 1  # Test only unsupported dtypes
@@ -1056,6 +1046,8 @@ def _serialize_sample(sample_input):
 #     operator supports. The dtype supports forward and backward if possible.
 #   OpDTypes.none - the test is instantiated without any dtype. The test signature
 #     should not include a dtype kwarg in this case.
+#   OpDTypes.any_common_cpu_cuda_one - the test is instantiated for a dtype
+#     that supports both CPU and CUDA.
 #
 # These options allow tests to have considerable control over the dtypes
 #   they're instantiated for.
@@ -1089,7 +1081,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[Set[torch.dtype], Set[None]]
+            dtypes: Union[set[torch.dtype], set[None]]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1854,7 +1846,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: Optional[List[tuple[int, int]]] = None):
+def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1969,7 +1961,7 @@ def skipPRIVATEUSE1(fn):
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.
-def get_all_device_types() -> List[str]:
+def get_all_device_types() -> list[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 

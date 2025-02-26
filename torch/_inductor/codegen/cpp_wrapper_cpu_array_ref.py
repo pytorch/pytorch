@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-import os
 from itertools import count
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Optional
 
 import sympy
 
@@ -60,11 +59,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation
-        self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
+        self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -82,18 +83,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
-    def write_header(self):
-        if V.graph.is_const_graph:
-            # We do not write header for constant graph, it will be written by main module.
-            return
-
-        super().write_header()
-        with open(
-            os.path.join(
-                os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
-            )
-        ) as f:
-            self.header.splice(f.read())
+    @staticmethod
+    def get_device_include_path(device: str) -> str:
+        assert device == "cpu", "ArrayRef only supported on CPU!"
+        if V.graph.aot_mode:
+            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
+        return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
 
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
@@ -182,6 +177,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
+                assert V.graph.const_code is not None
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:
@@ -209,7 +205,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = ""
+                if config.aot_inductor.compile_wrapper_with_O0:
+                    run_impl_proto += """
+                    #ifdef __clang__
+                    __attribute__((optnone))
+                    #else
+                    __attribute__((optimize("O0")))
+                    #endif
+                    """
+
+                run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -222,11 +228,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
+
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
                         __check_inputs_outputs(input_handles, output_handles);
                     """
+
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
                         """
@@ -360,7 +368,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
-    def generate_return(self, output_refs: List[str]):
+    def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
@@ -400,7 +408,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
 
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -655,15 +663,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
+    def generate_c_shim_extern_kernel_call(
+        self, kernel: str, args: list[str], device: str, **_
+    ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
         wrapped_args = []
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
@@ -680,12 +688,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     piece = f"borrow_arrayref_tensor_as_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
-        with debug_printer_manager:
-            shim_fn = self.get_c_shim_func_name(kernel)
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
-            )
+        super().generate_c_shim_extern_kernel_call(
+            kernel, wrapped_args, device, debug_args=args
+        )
 
     def generate_scatter_fallback(
         self,
@@ -701,7 +706,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
@@ -759,7 +764,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -858,7 +863,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]
@@ -941,93 +946,31 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return final_tmp_name
 
     def val_to_arg_str(self, val, type_=None) -> str:
-        if val is None:
-            # None needs special care. It either represent nullopt or an empty tensor
-            if type_ is None or isinstance(type_, torch.OptionalType):
-                if type_ is not None and isinstance(
-                    type_.getElementType(),
-                    (
-                        torch.ListType,
-                        torch.TupleType,
-                        torch.DeviceObjType,
-                    ),
-                ):
-                    return "0, 0"
+        if (
+            val is not None
+            and isinstance(type_, torch.OptionalType)
+            and isinstance(type_.getElementType(), torch.TensorType)
+        ):
+            # type_ is Optional[Tensor]
+            # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+            base_handle = self.val_to_arg_str(val, torch.TensorType)
+            if config.aot_inductor.use_minimal_arrayref_interface:
+                if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
+                    base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
                 else:
-                    return "0"  # nullptr is not available in C
-            elif isinstance(type_, torch.TensorType):
-                # create an empty tensor, the equivalent of at::Tensor()
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name}_handle;")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
-                )
-                self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
-                return var_name
-            else:
-                raise AssertionError("Can not map None to a known data type")
+                    base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
+            (
+                tmp_raii_handle_var,
+                tmp_raii_handle_var_decl,
+            ) = self.create_tmp_raii_handle_var(base_handle)
+            if tmp_raii_handle_var:
+                self.writeline(tmp_raii_handle_var_decl)
+                base_handle = tmp_raii_handle_var
+            var_name = f"var_{next(self.arg_var_id)}"
+            self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
+            return f"&{var_name}"
 
-        if isinstance(type_, torch.OptionalType):
-            element_type = type_.getElementType()
-            if not isinstance(element_type, torch.TensorType):
-                var_name = f"var_{next(self.arg_var_id)}"
-                if isinstance(
-                    element_type,
-                    (torch.ListType, torch.TupleType, torch.DeviceObjType),
-                ):
-                    # type_ is something like Optional[List] or Optional[Device]
-                    arg_str = self.val_to_arg_str(val, element_type)
-                    # For datatypes with auxiliary info, we need to hoist out the extra arguments.
-                    # NOTE: This only works if there is one additional argument, though it can easily be generalized.
-                    main_value, aux = arg_str.rsplit(", ")
-                    self.writeline(f"auto {var_name} = {main_value};")
-                    return f"&{var_name}, {aux}"
-                else:
-                    self.writeline(
-                        f"{self.c_type_for_prim_type(val, element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
-                    )
-                    return f"&{var_name}"
-            else:
-                # type_ is Optional[Tensor]
-                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-                base_handle = self.val_to_arg_str(val, element_type)
-                if config.aot_inductor.use_minimal_arrayref_interface:
-                    if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
-                        base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
-                    else:
-                        base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
-                (
-                    tmp_raii_handle_var,
-                    tmp_raii_handle_var_decl,
-                ) = self.create_tmp_raii_handle_var(base_handle)
-                if tmp_raii_handle_var:
-                    self.writeline(tmp_raii_handle_var_decl)
-                    base_handle = tmp_raii_handle_var
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
-                return f"&{var_name}"
-
-        elif isinstance(type_, torch.ListType):
-            assert isinstance(
-                val, (list, tuple)
-            ), f"{val} does not match with arg type {type_}"
-            element_type = type_.getElementType()
-            var_name = f"var_array_{next(self.var_array_id)}"
-            if len(val) == 0:
-                # Zero-size array is not supported in the C or C++ standard, so
-                # we declare a null pointer for it.
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(None, element_type)}* {var_name} = nullptr;"
-                )
-            else:
-                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
-                )
-            # Need to pass the array length because we can't use std::vector
-            return f"{var_name}, {len(val)}"
-
-        return self.val_to_arg_str_for_prim_type(val, type_)
+        return super().val_to_arg_str(val, type_)
 
     def codegen_tensor_item(
         self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None

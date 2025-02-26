@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Callable, cast, Generic, List, Optional, TypeVar, Union
+from typing import Callable, cast, Generic, Optional, TypeVar, Union
 
 import torch
 
@@ -27,7 +27,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     """
 
     def __init__(
-        self, *, devices: Optional[List[Union[int, str, torch.device]]] = None
+        self, *, devices: Optional[list[Union[int, str, torch.device]]] = None
     ):
         r"""
         Create an empty unset ``Future``. If the future is intended to hold
@@ -278,7 +278,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         self.set_result(result)  # type: ignore[arg-type]
 
 
-def collect_all(futures: List[Future]) -> Future[List[Future]]:
+def collect_all(futures: list[Future]) -> Future[list[Future]]:
     r"""
     Collects the provided :class:`~torch.futures.Future` objects into a single
     combined :class:`~torch.futures.Future` that is completed when all of the
@@ -305,12 +305,12 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         fut1 result = 1
     """
     return cast(
-        Future[List[Future]],
-        torch._C._collect_all(cast(List[torch._C.Future], futures)),
+        Future[list[Future]],
+        torch._C._collect_all(cast(list[torch._C.Future], futures)),
     )
 
 
-def wait_all(futures: List[Future]) -> List:
+def wait_all(futures: list[Future]) -> list:
     r"""
     Waits for all provided futures to be complete, and returns
     the list of completed values. If any of the futures encounters an error,
@@ -327,5 +327,5 @@ def wait_all(futures: List[Future]) -> List:
     """
     return [
         fut.wait()
-        for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()
+        for fut in torch._C._collect_all(cast(list[torch._C.Future], futures)).wait()
     ]

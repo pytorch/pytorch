@@ -166,7 +166,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             group = x.get_group()
             return size, coord, group
 
-        compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
+        # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
+        compiled_fn = torch.compile(backend="aot_eager")(fn)
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         opt_fn = fn(mesh)

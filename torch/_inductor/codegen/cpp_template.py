@@ -4,7 +4,8 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, Iterable, List, Optional, Union
+from collections.abc import Iterable
+from typing import Callable, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -33,8 +34,9 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Union[ir.Buffer, List[ir.Buffer]] = ir.Buffer(
-            name="buf_out", layout=layout
+        self.index = next(self.index_counter)
+        self.output_node: Union[ir.Buffer, list[ir.Buffer]] = ir.Buffer(
+            name=f"buf_out{self.index}", layout=layout
         )
         self.layout = layout
         self.num_threads = num_threads
@@ -74,7 +76,7 @@ class CppTemplate(KernelTemplate):
         # since in cpp kernel, we bind it to C long
         extra_args = tuple(ctypes.c_ulonglong(x) for x in extra_args)
 
-        kernel_hash_name = f"cpp_{self.name}_{next(self.index_counter)}"
+        kernel_hash_name = f"cpp_{self.name}_{self.index}"
 
         # Create the BenchmarkRequest for CPP
         bmreq = CppBenchmarkRequest(
@@ -88,7 +90,7 @@ class CppTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
             flag_template_buffer_has_other_users: bool,
-            epilogue_nodes: Optional[List[ir.IRNode]] = None,
+            epilogue_nodes: Optional[list[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads

@@ -1,14 +1,8 @@
+import enum
 import types
-from typing import Dict, NewType, Tuple
+from typing import Literal, overload
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
-
-# For typechecking
-SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
-CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
-# Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
-skip_code_recursive_flag: SkipCodeRecursiveFlag
-cache_limit_hit_flag: CacheLimitHitFlag
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
@@ -27,21 +21,37 @@ class _CacheEntry:
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
+class _FrameAction(enum.Enum):
+    DEFAULT: Literal[0]
+    SKIP: Literal[1]
+    RUN_ONLY: Literal[2]
+
+class _FrameExecStrategy:
+    cur_action: _FrameAction
+    recursive_action: _FrameAction
+
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(
+        self, cur_action: _FrameAction, recursive_action: _FrameAction
+    ) -> None: ...
+
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.
 class _PyInterpreterFrame:
     f_code: types.CodeType
-    f_locals: Dict[str, object]
-    f_globals: Dict[str, object]
-    f_builtins: Dict[str, object]
+    f_locals: dict[str, object]
+    f_globals: dict[str, object]
+    f_builtins: dict[str, object]
     f_lasti: int
     f_lineo: int
     f_back: types.FrameType
     # A tuple containing cell objects captured by this frame.
-    closure: Tuple[types.CellType]
+    closure: tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
 
 py_opcode_caches: list[int]
 
-def code_framelocals_names(code: types.CodeType) -> Tuple[str]: ...
+def code_framelocals_names(code: types.CodeType) -> tuple[str]: ...
