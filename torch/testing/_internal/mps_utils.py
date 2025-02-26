@@ -216,7 +216,7 @@ UNIMPLEMENTED_XFAILIST = {
     "special.bessel_y1": MPSSkipInfo(UNIMPLEMENTED),
     "special.chebyshev_polynomial_t": MPSSkipInfo(UNIMPLEMENTED),
     "special.chebyshev_polynomial_u": MPSSkipInfo(UNIMPLEMENTED),
-    "special.entr": MPSSkipInfo(UNIMPLEMENTED),
+    "special.entr": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bool]),
     "special.erfcx": MPSSkipInfo(UNIMPLEMENTED),
     "special.hermite_polynomial_h": MPSSkipInfo(UNIMPLEMENTED),
     "special.hermite_polynomial_he": MPSSkipInfo(UNIMPLEMENTED),
@@ -973,7 +973,7 @@ def mps_op_db(op_db: list[OpInfo]) -> list[OpInfo]:
                                 dtypes=skip.dtypes,
                             )
                             op.decorators = op.decorators + (decorator,)
-            
+
         if MACOS_VERSION < 14.0:
             # Skip complex64 dtypes before MacOS14
             decorator = DecorateInfo(
