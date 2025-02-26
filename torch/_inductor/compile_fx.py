@@ -823,7 +823,7 @@ def _compile_fx_inner(
 
     # Clear Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
-    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
+    #torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
         logging.INFO,
