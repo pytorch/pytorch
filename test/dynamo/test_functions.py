@@ -2076,8 +2076,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
 
         # The type of `cls._make` and `cls._asdict` is method type
-        if callable(getattr(cls, "_asdict", None)) and callable(
-            getattr(cls, "_make", None)
+        if callable(getattr(cls, "_make", None)) and callable(
+            getattr(cls, "_asdict", None)
         ):
             return a + b
         else:
