@@ -1864,7 +1864,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 device_type="cpu", dtype=dtype
             ), torch.no_grad():
                 self.common(mod, (v,), atol=atol, rtol=rtol)
-            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
@@ -1944,7 +1944,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ), torch.no_grad():
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
-            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
             if any(e != "none" for e in epilogue):
                 self.assertGreater(
                     counters["inductor"]["cpp_epilogue_fusion_counter"], 0
