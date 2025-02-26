@@ -46,6 +46,8 @@ C10_DIAGNOSTIC_POP()
 
 namespace {
 
+constexpr int kNumSMsForH100 = 132;
+
 using DtypeScale = float;
 using DtypeAccum = float;
 using DtypeEpilogue = float;
@@ -260,13 +262,6 @@ void f8f8bf16_rowwise_impl(
   // Using the arguments, query for extra workspace required for matrix
   // multiplication computation
   size_t workspace_size = Gemm::get_workspace_size(arguments);
-
-  // Ensure persistent kernels leave enough free SMs for NCCL background ops.
-  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
-    arguments.hw_info.sm_count =
-        at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount -
-        at::globalContext()._SMCarveout_EXPERIMENTAL().value();
-  }
 
   // Set the swizzle size
   arguments.scheduler.max_swizzle_size = swizzle;
@@ -526,17 +521,12 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
   int M = XQ.size(0);
   int N = WQ.size(1);
 
-  int smTarget = at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
-  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
-    smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
-  }
-
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
   if (ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
           ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
-      smTarget / cute::size(ClusterShape{})) {
+      kNumSMsForH100 / cute::size(ClusterShape{})) {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,

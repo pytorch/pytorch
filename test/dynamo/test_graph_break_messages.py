@@ -621,7 +621,7 @@ from user code:
             torch.compile(fn, backend="eager", fullgraph=True)()
 
         self.assertExpectedInline(
-            munge_exc(cm.exception, suppress_suffix=True, skip=1),
+            munge_exc(cm.exception, suppress_suffix=True, skip=0),
             """\
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
@@ -636,7 +636,7 @@ from user code:
         )
 
         self.assertExpectedInline(
-            munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=1),
+            munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=0),
             """\
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -727,10 +727,10 @@ from user code:
 
         self.assertExpectedInline(
             post_munge(
-                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=1)
+                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0)
             ),
             """\
-Graph break in user code at /data/users/williamwen/pytorch3/test/dynamo/test_graph_break_messages.py:N
+Graph break in user code at test_graph_break_messages.py:N
 Graph Break Reason: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
@@ -738,11 +738,13 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
 User code traceback:
+  File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break()
 """,
         )
 
         self.assertExpectedInline(
-            post_munge(munge_exc(records[1].exc_info[1], suppress_suffix=True, skip=1)),
+            post_munge(munge_exc(records[1].exc_info[1], suppress_suffix=True, skip=0)),
             """\
 Reconstruction failure
   Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
@@ -754,7 +756,8 @@ Reconstruction failure
 
 
 from user code:
-""",
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break()""",
         )
 
     def test_faketensor_nyi(self):
