@@ -35,11 +35,13 @@ from torch._dynamo import (
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
+    chromium_event_timed,
     CompileEventLogger,
     counters,
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_metrics_context,
     lazy_format_graph_code,
     set_feature_use,
 )
@@ -1636,7 +1638,11 @@ def compile_fx_aot(
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
     with V.set_aot_compilation(True), torch._guards.compile_context(
         saved_compile_context
-    ):
+    ), chromium_event_timed(
+        "compile_fx_aot",
+        log_pt2_compile_event=True,
+        reset_event_log_on_exit=True,
+    ), get_metrics_context():
         compiled_artifacts = compile_fx(
             model_,
             example_inputs_,
