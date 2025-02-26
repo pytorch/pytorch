@@ -1505,6 +1505,8 @@ class test_configs:
     autotune_choice_name_regex: Optional[str] = None
     autotune_choice_desc_regex: Optional[str] = None
 
+    graphsafe_rng_func_ignores_fallback_random = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
