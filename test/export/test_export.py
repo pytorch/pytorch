@@ -11725,7 +11725,11 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 1)
+        # second assert from TORCH_SYM_CHECK in checkInBoundsForStorage
+        expected_num_asserts = (
+            2 if "TrainingIRToRunDecompExport" in str(self.__class__) else 1
+        )
+        self.assertEqual(num_asserts, expected_num_asserts)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
