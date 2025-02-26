@@ -1646,6 +1646,16 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def xfailIf(condition):
+    """
+    Decorator for conditionally setting unittest.expectedFailure
+    """
+    def decorator(fn):
+        if condition:
+            return unittest.expectedFailure(fn)
+        return fn
+    return decorator
+
 def serialTest(condition=True):
     """
     Decorator for running tests serially.  Requires pytest
