@@ -2407,10 +2407,12 @@ class TestMPS(TestCaseMPS):
                 dst2[i] = val
         self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
 
-        # Regression test for https://github.com/pytorch/pytorch/issues/143477
-        mask_bool = torch.triu(torch.ones(1024, 1024, device=device), diagonal=1).bool()
-        attn_scores = torch.rand(48, 25, 1024, 1024, device=device)
-        attn_scores.masked_fill_(mask_bool, 0)
+        if MACOS_VERSION >= 14.0:
+            # Regression test for https://github.com/pytorch/pytorch/issues/143477
+            # Allocating 48x25x1024x1024 tensor crashes on MacOS-13
+            mask_bool = torch.triu(torch.ones(1024, 1024, device=device), diagonal=1).bool()
+            attn_scores = torch.rand(48, 25, 1024, 1024, device=device)
+            attn_scores.masked_fill_(mask_bool, 0)
 
     def test_masked_fill__non_contiguous(self):
         shape = (3, 5)
