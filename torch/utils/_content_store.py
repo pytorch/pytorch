@@ -105,7 +105,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         buf = (ctypes.c_byte * cpu_storage.nbytes()).from_address(
             cpu_storage.data_ptr()
         )
-        sha1 = hashlib.sha1(usedforsecurity=False)
+        sha1 = hashlib.sha1()
         sha1.update(buf)
         return sha1.hexdigest()
 

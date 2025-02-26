@@ -52,11 +52,7 @@ from torch._subclasses.fake_tensor import (
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
-from torch.fx.node import (
-    _side_effectful_need_to_be_preserved_pre_dispatch,
-    Argument,
-    Target,
-)
+from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -1091,40 +1087,6 @@ class PythonKeyTracer(Tracer):
         else:
             return e
 
-    def create_node(
-        self,
-        kind: str,
-        target: Target,
-        args: tuple[Argument, ...],
-        kwargs: dict[str, Argument],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
-    ) -> torch.fx.Node:
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
-
-        def map_fn(v: Any) -> Optional[_ExtractValType]:
-            if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
-                return None
-            val = v.meta["val"]
-            # other subclasses like FunctionalTensor error on `extract_val`
-            # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
-                return None
-            return extract_val(v.meta["val"])
-
-        # TODO: opt-in mechanism ?
-        if isinstance(
-            target,
-            (
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            ),
-        ):
-            arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
-            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
-
-        return node
-
 
 def _make_temp_remove_mode_context_manager(
     mode_ty: type[TorchFunctionMode],
@@ -1224,7 +1186,7 @@ def wrap_key(
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
-            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)  # type: ignore[attr-defined]
+            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
         out = f(*tensors)  # type:ignore[call-arg]
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)

@@ -2535,10 +2535,6 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
-    return _accessors.empty();
-  }
-
   int64_t fail_count() const {
     return _fail_count;
   }
@@ -3784,12 +3780,8 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (matches_dict_tag && _is_immutable_object &&
-        _guard_manager->has_no_accessors()) {
+    if (matches_dict_tag && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
-      // NB: We only skip the subtree if there are no accessors in the subtree.
-      // This is specificallly for tensors which are used in symbolic shape C++
-      // guards, and therefore have accessors on the tensor GuardManager itself.
       return true;
     }
 

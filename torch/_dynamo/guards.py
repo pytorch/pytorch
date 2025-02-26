@@ -1691,15 +1691,7 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
-            exc.unimplemented_v2(
-                gb_type="Attempted to guard on uninitialized nn.Module",
-                context="",
-                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
-                f"nn.Module subclass `{type(val)}`.",
-                hints=[
-                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
-                ],
-            )
+            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

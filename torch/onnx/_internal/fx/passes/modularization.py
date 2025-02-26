@@ -822,10 +822,7 @@ class Modularize(_pass.Transform):
         ... )
         >>> gm.print_readable()
 
-        >>> gm = passes.Modularize(
-        ...     infra.DiagnosticContext("test_context", "1.0"),
-        ...     gm,
-        ... ).run()
+        >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
         >>> gm.print_readable()
 
     """
