@@ -4123,19 +4123,16 @@ class CPUReproTests(TestCase):
             def forward(self, x):
                 return self.group_norm(x)
 
-        options = itertools.product(
-            vec_dtypes, [torch.contiguous_format, torch.channels_last]
-        )
-        for dtype, fmt in options:
+        for fmt in [torch.contiguous_format, torch.channels_last]:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
-            x = torch.randn((2, 64, 168, 168), dtype=dtype).to(memory_format=fmt)
+            x = torch.randn(2, 64, 168, 168).to(memory_format=fmt)
             with torch.no_grad():
                 expected = mod(x)
                 compiled_m = torch.compile(mod)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
-                self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+                self.assertEqual(expected, actual, atol=1e-4, rtol=1e-5)
                 # 3 generated kernels (first one for var_mean, last two for result)
                 check_metrics_vec_kernel_count(3)
                 # check that there is no outer loop fusion.
