@@ -46,6 +46,7 @@ from torch._C._distributed_c10d import (
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
+from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
 
 from .c10d_logger import _exception_logger, _time_logger
@@ -231,7 +232,8 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(str):
+# TODO refactor into enum/strenum
+class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
 
@@ -1381,7 +1383,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     if isinstance(device, torch.device):
         device_str = device.type
     else:
-        device_str = device.split(":")[0]
+        device_str = torch.device(device).type
 
     backend = Backend.default_device_backend_map.get(device_str)
     if backend is None:
@@ -1811,7 +1813,7 @@ def _shutdown_backend(pg):
     except RuntimeError:
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explictly call shutdown to ensure that NCCL resources are released
+        # explicitly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
 
@@ -2778,6 +2780,20 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         tensor([4.+4.j, 6.+6.j], device='cuda:1') # Rank 1
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (tensor,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_reduce,
+            relevant_args,
+            tensor,
+            op=op,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
@@ -3687,6 +3703,20 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (tensor,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_gather,
+            relevant_args,
+            tensor_list,
+            tensor,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     _ensure_all_tensors_same_dtype(tensor_list, tensor)
@@ -3763,6 +3793,20 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         The Gloo backend does not support this API.
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input_tensor,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_gather_into_tensor,
+            relevant_args,
+            output_tensor,
+            input_tensor,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
     if _rank_not_in_group(group):
@@ -4208,6 +4252,21 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         The Gloo backend does not support this API.
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            reduce_scatter_tensor,
+            relevant_args,
+            output,
+            input,
+            op=op,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
 
@@ -4366,6 +4425,22 @@ def all_to_all_single(
         tensor([3+3j, 7+7j, 11+11j, 15+15j])                            # Rank 2
         tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_to_all_single,
+            relevant_args,
+            output,
+            input,
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+            group=group,
+            async_op=async_op,
+        )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("all_to_all_single")
         return
@@ -4661,7 +4736,7 @@ def _hash_ranks_to_str(ranks: list[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
     # In case there is already a PG with the same rank composition
     unique_str = "_".join([rank_join, str(len(_world.pg_names))])
-    return hashlib.sha1(bytes(unique_str, "utf-8")).hexdigest()
+    return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
 # Takes a list of ranks and computes an integer color
@@ -5364,8 +5439,7 @@ def _find_or_create_pg_by_ranks_and_tag(
 def _get_group_tag(pg: ProcessGroup) -> str:
     """Return the tag associated with ``pg``."""
     tag = _world.pg_to_tag[pg]
-    if tag.startswith("user:"):
-        tag = tag[5:]
+    tag = tag.removeprefix("user:")
     return tag
 
 

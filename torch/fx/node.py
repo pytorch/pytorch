@@ -1,10 +1,11 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
 import inspect
+import logging
+import operator
 import types
-import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._C import _NodeBase
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from .graph import Graph
 
 __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
+
+log = logging.getLogger(__name__)
 
 BaseArgumentTypes = Union[
     str,
@@ -55,6 +58,7 @@ Argument = Optional[
         BaseArgumentTypes,
     ]
 ]
+ArgumentT = TypeVar("ArgumentT", bound=Argument)
 
 _legal_ops = dict.fromkeys(
     [
@@ -68,11 +72,14 @@ _legal_ops = dict.fromkeys(
     ]
 )
 
-_side_effectful_need_to_be_preserved_pre_dispatch: set[Callable] = {
+# Dynamo is unable to trace global set[Callable].__contains__.
+# See https://github.com/pytorch/pytorch/issues/145761. Since we only have
+# a handful of ops so switch to list of callables.
+_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
-}
+]
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
@@ -88,7 +95,9 @@ _side_effectful_functions: set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-} | _side_effectful_need_to_be_preserved_pre_dispatch
+    operator.setitem,
+} | set(_side_effectful_need_to_be_preserved_pre_dispatch)
+
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
@@ -120,7 +129,9 @@ def _type_repr(obj: object) -> str:
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    if isinstance(obj, type):
+    # Extension: If we don't ignore GenericAlias then `list[int]` will print
+    # simply "list".
+    if isinstance(obj, type) and not isinstance(obj, types.GenericAlias):
         if obj.__module__ == "builtins":
             return obj.__qualname__
         return f"{obj.__module__}.{obj.__qualname__}"
@@ -381,7 +392,7 @@ class Node(_NodeBase):
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         if self == x:
-            warnings.warn(
+            log.debug(
                 "Trying to prepend a node to itself. This behavior has no effect on the graph."
             )
             return
@@ -596,7 +607,8 @@ class Node(_NodeBase):
             return self._repr_fn(self)
         return self.name
 
-    def _pretty_print_target(self, target: object) -> str:
+    @staticmethod
+    def _pretty_print_target(target: object) -> str:
         """
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
@@ -883,35 +895,42 @@ class Node(_NodeBase):
 
 
 @compatibility(is_backward_compatible=True)
-def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
+def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     """
-    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each Node appearing in arg.
+
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
 
 @compatibility(is_backward_compatible=True)
-def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
+def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT:
     """
-    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each object appearing in arg.
+
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
+    result: Argument
+
     if isinstance(a, tuple):
-        t = tuple([map_aggregate(elem, fn) for elem in a])
+        it = (map_aggregate(elem, fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, "_fields") else type(a)(*t)  # type: ignore[arg-type]
+        result = type(a)(*it) if hasattr(a, "_fields") else tuple(it)
     elif isinstance(a, list):
-        return immutable_list([map_aggregate(elem, fn) for elem in a])
+        result = immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
-        rv = immutable_dict()
-        for k, v in a.items():
-            dict.__setitem__(rv, k, map_aggregate(v, fn))
-        return rv
+        result = immutable_dict([(k, map_aggregate(v, fn)) for k, v in a.items()])
     elif isinstance(a, slice):
-        return slice(
+        result = slice(
             map_aggregate(a.start, fn),
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
     else:
-        return fn(a)
+        result = fn(a)
+
+    return cast(ArgumentT, result)

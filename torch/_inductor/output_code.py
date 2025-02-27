@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -38,6 +38,7 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
@@ -91,10 +92,6 @@ class OutputCode:
 
 
 _StrideExprStr: TypeAlias = str
-
-
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -280,7 +277,7 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
@@ -304,10 +301,10 @@ class CompiledFxGraph(OutputCode):
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
     mutated_input_idxs: OrderedSet[int]
-    constants: Optional[Dict[str, torch.Tensor]]
-    frozen_param_names: Dict[str, str]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
+    constants: Optional[dict[str, torch.Tensor]]
+    frozen_param_names: dict[str, str]
+    torchbind_constants: dict[str, torch._C.ScriptObject]
+    output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     counter_deltas: Counter[str]
@@ -368,7 +365,7 @@ class CompiledFxGraph(OutputCode):
             self.constants = {}
             self.frozen_param_names = {}
             for k, v in graph.constants.items():
-                if k.startswith("_frozen_param"):
+                if is_frozen_param(v):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
@@ -440,7 +437,7 @@ class CompiledFxGraph(OutputCode):
                 assert len(output.args) == 1
                 stack_traces = [
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
+                    for arg in output.args[0]  # type: ignore[union-attr]
                 ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
@@ -549,11 +546,6 @@ class CompiledFxGraph(OutputCode):
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        from .graph import GraphLowering
-
-        # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(code)
-
         try:
             with dynamo_timed(
                 "PyCodeCache.load_by_key_path",
@@ -570,10 +562,6 @@ class CompiledFxGraph(OutputCode):
             raise
 
         return artifact_path
-
-
-def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass
@@ -597,10 +585,6 @@ class CompiledAOTI(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
-
-
-def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass
