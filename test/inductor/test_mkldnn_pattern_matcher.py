@@ -153,6 +153,8 @@ class TestPatternMatcherBase(TestCase):
         is_dynamic=False,
         quantizer=None,
         compile_options={},  # noqa: B006
+        include_ops=(),
+        exclude_ops=(),
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -189,7 +191,17 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
-                actual = torch.compile(mod, **compile_options)(*clone_inputs)
+                if len(include_ops) == 0 and len(exclude_ops) == 0:
+                    actual = torch.compile(mod, **compile_options)(*clone_inputs)
+                else:
+                    actual, (source_code,) = run_and_get_code(
+                        torch.compile(mod, fullgraph=True, **compile_options),
+                        *clone_inputs,
+                    )
+                    for op in include_ops:
+                        self.assertIn(op, source_code)
+                    for op in exclude_ops:
+                        self.assertNotIn(op, source_code)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
 
@@ -4014,10 +4026,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("dynamic", [True, False])
     @parametrize("reshape_a", [True, False])
-    @parametrize("M", [1, 32])
+    @parametrize(
+        "M",
+        [
+            1,
+            32,
+        ],
+    )
     @parametrize("inplace_add", [True, False])
+    @parametrize("expand_a_scale", [True, False])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, dynamic, reshape_a, M, inplace_add
+        self, has_bias, dtype, dynamic, reshape_a, M, inplace_add, expand_a_scale
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
@@ -4036,6 +4055,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
         out_feature = 64
         q_min, q_max = -32, 31
 
+        test_for_pointwise_binary = (
+            True
+            if M == 1
+            and inplace_add
+            and not expand_a_scale
+            and not dynamic
+            and not has_bias
+            else False
+        )
+
         class Mod(torch.nn.Module):
             def __init__(self, dtype: torch.dtype, has_bias: bool):
                 super().__init__()
@@ -4048,6 +4077,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
                 self.b_scale = self.b_scale.to(dtype)
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+
                 self.additive = torch.rand([M, out_feature], dtype=dtype)
 
             def forward(self, a):
@@ -4057,12 +4087,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     a_reshaped = a
                 c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
-                a_scale = self.a_scale.expand(c.shape)
+                if expand_a_scale:
+                    a_scale = self.a_scale.expand(c.shape)
+                else:
+                    a_scale = self.a_scale
                 c = c * a_scale
                 c = c * self.b_scale
                 if self.has_bias:
                     c = c + self.bias
-                if inplace_add:
+                elif inplace_add and test_for_pointwise_binary:
+                    # When M is 1, dynamic shapes are enabled with torch.compile, has_bias is False,
+                    # expand_a_scale is False and inplace_add is true,
+                    # the output's innermost dim's stride can't be determined due to some Inductor bug.
                     c.add_(self.additive)
                 return c
 
@@ -4077,11 +4113,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             (a,),
-            matcher_check_fn=matcher_check_fn,
+            matcher_check_fn,
+            include_ops=["qlinear_pointwise.binary_tensor"]
+            if test_for_pointwise_binary
+            else (),
             check_autocast=dtype,
             compile_options={"dynamic": dynamic},
         )
-
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
