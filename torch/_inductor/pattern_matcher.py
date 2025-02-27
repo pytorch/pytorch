@@ -1513,7 +1513,11 @@ def _serialize_pattern(
         pattern_matcher_imports = []
         for name in dir(torch._inductor.pattern_matcher):
             attr = getattr(torch._inductor.pattern_matcher, name)
-            if name == "_SimpleSpec" or isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+            try:
+                if issubclass(attr, (PatternExpr, _TargetExpr)):
+                    pattern_matcher_imports.append(name)
+            except TypeError:
+                pass
                 pattern_matcher_imports.append(name)
 
         formatted_imports = ",\n   ".join(pattern_matcher_imports)
