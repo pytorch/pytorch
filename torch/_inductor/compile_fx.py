@@ -1016,9 +1016,16 @@ class _InProcessFxCompile(FxCompile):
                         provenance_tracking_json
                     )
                 if config.is_fbcode():
-                    log_optimus_to_scuba(
-                        extra_logging={"pt2_configs": str(get_patched_config_dict())}
-                    )
+                    try:
+                        log_optimus_to_scuba(
+                            extra_logging={
+                                "pt2_configs": str(get_patched_config_dict())
+                            }
+                        )
+                    except ValueError:
+                        # TODO(T216453900): need to work around for now to support vllm
+                        # See details in vllm/compilation/pass_manager.py.
+                        log.warning("failed to log pt2_configs")
 
             with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
                 example_inputs
