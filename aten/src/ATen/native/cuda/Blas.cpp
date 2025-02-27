@@ -1228,12 +1228,12 @@ namespace {
   const std::optional<at::Tensor>& offs_b
   ) {
     const bool a_is_2d = mat_a.dim() == 2;
-    const bool b_is_2d = mat_a.dim() == 2;
+    const bool b_is_2d = mat_b.dim() == 2;
     TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
     TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
 
-    TORCH_CHECK(!a_is_2d ^ offs_a.has_value(), "have to provide offsets for mat_a if it is 2d");
-    TORCH_CHECK(!b_is_2d ^ offs_b.has_value(), "have to provide offsets for mat_a if it is 2d");
+    TORCH_CHECK(! (a_is_2d ^ offs_a.has_value()), "have to provide offsets for mat_a if it is 2d");
+    TORCH_CHECK(! (b_is_2d ^ offs_b.has_value()), "have to provide offsets for mat_b if it is 2d");
     if (offs_a.has_value()) {
       TORCH_CHECK(offs_a->dim() == 1, "offs_a has to be 1D");
     }
@@ -1268,9 +1268,10 @@ namespace {
   bool transposed(const Tensor& mat) {
     IntArrayRef tensor_strides = mat.strides();
     IntArrayRef tensor_sizes = mat.sizes();
-    if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
+    int end_dim = mat.dim() - 1;
+    if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
       return true;
-    } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
+    } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
       return false;
     } else {
       TORCH_CHECK(false, "Tensor should not be self-overlapping");
