@@ -584,26 +584,6 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
 
 
-# Check the meta data of two flattened lists of leaves.
-# This function is for example useful if the input and the output of a combine_fn are required to have the same
-# meta data
-def check_two_lists_for_same_metadata(leaves_a, leaves_b):
-    # This is a workaround since the device is not a property of TensorMetadata
-    la_tensor_metadata = [
-        (_extract_tensor_metadata(la, include_contiguity=False), la.device)
-        for la in leaves_a
-    ]
-    lb_tensor_metadata = [
-        (_extract_tensor_metadata(lb, include_contiguity=False), lb.device)
-        for lb in leaves_b
-    ]
-
-    # TODO: The TensorMetadata does not contain the device property and hence this is not checked!
-    assert all(la == lb for la, lb in zip(la_tensor_metadata, lb_tensor_metadata)), (
-        f"The metadata of leaves_a needs to match the metadata of leaves_b"
-        f"\n  leaves_a metadata             : {[(x[0].shape, x[0].dtype, x[0].stride, x[1]) for x in la_tensor_metadata]}"
-        f"\n  leaves_b metadata             : {[(x[0].shape, x[0].dtype, x[0].stride, x[1]) for x in lb_tensor_metadata]}"
-    )
 
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,

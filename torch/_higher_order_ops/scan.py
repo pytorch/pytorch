@@ -112,6 +112,11 @@ def scan(
     # and we also want to the input ordering matches the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
+    
+    # Shortcut if no xs is provided
+    if len(leaves_xs_orig) == 0:
+        return init, []
+    
     def _validate_input(cfn, lxs, linit, d, r):
         if not callable(cfn):
             raise RuntimeError("Combine_fn must be a callable, but got {cfn}")

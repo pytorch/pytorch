@@ -2881,15 +2881,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
-    select_copy = torch.ops.aten.select_copy.int(flip, 0, 0)
-    add = torch.ops.aten.add.Tensor(init_1, select_copy);  add = None
-    add_1 = torch.ops.aten.add.Tensor(init_1, select_copy);  select_copy = add_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, (init_1,), (flip,), [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -2908,16 +2905,13 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    elem_1 = torch.flip(elem, [0]);  elem = None
-    select_copy = torch.select_copy(elem_1, 0, 0)
-    new_carry = l_init_ + select_copy;  new_carry = None
-    add_1 = l_init_ + select_copy;  select_copy = add_1 = None
+    flip = torch.flip(elem, [0]);  elem = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem_1], []);  scan_combine_fn_0 = l_init_ = elem_1 = None
-    getitem = scan[0]
-    elem_2 = scan[1];  scan = None
-    flip_1 = torch.flip(elem_2, [0]);  elem_2 = None
-    return (getitem, flip_1)""",  # noqa: B950
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, (l_init_,), (flip,), []);  scan_combine_fn_0 = l_init_ = flip = None
+    carry = scan[0]
+    out = scan[1];  scan = None
+    out_1 = torch.flip(out, [0]);  out = None
+    return (carry, out_1)""",  # noqa: B950
         )
 
 
@@ -6858,16 +6852,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
     r = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    r_1 = torch.select_copy(r, 0, 0)
-    r_2 = l_init_.matmul(l_add_closure_0_cell_contents_0_param_)
-    r_3 = r_2.matmul(r_1);  r_2 = r_1 = None
-    r_4 = r_3.add(l_add_closure_0_cell_contents_1_0_);  r_3 = None
-    r_5 = r_4.sum();  r_4 = r_5 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
-    getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, (l_init_,), (r,), [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    carry = scan[0]
+    out = scan[1];  scan = None
+    return (carry, out)""",  # noqa: B950
             )
 
         else:
@@ -6879,17 +6868,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_xs_ = L_xs_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
-    elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    select_copy = torch.select_copy(elem, 0, 0)
-    matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
-    matmul_1 = matmul @ select_copy;  matmul = select_copy = None
-    ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
-    sum_1 = ret.sum();  ret = sum_1 = None
+    movedim = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
-    getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, (l_init_,), (movedim,), [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = movedim = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    carry = scan[0]
+    out = scan[1];  scan = None
+    return (carry, out)""",  # noqa: B950
             )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)

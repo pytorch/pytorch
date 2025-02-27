@@ -1432,7 +1432,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             first_slice_copy,
             stack_y,
         )
-        from torch._higher_order_ops.utils import check_two_lists_for_same_metadata
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1564,13 +1563,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ai.as_proxy() for ai in additional_inputs_seq
         ) + list(combine_freevars_proxy)
         
-        # # combine_result is a flatten list concated by carry + y, len(carry) is len(init) since they have
-        # # same pytree structure.
-        # carry_vars, y_vars = _extract_carry_and_out(
-        #     combine_result.items, num_init_leaves
-        # )
-        # y_proxies = [y_var.as_proxy() for y_var in y_vars]
-        
         # Flatten manually and get the tree_spec.
         # We need to do it this way, as if speculate_subgraph already returns the flattened output
         # we may run into issues that we actually mistake an output for a carry.
@@ -1616,13 +1608,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             out_meta = [*example_carry, *example_stacked_out]
 
-        # return wrap_fx_proxy(
-        #     tx=tx,
-        #     proxy=tx.output.create_proxy(
-        #         "call_function", torch.ops.higher_order.scan, p_args, {}
-        #     ),
-        #     example_value=out_meta,
-        # )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.scan, p_args, {}, out_meta, combine_treespec
         )
