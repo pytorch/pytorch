@@ -71,7 +71,7 @@ IF(NOT MKLDNN_FOUND)
     ExternalProject_Get_Property(xpu_mkldnn_proj BINARY_DIR)
     set(__XPU_MKLDNN_BUILD_DIR ${BINARY_DIR})
     set(XPU_MKLDNN_LIBRARIES ${__XPU_MKLDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    set(XPU_MKLDNN_INCLUDE ${__XPU_MKLDNN_BUILD_DIR}/include ${XPU_MKLDNN_ROOT}/include)
+    set(XPU_MKLDNN_INCLUDE ${XPU_MKLDNN_ROOT}/include ${__XPU_MKLDNN_BUILD_DIR}/include)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
