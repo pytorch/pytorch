@@ -13,7 +13,7 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
-    use_ck_template,
+    use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
@@ -25,6 +25,7 @@ from .mm_common import (
     mm_args,
     mm_configs,
     mm_options,
+    should_fallback_to_aten,
 )
 
 
@@ -191,11 +192,11 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             layout,
             [mat1, mat2],
         )
-    if use_ck_template(layout):
+
+    if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)

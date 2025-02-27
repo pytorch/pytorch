@@ -1,5 +1,7 @@
 import dataclasses
-from typing import Any, Dict, List, Tuple
+import itertools
+from collections.abc import Iterable
+from typing import Any, Union
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -13,13 +15,15 @@ class SubclassCreationMeta:
     start_idx: int
     num_tensors: int
     class_type: Any
-    attrs: Dict[str, "SubclassCreationMeta"]
+    attrs: dict[str, "SubclassCreationMeta"]
     metadata: Any
+    outer_size: Iterable[Union[None, int, torch.SymInt]]
+    outer_stride: Iterable[Union[None, int, torch.SymInt]]
 
 
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: List[torch.Tensor] = list(tensors)
+        todo: list[torch.Tensor] = list(tensors)
 
         def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
             if subclass_meta is None:
@@ -29,15 +33,18 @@ class UnwrapTensorSubclass(torch.nn.Module):
                 built_tensor, offset = _unwrap_tensor_subclasses(meta, tensors, offset)
                 inner_tensors[attr] = built_tensor
             rebuilt = subclass_meta.class_type.__tensor_unflatten__(
-                inner_tensors, subclass_meta.metadata, None, None
+                inner_tensors,
+                subclass_meta.metadata,
+                subclass_meta.outer_size,
+                subclass_meta.outer_stride,
             )
             return rebuilt, offset
 
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
-    def right_inverse(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
         assert type(tensor) is not torch.Tensor
-        plain_tensors: List[torch.Tensor] = []
+        plain_tensors: list[torch.Tensor] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
             if type(tensor) is torch.Tensor:
@@ -59,6 +66,8 @@ class UnwrapTensorSubclass(torch.nn.Module):
                     class_type=type(tensor),
                     attrs=attr_to_meta,
                     metadata=metadata,
+                    outer_size=tensor.size(),
+                    outer_stride=tensor.stride(),
                 ),
                 new_idx,
             )
@@ -79,11 +88,11 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
-        module.named_parameters(recurse=False)
-    )
-    for name, param in name_param:
-        if is_traceable_wrapper_subclass(param):
+    for name, tensor in itertools.chain(
+        list(module.named_parameters(recurse=False)),
+        list(module.named_buffers(recurse=False)),
+    ):
+        if is_traceable_wrapper_subclass(tensor):
             torch.nn.utils.parametrize.register_parametrization(
                 module, name, UnwrapTensorSubclass()
             )

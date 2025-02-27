@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 from collections import namedtuple
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -110,7 +110,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     in_features: int
     n_classes: int
-    cutoffs: List[int]
+    cutoffs: list[int]
     div_value: float
     head_bias: bool
     head: Linear

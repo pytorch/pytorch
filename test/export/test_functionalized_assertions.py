@@ -13,10 +13,8 @@ class TestFuntionalAssertions(TestCase):
             dep_token,
         )
         with self.assertRaisesRegex(RuntimeError, "test msg"):
-            (
-                torch.ops.aten._functional_assert_async.msg(
-                    torch.tensor(0), "test msg", dep_token
-                ),
+            torch.ops.aten._functional_assert_async.msg(
+                torch.tensor(0), "test msg", dep_token
             )
 
     def test_functional_sym_constrain_range(self) -> None:
