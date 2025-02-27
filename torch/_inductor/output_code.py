@@ -473,6 +473,7 @@ class CompiledFxGraph(OutputCode):
         The results of this function are *not* saved in the cache itself.
         """
         set_tracing_context_output_strides(example_inputs, self)
+        assert graph_kwargs["cudagraphs"] is not None
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled

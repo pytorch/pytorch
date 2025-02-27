@@ -23,9 +23,9 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import OutputCode
 from torch._inductor.utils import BoxedBool, InputType
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv

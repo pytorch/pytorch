@@ -666,8 +666,8 @@ def _compile_fx_inner(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
     ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
-    if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
-        graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
+    if graph_kwargs.get("cudagraphs") is None:
+        graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
