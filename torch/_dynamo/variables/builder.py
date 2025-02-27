@@ -45,7 +45,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch.fx.experimental._dynamism import normalize_source_name
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -58,6 +57,7 @@ from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mo
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
