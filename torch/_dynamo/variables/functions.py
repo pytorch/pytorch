@@ -527,7 +527,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
         except Unsupported as e:
-            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
