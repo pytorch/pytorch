@@ -12915,8 +12915,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 expected_divisible[2] = expected_divisible.pop(1)
             elif config.triton.cooperative_reductions:
                 self.assertEqual(len(kernels), 1)
-                # one kernel, with extra workspace/semaphore args
                 expected_divisible = {
+                    # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
                 }
             else:
