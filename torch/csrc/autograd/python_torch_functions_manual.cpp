@@ -734,7 +734,8 @@ void initTorchFunctions(PyObject* module) {
             src.storage(),
             dst.sym_storage_offset(),
             dst.sym_sizes(),
-            dst.sym_strides());
+            dst.sym_strides(),
+            /*check_offset_in_bounds=*/false);
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
