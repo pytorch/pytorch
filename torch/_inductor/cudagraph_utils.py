@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor.utils import GraphPartitionInfo, InputType
+from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -350,7 +350,7 @@ class CudagraphMetadata:
 
 
 def get_partition_cudagraph_metadata(
-    partition_info: GraphPartitionInfo,
+    partition_map: GraphPartitionMap,
     metadata: CudagraphMetadata,
 ) -> CudagraphMetadata:
     """
@@ -363,7 +363,7 @@ def get_partition_cudagraph_metadata(
     partition_static_input_idxs = []
     partition_mutated_input_idxs = []
     for partition_input_idx, graph_input_idx in enumerate(
-        partition_info.input_index_mapping
+        partition_map.input_index_mapping
     ):
         if graph_input_idx in metadata.static_input_idxs:
             partition_static_input_idxs.append(partition_input_idx)
@@ -376,7 +376,7 @@ def get_partition_cudagraph_metadata(
         else:
             # create a dummy placeholder info since this partition input is not a graph input
             placeholder = PlaceholderInfo(
-                name=f"partition_{partition_info.id}_placeholder_{partition_input_idx}",
+                name=f"partition_{partition_map.id}_placeholder_{partition_input_idx}",
                 stack_trace=None,
                 users=[],
                 mutating_use_stack_trace=None,
@@ -384,14 +384,14 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
-    for graph_output_idx in partition_info.output_index_mapping:
+    for graph_output_idx in partition_map.output_index_mapping:
         if graph_output_idx:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
         else:
             partition_stack_traces.append(None)
 
     partition_constants = {
-        name: metadata.constants[name] for name in partition_info.constant_names
+        name: metadata.constants[name] for name in partition_map.constant_names
     }
 
     return CudagraphMetadata(

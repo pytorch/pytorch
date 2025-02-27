@@ -152,7 +152,11 @@ class align(sympy.Function):
 
 
 @dataclasses.dataclass(frozen=True)
-class GraphPartitionInfo:
+class GraphPartitionMap:
+    """
+    Mapping from the partition info (e.g., input/output) to the graph info
+    """
+
     # a unique id of graph partition
     id: int
 

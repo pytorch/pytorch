@@ -45,7 +45,6 @@ from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
-    GraphPartitionInfo,
     InputType,
     output_node,
     set_tracing_context_output_strides,
@@ -245,8 +244,7 @@ def cudagraph_partition_post_compile(
     constants: dict[str, torch.Tensor],
 ) -> None:
     if (  # TODO: Double check this is correct. Write down the assumption clearly. Add doc.
-        compiled_graph.partition_infos is None
-        or len(compiled_graph.partition_infos) == 0
+        compiled_graph.partition_maps is None or len(compiled_graph.partition_maps) == 0
     ):
         try_handle_backward_generation(compiled_graph)
         return
@@ -273,9 +271,9 @@ def cudagraph_partition_post_compile(
     prepare_cudagraph_post_compile(compiled_graph, example_inputs)
 
     cudagraphify_fns = []
-    for partition_info in compiled_graph.partition_infos:
+    for partition_map in compiled_graph.partition_maps:
         partition_metadata = get_partition_cudagraph_metadata(
-            partition_info,
+            partition_map,
             graph_metadata,
         )
 
@@ -390,7 +388,7 @@ class CompiledFxGraph(OutputCode):
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    partition_infos: Optional[list[GraphPartitionInfo]]
+    partition_maps: Optional[list[GraphPartitionMap]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
@@ -454,7 +452,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.cudagraph_info = None
-        self.partition_infos = graph.partition_infos
+        self.partition_maps = graph.partition_maps
         self.fx_kwargs = {}
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None

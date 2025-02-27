@@ -4002,7 +4002,7 @@ class Scheduler:
 
         return name_to_node
 
-    def compute_graph_partition_infos(
+    def compute_graph_partition_maps(
         self,
         partitions: list[PartitionType],
         signatures: list[GraphPartitionSignature],
@@ -4018,7 +4018,7 @@ class Scheduler:
             name: idx for idx, name in enumerate(V.graph.get_output_names())
         }
 
-        V.graph.partition_infos = []
+        V.graph.partition_maps = []
 
         for partition_id, (partition, signature) in enumerate(
             zip(partitions, signatures)
@@ -4037,7 +4037,7 @@ class Scheduler:
             for node in signature.output_nodes:
                 output_mapping.append(name_to_graph_output_index.get(node.get_name()))
 
-            V.graph.partition_infos.append(
+            V.graph.partition_maps.append(
                 GraphPartitionInfo(
                     partition_id,
                     input_mapping,
@@ -4143,7 +4143,7 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
-        self.compute_graph_partition_infos(partitions, signatures)
+        self.compute_graph_partition_maps(partitions, signatures)
 
         return partitions, signatures
 
