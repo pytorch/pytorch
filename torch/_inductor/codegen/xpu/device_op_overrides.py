@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
@@ -69,6 +71,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "void *"
+
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        return None
 
 
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())
