@@ -2554,14 +2554,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
                 out_strides[i] = stride
 
-            for dim in expanded_dims:
-                arg = slice_(arg, dim, 0, 1)
-
-            # TODO this is too subtle to get right in lowering, should be handled in match_exact_strides
-            out = ir.ExternKernel.require_exact_strides(arg, out_strides)
-            out = expand(TensorBox(out), out_size)
-            out = ir.try_match_insignificant_strides(out, out_strides)
-            return out
+            return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return ir.try_match_insignificant_strides(
