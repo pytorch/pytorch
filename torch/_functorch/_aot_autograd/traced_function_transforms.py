@@ -14,7 +14,7 @@ It does so by:
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Union
 from unittest.mock import patch
 
 import torch
@@ -38,6 +38,9 @@ from torch.nn.utils import stateless
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -190,7 +193,7 @@ def fn_prepped_for_autograd(
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
-    def inner_fn(primals: List[Any], tangents: List[Any]):
+    def inner_fn(primals: list[Any], tangents: list[Any]):
         outs, tangent_mask = fn(*primals)
 
         assert len(tangent_mask) == len(outs)
@@ -232,7 +235,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = ()
+        backward_out: tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
@@ -314,15 +317,17 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
     def traced_joint(
         primals, tangents, fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset
     ):
-        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch(
-            "torch.cuda.set_rng_state", override_set_rng_state
+        with (
+            patch("torch.cuda.get_rng_state", override_get_rng_state),
+            patch("torch.cuda.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(func(primals, tangents))
 
     def traced_forward(*primals_fwd_seed_fwd_base_offset):
         # The signature is (*primals, seed, offset)
-        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch(
-            "torch.cuda.set_rng_state", override_set_rng_state
+        with (
+            patch("torch.cuda.get_rng_state", override_get_rng_state),
+            patch("torch.cuda.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(func(*primals_fwd_seed_fwd_base_offset[:-2]))
 
@@ -464,7 +469,10 @@ def create_functionalized_fn(
                         # Not banning here mutations on inpt_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
-                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
+                        with (
+                            torch.fx.traceback.preserve_node_meta(),
+                            set_partitioner_tag_must_be_in_backward(),
+                        ):
                             before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
@@ -479,9 +487,32 @@ def create_functionalized_fn(
                 ):
                     assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ) and not has_data_mutation(f_inpt), (
-                        "Found an input to the backward that was mutated during the backward pass. This is not supported"
+                    ), (
+                        "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
                     )
+                    if has_data_mutation(f_inpt):
+                        can_be_in_graph = _check_if_mutation_can_be_in_graph(
+                            keep_input_mutations=True,
+                            mutates_data=True,
+                            mutates_metadata=False,
+                            mutations_hidden_from_autograd=are_all_mutations_hidden_from_autograd(
+                                f_inpt
+                            ),
+                            mutations_under_no_grad_or_inference_mode=are_all_mutations_under_no_grad_or_inference_mode(
+                                f_inpt
+                            ),
+                            mutates_storage_metadata=False,
+                            mutation_inductor_storage_resize=was_inductor_storage_resized(
+                                f_inpt
+                            ),
+                            requires_grad=f_inpt.requires_grad,
+                        )
+                        assert can_be_in_graph, (
+                            "a backward input that had data mutated in an autograd-aware way. This is not supported"
+                        )
+                        # Perform the input mutation
+                        with torch.fx.traceback.preserve_node_meta():
+                            before.copy_(after)
 
             if aot_config.keep_inference_input_mutations:
                 # Note: This is a bit annoying. There's a layering issue here, where:
@@ -735,7 +766,7 @@ def handle_effect_tokens_fn(
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
 def aot_dispatch_subclass(
     flat_fn_maybe_joint,
-    args: List[Any],
+    args: list[Any],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
@@ -864,9 +895,12 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
-        with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ), maybe_disable_thunkify():
+        with (
+            stateless._reparametrize_module(
+                mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            ),
+            maybe_disable_thunkify(),
+        ):
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(

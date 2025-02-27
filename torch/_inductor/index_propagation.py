@@ -5,15 +5,15 @@ propagation of sympy expressions downstream of ops.index_expr calls.
 
 For example, say we have the IR:
 
-   tmp0 = ops.index_expr(x, torch.int32)
-   tmp1 = ops.constant(2, torch.int32)
-   tmp2 = ops.mul(tmp0, tmp1)
-   tmp3 = ops.indirect_indexing(tmp2, x_size)
-   tmp4 = ops.load("buf0", tmp3)
+    tmp0 = ops.index_expr(x, torch.int32)
+    tmp1 = ops.constant(2, torch.int32)
+    tmp2 = ops.mul(tmp0, tmp1)
+    tmp3 = ops.indirect_indexing(tmp2, x_size)
+    tmp4 = ops.load("buf0", tmp3)
 
 The underlying handler would just see:
 
-   ops.load("buf0", x * 2)
+    ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
 printers. So simple operations like minimum and maximum cannot be translated to
@@ -22,8 +22,9 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, overload, Union
+from typing import Any, Literal, Optional, overload, Union
 from typing_extensions import TypeAlias
 
 import sympy
@@ -33,6 +34,7 @@ from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
+from .ops_handler import DefaultHandler
 from .sizevars import evaluate_expr
 from .utils import generate_assert
 from .virtualized import V
@@ -186,7 +188,7 @@ class IndexPropVar:
 IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
 
 
-class IndexPropagation:
+class IndexPropagation(DefaultHandler):
     """Ops wrapper that tries to propagate constant and index_expr values through the computation.
 
     This aims to maximize the compile time simplification possible, and convert
@@ -197,8 +199,8 @@ class IndexPropagation:
     def __init__(
         self,
         inner: Any,
-        iter_ranges: Dict[sympy.Symbol, sympy.Expr],
-        indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
+        iter_ranges: dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: dict[sympy.Symbol, sympy.Expr],
     ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
@@ -248,17 +250,17 @@ class IndexPropagation:
     def fallback(
         self,
         name: Literal["indirect_indexing"],
-        args: tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: Sequence[Any],
+        kwargs: dict[str, Any],
     ) -> IndexPropVar: ...
 
     @overload
     def fallback(
-        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult: ...
 
     def fallback(
-        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
@@ -266,7 +268,7 @@ class IndexPropagation:
         return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
-        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
@@ -286,22 +288,19 @@ class IndexPropagation:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
-    def __getattr__(self, name: str) -> Callable[..., IndexPropResult]:
-        def inner(*args: Any, **kwargs: Any) -> IndexPropResult:
-            if not hasattr(SymPyOps, name):
-                return self.fallback(name, args, kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        if not hasattr(SymPyOps, name):
+            return self.fallback(name, args, kwargs)
 
-            var_arguments = [
-                a
-                for a in itertools.chain(args, kwargs.values())
-                if isinstance(a, IndexPropVar)
-            ]
-            if not all(v.is_symbolic for v in var_arguments):
-                return self.fallback(name, args, kwargs)
+        var_arguments = [
+            a
+            for a in itertools.chain(args, kwargs.values())
+            if isinstance(a, IndexPropVar)
+        ]
+        if not all(v.is_symbolic for v in var_arguments):
+            return self.fallback(name, args, kwargs)
 
-            return self.propagate_sympy(name, args, kwargs)
-
-        return inner
+        return self.propagate_sympy(name, args, kwargs)
 
     def statically_true(self, e):
         """

@@ -4,7 +4,6 @@ r"""Pruning methods."""
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Tuple
 
 import torch
 
@@ -271,7 +270,7 @@ class PruningContainer(BasePruningMethod):
     """
 
     def __init__(self, *args):
-        self._pruning_methods: Tuple[BasePruningMethod, ...] = ()
+        self._pruning_methods: tuple[BasePruningMethod, ...] = ()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)

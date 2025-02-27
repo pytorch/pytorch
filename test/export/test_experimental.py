@@ -10,6 +10,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export, export_for_training
 from torch.export._trace import _convert_ts_to_export_experimental
 from torch.export.experimental import _export_forward_backward
+from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 
 
@@ -264,8 +265,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         ep = _export_forward_backward(ep)
 
     def test_joint_loss_index(self):
-        from torch.export.graph_signature import OutputKind
-
         class Foo(torch.nn.Module):
             def __init__(self, index):
                 super().__init__()
@@ -289,6 +288,48 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
                     self.assertTrue(spec.kind == OutputKind.LOSS_OUTPUT)
                 else:
                     self.assertTrue(spec.kind != OutputKind.LOSS_OUTPUT)
+
+    def test_joint_buffer_input_mutations(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 4)
+                self.register_buffer("buf", torch.randn(4))
+                self.loss = torch.nn.CrossEntropyLoss()
+
+            def forward(self, x, label):
+                x.add_(self.buf)
+                x = self.l(x)
+                self.buf.add_(2.0)
+                return self.loss(x, label)
+
+        inputs = (
+            torch.randn(4, 4),
+            torch.randint(0, 4, (4,)),
+        )
+        ep = export(Foo(), inputs)
+        ep_joint = _export_forward_backward(ep)
+        self.assertEqual(len(ep_joint.graph_signature.output_specs), 5)
+        self.assertEqual(
+            ep_joint.graph_signature.output_specs[0].kind,
+            OutputKind.BUFFER_MUTATION,
+        )
+        self.assertEqual(
+            ep_joint.graph_signature.output_specs[0].target,
+            "buf",
+        )
+        self.assertEqual(
+            ep_joint.graph_signature.output_specs[1].kind,
+            OutputKind.USER_INPUT_MUTATION,
+        )
+        self.assertEqual(
+            ep_joint.graph_signature.output_specs[1].target,
+            "x",
+        )
+        self.assertEqual(
+            ep_joint.graph_signature.output_specs[2].kind,
+            OutputKind.LOSS_OUTPUT,
+        )
 
 
 if __name__ == "__main__":
