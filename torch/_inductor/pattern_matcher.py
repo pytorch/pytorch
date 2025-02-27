@@ -1518,7 +1518,6 @@ def _serialize_pattern(
                     pattern_matcher_imports.append(name)
             except TypeError:
                 pass
-                pattern_matcher_imports.append(name)
 
         formatted_imports = ",\n   ".join(pattern_matcher_imports)
         formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"
