@@ -66,10 +66,6 @@ set DISTUTILS_USE_SDK=1
 :: Print all existing environment variable for debugging
 set
 
-:: start sccache server and reset sccache stats
-sccache --start-server
-sccache --zero-stats
-sccache --show-stats
 
 python setup.py bdist_wheel
 if errorlevel 1 goto fail
