@@ -179,7 +179,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
   Tensor mean = at::empty({M}, options);
   Tensor rstd = at::empty({M}, options);
   LayerNormKernel(
-      input_buffer.is_cuda() ? kCUDA : (input_buffer.is_xpu() ? kXPU : kCPU),
+      input_buffer.device().type(),
       input_buffer,
       *weight_contig,
       *bias_contig,
