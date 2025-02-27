@@ -136,7 +136,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
-def handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
+def try_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
     assert compiled_graph.current_callable is not None
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     boxed_forward_device_index = compiled_graph.boxed_forward_device_index
@@ -162,6 +162,23 @@ def handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
         compiled_graph.current_callable = compiled_artifact
 
 
+def prepare_cudagraph_post_compile(
+    compiled_graph: CompiledFxGraph, example_inputs: Sequence[InputType]
+):
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    if not config.triton.cudagraph_trees:
+        # Force specialize all inputs so that CUDA graphs will work
+        for t in example_inputs:
+            if isinstance(t, torch.SymInt):
+                int(t)  # guard
+
+    if boxed_forward_device_index is not None and not is_inference and not is_backward:
+        boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+
 def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -177,7 +194,6 @@ def cudagraph_post_compile(
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
@@ -187,18 +203,8 @@ def cudagraph_post_compile(
 
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
-        if not config.triton.cudagraph_trees:
-            # Force specialize all inputs so that CUDA graphs will work
-            for t in example_inputs:
-                if isinstance(t, torch.SymInt):
-                    int(t)  # guard
 
-        if (
-            boxed_forward_device_index is not None
-            and not is_inference
-            and not is_backward
-        ):
-            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+        prepare_cudagraph_post_compile(compiled_graph, example_inputs)
 
         from .compile_fx import cudagraphify
 
@@ -218,7 +224,7 @@ def cudagraph_post_compile(
 
     else:
         BoxedBool.disable(cudagraphs)
-        handle_backward_generation(compiled_graph)
+        try_handle_backward_generation(compiled_graph)
 
         if "cuda" in compiled_graph.device_types:
             # prefer better disable_cudagraphs_reason bc stack trace
@@ -236,15 +242,13 @@ def cudagraph_post_compile(
 def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
-    cudagraphs: BoxedBool,
     constants: dict[str, torch.Tensor],
 ) -> None:
-    if (
+    if (  # TODO: Double check this is correct. Write down the assumption clearly. Add doc.
         compiled_graph.partition_infos is None
         or len(compiled_graph.partition_infos) == 0
     ):
-        BoxedBool.disable(cudagraphs)
-        handle_backward_generation(compiled_graph)
+        try_handle_backward_generation(compiled_graph)
         return
 
     from .compile_fx import cudagraphify
@@ -252,11 +256,11 @@ def cudagraph_partition_post_compile(
     assert compiled_graph.current_callable is not None
     assert compiled_graph.recursively_apply_fns is not None
     assert compiled_graph.cudagraph_info is not None
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
     mutated_input_idxs = tuple(compiled_graph.mutated_input_idxs)
+    device_index = next(iter(compiled_graph.device_idxs))
 
     graph_metadata = CudagraphMetadata(
         compiled_graph.cudagraph_info.placeholders,
@@ -266,16 +270,7 @@ def cudagraph_partition_post_compile(
         constants,
     )
 
-    device_index = next(iter(compiled_graph.device_idxs))
-
-    if not config.triton.cudagraph_trees:
-        # Force specialize all inputs so that CUDA graphs will work
-        for t in example_inputs:
-            if isinstance(t, torch.SymInt):
-                int(t)  # guard
-
-    if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(device_index)
+    prepare_cudagraph_post_compile(compiled_graph, example_inputs)
 
     cudagraphify_fns = []
     for partition_info in compiled_graph.partition_infos:
@@ -566,7 +561,6 @@ class CompiledFxGraph(OutputCode):
             cudagraph_partition_post_compile(
                 example_inputs,
                 self,
-                cudagraphs,
                 constants.unwrap(self),
             )
         else:

@@ -356,7 +356,7 @@ def get_partition_cudagraph_metadata(
     """
     Convert the cudagraph metadata at the graph level to the graph partition level,
     given the graph partition info (i.e., mapping from partition input/output index
-    to the graph input/output index).
+    to graph input/output index).
     """
 
     partition_placeholders = []
