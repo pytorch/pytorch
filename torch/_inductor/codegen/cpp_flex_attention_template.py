@@ -2,7 +2,7 @@
 import contextlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -193,102 +193,6 @@ inline void {{kernel_name}}_copy_value_with_pad(
 
   }
 }
-// Transpose a [2, 32] matrix to [32, 2]
-// Note: the output leading dimension should be 2,
-// that is, the output must be contiguous
-static inline void {{kernel_name}}_transpose_pad_2x32_block(
-    const uint16_t* src,
-    uint16_t* dst,
-    int64_t ld_src,
-    int krem = 2,
-    int nrem = 32) {
-#if defined(CPU_CAPABILITY_AVX512)
-  __m512i r0, r1;
-  __m512i d0, d1;
-  // load
-  if (nrem < 32) {
-    __mmask32 mask_krem_v = (1LL << nrem) - 1;
-    r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
-    // if krem is not 2, pad with zeros
-    if (krem == 2) {
-      r1 = _mm512_maskz_loadu_epi16(mask_krem_v, src + ld_src);
-    } else {
-      r1 = _mm512_setzero_si512();
-    }
-  } else {
-    r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
-    if (krem == 2) {
-      r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
-    } else {
-      r1 = _mm512_setzero_si512();
-    }
-  }
-  // transpose
-  d0 = _mm512_unpacklo_epi16(r0, r1);
-  d1 = _mm512_unpackhi_epi16(r0, r1);
-  r0 = _mm512_shuffle_i32x4(d0, d1, 0x88);
-  r1 = _mm512_shuffle_i32x4(d0, d1, 0xdd);
-  d0 = _mm512_shuffle_i32x4(r0, r1, 0x88);
-  d1 = _mm512_shuffle_i32x4(r0, r1, 0xdd);
-
-  // store
-  if (nrem < 16) {
-    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
-    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
-  } else if (nrem == 16) {
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-  } else if (nrem < 32) {
-    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-    _mm512_mask_storeu_epi16(
-        reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
-  } else {
-    // normal store
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
-  }
-#else
-TORCH_CHECK(false, "transpose_pad_2x32_block is only supported when avx512 is supported")
-#endif
-}
-
-// To use AMX to accelerate GEMM,
-// reorder the memory format [K, N] -> [K/2, N, 2]
-// Note: If K % 2 != 0, pad K implicitly
-static inline void {{kernel_name}}_pack_vnni2(
-    const uint16_t* src,
-    uint16_t* dst,
-    int64_t ld_src,
-    int64_t K,
-    int64_t N) {
-#if defined(CPU_CAPABILITY_AVX512)
-  int64_t bk = 0;
-  int64_t _K = K / 2 * 2;
-  int64_t _N = N / 32 * 32;
-  for (; bk < _K; bk += 2) {
-    int64_t bn = 0;
-    for (; bn < _N; bn += 32) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src);
-    }
-    int64_t nrem = N - bn;
-    if (nrem > 0) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 2, nrem);
-    }
-  }
-  if (K % 2 == 1) {
-    int64_t bn = 0;
-    for (; bn < _N; bn += 32) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1);
-    }
-    int64_t nrem = N - bn;
-    if (nrem > 0) {
-      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1, nrem);
-    }
-  }
-#else
-TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
-#endif
-}
 """
 
 ALLOCATE_BUFFER = r"""
@@ -313,6 +217,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
+  {{ kernel.maybe_codegen_profile() }}
   int64_t kvBlockSize = {{kvBlockSize}};
   kvBlockSize = kvBlockSize>{{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}}
                                                     : kvBlockSize;
@@ -495,7 +400,7 @@ extern "C"
           /* ld_dst */ cur_kvSplitSize);
 
         // Pack [headSize, cur_kvSplitSize]
-        {{kernel.kernel_name}}_pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
           /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
                   j * eheadSize * kvSize + n * eheadSize),
@@ -504,7 +409,7 @@ extern "C"
           /* N */ cur_kvSplitSize);
 
         // Pack [cur_kvSplitSize, headSize_v]
-        {{kernel.kernel_name}}_pack_vnni2(
+        at::vec::pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(v_addr),
           /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
                   i * num_head * kv_padding_size * headSize_v +
@@ -620,53 +525,45 @@ extern "C"
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
 {%- if score_mod and mask_mod %}
-        // TODO: vectorization optimization for below score and mask codegen functions
-        // apply score mod function
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
-            std::vector<int64_t> b_idx = {i};
-            std::vector<int64_t> h_idx = {j};
-            std::vector<int64_t> q_idx = {m+row};
-            int64_t phisical_kv_idx = n+col;
+        // TODO: reduce the number of calls of q_idx and kv_idx initialization
+        std::vector<int64_t> q_idx(cur_qSplitSize);
+        for (int64_t i = 0; i < cur_qSplitSize; ++i) {
+            q_idx[i] = m + i;
+        }
+
+        std::vector<int64_t> kv_idx(cur_kvSplitSize);
+        for (int64_t i = 0; i < cur_kvSplitSize; ++i) {
             if (use_kv_indice) {
-                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
+                kv_idx[i] = *kv_logical_data * kvBlockSize + i;
+            } else {
+                kv_idx[i] = n + i;
             }
-            std::vector<int64_t> kv_idx = {phisical_kv_idx};
-            accum_t* in_ptr0 = qk_data + row * cur_kvSplitSize + col;
-            auto in_ptr1 = b_idx.data();
-            auto in_ptr2 = h_idx.data();
-            auto in_ptr3 = q_idx.data();
-            auto in_ptr4 = kv_idx.data();
+        }
+
+        std::vector<int64_t> b_idx = {i};
+        std::vector<int64_t> h_idx = {j};
+
+        accum_t* in_ptr0 = qk_data;
+
+        auto in_ptr1 = b_idx.data();
+        auto in_ptr2 = h_idx.data();
+        auto in_ptr3 = q_idx.data();
+        auto in_ptr4 = kv_idx.data();
+
+        // apply score mod function
+        {
             {{ template.generate_other_buffer("score_others", 0, "len_score_other", kernel.args) }}
             accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
-            {{ template.modification(score_mod, score_buf_name, score_buf_idx) }}
-          }
+            {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
         }
+
         // Apply block mask, fill unused with -inf
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
-            std::vector<int64_t> b_idx = {i};
-            std::vector<int64_t> h_idx = {j};
-            std::vector<int64_t> q_idx = {m+row};
-            int64_t phisical_kv_idx = n+col;
-            if (use_kv_indice) {
-                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
-            }
-            std::vector<int64_t> kv_idx = {phisical_kv_idx};
-            accum_t* qk_block = qk_data + row * cur_kvSplitSize + col;
-            auto in_ptr1 = b_idx.data();
-            auto in_ptr2 = h_idx.data();
-            auto in_ptr3 = q_idx.data();
-            auto in_ptr4 = kv_idx.data();
+        {
             {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
-            std::vector<int64_t> temp = {0};
-            int64_t* out_ptr{{mask_buf_idx}} = temp.data();
-            {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx) }}
-            *qk_block = *out_ptr{{mask_buf_idx}} != 0
-                            ? *qk_block
-                            : -std::numeric_limits<accum_t>::infinity();
-          }
+            accum_t* out_ptr{{mask_buf_idx}} = in_ptr0;
+            {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx)|indent(12, false) }}
         }
+
 {%- endif %}
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
@@ -791,6 +688,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_score_other,
         len_mask_other,
         kernel_input_name_to_buffer,
+        block_vars,
     ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16]
         super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
@@ -823,6 +721,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_score_other = len_score_other
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
+        self.block_vars = block_vars
         self.extra_sizevars = list(
             OrderedSet(
                 val
@@ -934,13 +833,14 @@ class CppFlexAttentionTemplate(CppTemplate):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-
-        var_sizes = tuple([])  # type: ignore[var-annotated]  # noqa: C409
-        output_index = 0
+        var_sizes = tuple(subgraph_buffer.get_size())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes)
         }
+
+        dst_layout = subgraph_buffer.get_layout()
+        output_index = dst_layout.make_indexer()([*var_ranges.keys()])
 
         def fn(*args):
             V.ops.store(
@@ -971,7 +871,24 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
         kernel_group.finalize_kernel(cpp_kernel_proxy, [])
-        return kernel_group.loops_code.getvalue()
+        output_code = kernel_group.loops_code.getvalue()
+
+        var_q_symbol, var_kv_symbol = self.block_vars
+        # See [Note] Handle the case where the split sizes are not statically known.
+        # We don't know the value of qBlockSize and rkvBlockSize during compilation time
+        # thus we've represented them by symbols.
+        # We change the symbol strings back to "cur_qSplitSize" and "cur_kvSplitSize"
+        # in the generated code thus they'll be filled with the real value during runtime.
+        if var_q_symbol in kernel_group.args.sizevars:
+            output_code = output_code.replace(
+                kernel_group.args.sizevars[var_q_symbol], "cur_qSplitSize"
+            )
+        if var_kv_symbol in kernel_group.args.sizevars:
+            output_code = output_code.replace(
+                kernel_group.args.sizevars[var_kv_symbol], "cur_kvSplitSize"
+            )
+
+        return output_code
 
     @staticmethod
     def add_choices(
@@ -988,6 +905,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_score_other,
         len_mask_other,
         kernel_input_name_to_buffer,
+        block_vars,
     ):
         def preprocessor(input_nodes, layout):
             return input_nodes, layout
@@ -1011,6 +929,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             len_score_other=len_score_other,
             len_mask_other=len_mask_other,
             kernel_input_name_to_buffer=kernel_input_name_to_buffer,
+            block_vars=block_vars,
         )
         template.maybe_append_choice(choices)
         return template
@@ -1022,7 +941,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:

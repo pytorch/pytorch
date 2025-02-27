@@ -6,7 +6,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 from tabulate import tabulate
@@ -46,7 +46,7 @@ class ExperimentConfig:
     dtype: torch.dtype
     calculate_bwd_time: bool
     cal_bandwidth: bool
-    backends: List[str]
+    backends: list[str]
 
     def __post_init__(self):
         assert len(self.shape) == 6, (
@@ -80,7 +80,7 @@ class ExperimentResults:
 @dataclass(frozen=True)
 class Experiment:
     config: ExperimentConfig
-    results: Dict[str, ExperimentResults]  # backend -> ExperimentResults
+    results: dict[str, ExperimentResults]  # backend -> ExperimentResults
 
     def asdict(self):
         dict1 = self.config.asdict()
@@ -357,7 +357,7 @@ def run_single_experiment(
     config: ExperimentConfig,
     dynamic=False,
     max_autotune=False,
-) -> Dict[str, ExperimentResults]:
+) -> dict[str, ExperimentResults]:
     device = torch.device("cuda")
     batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
@@ -504,7 +504,7 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     return total_flops / results.fwd_time / 1e6  # in TFLOPs/
 
 
-def get_average_speedups(results: List[Experiment], type: str, backend: str):
+def get_average_speedups(results: list[Experiment], type: str, backend: str):
     # Calculate speedups
     speedups = [
         calculate_speedup(r.results["compiled"], r.results[backend], type)
@@ -533,7 +533,7 @@ def get_average_speedups(results: List[Experiment], type: str, backend: str):
     return table_data
 
 
-def print_results(results: List[Experiment], save_path: Optional[str] = None):
+def print_results(results: list[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
         backends = experiment.config.backends + ["compiled"]
@@ -1024,16 +1024,16 @@ def generate_eager_sdpa(
 def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
-    batch_sizes: List[int],
-    num_heads: List[tuple[int, int]],
-    seq_lens: List[int],
-    head_dims: List[int],
-    score_mods_str: List[str],
+    batch_sizes: list[int],
+    num_heads: list[tuple[int, int]],
+    seq_lens: list[int],
+    head_dims: list[int],
+    score_mods_str: list[str],
     decoding: bool,
-    kv_cache_size: List[int],
+    kv_cache_size: list[int],
     cal_bandwidth: bool,
-    backends: List[str],
-) -> List[ExperimentConfig]:
+    backends: list[str],
+) -> list[ExperimentConfig]:
     assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
     if decoding:

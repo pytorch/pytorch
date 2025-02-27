@@ -82,9 +82,9 @@ if __name__ == "__main__":
         print(yaml_content)
         print("\nWill write the above schema to" + args.prefix + commit.yaml_path)
     else:
-        with open(args.prefix + commit.yaml_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.yaml_path), "w") as f:
             f.write(yaml_content)
-        with open(args.prefix + commit.cpp_header_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.cpp_header_path), "w") as f:
             f.write(cpp_header)
-        with open(args.prefix + commit.thrift_schema_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.thrift_schema_path), "w") as f:
             f.write(thrift_schema)
