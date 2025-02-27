@@ -3,18 +3,8 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
-#include <ATen/cpu/vec/vec256/vec256_16_base.h>
+#include <ATen/cpu/vec/vec256/vec16bit_float.h>
 #include <c10/util/irange.h>
-
-#if defined(CPU_CAPABILITY_AVX2)
-#define SLEEF_STATIC_LIBS
-#include <sleef.h>
-#endif
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]

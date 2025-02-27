@@ -3,10 +3,12 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
+// Used for shared functions and classes for vec256_bfloat16.h and vec256_half.h.
+// Any functions/classes that are common between those two files should be defined here.
+// Any non-shared functions/classes should be defined in the respective files.
+
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/intrinsics.h>
-
-// #include <c10/util/irange.h>
 
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
