@@ -1227,6 +1227,14 @@ class GitHubPR:
             repo.fetch(self.last_commit()["oid"], pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    f"PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
             return []
         else:
             return self.merge_ghstack_into(
@@ -1235,6 +1243,7 @@ class GitHubPR:
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
             )
+
 
 
 class MergeRuleFailedError(RuntimeError):
