@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, cast, Dict
+from typing import Any, Callable, cast
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -72,7 +72,7 @@ def gh_fetch_json_dict(
     params: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
+    return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
 def gh_fetch_commit(org: str, repo: str, sha: str) -> dict[str, Any]:

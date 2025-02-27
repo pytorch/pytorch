@@ -1,6 +1,17 @@
+"""Logging utilities for Dynamo and Inductor.
+
+This module provides specialized logging functionality including:
+- Step-based logging that prepends step numbers to log messages
+- Progress bar management for compilation phases
+- Centralized logger management for Dynamo and Inductor components
+
+The logging system helps track the progress of compilation phases and provides structured
+logging output for debugging and monitoring.
+"""
+
 import itertools
 import logging
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -10,7 +21,7 @@ disable_progress = True
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
-def get_loggers() -> List[logging.Logger]:
+def get_loggers() -> list[logging.Logger]:
     return [
         logging.getLogger("torch.fx.experimental.symbolic_shapes"),
         logging.getLogger("torch._dynamo"),

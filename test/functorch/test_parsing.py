@@ -24,7 +24,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-from typing import Any, Callable, Dict
+from typing import Any
 from unittest import mock
 
 from functorch.einops._parsing import (
@@ -37,9 +37,8 @@ from functorch.einops._parsing import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-mock_anonymous_axis_eq: Callable[[AnonymousAxis, object], bool] = (
-    lambda self, other: isinstance(other, AnonymousAxis) and self.value == other.value
-)
+def mock_anonymous_axis_eq(self: AnonymousAxis, other: object) -> bool:
+    return isinstance(other, AnonymousAxis) and self.value == other.value
 
 
 class TestAnonymousAxis(TestCase):
@@ -206,7 +205,7 @@ class TestParsedExpression(TestCase):
 
 class TestParsingUtils(TestCase):
     def test_parse_pattern_number_of_arrows(self) -> None:
-        axes_lengths: Dict[str, int] = {}
+        axes_lengths: dict[str, int] = {}
 
         too_many_arrows_pattern = "a -> b -> c -> d"
         with self.assertRaises(ValueError):
@@ -220,13 +219,13 @@ class TestParsingUtils(TestCase):
         parse_pattern(just_right_arrows, axes_lengths)
 
     def test_ellipsis_invalid_identifier(self) -> None:
-        axes_lengths: Dict[str, int] = {"a": 1, _ellipsis: 2}
+        axes_lengths: dict[str, int] = {"a": 1, _ellipsis: 2}
         pattern = f"a {_ellipsis} -> {_ellipsis} a"
         with self.assertRaises(ValueError):
             parse_pattern(pattern, axes_lengths)
 
     def test_ellipsis_matching(self) -> None:
-        axes_lengths: Dict[str, int] = {}
+        axes_lengths: dict[str, int] = {}
 
         pattern = "a -> a ..."
         with self.assertRaises(ValueError):
@@ -240,7 +239,7 @@ class TestParsingUtils(TestCase):
         parse_pattern(pattern, axes_lengths)
 
     def test_left_parenthesized_ellipsis(self) -> None:
-        axes_lengths: Dict[str, int] = {}
+        axes_lengths: dict[str, int] = {}
 
         pattern = "(...) -> ..."
         with self.assertRaises(ValueError):
@@ -254,7 +253,7 @@ class MaliciousRepr:
 
 class TestValidateRearrangeExpressions(TestCase):
     def test_validate_axes_lengths_are_integers(self) -> None:
-        axes_lengths: Dict[str, Any] = {"a": 1, "b": 2, "c": 3}
+        axes_lengths: dict[str, Any] = {"a": 1, "b": 2, "c": 3}
         pattern = "a b c -> c b a"
         left, right = parse_pattern(pattern, axes_lengths)
         validate_rearrange_expressions(left, right, axes_lengths)
@@ -265,7 +264,7 @@ class TestValidateRearrangeExpressions(TestCase):
             validate_rearrange_expressions(left, right, axes_lengths)
 
     def test_non_unitary_anonymous_axes_raises_error(self) -> None:
-        axes_lengths: Dict[str, int] = {}
+        axes_lengths: dict[str, int] = {}
 
         left_non_unitary_axis = "a 2 -> 1 1 a"
         left, right = parse_pattern(left_non_unitary_axis, axes_lengths)
@@ -278,7 +277,7 @@ class TestValidateRearrangeExpressions(TestCase):
             validate_rearrange_expressions(left, right, axes_lengths)
 
     def test_identifier_mismatch(self) -> None:
-        axes_lengths: Dict[str, int] = {}
+        axes_lengths: dict[str, int] = {}
 
         mismatched_identifiers = "a -> a b"
         left, right = parse_pattern(mismatched_identifiers, axes_lengths)
@@ -291,7 +290,7 @@ class TestValidateRearrangeExpressions(TestCase):
             validate_rearrange_expressions(left, right, axes_lengths)
 
     def test_unexpected_axes_lengths(self) -> None:
-        axes_lengths: Dict[str, int] = {"c": 2}
+        axes_lengths: dict[str, int] = {"c": 2}
 
         pattern = "a b -> b a"
         left, right = parse_pattern(pattern, axes_lengths)

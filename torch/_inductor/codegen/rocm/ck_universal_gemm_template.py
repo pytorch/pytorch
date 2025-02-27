@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import copy
 import logging
+import math
 import random
-from typing import List, Optional
+from collections import namedtuple
+from typing import Optional
 
 import sympy
 
@@ -21,6 +23,30 @@ _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
 
 
 log = logging.getLogger(__name__)
+
+# lightweight collection of information about a single op
+InductorROCmOp = namedtuple("InductorROCmOp", ["op", "kBatch"])
+
+padding_lookup = {
+    "M": {
+        "GemmSpecialization::MPadding": True,
+        "GemmSpecialization::MNPadding": True,
+        "GemmSpecialization::MKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+    "N": {
+        "GemmSpecialization::NPadding": True,
+        "GemmSpecialization::MNPadding": True,
+        "GemmSpecialization::NKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+    "K": {
+        "GemmSpecialization::KPadding": True,
+        "GemmSpecialization::MKPadding": True,
+        "GemmSpecialization::NKPadding": True,
+        "GemmSpecialization::MNKPadding": True,
+    },
+}
 
 
 def is_static_int(number):
@@ -81,7 +107,7 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
-            1, // kBatch
+            kBatch, // kBatch
             {{a_elementwise_op}},
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
@@ -141,6 +167,7 @@ class CKGemmTemplate(CKTemplate):
         const int32_t LDB = {{LDB}};
         const int32_t LDC = {{LDC}};
         const int32_t LDD = {{LDD}};
+        const int32_t kBatch = {{kBatch}};
 
         using AElementType = {{a_ck_dtype}};
         using BElementType = {{b_ck_dtype}};
@@ -285,11 +312,11 @@ class CKGemmTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
@@ -362,7 +389,14 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def filter_op(self, op: "CKGemmOperation"):
+    def _has_padding(self, dimension, gemm_specialization):
+        # Get the relevant padding map for the given dimension
+        dimension_padding = padding_lookup.get(dimension, {})
+
+        # Check if the specialization is in the dimension's padding map
+        return dimension_padding.get(gemm_specialization, False)
+
+    def filter_op(self, op_info: InductorROCmOp):
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -371,6 +405,7 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
+        op, kBatch = op_info.op, op_info.kBatch
         metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
         X_meta = metas[0]
         W_meta = metas[1]
@@ -397,25 +432,26 @@ class CKGemmTemplate(CKTemplate):
         N = W_meta.size[-1]
 
         if is_static_int(M):
-            if not any(
-                m_padding in op.gemm_specialization
-                for m_padding in ["MPadding", "MNPadding", "MKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("M", op.gemm_specialization):
                 if M % op.m_per_block != 0:
                     return None
         if is_static_int(N):
-            if not any(
-                n_padding in op.gemm_specialization
-                for n_padding in ["NPadding", "MNPadding", "NKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("N", op.gemm_specialization):
                 if N % op.n_per_block != 0:
                     return None
         if is_static_int(K):
-            if not any(
-                k_padding in op.gemm_specialization
-                for k_padding in ["KPadding", "MKPadding", "NKPadding", "MNKPadding"]
-            ):
+            if not self._has_padding("K", op.gemm_specialization):
                 if K % op.k_per_block != 0:
+                    return None
+                K_t = kBatch * op.k_per_block
+                if K % K_t != 0:
+                    return None
+            else:
+                # need another kBatch check here
+                lcm = abs(op.a_k1 * op.b_k1) // math.gcd(op.a_k1, op.b_k1)
+                K_t = kBatch * lcm
+                k_read_pad_splited = math.ceil(K / K_t) * lcm
+                if (k_read_pad_splited * (kBatch - 1)) >= K:
                     return None
 
         a_contig_size = (
@@ -450,11 +486,82 @@ class CKGemmTemplate(CKTemplate):
             != 0
         ):
             return None
-
+        if not self._check_num_k_loops(op, kBatch):
+            return None
         # TBD disable instances with invalid number of pipeline prefetch stages
         # It will avoid compiling a small percentage of unrunnable instances which fail the gemm argument check
 
         return op
+
+    def _check_num_k_loops(self, op, kBatch):
+        # Additional splitK scenario check
+        metas = [T.get_layout() for T in [*self.input_nodes]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        K = X_meta.size[-1]
+        if kBatch > 1:
+            if op.block_gemm_pipeline_version != "BlockGemmPipelineVersion::v1":
+                try:
+                    prefetch_stages = self._prefetch_stages(
+                        op,
+                        torch.empty((), dtype=X_meta.dtype).element_size(),
+                        torch.empty((), dtype=W_meta.dtype).element_size(),
+                        torch.cuda.get_device_properties(X_meta.device).warp_size,
+                    )
+                except Exception as e:
+                    log.debug(
+                        "Failed to prefetch_stages for %s with exception %s", op.name, e
+                    )
+                    # be conservative here and disable the op
+                    return False
+
+                K_t = op.k_per_block * kBatch
+                ak0 = (K + K_t - 1) // K_t * (op.k_per_block // op.a_k1)
+                num_k_loop = ak0 // (op.k_per_block // op.a_k1)
+                if num_k_loop <= prefetch_stages:
+                    log.debug(
+                        "Op %s is not compatible due to invalid number of pipeline prefetch stages. "
+                        "Parameters: kBatch=%s, block_gemm_pipeline_version=%s, prefetch_stages=%s, num_k_loop=%s",
+                        op.name(),
+                        kBatch,
+                        op.block_gemm_pipeline_version,
+                        prefetch_stages,
+                        num_k_loop,
+                    )
+                    return False
+
+        return True
+
+    # small helper to figure out the prefetch stages on AMD
+    def _prefetch_stages(self, op, a_dtype_size, b_dtype_size, warp_size: int = 64):
+        version_str = op.block_gemm_pipeline_version.split("::")[-1]
+        try:
+            version = int(version_str[1:])  # Assuming the format is always 'vX'
+        except ValueError as e:
+            raise ValueError(f"Invalid version string: {version_str}") from e
+        if version not in [1, 2, 3, 4, 5]:
+            raise ValueError(
+                f"unknown prefetch stages for {op.block_gemm_pipeline_version}"
+            )
+        # Define the mapping of versions to stages
+        version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
+        # Get the stages for the given version
+        stages = version_to_stages.get(version, None)
+        if stages is None:
+            # This means we're at stage 2, and this requires computation
+            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
+            wgp_per_cu = max(4 * warp_size // op.block_size, 1)
+            full_mem_band_prefetch_stages = math.ceil(
+                32768
+                / wgp_per_cu
+                / (
+                    (op.m_per_block * a_dtype_size + op.n_per_block * b_dtype_size)
+                    * op.k_per_block
+                )
+            )
+            stages = min(max(full_mem_band_prefetch_stages, 2), 8)
+
+        return stages
 
     def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
@@ -688,10 +795,7 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            if self.is_batched:
-                size_arg_strs = ["B", "M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
-            else:
-                size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            # NOTE: size_arg_strs is defined above
             size_arg_vals = (
                 self.size_args()
                 if is_static_problem
@@ -700,6 +804,12 @@ class CKGemmTemplate(CKTemplate):
                 )
             )
             size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
+            runtime_args = dict(
+                zip(
+                    [a.name for a in self.get_runtime_arg_info()],
+                    self.get_runtime_arg_values(),
+                )
+            )
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
@@ -740,6 +850,7 @@ class CKGemmTemplate(CKTemplate):
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
                 **size_args,
+                **runtime_args,
             )
             res += runner_code
 
@@ -765,7 +876,7 @@ class CKGemmTemplate(CKTemplate):
             and Y_layout == "Row"
         )
 
-    def gen_ops(self):
+    def gen_ops(self) -> list[InductorROCmOp]:
         """
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
@@ -794,7 +905,17 @@ class CKGemmTemplate(CKTemplate):
 
         assert generator is not None
 
-        filtered_instances = list(filter(lambda op: self.filter_op(op), generator()))
+        # NOTE(coconutruben): for now, we only support kBatch 1
+        # TODO(coconturuben): infer a better kBatch depending on the input shape
+        # TODO(coconutruben): allow users to provide a list of kBatches to sweep over
+        kBatches = [1]
+        rops = generator()
+        ops = [
+            InductorROCmOp(op=op, kBatch=kBatch) for op in rops for kBatch in kBatches
+        ]
+
+        filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
+
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -836,7 +957,8 @@ class CKGemmTemplate(CKTemplate):
         for op in ops:
             template.maybe_append_choice(
                 choices,
-                op=op,
+                op=op.op,
+                kBatch=op.kBatch,
             )
 
     def size_args(self):

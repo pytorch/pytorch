@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 
 import itertools
-from typing import List
 
 import torch
 from torch.autograd.profiler_legacy import profile
@@ -13,7 +12,7 @@ from . import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 class _server_process_global_profile(profile):
