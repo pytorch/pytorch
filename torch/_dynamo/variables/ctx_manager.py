@@ -750,11 +750,9 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
-        )
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+        ),
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):
@@ -1186,9 +1184,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device.type, (
-            "stream value is not equal to the passed device"
-        )
+        assert (
+            value.device.type == device.type
+        ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value

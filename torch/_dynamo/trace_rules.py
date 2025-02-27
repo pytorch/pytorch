@@ -3641,10 +3641,7 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         fi = FunctionInfo(
-            obj,
-            obj.__name__,
-            getfile(obj),
-            obj.__code__,  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
+            obj, obj.__name__, getfile(obj), obj.__code__  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
         )
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)

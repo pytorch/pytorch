@@ -68,7 +68,9 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(value), f"""
+        assert ConstantVariable.is_base_literal(
+            value
+        ), f"""
 Cannot construct `ConstantVariable` for value of type {type(value)}.
 
 This failure likely due to PyTorch-internal use of `ConstantVariable` on

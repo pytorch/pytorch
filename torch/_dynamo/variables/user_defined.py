@@ -771,9 +771,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().guard_as_python_constant()
 
     def torch_function_check(self):
-        assert has_torch_function(self), (
-            f"calling torch function on object without __torch_function__ {self}"
-        )
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
@@ -1510,9 +1510,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
         if self._dict_vt is None:
-            assert self.source is None, (
-                "dict_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed by builder.py when source is present"
             self._dict_vt = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
             )
@@ -1557,9 +1557,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
         if self._list_vt is None:
-            assert self.source is None, (
-                "list_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "list_vt must be constructed by builder.py when source is present"
             self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
 
     def call_method(

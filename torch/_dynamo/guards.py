@@ -2242,9 +2242,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in self.__class__.__dict__, (
-            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
-        )
+        assert (
+            func_name in self.__class__.__dict__
+        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:

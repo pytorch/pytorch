@@ -610,8 +610,7 @@ ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy],
-        check_str=options.check_str,  # type: ignore[call-arg]
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -686,10 +685,9 @@ def repro_analyze(options, mod, load_args):
     reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
 
     new_args = clone_inputs(args)
-    with (
-        intermediate_hook(save_hook),
-        tqdm(desc="Saving inductor intermediates", total=total) as pbar,
-    ):
+    with intermediate_hook(save_hook), tqdm(
+        desc="Saving inductor intermediates", total=total
+    ) as pbar:
         assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
@@ -713,10 +711,9 @@ def repro_analyze(options, mod, load_args):
 
     if not options.skip_check_deterministic:
         new_args = clone_inputs(args)
-        with (
-            intermediate_hook(check_hook),
-            tqdm(desc="Checking inductor determinism", total=total) as pbar,
-        ):
+        with intermediate_hook(check_hook), tqdm(
+            desc="Checking inductor determinism", total=total
+        ) as pbar:
             compiled(new_args)
             assert not new_args
 

@@ -209,7 +209,7 @@ DONT_WRAP_FILES = {
 
 
 def _debug_get_cache_entry_list(
-    code: Union[types.CodeType, Callable[..., Any]],
+    code: Union[types.CodeType, Callable[..., Any]]
 ) -> list[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
@@ -489,9 +489,9 @@ class _TorchDynamoContext:
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = (
-                weakref.ref(fn)
-            )
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -850,9 +850,9 @@ def is_inductor_supported():
 
 def check_for_incompatible_configs():
     # Some of the configs should be mutually exclusive
-    assert not (config.suppress_errors and config.fail_on_recompile_limit_hit), (
-        "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
-    )
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
 
 
 def optimize(*args, **kwargs):
@@ -861,9 +861,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
-                f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
-            )
+            assert set(ca_kwargs_override.keys()) == {
+                "fullgraph"
+            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -903,7 +903,8 @@ def _optimize(
     Example Usage::
 
         @torch._dynamo.optimize()
-        def toy_example(a, b): ...
+        def toy_example(a, b):
+            ...
     """
     check_if_dynamo_supported()
     check_for_incompatible_configs()
@@ -1370,9 +1371,9 @@ def rewrite_signature(
         # as part of the function signature.
         for kwonly_arg in fullargspec.kwonlyargs:
             kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
 
         return input_strs
 
@@ -1476,9 +1477,9 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert aten_graph, (
-                "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-            )
+            assert (
+                aten_graph
+            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)
@@ -1493,9 +1494,9 @@ def export(
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
-            assert out_guards is None, (
-                "whole graph export entails exactly one guard export"
-            )
+            assert (
+                out_guards is None
+            ), "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -1504,9 +1505,9 @@ def export(
             gm: torch.fx.GraphModule, inner_example_inputs
         ):
             nonlocal graph
-            assert graph is None, (
-                "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
-            )
+            assert (
+                graph is None
+            ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
             graph = gm
 
             nonlocal fake_mode, example_inputs
@@ -1545,10 +1546,8 @@ def export(
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 
                 with (
-                    ambient_fake_mode,
-                    enable_python_dispatcher(),
-                    ignore_fresh_unbacked,
-                ):
+                    ambient_fake_mode
+                ), enable_python_dispatcher(), ignore_fresh_unbacked:
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,
@@ -1648,9 +1647,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert same_signature, (
-                "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
-            )
+            assert (
+                same_signature
+            ), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
@@ -1727,8 +1726,7 @@ def export(
             for node in graph.graph.find_nodes(op="get_attr"):
                 if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target),  # type: ignore[arg-type]
-                        static_shapes=True,
+                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
                     )
 
         if same_signature:

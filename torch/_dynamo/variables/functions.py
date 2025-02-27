@@ -226,9 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        assert isinstance(
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
+        ), f"expected FunctionType found {typestr(fn)} {fn}"
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -1677,7 +1677,8 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs): ...
+    def call_function(self, tx, args, kwargs):
+        ...
 
 
 class SysFunctionVariable(VariableTracker):

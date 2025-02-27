@@ -377,9 +377,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                assert isinstance(py_arg, list), (
-                    "py_arg should be a list in optimizer variable"
-                )
+                assert isinstance(
+                    py_arg, list
+                ), "py_arg should be a list in optimizer variable"
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

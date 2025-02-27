@@ -714,13 +714,15 @@ def dynamo_timed(
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
+    ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> tuple[list[str], list[object]]: ...
+) -> tuple[list[str], list[object]]:
+    ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -920,17 +922,20 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
+def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]:
+    ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
+) -> TypeIs[T]:
+    ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool:
+    ...
 
 
 def istype(obj, allowed_types):
@@ -2461,11 +2466,8 @@ def set_example_value(node, example_value):
     # the program was traced).
     node.meta["example_value"] = example_value
     shape_env = TracingContext.get().fake_mode.shape_env
-    if (
-        symbol_to_path
-        := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-            shape_env, example_value
-        )
+    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+        shape_env, example_value
     ):
         node.meta["unbacked_bindings"] = symbol_to_path
 
@@ -2661,9 +2663,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2704,9 +2706,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -3347,13 +3349,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        assert not is_fake(
+            buffer
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        assert not is_fake(
+            param
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fqn(obj: Any):
@@ -4436,7 +4438,7 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
     return mode
