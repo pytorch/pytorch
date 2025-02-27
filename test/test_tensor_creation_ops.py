@@ -1970,7 +1970,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(complexHalfTensor, expected)
 
     # TODO: this test should be updated
-    @xfailIfTorchDynamo
     def test_zeros_out(self, device):
         shape = (3, 4)
         out = torch.zeros(shape, device=device)
@@ -2057,7 +2056,6 @@ class TestTensorCreation(TestCase):
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
     # TODO: this test should be updated
-    @xfailIfTorchDynamo
     @onlyCPU
     def test_constructor_device_legacy(self, device):
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor(device='cuda'))
@@ -2373,7 +2371,6 @@ class TestTensorCreation(TestCase):
             self.assertEqual(len(w), 1)
 
     # TODO: this test should be updated
-    @xfailIfTorchDynamo
     def test_arange(self, device):
         res = torch.tensor(range(10000), device=device)
         res1 = torch.arange(0, 10000, device=device)  # Use a larger number so vectorized code can be triggered
@@ -2954,7 +2951,6 @@ class TestTensorCreation(TestCase):
         f16_tensor = torch.arange(0, 6, step=2, dtype=dtype, device=device)
         self.assertEqual(ref_tensor, f16_tensor)
 
-    @xfailIfTorchDynamo
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.bfloat16))
     def test_linspace(self, device, dtype):
@@ -3086,7 +3082,6 @@ class TestTensorCreation(TestCase):
             self._test_linspace(device, dtype, steps=steps)
 
     # Compares logspace device vs cpu
-    @xfailIfTorchDynamo
     def _test_logspace(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps)
@@ -3122,7 +3117,6 @@ class TestTensorCreation(TestCase):
             self._test_logspace(device, dtype, steps=steps)
             self._test_logspace_base2(device, dtype, steps=steps)
 
-    @xfailIfTorchDynamo
     @dtypes(*all_types_and(torch.bfloat16))
     @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
                   all_types_and(torch.half, torch.bfloat16))
@@ -3198,7 +3192,6 @@ class TestTensorCreation(TestCase):
             ctype = torch.complex128 if dtype is torch.double else torch.complex64
             self.assertEqual(t.dtype, ctype)
 
-    @xfailIfTorchDynamo
     def test_full_out(self, device):
         size = (5,)
         o = torch.empty(size, device=device, dtype=torch.long)
