@@ -1,20 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
+from collections.abc import Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import (
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
@@ -44,7 +34,7 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: Dict[str, Dict[torch._ops.OperatorBase, Callable]] = (
+global_decomposition_table: dict[str, dict[torch._ops.OperatorBase, Callable]] = (
     defaultdict(dict)
 )
 
@@ -78,7 +68,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
-    overloads: List[Union[torch._ops.OperatorBase]] = []
+    overloads: list[Union[torch._ops.OperatorBase]] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -234,7 +224,7 @@ def register_decomposition(
 def get_decompositions(
     aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
     type: str = "post_autograd",
-) -> Dict[torch._ops.OperatorBase, Callable]:
+) -> dict[torch._ops.OperatorBase, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
     operator overloads and overload packets passed as input.  Overload
@@ -253,7 +243,7 @@ def get_decompositions(
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)
-    decompositions: Dict[torch._ops.OperatorBase, Callable] = {}
+    decompositions: dict[torch._ops.OperatorBase, Callable] = {}
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
@@ -264,7 +254,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[torch._ops.OperatorBase, Callable],
+    decompositions: dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """
@@ -298,7 +288,7 @@ def core_aten_decompositions() -> "CustomDecompTable":
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def _core_aten_decompositions_post_autograd() -> Dict[
+def _core_aten_decompositions_post_autograd() -> dict[
     torch._ops.OperatorBase, Callable
 ]:
     aten = torch.ops.aten

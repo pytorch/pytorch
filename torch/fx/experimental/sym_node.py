@@ -13,16 +13,20 @@ As this file is imported from within torch/__init__.py we do not want it to depe
 to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
 
+
 import builtins
+import functools
+import inspect
 import itertools
 import logging
 import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, Type, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
+import torch._logging.structured as structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -35,6 +39,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
+from torch._logging import dtrace_structured
 
 
 if TYPE_CHECKING:
@@ -489,7 +494,9 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
+        )
         try:
             return int(r)
         except Exception:
@@ -499,7 +506,9 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
+        )
         try:
             return float(r)
         except Exception:
@@ -509,7 +518,9 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node_id=id(self)
+        )
         try:
             return bool(r)
         except Exception:
@@ -562,7 +573,11 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+            self.expr,
+            self.hint,
+            fx_node=self.fx_node,
+            size_oblivious=True,
+            expr_sym_node_id=id(self),
         )
         try:
             return bool(r)
@@ -1218,6 +1233,60 @@ def _make_node_magic(method, func):
     else:
         method_attr = method
 
+    def uninteresting_files() -> set[str]:
+        import torch
+
+        mods = [
+            torch._dynamo.eval_frame,
+            torch._dynamo.utils,
+            torch.fx.experimental.sym_node,
+            torch,
+        ]
+        import torch._dynamo.guards
+
+        return (
+            {inspect.getfile(m) for m in mods}
+            | torch._dynamo.guards.uninteresting_files()
+            | {"<string>"}
+        )
+
+    def capture_provenance(fn):
+        @functools.wraps(fn)
+        def wrapper(self, other=None):
+            if other is None:
+                result = fn(self)
+            else:
+                result = fn(self, other)
+            if torch._logging._internal.GET_DTRACE_STRUCTURED:
+                if other is not None:
+                    arguments = [self, other]
+                else:
+                    arguments = [self]
+
+                def get_id(sym_node) -> Optional[int]:
+                    # We don't want to return an ID if the input is a constant
+                    return None if sym_node.constant is not None else id(sym_node)
+
+                dtrace_structured(
+                    "expression_created",
+                    metadata_fn=lambda: {
+                        "method": method,
+                        "result": str(result),
+                        "result_id": id(result),
+                        "arguments": [str(a) for a in arguments],
+                        "argument_ids": [
+                            get_id(i) for i in arguments if get_id(i) is not None
+                        ],
+                        "user_stack": structured.get_user_stack(3),
+                        "stack": structured.get_framework_stack(3),
+                    },
+                )
+
+            return result
+
+        return wrapper
+
+    @capture_provenance
     def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
@@ -1272,7 +1341,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
-        pytype: Type
+        pytype: type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
         # returns a float while both arguments are ints: 2**(-1). Also, max and
@@ -1312,6 +1381,7 @@ def _make_node_magic(method, func):
         )
         return result
 
+    @capture_provenance
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
@@ -1335,7 +1405,7 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
-        pytype: Type
+        pytype: type
         if method in always_int_magic_methods:
             pytype = int
         elif method in always_bool_magic_methods:
@@ -1485,7 +1555,7 @@ def _make_node_sizes_strides(method, func):
                 out_hint = op(size_hints, stride_hints)
 
         # NB: This is the indicator function, not the actual bool!
-        pytype: Type
+        pytype: type
         if method.endswith("_indicator"):
             pytype = int
         else:
