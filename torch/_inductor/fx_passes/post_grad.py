@@ -711,27 +711,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
-        # Propagate args_kwargs_val from the triton_kernel_wrapper_functional node
-        # to the triton_kernel_wrapper mutation node.
-        assert len(match.nodes) == 1
-        old_node = match.nodes[0]
-        new_nodes = match.replace_by_example(
-            decomp,
-            flat_args,
-            run_functional_passes=False,
-            unsafe_drop_arg_kwarg_vals_meta=True,
-        )
-        for new_node in new_nodes:
-            if (
-                new_node.target
-                is not torch.ops.higher_order.triton_kernel_wrapper_mutation
-            ):
-                continue
-            new_node.meta["arg_kwarg_vals"] = old_node.meta["arg_kwarg_vals"]
-            return
-        raise AssertionError(
-            "triton_kernel_wrapper_functional arg_kwarg_vals not propagated"
-        )
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 

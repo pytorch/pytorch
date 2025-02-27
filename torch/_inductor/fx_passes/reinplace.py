@@ -21,7 +21,7 @@ from torch._inductor.lowering import (
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
-from torch.fx.immutable_collections import immutable_dict
+from torch.fx.immutable_collections import immutable_list, immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -720,6 +720,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
+            if "arg_kwarg_vals" in node.meta:
+                # We changed the kwargs, so we need to update arg_kwarg_vals
+                # to something sane.
+                args, kwargs = node.meta["arg_kwarg_vals"]
+                new_kwargs = {**kwargs}
+                new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
+                new_kwargs = immutable_dict(new_kwargs)
+                node.meta["arg_kwarg_vals"] = (args, new_kwargs)
         elif (
             inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
         ) is not None:
