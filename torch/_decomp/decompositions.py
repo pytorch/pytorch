@@ -2280,8 +2280,9 @@ def native_batch_norm_backward(
 
     grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
     proj_scale = _broadcast_batch_norm_backward(
-        torch.mul(dot_p * norm, invstd * invstd), broadcast_mask
-    )  # type: ignore[operator]
+        torch.mul(dot_p * norm, invstd * invstd),  # type: ignore[operator]
+        broadcast_mask,
+    )
 
     if weight_cast is None:
         grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
