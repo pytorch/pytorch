@@ -3471,7 +3471,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_out_op(Tensor x, Tensor y, Tensor(a!) out) -> ()",
-                # tags=[torch._C.Tag.flexible_layout],
                 tags=[torch._C.Tag.needs_exact_strides],
             )
 
