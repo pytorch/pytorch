@@ -588,7 +588,6 @@ def register_onednn_fusion_ops():
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
             else:
-                x_scale_size = x_scale.get_size()
                 if all(dim == 1 for dim in x_scale.get_size()):
                     # Corner-case discovered with LLaMA series.
                     # If all outer dims of x_scale are 1, make it a 0D tensor.
@@ -901,7 +900,6 @@ def register_onednn_fusion_ops():
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
             else:
-                x_scale_size = x_scale.get_size()
                 if all(dim == 1 for dim in x_scale.get_size()):
                     # Corner-case discovered with LLaMA series.
                     # If all outer dims of x_scale are 1, make it a 0D tensor.
