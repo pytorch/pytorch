@@ -114,11 +114,7 @@ class set_stance(_DecoratorContextManager):
         skip_guard_eval_unsafe: bool = False,
         force_backend=None,
     ) -> None:
-        if (
-            stance != "eager_then_compile"
-            and force_backend is not None
-            and stance != "default"
-        ):
+        if force_backend is not None and stance != "default":
             raise RuntimeError("non-default stance cannot have force_backend set")
 
         self.stance = DynamoStance(stance, skip_guard_eval_unsafe, force_backend)
