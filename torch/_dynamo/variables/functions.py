@@ -1169,7 +1169,7 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
-            qualname = getattr(self.value, "__qualname__", "Unknown qualname")
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1184,7 +1184,7 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{self.value.__qualname__}` or the file `{path}` "
+                        f"Remove the function `{qualname}` or the file `{path}` "
                         "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
                         "attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
