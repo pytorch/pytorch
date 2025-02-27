@@ -12524,6 +12524,231 @@ class CommonTemplate:
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_no_inputs(self):
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        foo = torch.compile(foo)
+        foo()
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_arange1(self):
+        def fn(step, device):
+            return torch.arange(512, -512, step, device=device)
+
+        compiled_fn = torch.compile(fn)
+
+        for step in (-1, -1.0):
+            expect = fn(step, "cpu")
+            actual = compiled_fn(step, "cpu")
+            self.assertEqual(expect, actual)
+
+        self.assertEqual(expect, actual)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_arange2(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
+
+        compiled_fn = torch.compile(fn)
+
+        x = make_arg(1, dtype=torch.float32)
+        self.assertEqual(fn(x), compiled_fn(x))
+
+        x = make_arg(1, dtype=torch.int64)
+        self.assertEqual(fn(x), compiled_fn(x))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_argmax(self):
+        def fn():
+            a = torch.zeros([2, 2])
+            b = a.argmax(0)
+            return b.float().mean()
+
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(fn(), compiled_fn())
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_both_scalars(self):
+        def fn(a, b):
+            return (
+                aten.add(a, b),
+                aten.add(b, a),
+                aten.sub(a, b),
+                aten.sub(b, a),
+                aten.mul(a, b),
+                aten.mul(b, a),
+            )
+
+        compiled_fn = torch.compile(fn)
+
+        self.assertEqual(fn(4, 3.3), compiled_fn(4, 3.3))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    @config.patch(assume_aligned_inputs=False)
+    def test_graph_partition_misaligned_input(self):
+        def fn(x):
+            return x.cos() * x.sin()
+
+        fn_c = torch.compile(fn, mode="reduce-overhead", dynamic=True)
+
+        for size, stride, offset in (
+            ((32, 32), (32, 1), 4),
+            ((48, 48), (48, 1), 4),
+            ((64, 64), (64, 1), 5),
+        ):
+            torch.manual_seed(42)
+            base = torch.randn(
+                64 * 64 + 64,
+                dtype=torch.float32,
+                device=self.device,
+                requires_grad=True,
+            )
+            torch.manual_seed(42)
+            base_ref = torch.randn(
+                64 * 64 + 64,
+                dtype=torch.float32,
+                device=self.device,
+                requires_grad=True,
+            )
+
+            inp = torch.as_strided(base, size, stride, offset)
+            inp_ref = torch.as_strided(base_ref, size, stride, offset)
+
+            inp.requires_grad_(True)
+            inp_ref.requires_grad_(True)
+
+            res = fn_c(inp)
+            ref = fn(inp_ref)
+            self.assertEqual(ref, res)
+
+            res.sum().backward()
+            ref.sum().backward()
+            self.assertEqual(base.grad, base_ref.grad)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_constant_tensor1(self):
+        def fn():
+            a = torch.zeros([1, 2], dtype=torch.int32)
+            a = a + a
+            b = a.to(dtype=torch.float32)
+            return b * 0.8
+
+        compiled_fn = torch.compile(fn)
+
+        self.assertEqual(fn(), compiled_fn())
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_constant_tensor2(self):
+        def fn(x):
+            return torch.tensor(list(range(2, 40, 2)), device=self.device) + x
+
+        compiled_fn = torch.compile(fn)
+
+        x = torch.randn(1, device=self.device)
+
+        self.assertEqual(fn(x), compiled_fn(x))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_scalar_inputs(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(fn(1024, 100), compiled_fn(1024, 100))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_unbacked_symint_as_output(self):
+        def nested(x, repeats):
+            rank = torch.arange(repeats.numel(), device=x.device)
+            index = rank.repeat_interleave(repeats, dim=0)
+            return torch.index_select(x, index=index, dim=0)
+
+        example_inputs = (
+            torch.randn((32, 64), device=self.device),
+            repeats := torch.tensor([5, 10, 15], device=self.device),
+        )
+        torch._dynamo.mark_dynamic(repeats, 0)
+
+        nested_opt = torch.compile(nested, backend="inductor")
+
+        expect = nested(*example_inputs)
+        actual = nested_opt(*example_inputs)
+        self.assertEqual(expect, actual)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_refcount(self):
+        contexts = [
+            contextlib.nullcontext,
+            lambda: torch._inductor.config.patch({"triton.cudagraphs": True}),
+        ]
+
+        for context in contexts:
+            with context():
+                inps = [
+                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(self.device),
+                ]
+                inp_refs = [weakref.ref(inp) for inp in inps]
+
+                def fn(x, y):
+                    a = x + y
+                    return (a @ a,)
+
+                fn_fx = make_fx(fn)(inps[0], inps[1])
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+
+                matmul_seen = False
+
+                class TestRefMode(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+
+                        nonlocal inps
+                        nonlocal inp_refs
+                        nonlocal matmul_seen
+
+                        gc.collect()
+                        if func is aten.mm.out:
+                            matmul_seen = True
+                            assert len(inps) == 0
+                            assert inp_refs[0]() is None
+                            assert inp_refs[1]() is None
+
+                        return func(*args, **kwargs)
+
+                with TestRefMode():
+                    fn_compiled(inps)
+
+                # do an extra run to make sure we are deallocating on warmup and record
+                inps.extend(
+                    [
+                        torch.rand([5, 5]).to(self.device),
+                        torch.rand([5, 5]).to(self.device),
+                    ]
+                )
+                inp_refs.extend([weakref.ref(inp) for inp in inps])
+                matmul_seen = False
+
+                with TestRefMode():
+                    fn_compiled(inps)
+
+                assert len(inps) == 0
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -13803,6 +14028,136 @@ if HAS_GPU and not TEST_WITH_ASAN:
             FileCheck().check("triton_meta").check("'signature':").check(
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+            self.assertEqual(eager_out, compiled_out)
+
+            _, code = run_and_get_code(f_compiled, x_cloned, y_cloned)
+
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").check(
+                    "(buf0, buf1) = self.partitions[0](partition0_args)"
+                ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
+                    code[0]
+                )
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_multiple_functions(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            def g(x):
+                return x + 1
+
+            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = g(f(x, y))
+
+            f_compiled = torch.compile(f)
+            g_compiled = torch.compile(g)
+            compiled_out = g_compiled(f_compiled(x_cloned, y_cloned))
+
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_condition_op(self):
+            def f(p, b):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+            p = torch.tensor([True], device=self.device)
+            a = torch.ones([2, 3], device=self.device)
+
+            compiled_f = torch.compile(f)
+            eager_out = f(p, a)
+            compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device=self.device), torch.randn(
+                3, 3, device=self.device
+            )
+            compiled_out = f_compiled(x, y)
+            self.assertEqual(compiled_out, f(x, y))
+
+            x, y = torch.ones(4, 4, device=self.device), torch.randn(
+                4, 4, device=self.device
+            )
+            compiled_out = f_compiled(x, y)
+            self.assertEqual(compiled_out, f(x, y))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_unbacked_symint(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device=self.device), torch.randn(
+                3, 3, device=self.device
+            )
+
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(y, 1)
+
+            compiled_out = f_compiled(x, y)
+            eager_out = f(x, y)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_buffer_reuse(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x1 + y1 + x @ y
+                u = (y_cpu.cuda() + 2) @ y + 3
+                u_cpu = u.cpu() + 2
+                return z + u_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+
+            self.assertEqual(eager_out, compiled_out)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
