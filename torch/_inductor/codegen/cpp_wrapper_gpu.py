@@ -578,20 +578,19 @@ class CppWrapperGpu(CppWrapperCpu):
                     and triton_meta.get("configs")
                     and triton_meta.get("signature")
                 ):
+                    signatures = triton_meta["signature"]
                     arg_signatures = [
-                        val
-                        for val in triton_meta.get("signature").values()
-                        if val != "constexpr"
+                        val for val in signatures.values() if val != "constexpr"
                     ]
                     call_args = [
                         call_arg
-                        for call_arg, arg_name in zip(call_args, arg_signatures)
-                        if arg_signatures[arg_name] != "constexpr"
+                        for call_arg, arg_name in zip(call_args, signatures)
+                        if signatures[arg_name] != "constexpr"
                     ]
                     arg_types = [
                         arg_type
-                        for arg_type, arg_name in zip(arg_types, arg_signatures)
-                        if arg_signatures[arg_name] != "constexpr"
+                        for arg_type, arg_name in zip(arg_types, signatures)
+                        if signatures[arg_name] != "constexpr"
                     ]
             else:
                 # args with value 1 are added into equal_to_1 and constants
