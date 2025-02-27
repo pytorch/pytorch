@@ -463,7 +463,7 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
-        dynamism: Optional[list[Any]] = None,
+        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -614,7 +614,7 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    dynamism: Optional[list[Any]] = None,
+    dynamism: Optional[dict[Any, Any]] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph"""
     return ConvertFrameAssert(
@@ -654,7 +654,7 @@ def _compile(
     one_graph: bool,
     export: bool,
     export_constraints: Optional[typing.Never],
-    dynamism: Optional[list[Any]],
+    dynamism: Optional[dict[Any, Any]],
     hooks: Hooks,
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
@@ -1167,7 +1167,7 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        dynamism: Optional[list[Any]] = None,
+        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
         self._inner_convert = convert_frame_assert(
@@ -1277,7 +1277,7 @@ class ConvertFrame:
 
 
 def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, dynamism: Optional[list[Any]] = None
+    compiler_fn: CompilerFn, hooks: Hooks, dynamism: Optional[dict[Any, Any]] = None
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(compiler_fn, hooks, dynamism=dynamism)

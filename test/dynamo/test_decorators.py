@@ -624,6 +624,22 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_set_stance_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            print(fn(1, torch.randn(1), {0: torch.randn(1)}))
+            print(fn(2, torch.randn(2), {0: torch.randn(2)}))
+            print(fn(3, torch.randn(3), {0: torch.randn(3)}))
+            print(fn(4, torch.randn(4), {0: torch.randn(4)}))
+            print(fn(5, torch.randn(5), {0: torch.randn(5)}))
+
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):

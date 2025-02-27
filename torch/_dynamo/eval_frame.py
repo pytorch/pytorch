@@ -63,6 +63,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -71,6 +72,10 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
 )
 from torch.fx import GraphModule
+from torch.fx.experimental._dynamism import (
+    clone_and_convert_to_meta,
+    track_dynamism_across_examples,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -151,6 +156,19 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
+_EXAMPLE_INPUTS: Optional[dict[str, list[Any]]] = None
+
+
+def get_example_inputs(key) -> list[Any]:
+    global _EXAMPLE_INPUTS
+    if _EXAMPLE_INPUTS is None:
+        _EXAMPLE_INPUTS = {}
+
+    if key not in _EXAMPLE_INPUTS:
+        _EXAMPLE_INPUTS[key] = []
+
+    return _EXAMPLE_INPUTS[key]
+
 
 def _callback_from_stance(callback):
     if _stance.stance == "default":
@@ -165,6 +183,40 @@ def _callback_from_stance(callback):
                 hooks,
             )
 
+        return callback
+    elif _stance.stance == "eager_then_compile":
+        if callback not in (False, None):
+
+            def foo(*args, **kwargs):
+                frame = args[0]
+                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+                example_inputs = get_example_inputs(key)
+
+                if len(example_inputs) < 2:
+                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+                dynamism = track_dynamism_across_examples(example_inputs)
+                hooks = Hooks()
+                if len(example_inputs) == 1:
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.DEFAULT, FrameAction.DEFAULT
+                        )
+                    )
+
+                compiler_fn = (
+                    callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
+                )
+                return convert_frame.catch_errors_wrapper(
+                    convert_frame.convert_frame(  # type: ignore[arg-type]
+                        compiler_fn,
+                        hooks,
+                        dynamism=dynamism,
+                    ),
+                    hooks,
+                )(*args, **kwargs)
+
+            return foo
         return callback
     elif _stance.stance == "force_eager":
         # disable
