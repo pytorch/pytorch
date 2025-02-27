@@ -379,7 +379,7 @@ class MemTracker(TorchDispatchMode):
                 optimizer.step()
                 optimizer.zero_grad()
             mt.display_snapshot("peak")
-            mt.display_modulewise_snapshots(depth=3, units="MiB")
+            mt.display_modulewise_snapshots(depth = 3, units = "MiB")
 
     Known Limitations:
         - The ``MemTracker`` does not track memory for tensors that bypass the ``TorchDispatchMode`` ex. under ``no_dispatch``.

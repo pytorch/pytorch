@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 r"""Zero Redundancy Optimizer."""
-
 import collections
 import copy
 import enum
@@ -263,9 +262,9 @@ class _OverlapInfo:
         meaning ``self.broadcast_handles`` is filled. This clears ``self.broadcast_handles``
         in preparation for the next iteration.
         """
-        assert len(self.broadcast_handles) == self.num_bucket_assignments, (
-            f"Missing at least one broadcast handle on rank {dist.get_rank()}"
-        )
+        assert (
+            len(self.broadcast_handles) == self.num_bucket_assignments
+        ), f"Missing at least one broadcast handle on rank {dist.get_rank()}"
         _ = [x.wait() for x in self.broadcast_handles]
         self.broadcast_handles.clear()
 
@@ -910,9 +909,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         params_per_rank = overlap_info.params_per_rank
         offsets = overlap_info.offsets
 
-        self._bucket_assignments_per_rank_cache[assigned_rank][bucket_index] = (
-            _DDPBucketAssignment(bucket_index, bucket_params, bucket_offset)
-        )
+        self._bucket_assignments_per_rank_cache[assigned_rank][
+            bucket_index
+        ] = _DDPBucketAssignment(bucket_index, bucket_params, bucket_offset)
         if self.global_rank == assigned_rank:
             offsets[bucket_index] = len(params_per_rank[assigned_rank])
         params_per_rank[assigned_rank].extend(bucket_params)
@@ -928,9 +927,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         mapping bucket indices to :class:`_DDPBucketAssignment` s for each
         rank.
         """
-        assert self._overlap_with_ddp, (
-            "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
-        )
+        assert (
+            self._overlap_with_ddp
+        ), "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
         if len(self._bucket_assignments_per_rank_cache) > 0:
             return self._bucket_assignments_per_rank_cache
 
@@ -1077,9 +1076,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 "Specifying `gradients` should not "
                 "be used when `overlap_with_ddp=False`"
             )
-            assert closure is None, (
-                "`closure` is not supported when using a local functional optimizer"
-            )
+            assert (
+                closure is None
+            ), "`closure` is not supported when using a local functional optimizer"
             loss = self.optim.step(gradients=gradients)
 
         # Sync any updated attributes in the local optimizer to the exposed
@@ -1222,9 +1221,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         for rank, local_state_dict in enumerate(self._all_state_dicts):
             local_param_groups = local_state_dict["param_groups"]
             global_param_groups = self._partition_parameters()[rank]
-            assert len(local_param_groups) == len(global_param_groups), (
-                "Mismatch between number of local and global parameter groups"
-            )
+            assert len(local_param_groups) == len(
+                global_param_groups
+            ), "Mismatch between number of local and global parameter groups"
 
             for local_param_group, global_param_group in zip(
                 local_param_groups, global_param_groups
@@ -1234,9 +1233,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 local_param_indices = local_param_group["params"]
                 global_params = global_param_group["params"]
 
-                assert len(local_param_indices) == len(global_params), (
-                    "Mismatch between number of local and global parameters in parameter group"
-                )
+                assert len(local_param_indices) == len(
+                    global_params
+                ), "Mismatch between number of local and global parameters in parameter group"
                 for local_param_index, global_param in zip(
                     local_param_indices, global_params
                 ):
@@ -1269,9 +1268,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             dst_param_groups (list[dict]): parameter groups giving the
                 attribute settings to set.
         """
-        assert len(src_param_groups) == len(dst_param_groups), (
-            "Mismatch between number of source and destination parameter groups"
-        )
+        assert len(src_param_groups) == len(
+            dst_param_groups
+        ), "Mismatch between number of source and destination parameter groups"
         for src_param_group, dst_param_group in zip(src_param_groups, dst_param_groups):
             # Sync all attributes except the parameters
             for attr in filter(lambda x: x != "params", src_param_group.keys()):
@@ -1480,9 +1479,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         The local optimizer is saved in ``self.optim``.
         """
-        assert self._optim_constructor is not None, (
-            "The local optimizer class has not been set"
-        )
+        assert (
+            self._optim_constructor is not None
+        ), "The local optimizer class has not been set"
 
         param_groups = self._partition_parameters()[self.rank]
         # `overlap_with_ddp=True` requires a local functional optimizer
@@ -1509,9 +1508,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "error due to an empty parameter list",
                     self._optim_constructor,
                 )
-                self.optim: Any = self._optim_constructor(
-                    params, **self._optim_defaults
-                )  # type: ignore[no-redef]
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
             # Log information about the DDP and ZeRO bucketing
             if dist.get_debug_level() != dist.DebugLevel.OFF:
@@ -1534,9 +1531,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         else:
             # NOTE: Passing `param_groups` into the local optimizer constructor
             # bypasses the empty parameter list check
-            self.optim: Optimizer = self._optim_constructor(
-                param_groups, **self._optim_defaults
-            )  # type: ignore[no-redef]
+            self.optim: Optimizer = self._optim_constructor(param_groups, **self._optim_defaults)  # type: ignore[no-redef]
 
         # TODO: Manually add `self.param_groups` if using a functional
         # optimizer; remove this if/when the functional optimizers support

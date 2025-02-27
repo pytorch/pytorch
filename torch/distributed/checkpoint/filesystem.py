@@ -414,33 +414,41 @@ class FileSystemBase(ABC):
     @abstractmethod
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
-    ) -> Generator[io.IOBase, None, None]: ...
+    ) -> Generator[io.IOBase, None, None]:
+        ...
 
     @abstractmethod
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]: ...
+    ) -> Union[str, os.PathLike]:
+        ...
 
     @abstractmethod
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> None: ...
+    ) -> None:
+        ...
 
     @abstractmethod
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]: ...
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        ...
 
     @abstractmethod
-    def mkdir(self, path: Union[str, os.PathLike]) -> None: ...
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        ...
 
     @classmethod
     @abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool: ...
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        ...
 
     @abstractmethod
-    def exists(self, path: Union[str, os.PathLike]) -> bool: ...
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        ...
 
     @abstractmethod
-    def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        ...
 
 
 class FileSystem(FileSystemBase):
@@ -504,6 +512,7 @@ class FileSystem(FileSystemBase):
 
 
 class _FileSystemWriter(StorageWriter):
+
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -791,9 +800,9 @@ class FileSystemReader(StorageReader):
                         )
                         target_tensor = planner.resolve_tensor(req).detach()
 
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
+                        assert (
+                            target_tensor.size() == tensor.size()
+                        ), f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 

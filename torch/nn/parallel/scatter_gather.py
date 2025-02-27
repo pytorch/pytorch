@@ -35,7 +35,8 @@ def scatter(
     inputs: torch.Tensor,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> tuple[torch.Tensor, ...]: ...
+) -> tuple[torch.Tensor, ...]:
+    ...
 
 
 @overload
@@ -43,7 +44,8 @@ def scatter(
     inputs: T,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> list[T]: ...
+) -> list[T]:
+    ...
 
 
 def scatter(inputs, target_gpus, dim=0):

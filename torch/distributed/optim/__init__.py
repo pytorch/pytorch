@@ -5,7 +5,6 @@ optimizer locally on the workers where the parameters live.  The distributed
 optimizer can use any of the local optimizer :ref:`optimizer-algorithms` to
 apply the gradients on each worker.
 """
-
 import warnings
 
 import torch

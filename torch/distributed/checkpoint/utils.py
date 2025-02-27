@@ -32,7 +32,7 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: list[Union[T, WRAPPED_EXCEPTION]],
+    results: list[Union[T, WRAPPED_EXCEPTION]]
 ) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
         dict[int, WRAPPED_EXCEPTION],

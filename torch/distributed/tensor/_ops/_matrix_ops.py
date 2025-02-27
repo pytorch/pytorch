@@ -155,9 +155,9 @@ def _scaled_mm_like_strategy(
     assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
     assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
-    assert scale_result_strategy is None, (
-        "_scaled_mm on DTensors doesn't support scale_result"
-    )
+    assert (
+        scale_result_strategy is None
+    ), "_scaled_mm on DTensors doesn't support scale_result"
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
