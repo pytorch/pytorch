@@ -46,12 +46,8 @@ jobs:
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu"]
-        docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
+        docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         exclude:
-          - device: "rocm"
-            docker-image: "pytorch/manylinux-builder:cpu"
-          - device: "xpu"
-            docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
             rocm_version: "6.3"
@@ -62,8 +58,7 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
-      # TODO: We need to get rid of this when we remove builds that rely on the base manylinux-builder image
-      PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
+      PLATFORM: 'manylinux_2_28_x86_64'
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -132,7 +127,7 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
-          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") && "${PLATFORM}" == "manylinux_2_28_x86_64" ]]; then
+          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
