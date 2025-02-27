@@ -3457,7 +3457,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_op(Tensor x, Tensor y) -> Tensor",
-                tags=[torch._C.Tag.needs_exact_strides],
             )
 
             def impl(x, y):
@@ -3471,7 +3470,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_out_op(Tensor x, Tensor y, Tensor(a!) out) -> ()",
-                tags=[torch._C.Tag.needs_exact_strides],
             )
 
             def impl_out(x, y, out):

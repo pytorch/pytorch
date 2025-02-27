@@ -1153,7 +1153,7 @@ def _should_save_arg_kwarg_vals(
                 f"propagate the FakeTensor vals. Please file an issue."
             )
     if isinstance(target, torch._ops.OpOverload):
-        return torch._C.Tag.needs_exact_strides in target.tags
+        return torch._library.utils.needs_exact_strides(target)
     return False
 
 
