@@ -182,7 +182,6 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
-    # TODO: Unify the list inputs of control flow ops to tuple.
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat,
