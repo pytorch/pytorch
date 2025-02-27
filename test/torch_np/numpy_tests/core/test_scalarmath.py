@@ -116,7 +116,7 @@ class TestTypes(TestCase):
                 )
 
     def test_type_create(self):
-        for _, atype in enumerate(types):
+        for atype in types:
             a = np.array([1, 2, 3], atype)
             b = atype([1, 2, 3])
             assert_equal(a, b)

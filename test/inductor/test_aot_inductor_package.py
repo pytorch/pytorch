@@ -219,9 +219,10 @@ class TestAOTInductorPackage(TestCase):
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+                zipfile.ZipFile(package_path, "r") as zip_ref,
+            ):
                 zip_ref.extractall(tmp_dir)
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
@@ -475,6 +476,28 @@ class TestAOTInductorPackage(TestCase):
         expected = model(test_inputs)
         output = compiled(test_inputs)
         self.assertEqual(expected, output)
+
+    def test_deepcopy_compiled_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model = Model()
+
+        compiled = compile(model, example_inputs)
+
+        copmiled_copy = copy.deepcopy(compiled)
+
+        expected = model(*example_inputs)
+        output = compiled(*example_inputs)
+        output_copy = copmiled_copy(*example_inputs)
+        self.assertEqual(expected, output)
+        self.assertEqual(expected, output_copy)
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,

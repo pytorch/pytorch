@@ -2,7 +2,6 @@
 
 import os
 import sys
-import unittest
 import warnings
 from typing import Dict, List, Optional
 
@@ -151,9 +150,6 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_empty_list_lowercase(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -192,9 +188,6 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_empty_dict_lowercase(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -252,9 +245,6 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_with_jit_empty_list_lowercase(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -293,9 +283,6 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_with_jit_empty_dict_lowercase(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:

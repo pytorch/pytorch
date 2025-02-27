@@ -3,7 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from typing import Any, Callable, cast, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any, Callable, cast, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -13,10 +14,6 @@ import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._random import (
-    is_rng_supported_mesh,
-    OffsetBasedRNGTracker,
-)
 from torch.distributed.tensor._redistribute import (
     Redistribute,
     redistribute_local_tensor,
@@ -702,13 +699,6 @@ def distribute_tensor(
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
 
-    # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
-    # TODO: the value assignment to global variable is not the ideal solution
-    # we can replace it in future.
-    if not random._rng_tracker and is_rng_supported_mesh(device_mesh):
-        random._rng_tracker = OffsetBasedRNGTracker(device_type)
-
     if not tensor.is_leaf:
         raise RuntimeError(
             "`distribute_tensor` should be used to distribute leaf tensors! but found non-leaf tensor!"
@@ -871,6 +861,13 @@ def distribute_module(
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
+    already_distributed = getattr(module, "_distribute_module_applied", False)
+    if already_distributed:
+        raise RuntimeError(
+            "distribute_module should only be called once on a module, "
+            "but it has already been called on this module!"
+        )
+
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
@@ -966,6 +963,7 @@ def distribute_module(
                 f"output_fn should take in 3 arguments, but got {num_args} arguments!"
             )
 
+    module._distribute_module_applied = True  # type: ignore[assignment]
     return module
 
 
@@ -1016,7 +1014,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker()
+            random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
 
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):

@@ -7,7 +7,6 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from io import StringIO
-from typing import List
 from unittest.mock import patch
 
 import numpy as np
@@ -1177,8 +1176,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.utils import fresh_inductor_cache
 
-        with fresh_inductor_cache(), _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
+        with (
+            fresh_inductor_cache(),
+            _dynamo_dist_per_rank_init(self.rank, self.world_size),
         ):
             torch._dynamo.utils.clear_compilation_metrics()
 
@@ -1725,13 +1725,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, _ = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
+        # Test is that this function call does not throw an exception.
         fsdp_m = torch.compile(fsdp_m)
-        self.assertRaisesRegex(
-            AssertionError,
-            "Dynamo only supports FSDP with use_orig_params=True",
-            fsdp_m,
-            inputs,
-        )
 
     def test_fsdp_skip_guards(self):
         """
@@ -1957,7 +1952,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = ModuleWithStaticMethod(False)
         x = torch.randn((2, 3), device="cuda")
         ref_out = model(x)
-        test_outs: List[torch.Tensor] = []
+        test_outs: list[torch.Tensor] = []
 
         for use_self in (False, True):
             model = ModuleWithStaticMethod(use_self)
