@@ -605,7 +605,7 @@ class CustomOpDef:
 
         lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
+            tags=[_C.Tag.pt2_compliant_tag],
         )
         self._opoverload = utils.lookup_op(self._qualname)
 

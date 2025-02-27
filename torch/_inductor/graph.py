@@ -18,6 +18,7 @@ import sympy
 from sympy import Expr
 
 import torch
+import torch._library.utils as lib_utils
 import torch._logging
 import torch.fx
 from torch import device, Tensor
@@ -1126,7 +1127,9 @@ class GraphLowering(torch.fx.Interpreter):
 
                 # use contiguous unless the (custom) op asks something else
                 # explicitly
-                if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                if torch._C.Tag.needs_exact_strides in target.tags:
+                    decided_constraint = constrain_to_fake_tensors  # type: ignore[assignment]
+                elif torch._C.Tag.needs_fixed_stride_order in target.tags:
                     decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
                 elif torch._C.Tag.flexible_layout in target.tags:
                     decided_constraint = None  # type: ignore[assignment]
@@ -1152,7 +1155,29 @@ class GraphLowering(torch.fx.Interpreter):
             layout_constraints = maybe_layout_constraints(target)
             if layout_constraints:
                 old_args, old_kwargs = args, kwargs
-                args, kwargs = layout_constraints(n, *args, **kwargs)
+                if layout_constraints is constrain_to_fake_tensors:
+                    # only constrain_to_fake_tensor if this exists.
+                    # otherwise, no constraints at all: the implication is
+                    # that this operator was inserted by a custom pass
+                    # so we'll give them the freedom.
+                    if "arg_kwarg_vals" in n.meta:
+                        fake_args, fake_kwargs = n.meta["arg_kwarg_vals"]
+
+                        # (fake_args, fake_kwargs) might not align with (args, kwargs).
+                        # we need to normalize them based on the schema
+                        assert isinstance(target, torch._ops.OpOverload)
+                        normalize = functools.partial(
+                            lib_utils.normalize_args_kwargs, target._schema
+                        )
+                        fake_args, fake_kwargs = normalize(fake_args, fake_kwargs)
+                        args, kwargs = normalize(args, kwargs)
+                        old_args, old_kwargs = normalize(old_args, old_kwargs)
+
+                        args, kwargs = constrain_to_fake_tensors(
+                            args, kwargs, fake_args, fake_kwargs
+                        )
+                else:
+                    args, kwargs = layout_constraints(n, *args, **kwargs)
 
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 

@@ -1112,18 +1112,25 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        # TODO: opt-in mechanism ?
-        if isinstance(
-            target,
-            (
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            ),
-        ):
+        if should_save_arg_kwarg_vals(target):
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
             node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
+
+
+def should_save_arg_kwarg_vals(target: Any) -> bool:
+    if isinstance(
+        target,
+        (
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ),
+    ):
+        return True
+    if isinstance(target, torch._ops.OpOverload):
+        return torch._C.Tag.needs_exact_strides in target.tags
+    return False
 
 
 def _make_temp_remove_mode_context_manager(

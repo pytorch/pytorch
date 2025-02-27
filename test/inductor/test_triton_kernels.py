@@ -3381,7 +3381,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(z, (x + y) * 2)
 
     @requires_gpu
-    def test_preserves_strides(self):
+    @common_utils.parametrize("variant", ["triton_kernel", "custom_op"])
+    def test_preserves_strides(self, variant):
         import triton
         import triton.language as tl
 
@@ -3405,11 +3406,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         x = torch.randn(4, 4, 2, 2, device="cuda")
         other = torch.randn(4, 4, 2, 2, device="cuda")
 
-        def f(x, other):
-            y = x.transpose(2, 3).contiguous().transpose(2, 3)
-            z = y.sin().transpose(2, 3)
+        def add_triton(y, z):
             grid = (z.numel(),)
-            out = torch.empty_like(other)
+            out = torch.empty_like(z, memory_format=torch.contiguous_format)
             add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
             return out
 
@@ -3442,12 +3441,38 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         from torch._inductor import config
 
-        with config.patch(
-            post_grad_custom_post_pass=g,
-        ):
-            f_compile = torch.compile(f)
-            self.assertEqual(f(x, other), f_compile(x, other))
-            self.assertTrue(called)
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+                tags=[torch._C.Tag.needs_exact_strides],
+            )
+
+            def impl(x, y):
+                return add_triton(x, y)
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CUDA")
+            lib.impl("add_op", meta, "Meta")
+
+            def f(x, other):
+                # one input non-contiguous, the other input is contiguous
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin()
+                if variant == "triton_kernel":
+                    return add_triton(y, z)
+                elif variant == "custom_op":
+                    return torch.ops.mylib.add_op.default(y, z)
+                else:
+                    raise AssertionError("should not be hit")
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
