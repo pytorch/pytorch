@@ -1488,11 +1488,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
         check_subgraph_args_types(additional_inputs_vars)
 
-        # dim_fake = (
-        #     dim.as_proxy()
-        #     if type(dim.as_proxy()) == int
-        #     else get_fake_value(dim.as_proxy().node, tx)
-        # )
         scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
@@ -1507,14 +1502,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
             sub_args_inp = [
-                # _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
-                _make_inlined(tx, first_slice_copy)(inp)
-                for inp in xs_vars
+                _make_inlined(tx, first_slice_copy)(inp) for inp in xs_vars
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs_vars
             ]
+
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
@@ -1530,22 +1524,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True
         )
-
-        # key in the combine_lifted_freevars are proxies in the root tracer.
-        # We use root tracer's proxies to create scan op's inputs.
-        def _check_phs_position_match(
-            combine_graph: torch.fx.Graph, lifted_proxies: list[torch.fx.Proxy]
-        ):
-            lifted_phs = [
-                node for node in combine_graph.nodes if node.op == "placeholder"
-            ][-len(lifted_proxies) :]
-            for ph, lifted_proxy in zip(lifted_phs, lifted_proxies):
-                if ph is not lifted_proxy.node:
-                    unimplemented(
-                        "The postion lifted freevars doesn't match the order of placeholders in subgraph."
-                    )
-
-        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
         
         xs_proxy = tuple(x.as_proxy() for x in xs_vars)
@@ -1596,7 +1574,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             init_proxy,
             xs_proxy,
-            # dim.as_proxy(),
             additional_inputs_proxy,
         )
 

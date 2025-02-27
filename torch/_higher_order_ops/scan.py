@@ -141,11 +141,9 @@ def scan(
     if reverse:
         leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
 
-    # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
-    # TODO: Unify the list inputs of control flow ops to tuple.
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat,
@@ -157,7 +155,7 @@ def scan(
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=[])
+        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=())
 
     carry, out = _maybe_compile_and_run_fn(
         run_flattened_scan, combine_fn, leaves_init, leaves_xs,
@@ -176,7 +174,14 @@ class ScanOp(HigherOrderOperator):
         super().__init__("scan")
 
     def __call__(self, combine_fn, init, xs, additional_inputs):
-        assert isinstance(additional_inputs, list), "additional_inputs must be a list."
+        # There is currently an issue that the ScanOp is sometimes called with
+        # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
+        # Once this issue is resolved, the assertion should only allow tuples
+        # and the tuple cast should be removed
+        assert isinstance(
+            additional_inputs, (tuple, list)
+        ), "additional_inputs must be a tuple."
+        additional_inputs = tuple(additional_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, additional_inputs)
 
@@ -184,12 +189,11 @@ class ScanOp(HigherOrderOperator):
 scan_op = ScanOp()
 
 
-def generic_scan(operator, init, xs, dim=0, additional_inputs=None):
-    additional_inputs = additional_inputs if additional_inputs is not None else []
-
+def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
+    
     def call_operator(*args):
         return pytree.tree_leaves(operator(*args))
-
+    
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -279,7 +283,7 @@ def trace_scan(
     combine_fn: Callable,
     init: list[torch.Tensor],
     xs: list[torch.Tensor],
-    additional_inputs: list[torch.Tensor],
+    additional_inputs: tuple[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
 
