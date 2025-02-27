@@ -203,6 +203,16 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     auto output = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
     return toTensorList(output);
   }
+  at::Tensor call_unpack(
+      PyObject* py_compiler,
+      std::optional<size_t> hook_id,
+      size_t hook_input_id) override {
+    py::handle handle(py_compiler);
+    py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
+    auto tmp = py::cast<std::optional<at::Tensor>>(proxy);
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return tmp.value();
+  }
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
@@ -213,7 +223,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -654,7 +664,7 @@ static PyObject* wrap_string_list(const std::vector<std::string>& strs) {
   return pystrs;
 }
 
-std::string unwrap_string(PyObject* pystr) {
+static std::string unwrap_string(PyObject* pystr) {
   TORCH_INTERNAL_ASSERT(PyUnicode_Check(pystr));
   const char* str = PyUnicode_AsUTF8(pystr);
   TORCH_INTERNAL_ASSERT(str != nullptr);
@@ -790,14 +800,18 @@ static SizeInput::DynType get_default_dyn_type() {
 // Only call this function while holding GIL
 static CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
-    GraphTask& graph_task,
+    const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges,
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
-    THPObjectPtr* graph_arg_hooks) {
-  std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
+    THPObjectPtr* graph_arg_hooks,
+    THPObjectPtr* graph_arg_packed_inputs) {
+  const std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
+  std::unordered_map<Node*, int> visited_dependencies;
+  visited_dependencies.reserve(dependencies.size());
+
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
@@ -861,9 +875,9 @@ static CacheNode* _compiled_autograd_impl(
         }
       }
       auto it = dependencies.find(edge.function.get());
-      TORCH_INTERNAL_ASSERT(it != dependencies.end());
-      if (--it->second == 0) {
-        dependencies.erase(it);
+      int count = ++visited_dependencies[it->first];
+      TORCH_INTERNAL_ASSERT(count <= it->second);
+      if (count == it->second) {
         worklist.emplace_back(edge.function);
       }
     }
@@ -1052,7 +1066,8 @@ static CacheNode* _compiled_autograd_impl(
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
-  *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
+  *graph_arg_hooks = convert_pyobj_list(compiler_call.hooks);
+  *graph_arg_packed_inputs = convert_pyobj_list(compiler_call.packed_inputs);
   return cache;
 }
 
@@ -1078,7 +1093,7 @@ struct LockGuardWithErrorLogs {
 
 static variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
-    GraphTask& graph_task,
+    const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
   TORCH_CHECK(
@@ -1093,6 +1108,7 @@ static variable_list compiled_autograd(
   THPObjectPtr sizes;
   THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
+  THPObjectPtr packed_inputs;
   CacheNode* cache = _compiled_autograd_impl(
       graph_root,
       graph_task,
@@ -1101,7 +1117,8 @@ static variable_list compiled_autograd(
       &inputs,
       &sizes,
       &ivalue_args,
-      &hooks);
+      &hooks,
+      &packed_inputs);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
@@ -1110,6 +1127,7 @@ static variable_list compiled_autograd(
       sizes.get(),
       ivalue_args.get(),
       hooks.get(),
+      packed_inputs.get(),
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
