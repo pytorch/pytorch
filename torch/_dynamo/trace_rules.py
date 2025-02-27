@@ -122,7 +122,7 @@ If you are removing an existing torch level API:
 
 
 """
-manual_torch_name_rule_map = {
+manual_torch_name_rule_map: dict[str, Any] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -306,6 +306,7 @@ manual_torch_name_rule_map = {
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -639,6 +640,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_privateuse1_backend_name",
         "torch._C._get_qengine",
         "torch._C._get_schema",
+        "torch._C._get_sm_carveout_experimental",
         "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
@@ -1157,6 +1159,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
         "torch._C._set_should_use_format_with_string_table",
+        "torch._C._set_sm_carveout_experimental",
         "torch._C._set_storage_access_error_msg",
         "torch._C._set_tensor_metadata",
         "torch._C._set_tracing_state",
@@ -2997,6 +3000,12 @@ def _disallowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _nonstrict_trace_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
@@ -3099,6 +3108,11 @@ def _maybe_init_lazy_module(obj: object) -> None:
 def is_callable_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
+
+
+def is_nonstrict_trace_callable(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _nonstrict_trace_callable_ids
 
 
 def is_callable_disallowed(obj) -> bool:

@@ -27,7 +27,13 @@ def set_driver_to_gpu():
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if backend.driver.is_active() and name != "cpu":
-            if isinstance(driver.active, backend.driver):
+            # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
+            # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
+            if (
+                isinstance(driver.active, backend.driver)
+                or hasattr(driver.active, "_obj")
+                and isinstance(driver.active._obj, backend.driver)
+            ):
                 # Don't re-initialize backend if it is already active
                 return
             driver.set_active(backend.driver())
@@ -36,8 +42,7 @@ def set_driver_to_gpu():
 
 
 def get_backend_options():
-    from triton.runtime import driver
-
+    driver = triton.runtime.driver
     target = driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
@@ -480,8 +485,8 @@ def _compare_and_swap_with_index(
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
-    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
-    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
     ileft = tl.reshape(ileft, x.shape)
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)

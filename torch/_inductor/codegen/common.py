@@ -18,8 +18,6 @@ from typing import (
     cast,
     ClassVar,
     Generic,
-    Iterator,
-    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -59,7 +57,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, MutableMapping, Sequence
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
@@ -1234,6 +1232,18 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
+def is_buffer_removed(name: str) -> bool:
+    return any(
+        name in x
+        for x in (
+            V.graph.removed_buffers,
+            V.kernel.removed_buffers,
+            V.graph.inplaced_to_remove,
+            V.kernel.inplaced_to_remove,
+        )
+    )
+
+
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1243,15 +1253,7 @@ class DeferredLine(DeferredLineBase):
         assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
-        if all(
-            self.name not in x
-            for x in (
-                V.graph.removed_buffers,
-                V.kernel.removed_buffers,
-                V.graph.inplaced_to_remove,
-                V.kernel.inplaced_to_remove,
-            )
-        ):
+        if not is_buffer_removed(self.name):
             return self.line
         return None
 

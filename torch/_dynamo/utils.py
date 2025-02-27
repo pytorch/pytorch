@@ -59,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -1110,11 +1109,14 @@ def proxy_args_kwargs(args, kwargs):
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
         from .variables.base import typestr
 
-        unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+        unimplemented_v2(
+            gb_type="Failed to convert args/kwargs to proxy",
+            context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
+            hints=[],
             from_exc=e,
         )
 
@@ -1393,7 +1395,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -2465,9 +2467,15 @@ def set_example_value(node, example_value):
 def _get_fake_tensor(vt):
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
-        from .exc import unimplemented
+        from . import graph_break_hints
+        from .exc import unimplemented_v2
 
-        unimplemented("Cannot check Tensor object identity without its fake value")
+        unimplemented_v2(
+            gb_type="Cannot check Tensor object identity without its fake value",
+            context=str(fake_tensor),
+            explanation="TensorVariable is missing a fake example_value.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
     return fake_tensor
 
 
@@ -2575,15 +2583,44 @@ def get_safe_global_name(tx, root, obj):
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
+def is_in(item: Any, *containers) -> bool:
+    for container in containers:
+        if item in container:
+            return True
+    return False
+
+
+def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
+    """
+    Return a name that starts with `prefix` and is not in any of the
+    `containers` (e.g., map, set).
+    """
+    if not requires_suffix and not is_in(prefix, *containers):
+        return prefix
+
+    for i in itertools.count():
+        candidate = f"{prefix}_{i}"
+        if not is_in(candidate, *containers):
+            return candidate
+
+    raise AssertionError("unreachable")
+
+
 def wrap_fake_exception(fn):
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
 
-        msg = f"Unsupported: {e.reason} with fake tensor propagation."
+        msg = f"Encountered exception ({e.reason}) during fake tensor propagation."
         log.warning(msg)
-        unimplemented(msg, from_exc=e)
+        unimplemented_v2(
+            gb_type="Fake tensor propagation exception",
+            context=str(e.reason),
+            explanation=msg,
+            hints=[],
+            from_exc=e,
+        )
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -2957,9 +2994,16 @@ def extract_fake_example_value(node, required=True):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        from torch._dynamo.exc import unimplemented
+        from torch._dynamo.exc import unimplemented_v2
 
-        unimplemented("`FakeTensor` example value was required but not available")
+        from . import graph_break_hints
+
+        unimplemented_v2(
+            gb_type="Missing FakeTensor example value",
+            context=str(node),
+            explanation=f"`FakeTensor` example value was required for {node} but not available.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
     else:
         return None
 
@@ -3003,7 +3047,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
     from .exc import (
         TorchRuntimeError,
-        unimplemented,
+        unimplemented_v2,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3063,23 +3107,50 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(
-                f"data dependent operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            # capture_scalar_outputs only works for these ops right now
+            # see torch/_subclasses/fake_impls.py
+            if cause.func in (
+                torch.ops.aten.item.default,
+                torch.ops.aten._local_scalar_dense.default,
+            ):
+                # does this actually get triggered?
+                hints = [
+                    "Enable tracing of data-dependent output operators with "
+                    "`torch._dynamo.config.capture_scalar_outputs = True`",
+                ]
+            else:
+                hints = [
+                    "Consider wrapping the operator into a PyTorch-understood custom operator "
+                    "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
+                ]
+            unimplemented_v2(
+                gb_type="Data dependent operator",
+                context=str(cause.func),
+                explanation=f"Operator `{cause.func}` has a non-Tensor output "
+                "whose value is dependent on the data of Tensor inputs.",
+                hints=hints,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
+                    hints=[
+                        "Enable tracing of dynamic shape operators with "
+                        "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
+                    ],
                 )
             else:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "Operator does not have a meta kernel that supports dynamic output shapes, "
-                    "please report an issue to PyTorch"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator (no meta kernel)",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
+                    hints=[
+                        "Please report an issue to PyTorch",
+                    ],
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -3097,10 +3168,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                         f"module `{module}` and you may need to `import {module}`"
                         f"({ctx}), otherwise "
                     )
-            unimplemented(
-                f"unsupported operator: {cause.func} ({import_suggestion}see "
-                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
-                " for how to fix)"
+            unimplemented_v2(
+                gb_type="Operator does not support running with fake tensors",
+                context=f"unsupported operator: {cause.func}",
+                explanation="",
+                hints=[
+                    f"{import_suggestion}see "
+                    "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                    " for how to fix",
+                ],
             )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
@@ -3113,7 +3189,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
-            unimplemented(f"TypeError {node.target}: {cause}")
+            unimplemented_v2(
+                gb_type="TypeError when making fake tensor call",
+                context=f"TypeError {node.target}: {cause}",
+                explanation="",
+                hints=[],
+            )
 
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -3170,9 +3251,14 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 return node.target(*args, **kwargs)
             elif op == "call_method":
                 if not hasattr(args[0], node.target):
-                    from .exc import unimplemented
+                    from .exc import unimplemented_v2
 
-                    unimplemented(make_error_message("attribute not defined"))
+                    unimplemented_v2(
+                        gb_type="Missing attribute when running call_method node",
+                        context="",
+                        explanation=make_error_message("attribute not defined"),
+                        hints=[],
+                    )
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":
                 assert nnmodule is not None
@@ -3185,9 +3271,15 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
-            from .exc import unimplemented
+            from .exc import unimplemented_v2
 
-            unimplemented(make_error_message(e), from_exc=e)
+            unimplemented_v2(
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
+                context=str(e),
+                explanation=make_error_message(e),
+                hints=[],
+                from_exc=e,
+            )
         except Unsupported:
             raise
         except Exception as e:
@@ -3620,7 +3712,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4318,3 +4410,27 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    return mode
