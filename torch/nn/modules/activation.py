@@ -751,7 +751,7 @@ class SwiGLU(Module):
 
     .. math::
 
-        \text{swiglu}(x, y) = x * \swish(y)
+        \text{swiglu}(x, y) = x * swish(y)
 
     where :math:`\text{swish}(x) = x * \sigma(x)`, and :math:`x` and :math:`y` are
     split from the input tensor along the given dimension.

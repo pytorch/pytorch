@@ -4747,7 +4747,6 @@ class TestFunctionalTracing(JitTestCase):
         "rrelu": CONTROL_FLOW,
         "selu": CONTROL_FLOW,
         "silu": CONTROL_FLOW,
-        "swiglu": CONTROL_FLOW,
         "mish": CONTROL_FLOW,
         "smooth_l1_loss": CONTROL_FLOW,
         "soft_margin_loss": CONTROL_FLOW,

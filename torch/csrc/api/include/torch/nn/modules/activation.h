@@ -594,7 +594,7 @@ class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
 /// module storage semantics.
 TORCH_MODULE(SiLU);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SwiGLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SwiGLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies swiglu over a given input.
 /// See https://pytorch.org/docs/main/nn.html#torch.nn.SwiGLU to learn

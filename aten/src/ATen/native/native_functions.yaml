@@ -11889,9 +11889,8 @@
     CPU, CUDA: glu_jvp
   autogen: glu_jvp.out
 
-- func: swiglu(Tensor input, SymInt dim=-1) -> Tensor
-  dispatch:
-    CompositeImplicitAutograd: swiglu_symint
+- func: swiglu(Tensor input, int dim=-1) -> Tensor
+  python_module: nn
 
 - func: glu_backward_jvp(Tensor grad_x, Tensor grad_glu, Tensor x, Tensor dgrad_glu, Tensor dx, int dim) -> Tensor
   python_module: nn

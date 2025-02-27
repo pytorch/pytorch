@@ -839,20 +839,20 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
 DEFINE_DISPATCH(GeluKernel);
 DEFINE_DISPATCH(GeluBackwardKernel);
 
-Tensor swiglu_symint(const Tensor& input, c10::SymInt dim) {
+Tensor swiglu(const Tensor& input, int64_t dim) {
   if (dim < 0) {
     dim += input.dim();
   }
-  TORCH_CHECK(input.size(dim.expect_int()) % 2 == 0,
+  TORCH_CHECK(input.size(dim) % 2 == 0,
       "swiglu input size on dim ",
       dim,
       "should be an even number, which is ",
-      input.size(dim.expect_int()));
+      input.size(dim));
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
       "swiglu expected floating dtype for input, got ",
       input.scalar_type());
-  std::vector<Tensor> chunks = input.chunk(2, /*output_channels=*/dim.expect_int());
-  Tensor result = chunks[0] * chunks[1].sigmoid();
+  std::vector<Tensor> chunks = input.chunk(2, /*output_channels=*/dim);
+  Tensor result = chunks[0] * chunks[0].sigmoid() * chunks[1];
 
   return result;
 }
