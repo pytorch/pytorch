@@ -2623,6 +2623,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_max = result_var
                 result_sum = self.cse.newvar(dtype=dtype)
 
+                accumulator_max = self.reduction_collapse_dims(
+                    self.post_loop_combine, accumulator_max, acc_type
+                )
+                accumulator_sum = self.reduction_collapse_dims(
+                    self.post_loop_combine, accumulator_sum, acc_type
+                )
                 self.post_loop_combine.splice(
                     f"""
                     {result_max}_tmp, {result_sum}_tmp = triton_helpers.online_softmax_reduce(

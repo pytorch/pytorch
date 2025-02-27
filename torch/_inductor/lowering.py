@@ -6863,7 +6863,7 @@ def prepare_softmax_online(x, dim):
 
     reduction_ranges = kwargs["reduction_ranges"]
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-    _, num_split = ir.Reduction.num_splits(
+    hint, num_split = ir.Reduction.num_splits(
         **kwargs,
         reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
         reduction_numel=rnumel,
@@ -6874,7 +6874,7 @@ def prepare_softmax_online(x, dim):
         and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
-            input_node=x, num_output=2, **kwargs
+            input_node=x, num_output=2, reduction_hint=hint, **kwargs
         )
         return max_tensor, sum_tensor
     else:

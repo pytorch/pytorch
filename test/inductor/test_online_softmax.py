@@ -18,6 +18,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT") == "1" or DO_PERF_TEST
 
 
 def _prepare_softmax(x, dim):
@@ -164,7 +165,12 @@ class TestOnlineSoftmax(TestCase):
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
     def test_prepare_softmax_acc_with_fp64(self, dtype):
-        x = torch.randn(32768, 50257, device=GPU_TYPE, dtype=dtype)
+        if USE_LARGE_INPUT:
+            M, N = 32768, 50257
+        else:
+            M, N = 1024, 2048
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
 
         ref_fp64 = _prepare_softmax(x.to(dtype=torch.float64), dim=-1)
         ref = _prepare_softmax(x, dim=-1)
@@ -194,7 +200,12 @@ class TestOnlineSoftmax(TestCase):
     @parametrize("fn", [torch.log_softmax, torch.softmax])
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
     def test_softmax_acc_with_fp64(self, dtype, fn):
-        x = torch.randn(32768, 50257, device=GPU_TYPE, dtype=dtype)
+        if USE_LARGE_INPUT:
+            M, N = 32768, 50257
+        else:
+            M, N = 1024, 2048
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
 
         ref_fp64 = fn(x.to(dtype=torch.float64), dim=-1)
         ref = fn(x, dim=-1)
