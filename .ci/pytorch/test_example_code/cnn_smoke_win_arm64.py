@@ -20,7 +20,6 @@ class SimpleCNN(nn.Module):
         output = output.view(1)
         return output
 
-
 try:
     # Mock one infer
     net = SimpleCNN()
@@ -36,6 +35,6 @@ try:
     loss = criterion(outputs, label)
     loss.backward()
     optimizer.step()
-    
+
 except Exception as e:
     print(f"An error occurred: {e}")
