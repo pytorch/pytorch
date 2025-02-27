@@ -371,7 +371,12 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+    def add_data(
+        event_name: str,
+        log_level: CompileEventLogLevel,
+        overwrite: bool = False,
+        **metadata: object,
+    ):
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -408,11 +413,13 @@ class CompileEventLogger:
                 )
 
             # TODO: should we assert that the keys of metadata are in CompilationMetrics?
-            metrics_context.update(metadata)
+            metrics_context.update(metadata, overwrite)
             chromium_log.add_event_data(event_name, **metadata)
 
     @staticmethod
-    def add_toplevel(log_level: CompileEventLogLevel, **metadata: object):
+    def add_toplevel(
+        log_level: CompileEventLogLevel, overwrite: bool = False, **metadata: object
+    ):
         """
         Syntactic sugar for logging to the toplevel event
         """
@@ -421,7 +428,7 @@ class CompileEventLogger:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
             )
-        CompileEventLogger.add_data(top_event, log_level, **metadata)
+        CompileEventLogger.add_data(top_event, log_level, overwrite, **metadata)
 
     @staticmethod
     def increment(
@@ -457,7 +464,7 @@ class CompileEventLogger:
     @staticmethod
     def increment_toplevel(
         key: str,
-        value: int,
+        value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ):
         """
@@ -529,7 +536,7 @@ class CompileEventLogger:
         <event_name> should be the name of a timed event span passed to `dynamo_timed`.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.CHROMIUM, **metadata
+            event_name, CompileEventLogLevel.CHROMIUM, overwrite=False, **metadata
         )
 
     @staticmethod
@@ -542,11 +549,11 @@ class CompileEventLogger:
         with log_to_pt2_compile_events=True.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
+            event_name, CompileEventLogLevel.PT2_COMPILE, overwrite=False, **metadata
         )
 
     @staticmethod
-    def compilation_metric(**metadata: object):
+    def compilation_metric(overwrite: bool = False, **metadata: object):
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
         and chromium.
@@ -554,7 +561,7 @@ class CompileEventLogger:
         a column in PT2 Compile Events and Dynamo Compile, with the corresponding kwarg value.
         """
         CompileEventLogger.add_toplevel(
-            CompileEventLogLevel.COMPILATION_METRIC, **metadata
+            CompileEventLogLevel.COMPILATION_METRIC, overwrite, **metadata
         )
 
     @staticmethod
@@ -1216,6 +1223,7 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
+    num_graph_breaks: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
