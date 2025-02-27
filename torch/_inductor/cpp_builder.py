@@ -1618,15 +1618,12 @@ class CppBuilder:
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
 
-    # Given a path to an input cpp file and an output path,
-    # Attempts to compile the file, storing the output in "output_path"
     def build_fbcode_re(
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
             command = self.get_command_line().split()
             try:
-                assert config.is_fbcode(), "compile_file() is only used in fbcode"
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
@@ -1660,8 +1657,8 @@ class CppBuilder:
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
         """
-        if self._use_relative_path:
-            # _use_relative_path indicates this is a remote build
+        if config.is_fbcode():
+            # remote build uses relative path
             return self.build_fbcode_re()
         _create_if_dir_not_exist(self._output_dir)
         _build_tmp_dir = os.path.join(
