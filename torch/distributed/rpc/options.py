@@ -23,7 +23,7 @@ def _to_device(device: DeviceType) -> torch.device:
 
 
 def _to_device_map(
-    device_map: dict[DeviceType, DeviceType]
+    device_map: dict[DeviceType, DeviceType],
 ) -> dict[torch.device, torch.device]:
     full_device_map: dict[torch.device, torch.device] = {}
     reverse_map: dict[torch.device, torch.device] = {}

@@ -90,7 +90,7 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[Concatenate[_M, _P], _M]
+        func: Callable[Concatenate[_M, _P], _M],
     ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(

@@ -424,9 +424,9 @@ class FSDPParamGroup:
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
                 # but user may want to have a custom HSDP setup
-                assert (
-                    self._all_reduce_hook is not None
-                ), "all reduce hook stream is specified but hook itself is missing."
+                assert self._all_reduce_hook is not None, (
+                    "all reduce hook stream is specified but hook itself is missing."
+                )
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
