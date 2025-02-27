@@ -460,7 +460,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
-OPTION(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
+option(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -871,11 +871,6 @@ cmake_dependent_option(
   ON
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
-
-# We are currenlty not using alibi attention for Flash So we disable this
-# feature by default We dont currently document this feature because we don't
-# Suspect users building from source will need this
-add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
