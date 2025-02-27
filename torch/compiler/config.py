@@ -69,6 +69,9 @@ dynamic_sources: str = Config(
 """
 Comma delimited list of sources that should be marked as dynamic. Primarily useful for large
 models with graph breaks where you need intermediate tensors and ints to be marked dynamic.
+
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
 """
 
 

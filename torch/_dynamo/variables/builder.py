@@ -2644,13 +2644,13 @@ def get_automatic_dynamic_shapes_mark_as():
 
 _DYNAMIC_SOURCES: Optional[set[str]] = None
 
-
 def get_dynamic_sources() -> set[str]:
     global _DYNAMIC_SOURCES
     if _DYNAMIC_SOURCES is not None:
         return _DYNAMIC_SOURCES
 
-    _DYNAMIC_SOURCES = set(torch.compiler.config.dynamic_sources.split(","))
+    _DYNAMIC_SOURCES = set(torch.compiler.config.dynamic_sources.replace(" ", "").split(","))
+
     return _DYNAMIC_SOURCES
 
 
@@ -2723,7 +2723,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes:
+    if static_shapes and name not in dynamic_sources:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -2823,15 +2823,12 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic or name in dynamic_sources:
+        if marked_dynamic:
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
             # into the mutable state
-            if marked_dynamic:
-                log.debug("automatic dynamic %s marked dynamic", name)
-            if name in dynamic_sources:
-                log.debug("%s marked dynamic via source whitelist", name)
+            log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
             mark_size[i] = auto_dynamic
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
@@ -2846,6 +2843,11 @@ def _automatic_dynamic(
         automatic_dynamic_stride = (
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
+
+        if name in dynamic_sources:
+            log.debug("%s marked dynamic via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
