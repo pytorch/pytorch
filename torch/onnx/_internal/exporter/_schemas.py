@@ -307,9 +307,9 @@ def _get_allowed_types_from_type_annotation(
         allowed_types = set()
         subtypes = typing.get_args(type_)
         for subtype in subtypes:
-            assert (
-                subtype is not type(None)
-            ), "Union should not contain None type because it is handled by _is_optional."
+            assert subtype is not type(None), (
+                "Union should not contain None type because it is handled by _is_optional."
+            )
             allowed_types.update(_get_allowed_types_from_type_annotation(subtype))
         return allowed_types
 
