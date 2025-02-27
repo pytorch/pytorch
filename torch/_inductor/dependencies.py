@@ -807,7 +807,8 @@ def extract_loop_body_with_args(
             broadcast_dim_indexing = None
             replacement = dict(read.replacement)
             replacement_reverse = {v: k for k, v in replacement.items()}
-            assert additive_symbol in replacement_reverse
+            if additive_symbol not in replacement_reverse:
+                continue
             d_symbol = replacement_reverse[additive_symbol]
             d_p_replacement = {v: k for k, v in fn.replacement.items()}
             broadcast_dim_indexing = d_p_replacement[d_symbol]
