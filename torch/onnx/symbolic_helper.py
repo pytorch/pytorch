@@ -411,9 +411,9 @@ def quantized_args(
             output = fn(g, *non_quantized_args, **kwargs)
 
             assert _scale is not None, "Bug: Scale must be set for quantized operator"
-            assert (
-                _zero_point is not None
-            ), "Bug: Zero point must be set for quantized operator"
+            assert _zero_point is not None, (
+                "Bug: Zero point must be set for quantized operator"
+            )
 
             if quantize_output:
                 return quantize_helper(g, output, _scale, _zero_point)
