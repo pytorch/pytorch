@@ -14033,6 +14033,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition(self):
             def f(x, y):
@@ -14059,6 +14060,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                     code[0]
                 )
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_multiple_functions(self):
             def f(x, y):
@@ -14081,6 +14083,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             self.assertEqual(eager_out, compiled_out)
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_condition_op(self):
             def f(p, b):
@@ -14100,6 +14103,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             compiled_out = compiled_f(p, a)
             self.assertEqual(eager_out, compiled_out)
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_symint(self):
             def f(x, y):
@@ -14122,6 +14126,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_unbacked_symint(self):
             def f(x, y):
@@ -14143,6 +14148,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             eager_out = f(x, y)
             self.assertEqual(compiled_out, eager_out)
 
+        @requires_cuda
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_buffer_reuse(self):
             def f(x, y):
