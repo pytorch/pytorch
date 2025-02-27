@@ -255,14 +255,14 @@ def is_rerun_disabled_tests(
     Check if the test report is coming from rerun_disabled_tests workflow where
     each test is run multiple times
     """
-    job_id = get_job_id(report)
-    job_name = get_job_name(job_id, workflow_run_id, workflow_run_attempt)
-    if job_name and "rerun_disabled_tests" in job_name:
-        return True
-    return all(
+    if all(
         t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
         for t in tests.values()
-    )
+    ):
+        return True
+    job_id = get_job_id(report)
+    job_name = get_job_name(job_id, workflow_run_id, workflow_run_attempt)
+    return job_name is not None and "rerun_disabled_tests" in job_name
 
 
 def get_job_id(report: Path) -> int | None:
