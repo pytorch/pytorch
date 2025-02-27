@@ -2253,7 +2253,7 @@ class TestOptimRenewed(TestCase):
 
             print(kwargs)
 
-            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(8)]
+            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(600)]
             for p in params:
                 p.grad = torch.rand_like(p)
 
@@ -2272,29 +2272,45 @@ class TestOptimRenewed(TestCase):
 
             # to simulate bf16 training, we are going to fake cast the ref_optim's state to
             # to bf16 and then cast back to fp32 after every step.
-            for _ in range(1):
+            tracker = TensorTracker()
+            for i in range(3):
+                # if i > 0:
+                    # breakpoint()
                 ref_optim.step()
                 bf16_optim.step()
+                # if i > 0:
+                    # breakpoint()
+                for p in params:
+                    tracker.add(p)
+                    tracker.add(p.grad)
                 for d in ref_optim.state.values():
+                    tracker.add(d["exp_avg"].to(torch.bfloat16))
+                    tracker.add(d["exp_avg_sq"].to(torch.bfloat16))
                     d["exp_avg"] = d["exp_avg"].to(torch.bfloat16).to(torch.float32)
                     d["exp_avg_sq"] = (
                         d["exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
                     )
                     if "max_exp_avg_sq" in d:
+                        tracker.add(d["max_exp_avg_sq"].to(torch.bfloat16))
                         d["max_exp_avg_sq"] = (
                             d["max_exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
                         )
 
-            for p, pc in zip(params, params_c):
-                self.assertEqual(p, pc)
+                # breakpoint()
+                for e, pc in enumerate(params_c):
+                    print(f"{e=}")
+                    tracker.pop_check_set(pc, self)
+                    tracker.pop_check_set(pc.grad, self)
+                
+                print(i)
+                self.assertEqual(params[0], params_c[0])
 
-            for d, dc in zip(ref_optim.state.values(), bf16_optim.state.values()):
-                self.assertEqual(d["exp_avg"], dc["exp_avg"].to(torch.float32))
-                self.assertEqual(d["exp_avg_sq"], dc["exp_avg_sq"].to(torch.float32))
-                if "max_exp_avg_sq" in d:
-                    self.assertEqual(
-                        d["max_exp_avg_sq"], dc["max_exp_avg_sq"].to(torch.float32)
-                    )
+                for dc in bf16_optim.state.values():
+                    tracker.pop_check_set(dc["exp_avg"], self)
+                    tracker.pop_check_set(dc["exp_avg_sq"], self)
+                    if "max_exp_avg_sq" in dc:
+                        tracker.pop_check_set(dc["max_exp_avg_sq"], self)
+                self.assertTrue(tracker.all_popped())
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
