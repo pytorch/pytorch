@@ -634,11 +634,11 @@ size_t PyTorchStreamReader::getRecordOffsetNoRead(
     size_t cursor,
     std::string filename,
     size_t size,
-    uint64_t storage_alignment) {
+    uint64_t alignment) {
   std::string full_name = archive_name_plus_slash_ + filename;
   size_t full_name_size = full_name.size();
   std::tuple<size_t, size_t> result =
-      detail::getOffset(cursor, full_name_size, size, storage_alignment);
+      detail::getOffset(cursor, full_name_size, size, alignment);
   size_t offset = std::get<0>(result);
   return offset;
 }
@@ -680,21 +680,21 @@ size_t ostream_write_func(
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::string& file_name,
     bool compute_crc32,
-    uint64_t storage_alignment)
+    uint64_t alignment)
     : archive_name_(basename(file_name)),
       compute_crc32_(compute_crc32),
-      storage_alignment_(storage_alignment) {
+      alignment_(alignment) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)> writer_func,
     bool compute_crc32,
-    uint64_t storage_alignment)
+    uint64_t alignment)
     : archive_name_("archive"),
       writer_func_(writer_func),
       compute_crc32_(compute_crc32),
-      storage_alignment_(storage_alignment) {
+      alignment_(alignment) {
   setup(archive_name_);
 }
 
@@ -764,7 +764,7 @@ void PyTorchStreamWriter::writeRecord(
       full_name.size(),
       size,
       padding_,
-      storage_alignment_);
+      alignment_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
 #if (!defined(FBCODE_CAFFE2))
