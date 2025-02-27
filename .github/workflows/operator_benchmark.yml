@@ -1,13 +1,9 @@
 name: operator_benchmark
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
   push:
-    branches:
-      - main
-      - release/*
+    tags:
+      - ciflow/op-benchmark/*
   workflow_dispatch:
     inputs:
       test_mode:
