@@ -153,8 +153,17 @@ def _compile_shader(source: str):
         >>> x = torch.zeros(16, device="mps")
         >>> lib.full(x, 3.14)
     """
+    from pathlib import Path
+
+    from torch.utils._cpp_embed_headers import _embed_headers
+
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
+    source = _embed_headers(
+        [l + "\n" for l in source.split("\n")],
+        [Path(__file__).parent.parent / "include"],
+        set(),
+    )
     return torch._C._mps_compileShader(source)
 
 

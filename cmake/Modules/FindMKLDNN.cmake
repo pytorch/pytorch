@@ -58,7 +58,7 @@ IF(NOT MKLDNN_FOUND)
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
       -DDNNL_BUILD_EXAMPLES=OFF
-      -DONEDNN_BUILD_GRAPH=OFF
+      -DONEDNN_BUILD_GRAPH=ON
       -DDNNL_LIBRARY_TYPE=STATIC
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
@@ -67,16 +67,15 @@ IF(NOT MKLDNN_FOUND)
       INSTALL_COMMAND ""
     )
 
-    ExternalProject_Get_Property(xpu_mkldnn_proj BINARY_DIR)
-    set(__XPU_MKLDNN_BUILD_DIR ${BINARY_DIR})
-    set(XPU_MKLDNN_LIBRARIES ${__XPU_MKLDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    set(XPU_MKLDNN_INCLUDE ${__XPU_MKLDNN_BUILD_DIR}/include)
+    ExternalProject_Get_Property(xpu_mkldnn_proj SOURCE_DIR BINARY_DIR)
+    set(XPU_MKLDNN_LIBRARIES ${BINARY_DIR}/src/${DNNL_LIB_NAME})
+    set(XPU_MKLDNN_INCLUDE ${SOURCE_DIR}/include ${BINARY_DIR}/include)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
     add_library(xpu_mkldnn INTERFACE)
     add_dependencies(xpu_mkldnn xpu_mkldnn_proj)
-    target_link_libraries(xpu_mkldnn INTERFACE ${__XPU_MKLDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
+    target_link_libraries(xpu_mkldnn INTERFACE ${XPU_MKLDNN_LIBRARIES})
     target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
   endif()
 
