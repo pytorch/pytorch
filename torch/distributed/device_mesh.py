@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -65,15 +65,15 @@ else:
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
-            self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: Dict[
+            self.mesh_stack: list[DeviceMesh] = []
+            self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: dict[
                 int, tuple[str, Optional[C10dBackend.Options]]
             ] = {}
-            self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
-            self.flatten_name_to_root_dims: Dict[
-                DeviceMesh, Dict[str, tuple[int, ...]]
+            self.flatten_name_to_root_dims: dict[
+                DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
@@ -85,7 +85,7 @@ else:
             self,
             device_mesh: "DeviceMesh",
             submesh_dim_names: tuple[str, ...],
-            submesh_dims: List[tuple[int, ...]],
+            submesh_dims: list[tuple[int, ...]],
         ) -> "DeviceMesh":
             # Get the submesh dim size from the submesh_dims.
             # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
@@ -290,7 +290,7 @@ else:
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
-        ) -> List[tuple[int, ...]]:
+        ) -> list[tuple[int, ...]]:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -342,7 +342,7 @@ else:
 
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> List["DeviceMesh"]:
+        ) -> list["DeviceMesh"]:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
@@ -462,7 +462,7 @@ else:
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
                 assert rank_coords.size(0) in (0, 1)
-                self._coordinate_on_dim: Optional[List[int]] = (
+                self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
@@ -502,7 +502,7 @@ else:
             # TODO(yifu): remove tag and ranks once we fully migrate to native
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: List[tuple[str, List[int], str]] = []
+            dim_group_infos: list[tuple[str, list[int], str]] = []
             default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
@@ -781,7 +781,7 @@ else:
                     _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
                 )
 
-        def get_all_groups(self) -> List[ProcessGroup]:
+        def get_all_groups(self) -> list[ProcessGroup]:
             """
             Returns a list of ProcessGroups for all mesh dimensions.
 
@@ -792,7 +792,7 @@ else:
 
         @staticmethod
         def from_group(
-            group: Union[ProcessGroup, List[ProcessGroup]],
+            group: Union[ProcessGroup, list[ProcessGroup]],
             device_type: str,
             mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
@@ -916,7 +916,7 @@ else:
             )
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> Optional[List[int]]:
+        def get_coordinate(self) -> Optional[list[int]]:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.

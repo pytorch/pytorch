@@ -361,8 +361,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
+        with (
+            TestMode(),
+            torch._dynamo.config.patch("traceable_tensor_subclasses", {TestSubclass}),
         ):
             with torch._C.DisableTorchFunctionSubclass():
                 expected = fn(inp)
@@ -392,8 +393,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
+        with (
+            TestMode(),
+            torch._dynamo.config.patch("traceable_tensor_subclasses", {TestSubclass}),
         ):
             expected = fn(inp)
             actual = fn_opt(inp)
