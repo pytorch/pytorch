@@ -275,7 +275,6 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-_DYNAMIC_SOURCES: Optional[set[str]] = None
 
 
 DimList = list
@@ -1951,15 +1950,15 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            if (
+            if self.source.name() in get_dynamic_sources():
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                dynamic_dim = DimDynamic.DYNAMIC
+            elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif (
-                not config.assume_static_by_default
-                or self.source.name() in get_dynamic_sources()
-            ):
+            elif not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2643,6 +2642,9 @@ def get_automatic_dynamic_shapes_mark_as():
         )
 
 
+_DYNAMIC_SOURCES: Optional[set[str]] = None
+
+
 def get_dynamic_sources() -> set[str]:
     global _DYNAMIC_SOURCES
     if _DYNAMIC_SOURCES is not None:
@@ -2821,12 +2823,15 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic or source.name() in dynamic_sources:
+        if marked_dynamic or name in dynamic_sources:
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
             # into the mutable state
-            log.debug("automatic dynamic %s marked dynamic", name)
+            if marked_dynamic:
+                log.debug("automatic dynamic %s marked dynamic", name)
+            if name in dynamic_sources:
+                log.debug("%s marked dynamic via source whitelist", name)
             mark_size = [auto_unset] * e.dim()
             mark_size[i] = auto_dynamic
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)

@@ -7859,7 +7859,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(my_dyn_fn, backend="eager")(y, y)
 
     @torch.compiler.config.patch(dynamic_sources="L['x']")
-    def test_dynamic_int_sources(self):
+    def test_dynamic_sources_int(self):
         counter = CompileCounter()
 
         @torch.compile(backend=counter)
@@ -7873,7 +7873,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(counter.frame_count, 1)
 
     @torch.compiler.config.patch(dynamic_sources="L['x']")
-    def test_dynamic_tensor_sources(self):
+    def test_dynamic_sources_tensor(self):
         counter = CompileCounter()
 
         @torch.compile(backend=counter)
