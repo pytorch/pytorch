@@ -66,7 +66,6 @@ from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     _get_symint_hints,
     contain_metadata_mutation_ops,
-    get_cuda_generator_meta_val,
     make_boxed_func,
     strict_zip,
     unlift_tokens,
@@ -449,20 +448,9 @@ def aot_dispatch_autograd(
             fake_mode = detect_fake_mode()
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
-
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            rng_states = [
-                n
-                for n in fw_module.graph.find_nodes(op="placeholder")
-                if "fwd_rng_state" in n.name
-            ]
-            fw_metadata.num_graphsafe_rng_states = len(rng_states)
-            if rng_states:
-                fw_metadata.graphsafe_rng_state_index = (
-                    rng_states[0].meta["val"].device.index
-                )
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
@@ -678,16 +666,6 @@ def aot_dispatch_autograd(
             functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper(
                 return_new_outs=False
             )
-
-            if rng_states:
-                index = fw_metadata.graphsafe_rng_state_index
-                assert index is not None
-                rng_states = [
-                    get_cuda_generator_meta_val(index)
-                    for _ in range(fw_metadata.num_graphsafe_rng_states)
-                ]
-                adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
-
             (
                 fw_module,
                 adjusted_flat_args,
