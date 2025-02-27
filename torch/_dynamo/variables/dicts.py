@@ -519,16 +519,15 @@ class ConstDictVariable(VariableTracker):
                 )
 
             self.install_dict_keys_match_guard()
-            tx.output.side_effects.mutation(self)
-            new_self = self.clone(
+            new_dict_vt = self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
 
             # NB - Guard on all the keys of the other dict to ensure
             # correctness.
             args[0].install_dict_keys_match_guard()
-            new_self.items.update(args[0].items)
-            return new_self
+            new_dict_vt.items.update(args[0].items)
+            return new_dict_vt
         else:
             return super().call_method(tx, name, args, kwargs)
 
