@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
@@ -2324,7 +2324,7 @@ def gen_source_files(
 
         def register_dispatch_key_env_callable(
             gnf: NativeFunction | NativeFunctionsGroup,
-        ) -> Dict[str, list[str]]:
+        ) -> dict[str, list[str]]:
             return {
                 "dispatch_definitions": get_native_function_definitions(
                     fm=fm,  # noqa: F821

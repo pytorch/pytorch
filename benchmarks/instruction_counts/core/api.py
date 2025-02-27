@@ -7,7 +7,7 @@ import enum
 import itertools as it
 import re
 import textwrap
-from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from worker.main import WorkerTimerArgs
 
@@ -49,7 +49,7 @@ class AutoLabels:
     language: Language
 
     @property
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> dict[str, str]:
         """Dict representation for CI reporting."""
         return {
             "runtime": self.runtime.value,
@@ -261,7 +261,7 @@ class GroupedBenchmark:
         py_block: str = "",
         cpp_block: str = "",
         num_threads: Union[int, tuple[int, ...]] = 1,
-    ) -> Dict[Union[tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+    ) -> dict[Union[tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
         py_cases, py_setup, py_global_setup = cls._parse_variants(
             py_block, Language.PYTHON
         )
@@ -279,9 +279,9 @@ class GroupedBenchmark:
         # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
-        variants: Dict[Union[tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        variants: dict[Union[tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
 
-        seen_labels: Set[str] = set()
+        seen_labels: set[str] = set()
         for label in it.chain(py_cases.keys(), cpp_cases.keys()):
             if label in seen_labels:
                 continue
@@ -415,13 +415,13 @@ class GroupedBenchmark:
     @staticmethod
     def _parse_variants(
         block: str, language: Language
-    ) -> tuple[Dict[str, List[str]], str, str]:
+    ) -> tuple[dict[str, list[str]], str, str]:
         block = textwrap.dedent(block).strip()
         comment = "#" if language == Language.PYTHON else "//"
         label_pattern = f"{comment} @(.+)$"
         label = ""
 
-        lines_by_label: Dict[str, List[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
+        lines_by_label: dict[str, list[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
         for line in block.splitlines(keepends=False):
             match = re.search(label_pattern, line.strip())
             if match:

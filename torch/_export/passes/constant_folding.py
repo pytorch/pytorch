@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -53,8 +53,8 @@ class ConstantFolder(torch.fx.Interpreter):
         skip_constructors: bool = False,
     ):
         super().__init__(gm)
-        self.node_replacements: Dict[torch.fx.Node, Any] = {}
-        self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
+        self.node_replacements: dict[torch.fx.Node, Any] = {}
+        self.replaced_uses: dict[torch.fx.Node, int] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors: bool = skip_constructors
 
@@ -75,6 +75,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.pt2e_quant.dequantize_affine,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
@@ -281,7 +282,7 @@ def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule
 
     new_graph = torch.fx.Graph()
 
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     output_nodes = []
     for node in gm.graph.nodes:
         if node.meta[META_TAG] == MODULE_TAG:

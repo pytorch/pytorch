@@ -2,7 +2,8 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence
+from collections.abc import Sequence
+from typing import Any, cast
 
 import sympy
 
@@ -13,13 +14,14 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Layout
+from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
     ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
+    use_aten_gemm_kernels,
 )
 
 
@@ -413,11 +415,6 @@ int8_mm_configs = functools.partial(
     configs=int8_platform_configs,
 )
 
-mixed_mm_configs = functools.partial(
-    filtered_configs,
-    configs=mixed_mm_platform_configs,
-)
-
 persistent_mm_configs = functools.partial(
     filtered_configs,
     configs=persistent_mm_platform_configs,
@@ -434,6 +431,17 @@ scaled_persistent_mm_configs = functools.partial(
 )
 
 
+def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
+    fallback_to_aten: bool = (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    )
+    if fallback_to_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+    return fallback_to_aten
+
+
 def mm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
@@ -441,7 +449,7 @@ def mm_grid(m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_mm_grid(M: int, N: int, meta: Dict[str, Any]):
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
@@ -456,7 +464,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     Common options to matmul triton templates.
     """
@@ -473,7 +481,6 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,

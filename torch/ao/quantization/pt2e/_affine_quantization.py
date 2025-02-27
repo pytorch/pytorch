@@ -3,7 +3,7 @@
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.observer import (
@@ -40,7 +40,7 @@ _SUB_BYTE_UINT_BOUNDS = {
 Map from dtype to the bound value of integers
 TODO: maybe can replace this with call to torch.iinfo
 """
-_DTYPE_TO_QVALUE_BOUNDS: Dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
+_DTYPE_TO_QVALUE_BOUNDS: dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
     torch.int16: (-(2**15), 2**15 - 1),
@@ -184,7 +184,7 @@ def _register_custom_op(lib):
     return decorator
 
 
-quant_lib = torch.library.Library("quant", "FRAGMENT")  # noqa: TOR901
+quant_lib = torch.library.Library("pt2e_quant", "FRAGMENT")  # noqa: TOR901
 
 register_custom_op = _register_custom_op(quant_lib)
 
@@ -234,7 +234,7 @@ def choose_qparams_affine_with_min_max(
 def _choose_qparams_affine(
     input: Optional[torch.Tensor],
     mapping_type: str,
-    block_size: List[int],
+    block_size: list[int],
     target_dtype: torch.dtype,
     quant_min: Optional[Union[int, float, bool]] = None,
     quant_max: Optional[Union[int, float, bool]] = None,
@@ -422,7 +422,7 @@ def quantize_affine(
 @register_custom_op
 def _quantize_affine(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     output_dtype: torch.dtype,
@@ -457,7 +457,7 @@ def _quantize_affine(
 
 def _quantize_affine_no_dtype_cast(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     quant_min: Union[int, float],
@@ -570,7 +570,7 @@ def dequantize_affine(
 @register_custom_op
 def _dequantize_affine(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     input_dtype: torch.dtype,
@@ -605,7 +605,7 @@ def _dequantize_affine(
 
 def _dequantize_affine_no_dtype_check(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     quant_min: Union[int, float],
@@ -744,7 +744,7 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
                 model, model.graph, "_zero_point", zero_point
             )
             q_node = model.graph.call_function(
-                torch.ops.quant.quantize_affine,
+                torch.ops.pt2e_quant.quantize_affine,
                 (
                     observer_node.args[0],
                     self.block_size,
@@ -758,7 +758,7 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
                 {},
             )
             dq_node = model.graph.call_function(
-                torch.ops.quant.dequantize_affine,
+                torch.ops.pt2e_quant.dequantize_affine,
                 (
                     q_node,
                     self.block_size,
