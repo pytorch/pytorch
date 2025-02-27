@@ -1240,6 +1240,11 @@ def forward(self, primals_1):
     #     return [sin, copy]""",
     #         )
 
+    # skipped after confirming with @yf225 and @bdhirsh
+    @unittest.skipIf(
+        True,
+        "using set_ unsafely and PT2 FSDP2 no longer uses set_ as used in this test",
+    )
     def test_input_mutation_storage_resize_down_and_set_(self):
         # Meant to mimic ppFSDP
         class TracableCreateParameter(torch.autograd.Function):
