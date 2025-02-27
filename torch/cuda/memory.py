@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -218,7 +218,7 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
-def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -323,7 +323,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -719,7 +719,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 
-def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
+def mem_get_info(device: Union[Device, int] = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device using cudaMemGetInfo.
 
     Args:
@@ -1041,7 +1041,7 @@ class MemPool(_MemPool):
         super().__init__(allocator, True)
 
     @property
-    def id(self) -> Tuple[int, int]:
+    def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 

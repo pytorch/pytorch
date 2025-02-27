@@ -439,11 +439,10 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = (
-            lambda cfg: not (  # noqa: E731
-                cfg.ln_req_grad and not cfg.elementwise_affine
+        valid_filter = (  # noqa: E731
+            lambda cfg: (
+                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[2:])
             )
-            and any(cfg[2:])
         )
         subtest_cfgs = list(
             filter(

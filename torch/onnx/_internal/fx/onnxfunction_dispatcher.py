@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import operator
 import types
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch._ops
@@ -19,6 +19,8 @@ from torch.onnx._internal.fx import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         graph_building as onnxscript_graph_building,

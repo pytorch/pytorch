@@ -29,8 +29,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -52,8 +53,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -242,7 +244,7 @@ class DistributedPatternTests(TestCase):
             x = x.sin()
             v = w._version
             w.copy_(x + 1)
-            torch._C._autograd._unsafe_set_version_counter(w, v)
+            torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return w, v
 
         for v in (3, 0, 1):
@@ -266,7 +268,7 @@ class DistributedPatternTests(TestCase):
             with torch.no_grad():
                 v = w._version
                 w.copy_(x)
-                torch._C._autograd._unsafe_set_version_counter(w, v)
+                torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return r
 
         w1 = torch.randn(1, requires_grad=True)
@@ -337,7 +339,9 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(fw_cnt.frame_count, 1)
         self.assertEqual(fw_cnt.op_count, 5)
         self.assertEqual(bw_cnt.frame_count, 2)  # grad=None and grad!=None
-        self.assertEqual(bw_cnt.op_count, 48)
+        self.assertEqual(
+            bw_cnt.op_count, 72
+        )  # Number of ops in the Dynamo-produced graphs
 
     def test_module_backward_hooks_aot(self):
         m1, inp1 = init_module_bw_hooks(True)

@@ -87,9 +87,12 @@ class BenchmarkFusionTestTemplate:
 
         # Disable dynamic_scale_rblock to make it easier to trigger register
         # spilling.
-        with unittest.mock.patch.object(
-            Scheduler, "benchmark_fused_nodes", new_benchmark_fn
-        ), config.patch("dynamic_scale_rblock", False):
+        with (
+            unittest.mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", new_benchmark_fn
+            ),
+            config.patch("dynamic_scale_rblock", False),
+        ):
             S = 512
 
             def f(*inputs):
@@ -158,9 +161,10 @@ class BenchmarkFusionTestTemplate:
                 ".run", 2, exactly=True
             ).run(out_code[0])
 
-        with config.patch(
-            {"benchmark_fusion": False, "epilogue_fusion": False}
-        ), torch.no_grad():
+        with (
+            config.patch({"benchmark_fusion": False, "epilogue_fusion": False}),
+            torch.no_grad(),
+        ):
             torch._dynamo.reset()
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)

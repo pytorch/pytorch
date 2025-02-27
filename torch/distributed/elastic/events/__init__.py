@@ -27,7 +27,7 @@ import logging
 import os
 import socket
 import traceback
-from typing import Dict, Optional
+from typing import Optional
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
 
@@ -40,7 +40,7 @@ from .api import (  # noqa: F401
 )
 
 
-_events_loggers: Dict[str, logging.Logger] = {}
+_events_loggers: dict[str, logging.Logger] = {}
 
 
 def _get_or_create_logger(destination: str = "null") -> logging.Logger:

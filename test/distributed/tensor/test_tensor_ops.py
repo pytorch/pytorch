@@ -226,9 +226,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        zeros_like_dt = torch.zeros_like(dist_tensor)
-        zeros_expected = torch.zeros(4, 8)
+        zeros_like_dt = torch.zeros_like(dist_tensor, dtype=torch.bfloat16)
+        zeros_expected = torch.zeros(4, 8, dtype=torch.bfloat16)
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
+        # make sure there is no side effect on the input tensor dtype
+        self.assertEqual(dist_tensor.dtype, torch.float32)
+        self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

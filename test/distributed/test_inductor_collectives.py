@@ -510,12 +510,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
-        ), torch._dynamo.config.patch(
-            dynamic_shapes=True,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
+        with (
+            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
             input_split_sizes_tensor = torch.tensor(
@@ -695,13 +696,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("buf0 = empty_strided")
-            .check("buf5 = empty_strided")
-            .check(".run(arg0_1, buf0, buf5, 16")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("buf1 = buf0")
             .check("buf6 = empty_strided")
-            .check(".run(buf6, 16")
-            .check("return (buf0, buf5, buf6")
+            .check(".run(buf1, arg0_1, buf6, 16")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("buf7 = empty_strided")
+            .check(".run(buf7, 16")
+            .check("return (buf1, buf6, buf7")
             .run(code)
         )
         out = compiled(inputs, **self.get_world_trs())
