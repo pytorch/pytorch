@@ -1030,9 +1030,9 @@ def _validate_schedule(
     num_stages: int,
     num_microbatches: int,
 ) -> dict[int, int]:
-    assert (
-        len(actions) == pp_group_size
-    ), f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
+    assert len(actions) == pp_group_size, (
+        f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
+    )
     for rank in range(pp_group_size):
         assert rank in actions, f"Schedule is missing actions for rank {rank}"
 
@@ -1079,9 +1079,9 @@ def _validate_schedule(
                 stage_index_to_rank_mapping[s_id] = rank
             else:
                 existing_rank = stage_index_to_rank_mapping[s_id]
-                assert (
-                    rank == existing_rank
-                ), f"Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
+                assert rank == existing_rank, (
+                    f"Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
+                )
 
     for s_id in stage_actions:
         f_mb = len(stage_actions[s_id][F])

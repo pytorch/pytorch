@@ -999,7 +999,7 @@ class FlatParamHandle:
         unsharded flat parameter specifying the shard.
         """
         flat_param_offsets = self._get_flat_param_offsets()
-        assert len(flat_param_offsets) == len(self.flat_param._numels_with_padding, (
+        assert len(flat_param_offsets) == len(self.flat_param._numels_with_padding), (
             f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
         )
         shard_param_infos: list[_ShardParamInfo] = []
@@ -2698,7 +2698,7 @@ def _safe_setattr_tensor_or_param(
 
 
 def _convert_to_params(
-    tensors: list[Union[torch.Tensor, nn.Parameter]]
+    tensors: list[Union[torch.Tensor, nn.Parameter]],
 ) -> list[nn.Parameter]:
     return [t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors]
 

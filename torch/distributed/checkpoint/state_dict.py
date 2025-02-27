@@ -140,10 +140,12 @@ class StateDictOptions:
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     shared_params_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     submodule_prefixes: set[str] = field(default_factory=set)
     handle_model: bool = True

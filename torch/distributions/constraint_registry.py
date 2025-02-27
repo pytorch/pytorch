@@ -66,7 +66,6 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
-
 from torch.distributions import constraints, transforms
 from torch.types import _Number
 

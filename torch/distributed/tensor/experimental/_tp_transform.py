@@ -188,9 +188,14 @@ def _mark_sharding(
     """
     Mark the sharding strategy for each node in the graph module.
     """
-    placement_strategies: dict[
-        Node, PlacementStrategy
-    ] = _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
+    placement_strategies: dict[Node, PlacementStrategy] = (
+        _mark_tensor_parallel_shardings(
+            gm,
+            graph_signature,
+            mesh,
+            parameter_placements,
+        )
+    )
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
