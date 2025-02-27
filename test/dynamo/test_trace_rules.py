@@ -6,7 +6,7 @@ import math
 import types
 import unittest
 import warnings
-from typing import Any, Dict, Set
+from typing import Any
 
 import torch
 import torch._dynamo.config as config
@@ -15,13 +15,18 @@ import torch._functorch.deprecated as deprecated_func
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
+    lookup_inner,
     manual_torch_name_rule_map,
     MOD_INLINELIST,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
-from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
+from torch._dynamo.variables import (
+    SkipFunctionVariable,
+    TorchInGraphFunctionVariable,
+    UserFunctionVariable,
+)
 from torch.testing._internal.common_utils import skipIfWindows
 
 
@@ -103,10 +108,10 @@ class AllowedObjects:
     from the heuristic defined in `gen_allowed_objs_and_ids`.
     """
 
-    object_ids: Dict[int, str]
-    c_binding_in_graph_functions: Set[Any]
-    non_c_binding_in_graph_functions: Set[Any]
-    name_rule_map: Dict[str, Any]
+    object_ids: dict[int, str]
+    c_binding_in_graph_functions: set[Any]
+    non_c_binding_in_graph_functions: set[Any]
+    name_rule_map: dict[str, Any]
 
 
 def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
@@ -438,6 +443,53 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+    def test_no_special_handlers_for_torch_non_c_bindings(self):
+        handlers = TorchInGraphFunctionVariable._get_handlers()
+        # These handlers are manually audited to be safe
+        safe_handlers = (
+            "handle_tracing_state_functions",  # No global state (constant)
+            "handle_radians",  # No global state (constant)
+            "handle_is_tensor",  # No global state
+            "handle_torch_compile",  # No global state, constant
+            "handle_ntuple",  # No global state
+            "handle_is_grad_enabled",  # Safely implemented
+            "handle_use_deterministic_algorithms",  # Guarded variable
+            "handle_are_deterministic_algorithms_enabled",  # Guarded constant
+            "handle_device_interface_stream",  # No global state
+            "handle_cudnn_is_acceptable",  # No global state
+            "handle_assert",  # No global state (constant)
+            "handle_nested_tensor",  # No global state
+        )
+        for fn in handlers:
+            if isinstance(fn, staticmethod) or inspect.ismethod(fn):
+                fn_name = f"{fn.__module__}#{fn.__name__}"
+            else:
+                fn_name = f"{fn.__module__}.{fn.__name__}"
+            if handlers[fn].__name__ in safe_handlers:
+                continue
+            self.assertFalse(
+                fn_name in torch_non_c_binding_in_graph_functions,
+                (
+                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
+                    "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
+                    "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
+                    "Otherwise, add it to `manual_torch_name_rule_map` instead."
+                ),
+            )
+
+    def test_almost_impossible_missing_name(self):
+        class weird:  # noqa: UP004
+            def __getattribute__(self, name):
+                if name == "__name__":
+                    raise AttributeError("test")
+
+        w = weird()
+        o = set()
+        with self.assertRaises(AttributeError):
+            w.__name__
+        self.assertEqual(lookup_inner(w, name=None, reasons=o), SkipFunctionVariable)
 
 
 class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):

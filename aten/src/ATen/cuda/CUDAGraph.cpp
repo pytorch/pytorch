@@ -257,7 +257,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
       has_graph_ = false;
     }
   } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");
+    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");

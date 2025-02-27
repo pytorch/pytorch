@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims
@@ -288,7 +288,7 @@ def norm(
 
 # CompositeImplicitAutograd
 @out_wrapper("U", "S", "Vh", exact_dtype=True)
-def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+def svd(A: TensorLikeType, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     return prims.svd(A, full_matrices=full_matrices)
 
 

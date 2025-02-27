@@ -10,7 +10,7 @@ import itertools
 import unittest
 import unittest.mock
 import warnings
-from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import numpy as np
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
-    input: Union[torch.Tensor, Tuple[torch.Tensor]],
+    input: Union[torch.Tensor, tuple[torch.Tensor]],
     custom_ops: Optional[
         Iterable[Union[contextlib.AbstractContextManager, contextlib.ContextDecorator]]
     ] = None,
@@ -341,22 +341,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         f = io.BytesIO()
         torch.onnx.export(foo, (torch.zeros(1, 2, 3)), f)
 
-    def test_listconstruct_erasure(self):
-        class FooMod(torch.nn.Module):
-            def forward(self, x):
-                mask = x < 0.0
-                return x[mask]
-
-        f = io.BytesIO()
-        torch.onnx.export(
-            FooMod(),
-            (torch.rand(3, 4),),
-            f,
-            add_node_names=False,
-            do_constant_folding=False,
-            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        )
-
     def test_export_dynamic_slice(self):
         class DynamicSliceExportMod(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -373,7 +357,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_export_dict(self):
         class DictModule(torch.nn.Module):
-            def forward(self, x_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+            def forward(self, x_in: torch.Tensor) -> dict[str, torch.Tensor]:
                 return {"test_key_out": x_in}
 
         x_in = torch.tensor(1)
@@ -486,7 +470,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             def __init__(self, bbox_xform_clip: float) -> None:
                 self.bbox_xform_clip = bbox_xform_clip
 
-            def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
+            def decode(self, rel_codes: Tensor, boxes: list[Tensor]) -> Tensor:
                 boxes = torch.cat(boxes, dim=0)
                 pred_ctr_x = (
                     torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip)
@@ -503,7 +487,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 super().__init__()
                 self.box_coder = BoxCoder(1.4)
 
-            def forward(self, box_regression: Tensor, proposals: List[Tensor]):
+            def forward(self, box_regression: Tensor, proposals: list[Tensor]):
                 return self.box_coder.decode(box_regression, proposals)
 
         model = torch.jit.script(MyModule())

@@ -51,11 +51,11 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1468,17 +1468,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                    lambda: getattr(net, fn)(None, l))
 
     def test_set_submodule(self):
+        # test the docstring example
+        A = nn.Module()
+        A.set_submodule("net_b", nn.Module())
+        A.set_submodule("net_b.net_c", nn.Module())
+        A.set_submodule("net_b.net_c.conv", nn.Conv2d(3, 3, 3))
+        A.set_submodule("net_b.linear", nn.Linear(3, 3))
+        new_linear = nn.Linear(1, 1)
+        A.set_submodule("net_b.net_c.conv", new_linear)
+        self.assertEqual(A.get_submodule("net_b.net_c.conv"), new_linear)
+        new_linear = nn.Linear(1, 2)
+        A.set_submodule("net_b.net_c.conv", new_linear, True)
+        self.assertEqual(A.get_submodule("net_b.net_c.conv"), new_linear)
+        new_conv = nn.Conv2d(1, 1, 1)
+        self.assertRaises(AttributeError, A.set_submodule, "net_b.conv", new_conv, True)
+        A.set_submodule("net_b.conv", new_conv)
+        self.assertEqual(A.get_submodule("net_b.conv"), new_conv)
+
+        # more tests
         net = nn.Module()
         net.t = nn.Module()
         l = nn.Linear(1, 2)
         target = "t.l"
-        net.set_submodule(target, l)
+        net.t.l = l
         self.assertEqual(net.get_submodule(target), l)
         l2 = nn.Linear(2, 1)
         net.set_submodule(target, l2)
         self.assertEqual(net.get_submodule(target), l2)
         self.assertRaises(ValueError, net.set_submodule, "", l)
         self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+        self.assertRaises(AttributeError, net.set_submodule, "0", l, True)
+        net.set_submodule("0", l, False)
+        self.assertEqual(net.get_submodule("0"), l)
+        l3 = nn.Linear(1, 1)
+        net.set_submodule("0", l3, True)
+        self.assertEqual(net.get_submodule("0"), l3)
+        net.foo = "bar"
+        self.assertRaises(AttributeError, net.set_submodule, "foo", l)
+        self.assertRaises(ValueError, net.set_submodule, "t.l", "bazz")
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -3520,6 +3547,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @tf32_on_and_off
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -4219,6 +4247,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self._test_RNN_cpu_vs_cudnn(1)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @tf32_on_and_off
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
         hidden_size = 6
@@ -4870,26 +4899,47 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     helper(self, nn.BatchNorm3d, shape, dtype, mixed_dtype, torch.channels_last_3d, precisons[dtype])
 
     def test_batchnorm_half_overflow(self):
-        def helper(self, mod, size, format):
+        def helper(self, mod, size, param_dtype, fwd_format, bwd_format):
             channels = size[1]
-            input = torch.randn(size, dtype=torch.half, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=format)
-            bn = mod(channels).cpu().to(torch.half)
+            input = torch.randn(size, dtype=torch.half, device='cpu')
+            input = input.contiguous(memory_format=fwd_format).requires_grad_(True)
+            bn = mod(channels).cpu().to(param_dtype)
             out = bn(input)
 
+            ref_input = input.detach().clone().requires_grad_(True)
             ref_bn = mod(channels).cpu().to(torch.float)
             ref_bn.load_state_dict(bn.to(torch.float).state_dict())
-            ref_out = ref_bn(input)
+            ref_out = ref_bn(ref_input)
 
             self.assertFalse(out.isinf().any())
             self.assertFalse(out.isnan().any())
             self.assertEqual(out, ref_out)
 
+            if param_dtype != torch.half:
+                grad_input = torch.empty(size=ref_out.shape).uniform_(0, 1).to(dtype=torch.half)
+                grad_input = grad_input.contiguous(memory_format=bwd_format)
+                ref_grad_input = grad_input.clone()
+                out.backward(grad_input)
+                ref_out.backward(ref_grad_input)
+                self.assertFalse(input.grad.isinf().any())
+                self.assertFalse(input.grad.isnan().any())
+                self.assertEqual(input.grad, ref_input.grad)
+
         for format in [torch.contiguous_format, torch.channels_last]:
-            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), format)
+            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), torch.half, format, format)
 
         for format in [torch.contiguous_format, torch.channels_last_3d]:
-            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), format)
+            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), torch.half, format, format)
+
+        formats = {
+            2: [torch.contiguous_format, torch.channels_last],
+            3: [torch.contiguous_format, torch.channels_last_3d],
+        }
+        for (fwd_format, bwd_format) in itertools.product(formats[2], formats[2]):
+            helper(self, nn.BatchNorm2d, (16, 3, 224, 224), torch.float, fwd_format, bwd_format)
+
+        for (fwd_format, bwd_format) in itertools.product(formats[3], formats[3]):
+            helper(self, nn.BatchNorm3d, (16, 20, 40, 40, 40), torch.float, fwd_format, bwd_format)
 
     @parametrize_test(
         'bn_module',
@@ -7297,7 +7347,7 @@ def add_test(test, decorator=None):
         kwargs['extra_args'] = test.extra_args
 
     if 'dtype' in get_function_arglist(test.test_cuda):
-        if tf32_is_not_fp32() and test.with_tf32:
+        if torch.cuda.is_tf32_supported() and test.with_tf32:
 
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
@@ -7340,7 +7390,7 @@ def add_test(test, decorator=None):
             with tf32_off():
                 test.test_cuda(self, **kwargs)
 
-        if tf32_is_not_fp32() and test.with_tf32:
+        if torch.cuda.is_tf32_supported() and test.with_tf32:
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
@@ -8910,6 +8960,32 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyCUDA   # Test if CPU and GPU results match with deterministic mode on
+    def test_ReflectionPad2d_large_deterministic(self, device):
+        original_deterministic = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            shape = [2, 65736, 6, 6]
+            pad = (1, 2, 3, 4)
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+        finally:
+            # avoid this state leaking outside of this test
+            torch.use_deterministic_algorithms(original_deterministic)
+
     @onlyNativeDeviceTypes
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
@@ -9778,7 +9854,6 @@ class TestNNDeviceType(NNTestCase):
         else:
             _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bilinear2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
         # NOTE: We expand the batch dim such that `b*c` is above the maximum
@@ -11076,6 +11151,20 @@ class TestNNDeviceType(NNTestCase):
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    def test_hardswish_grad_corner(self, device, dtype):
+        m = nn.Hardswish()
+        shape = (1, 9, 9, 1)
+        cpu_input = torch.ones(shape, device=device, dtype=dtype)
+        cpu_input = cpu_input * 3
+        cpu_input.requires_grad = True
+        fwd_result = m(cpu_input)
+        grad = torch.ones_like(fwd_result)
+        fwd_result.backward(grad)
+        ref = torch.ones(shape, device=device, dtype=dtype)
+        ref.fill_(1.5)
+        self.assertEqual(cpu_input.grad, ref)
 
     def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype
@@ -12942,10 +13031,68 @@ if __name__ == '__main__':
     @largeTensorTest("20GB", "cuda")
     def test_softmax_backward_64bit_indexing(self, device):
         for numel in (2147483650, 2147483650 + 1):
-            x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
+            x = torch.ones([1, 1, numel], device=device, dtype=torch.float16)
             x.fill_(1.0 / numel)
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
+
+    @onlyCUDA
+    def test_softmax_backward_smem(self, device):
+        torch.manual_seed(0)
+        # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype)
+            result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_without_fully_vectorized(self, device):
+        torch.manual_seed(0)
+        # We don't use smem here because the size of the elements does not divide
+        # ILP cleanly. ILP is defined as sizeof(float4) / sizeof(dtype). Since ILP
+        # is 4 and numel is not divisible by 4, we don't use shared memory here.
+        numel = 2048 + 1
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    def make_unaligned_1d_tensor_of_rand(self, numel, device, dtype):
+        # It's hard to get pytorch to return us a tensor that is not aligned to 16
+        # bytes. To work around that, we create an aligned tensor and create a
+        # slice of it that is not aligned.
+        output = torch.ones([numel + 1], device=device, dtype=dtype)
+        unaligned_output = output[1:]
+        self.assertNotEqual(unaligned_output.data_ptr() % 16, 0)
+        return unaligned_output
+
+    @onlyCUDA
+    def test_softmax_backward_unaligned_output(self, device):
+        torch.manual_seed(0)
+        # We don't use smem here because the output is not aligned to 16 bytes.
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            unaligned_output = self.make_unaligned_1d_tensor_of_rand(numel, device, dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(grad_output, unaligned_output, 0, unaligned_output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), unaligned_output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_unaligned_grad_output(self, device):
+        torch.manual_seed(0)
+        numel = 2048
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            unaligned_grad_output = self.make_unaligned_1d_tensor_of_rand(numel, device, dtype) * (1.0 / numel)
+            result = torch._softmax_backward_data(unaligned_grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(unaligned_grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
 
     # reference issue: https://github.com/pytorch/pytorch/issues/68248
     @onlyCUDA

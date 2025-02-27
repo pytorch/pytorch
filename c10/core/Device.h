@@ -169,7 +169,7 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
-  void validate() const {
+  void validate() {
     // Removing these checks in release builds noticeably improves
     // performance in micro-benchmarks.
     // This is safe to do, because backends that use the DeviceIndex

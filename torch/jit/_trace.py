@@ -17,7 +17,7 @@ import os
 import re
 import warnings
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -70,7 +70,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids: Set[int] = set()
+    seen_ids: set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -112,7 +112,7 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            in_args: List[torch.Tensor] = []
+            in_args: list[torch.Tensor] = []
             for i in range(len(in_vars)):
                 if not isinstance(args[i], torch.Tensor):
                     raise RuntimeError("Expected Tensor argument")
@@ -1114,7 +1114,7 @@ def trace(
     return traced_func
 
 
-_trace_module_map: Optional[Dict[Any, Any]] = None
+_trace_module_map: Optional[dict[Any, Any]] = None
 
 
 def trace_module(
@@ -1232,7 +1232,7 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        trace_module_map: Dict[Any, Any] = {}
+        trace_module_map: dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():

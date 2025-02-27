@@ -9,7 +9,6 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <limits>
 
 namespace c10::cuda {
 
@@ -175,16 +174,12 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  if constexpr (
-      C10_COMPILE_TIME_MAX_GPUS <
-      std::numeric_limits<decltype(num_gpus)>::max()) {
-    TORCH_CHECK(
-        num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
-        "Number of CUDA devices on the machine is larger than the compiled "
-        "max number of gpus expected (",
-        C10_COMPILE_TIME_MAX_GPUS,
-        "). Increase that and recompile.");
-  }
+  TORCH_CHECK(
+      num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
+      "Number of CUDA devices on the machine is larger than the compiled "
+      "max number of gpus expected (",
+      C10_COMPILE_TIME_MAX_GPUS,
+      "). Increase that and recompile.");
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
       cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));

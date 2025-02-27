@@ -392,7 +392,9 @@ class TestFakeTensorExport(common_utils.TestCase):
                 def forward(self, x):
                     return self.weight + x
 
-            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            onnx_program = torch.onnx.export(
+                Model(), (torch.tensor(1.0),), dynamo=True, optimize=False
+            )
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
             with self.assertRaises(Exception):
@@ -422,7 +424,9 @@ class TestFakeTensorExport(common_utils.TestCase):
                 return self.weight + x
 
         with torch.onnx.enable_fake_mode():
-            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            onnx_program = torch.onnx.export(
+                Model(), (torch.tensor(1.0),), dynamo=True, optimize=False
+            )
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
             with self.assertRaises(Exception):
@@ -454,7 +458,7 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         with torch.onnx.enable_fake_mode():
             onnx_program = torch.onnx.export(
-                real_model, (torch.tensor(1.0),), dynamo=True
+                real_model, (torch.tensor(1.0),), dynamo=True, optimize=False
             )
 
             assert onnx_program is not None
