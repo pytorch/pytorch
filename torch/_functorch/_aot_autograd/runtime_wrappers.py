@@ -1850,6 +1850,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     disable_amp=disable_amp,
                 )
 
+                for (
+                    out_idx,
+                    dims,
+                ) in CompiledFunction.metadata.mark_dynamic_outs.items():
+                    for dim in dims:
+                        torch._dynamo.mark_dynamic(fw_outs[out_idx], dim)  # mutates
+
                 num_outputs = CompiledFunction.metadata.num_outputs
                 num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
                 num_mutated_runtime_inps = (

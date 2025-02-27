@@ -476,6 +476,24 @@ def aot_dispatch_autograd(
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
+            for out_idx, node in enumerate(fw_outs):
+                dynamic_dims = []
+
+                if not hasattr(node, "meta") and "val" in node.meta:
+                    # non dynamo frontends
+                    continue
+
+                if not isinstance(node.meta["val"], FakeTensor):
+                    # non tensors
+                    continue
+
+                for dim, size in enumerate(node.meta["val"].shape):
+                    if not isinstance(size, int):
+                        dynamic_dims.append(dim)
+
+                if dynamic_dims:
+                    fw_metadata.mark_dynamic_outs[out_idx] = dynamic_dims
+
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,

@@ -411,6 +411,10 @@ class ViewAndMutationMeta:
         default_factory=list
     )
 
+    # Which outputs to mark_dynamic (only for tensors). Only implemented for fwd graph.
+    # Maps graph output idx => dynamic dims.
+    mark_dynamic_outs: dict[int, list[int]] = field(default_factory=dict)
+
     # Indexes of saved tensors which are donated buffer.
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
