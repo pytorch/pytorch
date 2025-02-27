@@ -94,6 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
+  const float softcap = 0.0;
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -111,7 +112,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   // in order to determine whether we are using varlen or dense forward
   if (cumulative_sequence_length_q.defined()) {
     // Varlen forward
-    auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_varlen_bwd(
+    auto [dQuery, dKey, dValue, dSoftmax] = FLASH_NAMESPACE::mha_varlen_bwd(
         contiguous_grad_out,
         query,
         key,
@@ -132,13 +133,14 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         non_null_window_left,
         non_null_window_right,
+        softcap,
         determinisitic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   } else {
     // Dense forward
-    auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_bwd(
+    auto [dQuery, dKey, dValue, dSoftmax] = FLASH_NAMESPACE::mha_bwd(
         contiguous_grad_out,
         query,
         key,
@@ -154,6 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         non_null_window_left,
         non_null_window_right,
+        softcap,
         determinisitic,
         philox_seed,
         philox_offset);

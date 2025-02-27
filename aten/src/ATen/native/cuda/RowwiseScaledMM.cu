@@ -30,8 +30,11 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/version.h>
 
 #include <cutlass/gemm/collective/collective_builder.hpp>
+#include <cutlass/gemm/device/gemm_universal.h>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
+#include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
 #include <cutlass/epilogue/collective/collective_builder.hpp>
+#include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 
 #include <cute/atom/mma_atom.hpp>
 #include <cutlass/gemm/dispatch_policy.hpp>
@@ -42,8 +45,6 @@ C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 namespace {
-
-constexpr int kNumSMsForH100 = 132;
 
 using DtypeScale = float;
 using DtypeAccum = float;
@@ -68,27 +69,34 @@ using Cast = cutlass::epilogue::fusion::Sm90Compute<
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
-template <bool PingPong, bool FastAccum>
+template <bool LargeTile, bool FastAccum>
 struct Schedule;
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/false> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/false> {
   using type = cutlass::gemm::KernelTmaWarpSpecialized;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/false> {
-  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/false> {
+  // For a 128x128x128 tile with fastAccum = false, using
+  // pingpong schedule will lead to spilling, and WarpSpecialized w/o pingpong
+  // is slow
+  using type = cutlass::gemm::KernelTmaWarpSpecializedCooperative;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecializedCooperative;
 };
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 int ceildiv(int a, int b) {
@@ -103,7 +111,6 @@ int round_up_to_nearest_multiple(int a, int b) {
 template <
     typename TileShape,
     typename ClusterShape,
-    typename PingPong,
     typename Transposed,
     typename FastAccum,
     typename DtypeA,
@@ -176,6 +183,8 @@ void f8f8bf16_rowwise_impl(
           Bias,
           AccumScale>>;
 
+  constexpr bool large_tile = std::is_same_v<TileShape, cute::Shape<cute::_128, cute::_128, cute::_128>>;
+
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
           ArchTag,
@@ -191,7 +200,7 @@ void f8f8bf16_rowwise_impl(
           DtypeOutput,
           LayoutOutput,
           AlignmentOutput,
-          cutlass::epilogue::TmaWarpSpecialized,
+          typename Schedule<large_tile, FastAccum::value>::epilogue_type,
           EpilogueEVT>::CollectiveOp;
 
   using CollectiveMainloop =
@@ -209,7 +218,7 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          typename Schedule<PingPong::value, FastAccum::value>::type>::
+          typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
@@ -252,8 +261,232 @@ void f8f8bf16_rowwise_impl(
   // multiplication computation
   size_t workspace_size = Gemm::get_workspace_size(arguments);
 
+  // Ensure persistent kernels leave enough free SMs for NCCL background ops.
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    arguments.hw_info.sm_count =
+        at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount -
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+
   // Set the swizzle size
   arguments.scheduler.max_swizzle_size = swizzle;
+
+  // Allocate workspace memory
+  auto workspace = XQ.new_empty(
+      {static_cast<int64_t>(workspace_size)},
+      at::TensorOptions().dtype(at::kByte));
+
+  // Check the problem size is supported or not
+  cutlass::Status status = gemm.can_implement(arguments);
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error("cutlass cannot implement");
+  }
+
+  // Initialize CUTLASS kernel with arguments and workspace pointer
+  status = gemm.initialize(arguments, workspace.data_ptr());
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error("cutlass cannot initialize");
+  }
+
+  status = gemm(at::cuda::getCurrentCUDAStream());
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error(
+        std::string("cutlass cannot run") +
+        cutlass::cutlassGetStatusString(status));
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// Cutlass rowwise kernel for SM89
+template <
+    typename FastAccum,
+    typename DtypeA,
+    typename DtypeB,
+    typename DtypeBias>
+void f8f8bf16_rowwise_impl_sm89(
+    at::Tensor XQ, // FP8
+    at::Tensor WQ, // FP8
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  int M = XQ.size(0);
+  int N = WQ.size(1);
+  int K = XQ.size(1);
+
+  using LayoutInputA = cutlass::layout::RowMajor;
+  constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
+
+  using LayoutInputB = cutlass::layout::ColumnMajor;
+  constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
+
+  using LayoutOutput = cutlass::layout::RowMajor;
+  constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
+
+  // Tag indicating the minimum SM that supports the intended feature
+  using ArchTag = cutlass::arch::Sm89;
+  using OperatorClass = cutlass::arch::OpClassTensorOp;
+
+  using ThreadblockSwizzle =
+      cutlass::gemm::threadblock::ThreadblockSwizzleStreamK;
+
+  // TODO: instead of fixing these values, implement logic alike to
+  // what is used for SM90+.
+  using ThreadblockShape = cutlass::gemm::GemmShape<64, 128, 64>;
+  using WarpShape = cutlass::gemm::GemmShape<32, 64, 64>;
+  using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
+  constexpr auto NumStages = 4;
+
+  using Operator = std::conditional_t<
+      FastAccum::value,
+      cutlass::arch::OpMultiplyAddFastAccum,
+      cutlass::arch::OpMultiplyAdd>;
+  constexpr auto NumEVTEpilogueStages = 1;
+
+  using OutputTileThreadMap =
+      cutlass::epilogue::threadblock::OutputTileThreadLayout<
+          ThreadblockShape,
+          WarpShape,
+          DtypeOutput,
+          AlignmentOutput,
+          NumEVTEpilogueStages>;
+
+  using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
+
+  using XScale = cutlass::epilogue::threadblock::VisitorColBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_1, cute::_0, int64_t>>;
+  using XScaleArguments = typename XScale::Arguments;
+
+  using WScale = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
+  using WScaleArguments = typename WScale::Arguments;
+
+  using Bias = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeBias,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
+  using BiasArguments = typename Bias::Arguments;
+
+  using ApplyXScale = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::multiplies, DtypeEpilogue, DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using EVTApplyXScale = cutlass::epilogue::threadblock::Sm80EVT<
+      ApplyXScale,
+      Accum,
+      XScale>;
+
+  using ApplyWScale = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::multiplies, DtypeEpilogue, DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using EVTApplyWScale = cutlass::epilogue::threadblock::Sm80EVT<
+      ApplyWScale,
+      EVTApplyXScale,
+      WScale>;
+
+  using ApplyBias = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::plus, DtypeEpilogue, DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using EVTApplyBias = cutlass::epilogue::threadblock::Sm80EVT<
+      ApplyBias,
+      EVTApplyWScale,
+      Bias>;
+
+  using Output = cutlass::epilogue::threadblock::VisitorAuxStore<
+      OutputTileThreadMap, DtypeOutput,
+      cutlass::FloatRoundStyle::round_to_nearest,
+      cute::Stride<int64_t, cute::_1, int64_t> // StrideMNL
+  >;
+
+  using EVTOutput = cutlass::epilogue::threadblock::Sm80EVT<
+      Output,
+      EVTApplyBias>;
+
+  using EVTKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
+      DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
+      DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
+      DtypeOutput, LayoutOutput, AlignmentOutput,
+      DtypeAccum,
+      DtypeEpilogue,
+      OperatorClass,
+      ArchTag,
+      ThreadblockShape,
+      WarpShape,
+      InstructionShape,
+      EVTOutput,
+      ThreadblockSwizzle,
+      NumStages,
+      Operator,
+      NumEVTEpilogueStages
+  >::GemmKernel;
+
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<EVTKernel>;
+
+  cutlass::gemm::GemmCoord problem_size(M, N, K);
+  constexpr auto SplitKFactor = 1;
+
+  XScaleArguments x_scale_arguments{
+      (DtypeScale*)x_scale.data_ptr(),
+      DtypeScale(1),
+      {cute::_1{}, cute::_0{}, problem_size.m()}
+  };
+  WScaleArguments w_scale_arguments{
+      (DtypeScale*)w_scale.data_ptr(),
+      DtypeScale(1),
+      {cute::_0{}, cute::_1{}, problem_size.n()}
+  };
+  BiasArguments bias_arguments{
+      bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr()) : nullptr,
+      DtypeBias(0),
+      {cute::_0{}, cute::_1{}, problem_size.n()}
+  };
+  typename Output::Arguments output_arguments{
+    (DtypeOutput*)out.data_ptr(),
+    {problem_size.n(), cute::_1{}, problem_size.mn().product()}
+  };
+  typename EVTOutput::Arguments callback_arguments{
+    {
+      {
+        {
+          {},                 // Accum
+          x_scale_arguments,  // XScale
+          {}                  // ApplyXScale
+        },                    // EVTApplyXScale
+        w_scale_arguments,    // WScale
+        {}                    // ApplyWScale
+      },                      // EVTApplyWScale
+      bias_arguments,         // Bias
+      {}                      // ApplyBias
+    },                        // EVTApplyBias
+    output_arguments          // Output
+  };                          // EVTOutput
+
+  typename Gemm::Arguments arguments(
+    cutlass::gemm::GemmUniversalMode::kGemm,
+    problem_size,
+    SplitKFactor,
+    callback_arguments,           // arguments of EVT callbacks
+    (DtypeA*)XQ.data_ptr(),
+    (DtypeB*)WQ.data_ptr(),
+    nullptr,                      // ptr C (unused)
+    nullptr,                      // ptr D (unused)
+    problem_size.mk().product(),  // batch stride A
+    problem_size.nk().product(),  // batch stride B
+    0,                            // batch stride C (unused)
+    0,                            // batch stride D (unused)
+    problem_size.k(),             // stride A
+    problem_size.k(),             // stride B
+    0,                            // stride C (unused)
+    0);                           // stride D (unused)
+
+  Gemm gemm;
+
+  // Using the arguments, query for extra workspace required for matrix
+  // multiplication computation
+  size_t workspace_size = Gemm::get_workspace_size(arguments);
 
   // Allocate workspace memory
   auto workspace = XQ.new_empty(
@@ -293,22 +526,25 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
   int M = XQ.size(0);
   int N = WQ.size(1);
 
+  int smTarget = at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
   if (ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
           ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
-      kNumSMsForH100 / cute::size(ClusterShape{})) {
+      smTarget / cute::size(ClusterShape{})) {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }
@@ -447,6 +683,29 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
 }
 
 template <typename... Types>
+void dispatch_fp8_rowwise_kernel_on_sm(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
+  const bool sm9x = properties != nullptr && properties->major == 9;
+  if (!(sm89 || sm9x)) {
+    TORCH_CHECK(
+        false, "Rowwise scaling is not currently supported on your device");
+  }
+
+  if (sm9x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
+template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_fast_accum(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -456,11 +715,11 @@ void dispatch_fp8_rowwise_kernel_on_fast_accum(
     bool use_fast_accum,
     at::Tensor out) {
   if (use_fast_accum) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+    dispatch_fp8_rowwise_kernel_on_sm<
         std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+    dispatch_fp8_rowwise_kernel_on_sm<
         std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
@@ -488,6 +747,7 @@ void dispatch_fp8_rowwise_kernel_on_input_dtypes(
   }
 }
 
+template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -497,11 +757,13 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     bool use_fast_accum,
     at::Tensor out) {
   if (bias.has_value() && bias->dtype() == at::kBFloat16) {
-    dispatch_fp8_rowwise_kernel_on_input_dtypes<cutlass::bfloat16_t>(
-        XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        cutlass::bfloat16_t,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
-    dispatch_fp8_rowwise_kernel_on_input_dtypes<float>(
-        XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        float,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
 }
 
@@ -576,7 +838,7 @@ void f8f8bf16_rowwise(
       XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
 #else // BUILD_ROWWISE_FP8_KERNEL
   TORCH_CHECK(
-      false, "Rowwise scaling is not currenlty supported on your device");
+      false, "Rowwise scaling is not currently supported on your device");
 #endif
 }
 
