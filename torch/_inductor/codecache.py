@@ -1051,7 +1051,7 @@ class FxGraphCache:
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles", 1)
+                    CompileEventLogger.increment_toplevel("num_triton_bundles")
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1302,7 +1302,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache hit stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count", 1
+                    "inductor_fx_remote_cache_hit_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_hit_keys", key
@@ -1323,7 +1323,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache miss stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count", 1
+                    "inductor_fx_remote_cache_miss_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_miss_keys", key
@@ -1422,12 +1422,6 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
-        # Meta internal AOTInductor CPU
-        fbcode_aot_cpu_re = (
-            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
-        )
-        use_relative_path = fbcode_aot_cpu_re
-
         (
             specified_output_path,
             specified_artifact_name,
@@ -1511,7 +1505,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_relative_path=config.is_fbcode(),
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1632,7 +1626,7 @@ class AotCodeCompiler:
                 "aot_mode": graph.aot_mode,
                 "device_type": device_type,
                 "use_mmap_weights": use_mmap_weights,
-                "use_relative_path": use_relative_path,
+                "use_relative_path": config.is_fbcode(),
                 "vec_isa": picked_vec_isa,
             }
             object_build_options = CppTorchDeviceOptions(
@@ -1701,7 +1695,7 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_relative_path=use_relative_path,
+                use_relative_path=config.is_fbcode(),
             )
 
             so_builder = CppBuilder(
@@ -1974,8 +1968,9 @@ class CppCodeCache:
         compile_command = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
-            "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
+            "use_relative_path": config.is_fbcode(),
+            "vec_isa": pick_vec_isa(),
         }
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
@@ -1995,11 +1990,6 @@ class CppCodeCache:
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            """
-            If `fb_code` env, it need to be dispatched to original `compile_file` function.
-            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
-            """
-            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
 
@@ -2019,20 +2009,12 @@ class CppCodeCache:
                 output_dir=output_dir,
                 BuildOption=cpp_build_option,
             )
-
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
                 cpp_builder,
-                input_path,
-                fb_output_path,
             )
-
-            binary_path = normalize_path_separator(
-                fb_output_path
-                if config.is_fbcode()
-                else cpp_builder.get_target_file_path()
-            )
+            binary_path = normalize_path_separator(cpp_builder.get_target_file_path())
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -2062,16 +2044,11 @@ class CppCodeCache:
 def _worker_compile_cpp(
     lock_path: str,
     cpp_builder: CppBuilder,
-    fb_input_path: str,
-    fb_output_path: str,
 ) -> None:
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        binary_path = (
-            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
-        )
-        if not os.path.exists(binary_path):
+        if not os.path.exists(cpp_builder.get_target_file_path()):
             cpp_builder.build()
 
 
