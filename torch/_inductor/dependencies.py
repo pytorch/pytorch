@@ -319,6 +319,22 @@ class MemoryDep(Dep):
             indirect_broadcast=indirect_broadcast,
         )
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MemoryDep):
+            return NotImplemented
+        # Compare all core attributes except replacement and indirect_broadcast
+        return (
+            self.name == other.name
+            and self.index == other.index
+            and self.var_names == other.var_names
+            and self.size == other.size
+            and self.mode == other.mode
+        )
+
+    def __hash__(self) -> int:
+        # Hash must be consistent with __eq__
+        return hash((self.name, self.index, self.var_names, self.size, self.mode))
+
 
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
@@ -500,7 +516,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             sizes.pop()
 
     @classmethod
-    def _normalize(cls, index: sympy.Expr, var_ranges: VarRanges) -> tuple[
+    def _normalize(
+        cls, index: sympy.Expr, var_ranges: VarRanges
+    ) -> tuple[
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
@@ -528,7 +546,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
         return index, tuple(new_vars), tuple(new_sizes), tuple(replacement.items())  # type: ignore[arg-type]
 
-    def canonicalize(self, index: sympy.Expr) -> tuple[
+    def canonicalize(
+        self, index: sympy.Expr
+    ) -> tuple[
         sympy.Expr,
         tuple[sympy.Symbol, ...],
         tuple[sympy.Expr, ...],
@@ -742,9 +762,9 @@ def extract_loop_body_with_args(
             # check if the coefficient is the stride
             buffer = None
             if read.name in V.graph.name_to_buffer:
-                buffer = V.graph.name_to_buffer[read.name]
+                buffer = V.graph.name_to_buffer[read.name]  # type: ignore[assignment]
             elif read.name in V.graph.graph_inputs:
-                buffer = V.graph.graph_inputs[read.name]
+                buffer = V.graph.graph_inputs[read.name]  # type: ignore[assignment]
 
             if buffer is None or not isinstance(
                 buffer.layout, torch._inductor.ir.FixedLayout
@@ -755,7 +775,8 @@ def extract_loop_body_with_args(
             # check the indirect variable
             indirect_load_dim_indexing_expr = None
             indirect_var = multiplied_symbol
-            if not is_indirect(indirect_var.name):
+            # Fix: Check that indirect_var is not None before accessing .name
+            if indirect_var is None or not is_indirect(indirect_var.name):
                 continue
             # find out its corresponding set_indirect node, e.g. set_indirect0
             set_indirect_node = name_to_node[f"set_{repl_reverse[indirect_var].name}"]
