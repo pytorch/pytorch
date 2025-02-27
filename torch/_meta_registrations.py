@@ -3637,6 +3637,7 @@ def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
     )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
+
 @register_meta([aten._weight_int4pack_mm_with_scales_and_zeros])
 def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
