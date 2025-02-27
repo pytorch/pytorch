@@ -4965,7 +4965,9 @@ class ExternKernel(InputsKernel):
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
+            is_arg_tensor.append(
+                isinstance(arg, IRNode) and not isinstance(arg, NonTensorObj)
+            )
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
@@ -4996,7 +4998,9 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args: list[Union[torch.Tensor, torch._C.ScriptObject]] = []
+        example_args: list[
+            Union[torch.Tensor, torch._C.ScriptObject, torch.Generator]
+        ] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -5013,6 +5017,12 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_real_obj())
+            elif isinstance(x, torch._inductor.ir.GeneratorState):
+                device_index = x.device.index
+                assert x.device.type == "cuda" and device_index is not None
+                example_args.append(
+                    torch.cuda.default_generators[device_index].clone_state()
+                )
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -5143,7 +5153,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, TorchBindObject):
+        if isinstance(x, (NonTensorObj)):
             return x
         return cls.copy_input(x)
 
@@ -5787,6 +5797,14 @@ class UserDefinedTritonKernel(ExternKernel):
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
 
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -5797,13 +5815,6 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
-            # NOTE: raw_args doesn't include autotuned args.
-            # But, kernel.constexprs includes indices of autotuned args.
-            # So, let's recalculate constexpr indices wrt to raw_args.
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if kernel.arg_names.index(kwarg) in kernel.constexprs:
-                    constexpr_indices.append(idx)
 
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
@@ -5843,11 +5854,6 @@ class UserDefinedTritonKernel(ExternKernel):
                         equal_to_1.append(idx - index_shift)
 
                 triton_meta["configs"][0].equal_to_1 = equal_to_1
-        else:
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if triton_meta["signature"][kwarg] == "constexpr":
-                    constexpr_indices.append(idx)
 
         # Call to kernel
         self.codegen_comment(wrapper)
@@ -6483,7 +6489,16 @@ class FallbackKernel(ExternKernelAlloc):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
+                        out = self.outputs[0]
+                        # When fallback kernel returns a list consisting of a single tensor,
+                        # the output is represented as a MultiOutput with non empty indices.
+                        # In this case, we strip the first key path away.
+                        return go(
+                            self.outputs[0].get_name(),
+                            keypath[1:]
+                            if isinstance(out, MultiOutput) and len(out.indices) != 0
+                            else keypath,
+                        )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
@@ -7553,8 +7568,12 @@ class EffectfulKernel(FallbackKernel):
         return True
 
 
+class NonTensorObj(IRNode):
+    pass
+
+
 @ir_dataclass
-class TorchBindObject(IRNode):
+class TorchBindObject(NonTensorObj):
     from torch._library.fake_class_registry import FakeScriptObject
 
     name: str
@@ -7586,6 +7605,18 @@ class TorchBindObject(IRNode):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
+
+
+@ir_dataclass
+class GeneratorState(NonTensorObj):
+    name: str
+    device: torch.device
+
+    def get_name(self):  # type: ignore[no-untyped-def]
+        return self.name
+
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        return self.name
 
 
 class _CollectiveKernel(FallbackKernel):
