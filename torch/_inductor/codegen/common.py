@@ -287,7 +287,7 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(self) -> Optional[tuple[str, str]]:
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
