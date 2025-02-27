@@ -589,12 +589,11 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale_size = x_scale.get_size()
-                if len(x_scale_size) == 2:
-                    if x_scale_size[0] == 1 and x_scale_size[1] == 1:
-                        # Corner-case discovered with LLaMA series.
-                        # If x_scale is shaped [1, 1], make it a 0D tensor.
-                        # Otherwise, epilogue creator will run into indexing issues.
-                        x_scale = view(x_scale, [])
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
                 assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
                 x_scale.realize()
 
@@ -903,12 +902,11 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale_size = x_scale.get_size()
-                if len(x_scale_size) == 2:
-                    if x_scale_size[0] == 1 and x_scale_size[1] == 1:
-                        # Corner-case discovered with LLaMA series.
-                        # If x_scale is shaped [1, 1], make it a 0D tensor.
-                        # Otherwise, epilogue creator will run into indexing issues.
-                        x_scale = view(x_scale, [])
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
                 assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
                 x_scale.realize()
 
