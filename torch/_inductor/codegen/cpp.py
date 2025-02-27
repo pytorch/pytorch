@@ -505,8 +505,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         # For example (test_expr_vec_non_contiguous in test_cpu_repro.py):
         #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
         # If the check failed, we should fall back to standard loop codegen.
-        # If the range of the first inner loop is much larger than
-        # the range of all outer loops, fall back to standard loop codegen.
         def _inner(
             left_loop_nest: LoopNest,
             right_loop_nest: LoopNest,
