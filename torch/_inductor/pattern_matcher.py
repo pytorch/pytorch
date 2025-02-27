@@ -273,11 +273,13 @@ class Match:
                 fake_kwargs = {**fake_kwargs}
                 match_args, match_kwargs = tuple(self.args), self.kwargs
 
-                def record(node, val):
+                def record(node: torch.fx.Node, val: Any) -> None:
                     if isinstance(node, torch.fx.Node):
                         node_to_val[node] = val
 
-                torch.utils._pytree.tree_map(record, (match_args, match_kwargs), (fake_args, fake_kwargs))
+                torch.utils._pytree.tree_map(
+                    record, (match_args, match_kwargs), (fake_args, fake_kwargs)
+                )
 
                 # map args to their FakeTensor val in arg_kwarg_vals
                 example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
@@ -1091,7 +1093,6 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
-
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
