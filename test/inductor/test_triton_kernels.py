@@ -3409,7 +3409,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         def add_triton(y, z):
             grid = (z.numel(),)
             out = torch.empty_like(z, memory_format=torch.contiguous_format)
-            add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
+            add_kernel[grid](y, z, out, z.numel(), BLOCK_SIZE=16)
             return out
 
         class _CustomPass(PatternMatcherPass):
@@ -3431,8 +3431,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def decomp(*flat_args):
                 args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.aten.permute(*args, **kwargs).clone(
-                    memory_format=torch.channels_last
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
                 )
 
             nonlocal called
@@ -3442,6 +3442,17 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         from torch._inductor import config
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CUDA")
+            lib.impl("force_channels_last", impl2, "Meta")
+
             lib.define(
                 "add_op(Tensor x, Tensor y) -> Tensor",
                 tags=[torch._C.Tag.needs_exact_strides],
@@ -3457,9 +3468,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             lib.impl("add_op", meta, "Meta")
 
             def f(x, other):
-                # one input non-contiguous, the other input is contiguous
                 y = x.transpose(2, 3).contiguous().transpose(2, 3)
-                z = y.sin()
+                z = y.sin().transpose(2, 3)
                 if variant == "triton_kernel":
                     return add_triton(y, z)
                 elif variant == "custom_op":

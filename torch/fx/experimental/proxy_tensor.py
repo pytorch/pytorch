@@ -1112,14 +1112,14 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        if should_save_arg_kwarg_vals(target):
+        if _should_save_arg_kwarg_vals(target):
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
             node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
 
 
-def should_save_arg_kwarg_vals(target: Any) -> bool:
+def _should_save_arg_kwarg_vals(target: Any) -> bool:
     if isinstance(
         target,
         (
