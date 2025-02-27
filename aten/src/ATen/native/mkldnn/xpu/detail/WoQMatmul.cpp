@@ -51,8 +51,8 @@ sycl::event woq_matmul_int4(
       dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides,
       zp_usr_strides, dst_usr_strides;
-  uint64_t compressed_k = (uint64_t)(k / 8);
-  uint64_t num_groups = (uint64_t)(k / group_size);
+  int compressed_k = (int)(k / 8);
+  int num_groups = (int)(k / group_size);
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
   m2_usr_dims = {compressed_k, n};
