@@ -5232,11 +5232,22 @@ class TestLinalg(TestCase):
         # out_dtype = float16
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.half)
 
+        # rowwise scaling, only supported for this dtype combination
+        if dtype is torch.torch.float8_e4m3fnuz:
+            scaleA = torch.ones((matA.shape[0], 1), device=device)
+            scaleB = torch.ones((1, matB.shape[0]), device=device)
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+
         # This stores total number of cummulative results
         total_num_results = len(torch.cuda.tunable.get_results())
 
-        # There must be a four new tuning results
-        self.assertEqual((total_num_results - ref_num_results), 4)
+        # There must be a four new tuning results unless you do
+        # rowwise in which case there is a 5th one
+        if dtype is torch.torch.float8_e4m3fnuz:  # rowwise
+            count = 5
+        else:
+            count = 4
+        self.assertEqual((total_num_results - ref_num_results), count)
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
