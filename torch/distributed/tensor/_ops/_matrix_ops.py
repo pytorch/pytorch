@@ -252,8 +252,10 @@ def scaled_dot_product_flash_attention_strategy(
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        # None,  # philox_seed
+        # None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         Replicate(),
         Replicate(),
         Replicate(),
@@ -279,8 +281,10 @@ def scaled_dot_product_flash_attention_strategy(
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        # None,  # philox_seed
+        # None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         debug_attn_mask_sharding,
         qkv_sharding,
         qkv_sharding,
@@ -297,8 +301,10 @@ def scaled_dot_product_flash_attention_strategy(
             None,  # cum_seq_k
             None,  # max_q
             None,  # max_k
-            None,  # philox_seed
-            None,  # philox_offset
+            # None,  # philox_seed
+            # None,  # philox_offset
+            Replicate(),  # rng_state
+            None,  # unused
             Shard(2),  # debugattn
             Shard(2),  # q
             Shard(2),  # k
