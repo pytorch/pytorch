@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -16,6 +17,16 @@ constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
+
+enum class ErrorType {
+  SUCCESS = 0,
+  TIMEOUT = 1,
+  // e.g., NCCL error, etc
+  COMM_ERROR = 2,
+  // TODO, do we need to distinguish between remote timeout or remote COMM
+  // errors?
+  REMOTE_ERROR = 3
+};
 
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
@@ -391,6 +402,34 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
     bound_device_id_ = device;
+  }
+
+  virtual ErrorType getError() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support getError"));
+  }
+
+  virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support getMemAllocator"));
+  }
+
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  // Returns true if backend supports tensor allocation
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+    // Change to true in concrete backend if supported
+    return false;
   }
 
  protected:
