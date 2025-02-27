@@ -2619,26 +2619,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     """
                 )
 
-                # reduce
+                # reduce. Similar to the final reduction for coopereative
+                # reduction
                 result_max = result_var
                 result_sum = self.cse.newvar(dtype=dtype)
 
-                accumulator_max = self.reduction_collapse_dims(
-                    self.post_loop_combine, accumulator_max, acc_type
+                result_var = self.online_softmax_reduce_final_reduction(
+                    self.post_loop_combine,
+                    result_max,
+                    result_sum,
+                    accumulator_max,
+                    accumulator_sum,
+                    dim,
+                    dtype,
                 )
-                accumulator_sum = self.reduction_collapse_dims(
-                    self.post_loop_combine, accumulator_sum, acc_type
-                )
-                self.post_loop_combine.splice(
-                    f"""
-                    {result_max}_tmp, {result_sum}_tmp = triton_helpers.online_softmax_reduce(
-                        {accumulator_max}, {accumulator_sum}, {dim})
-                    {result_max} = {self.reduction_resize(f'{result_max}_tmp')}
-                    {result_sum} = {self.reduction_resize(f'{result_sum}_tmp')}
-                    """
-                )
-
-                result_var = result_max, result_sum
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -2709,6 +2703,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
+            elif reduction_type == "online_softmax_reduce":
+                result_max, result_sum = result_var
+                peer_max = self.codegen_cooperative_reduction_peer_combine(
+                    result_max, upcast_acc_dtype(src_dtype), default[0]
+                )
+                peer_sum = self.codegen_cooperative_reduction_peer_combine(
+                    result_sum, upcast_acc_dtype(src_dtype), default[1]
+                )
+                self.online_softmax_reduce_final_reduction(
+                    self.post_loop_store,
+                    result_max,
+                    result_sum,
+                    peer_max,
+                    peer_sum,
+                    dim,
+                    dtype,
+                )
             else:
                 peers = self.codegen_cooperative_reduction_peer_combine(
                     result_var, upcast_acc_dtype(src_dtype), default
@@ -2748,6 +2759,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
         return result_var
+
+    def _online_softmax_reduce(
+        self, buffer, accumulator_max, accumulator_sum, dim, dtype: torch.dtype
+    ):
+        accumulator_max = self.reduction_collapse_dims(buffer, accumulator_max, dtype)
+        accumulator_sum = self.reduction_collapse_dims(buffer, accumulator_sum, dtype)
+        result_max, result_sum = [str(self.cse.newvar(dtype=dtype)) for _ in range(2)]
+        buffer.splice(
+            f"""
+            {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
+                {accumulator_max}, {accumulator_sum}, {dim})
+            {result_max} = {self.reduction_resize(f'{result_max}')}
+            {result_sum} = {self.reduction_resize(f'{result_sum}')}
+            """
+        )
+
+        return result_max, result_sum
 
     def _welford(self, buffer, mean, m2, weight, dim, dtype: torch.dtype):
         """
@@ -2842,6 +2870,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer.splice(f"{result_expr} = {value}")
 
         return result_mean, result_m2, result_weight
+
+    def online_softmax_reduce_final_reduction(
+        self, buffer, result_max, result_sum, peer_max, peer_sum, dim, dtype
+    ):
+        values = self._online_softmax_reduce(buffer, peer_max, peer_sum, dim, dtype)
+        result_exprs = [result_max, result_sum]
+        for result_expr, value in zip(result_exprs, values):
+            buffer.splice(f"{result_expr} = {value}")
+
+        return result_max, result_sum
 
     def max_rsplit(self):
         if self.fixed_config:

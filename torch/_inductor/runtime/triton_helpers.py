@@ -152,7 +152,9 @@ def max_with_index(value, index, dim):
 @triton.jit
 def online_softmax_reduce(lhs_max, lhs_sum, dim):
     out_max = max2(lhs_max, dim)
-    out_sum = tl.sum(lhs_sum * math.exp(lhs_max - out_max[:, None]), dim)
+    out_max_keepdim = out_max[:, None]
+    delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    out_sum = tl.sum(lhs_sum * math.exp(delta), dim)
     return out_max, out_sum
 
 
