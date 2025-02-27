@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
-
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -24,27 +24,10 @@
 namespace {
 
 bool device_has_multicast_support(int device_idx) {
-#if defined(CUDART_SUPPORTS_MULTICAST)
   if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
     return false;
   }
-  // Multicast support requirements:
-  // - CUDA Runtime version >= 12030: Checked at compile time using
-  // CUDART_VERSION.
-  // - Driver version >= 535: Checked at runtime by verifying the existence of
-  // cuMulticastCreate_.
-  // - Device support: Determined by querying
-  // CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED at runtime.
-  auto driver_api = c10::cuda::DriverAPI::get();
-  int multicast_supported;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
-      &multicast_supported,
-      CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED,
-      device_idx));
-  return driver_api->cuMulticastCreate_ != nullptr && multicast_supported;
-#else
-  return false;
-#endif
+  return c10d::cuda::deviceSupportsMulticast(device_idx);
 }
 
 bool allow_overlapping_devices() {
