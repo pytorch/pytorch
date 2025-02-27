@@ -36,7 +36,7 @@ void _fused_adam_cuda_impl_(
         kHalf,
         kBFloat16,
         params[0].scalar_type(),
-        "fused_adam_kernel_cuda",
+        "fused_adam_mp_kernel_cuda",
         [&]() {
           multi_tensor_apply_for_fused_optimizer<4>(
               tensor_lists,

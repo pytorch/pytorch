@@ -837,16 +837,10 @@ def _fused_adam(
     lr_dict: Optional[DeviceDict] = (
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
-    # grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-    #     [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
-    # )
-    # replace this with better implementation
-    grouped_tensors = {
-        (params[0].device, params[0].dtype): (
-            (params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps),
-            None,
-        )
-    }
+    # TODO: currently the check that the state are properly correspondent to their param dtype + device is removed!!!!
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
+    )
     for (device, _), (
         (
             device_params_,

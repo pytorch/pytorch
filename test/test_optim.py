@@ -2237,17 +2237,16 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @optims(
-        [o for o in optim_db if o.optim_cls.__name__ == "Adam"], dtypes=[torch.float32]
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
     )
-    def test_bf16_fused_adam(self, device, dtype, optim_info):
+    def test_bf16_fused(self, device, dtype, optim_info):
         optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
             # currently not supported
-            if kwargs.get("amsgrad", False) or kwargs.get(
-                "decoupled_weight_decay", False
-            ):
+            if kwargs.get("amsgrad", False):
                 continue
             kwargs["fused"] = True
 
