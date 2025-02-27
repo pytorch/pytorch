@@ -47,7 +47,6 @@ jobs:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
-        exclude:
         include:
           - device: "rocm"
             rocm_version: "6.3"
