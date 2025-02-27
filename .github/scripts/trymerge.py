@@ -1245,7 +1245,6 @@ class GitHubPR:
             )
 
 
-
 class MergeRuleFailedError(RuntimeError):
     def __init__(self, message: str, rule: Optional["MergeRule"] = None) -> None:
         super().__init__(message)
