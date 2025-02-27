@@ -3381,7 +3381,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(z, (x + y) * 2)
 
     @requires_gpu
-    @common_utils.parametrize("variant", ["triton_kernel", "custom_op"])
+    @common_utils.parametrize(
+        "variant", ["triton_kernel", "custom_op", "mutable_custom_op"]
+    )
     def test_preserves_strides(self, variant):
         import triton
         import triton.language as tl
@@ -3467,6 +3469,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             lib.impl("add_op", impl, "CUDA")
             lib.impl("add_op", meta, "Meta")
 
+            lib.define(
+                "add_out_op(Tensor x, Tensor y, Tensor(a!) out) -> ()",
+                # tags=[torch._C.Tag.flexible_layout],
+                tags=[torch._C.Tag.needs_exact_strides],
+            )
+
+            def impl_out(x, y, out):
+                grid = (y.numel(),)
+                add_kernel[grid](x, y, out, y.numel(), BLOCK_SIZE=16)
+
+            lib.impl("add_out_op", impl_out, "CUDA")
+
             def f(x, other):
                 y = x.transpose(2, 3).contiguous().transpose(2, 3)
                 z = y.sin().transpose(2, 3)
@@ -3474,13 +3488,17 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                     return add_triton(y, z)
                 elif variant == "custom_op":
                     return torch.ops.mylib.add_op.default(y, z)
+                elif variant == "mutable_custom_op":
+                    out = torch.empty_like(y, memory_format=torch.contiguous_format)
+                    torch.ops.mylib.add_out_op(y, z, out)
+                    return out
                 else:
                     raise AssertionError("should not be hit")
 
             with config.patch(
                 post_grad_custom_post_pass=g,
             ):
-                f_compile = torch.compile(f)
+                f_compile = torch.compile(f, fullgraph=True)
                 self.assertEqual(f(x, other), f_compile(x, other))
                 self.assertTrue(called)
 
