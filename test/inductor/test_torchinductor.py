@@ -816,10 +816,10 @@ def skip_if_triton(fn):
 
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_triton_backend(self.device):
             raise unittest.SkipTest(f"triton backend is required for {self.device}")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
