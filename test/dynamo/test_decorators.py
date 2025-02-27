@@ -640,6 +640,26 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_set_stance_eager_then_compile_with_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            y = torch.sin(y)
+            torch._dynamo.graph_break()
+            y = torch.cos(y)
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            fn(1, torch.randn(1), {0: torch.randn(1)})
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+            fn(5, torch.randn(5), {0: torch.randn(5)})
+
+        # frame count 2 since we added a graph break
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
