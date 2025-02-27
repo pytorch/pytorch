@@ -893,8 +893,12 @@ class PythonWrapperCodegen(CodeGen):
         return V.graph.graph_outputs
 
     def codegen_input_size_asserts(self) -> None:
-        for name, buf in V.graph.graph_inputs.items():
+        for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+                continue
+
+            # a graph partition may take an IRNode output from a previous partition
+            if name not in V.graph.graph_input_names:
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -906,7 +910,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in V.graph.graph_inputs.items():
+        for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
@@ -2758,22 +2762,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def write_async_compile_wait(self):
         pass
-
-    def codegen_input_size_asserts(self) -> None:
-        if self.partition_signatures:
-            # graph partition does not need input size asserts since
-            # it is already done in the parent wrapper
-            return
-
-        super().codegen_input_size_asserts()
-
-    def codegen_input_nan_asserts(self) -> None:
-        if self.partition_signatures:
-            # graph partition does not need input nan asserts since
-            # it is already done in the parent wrapper
-            return
-
-        super().codegen_input_nan_asserts()
 
     def next_kernel_suffix(self) -> str:
         # Ensures that subgraphs kernels do not clash with each other
