@@ -2104,6 +2104,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
             "tangents" not in x.name
             and "bwd_seed" not in x.name
             and "bwd_base_offset" not in x.name
+            and "bwd_rng_state" not in x.name
         )
 
     arg_count = 0
