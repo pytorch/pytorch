@@ -126,11 +126,17 @@ class CppBmmTemplate(CppGemmTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
-        return micro_gemm.get_b_layout() != LayoutType.NORMAL or (
-            (not W.get_layout().is_contiguous() or W.get_name() in V.graph.constants)  # type: ignore[union-attr]
-            if isinstance(W, ir.IRNode)
-            else not W.is_contiguous()
+        assert isinstance(W, ir.IRNode)
+        _, n = W.get_size()[-2:]
+        result = (
+            not W.get_layout().is_contiguous()
+            or W.get_name() in V.graph.constants
+            or (
+                n % micro_gemm.register_blocking.block_n != 0
+                and micro_gemm.get_b_layout != LayoutType.NORMAL
+            )
         )
+        return result
 
     def get_gemm_function_call(
         self,
