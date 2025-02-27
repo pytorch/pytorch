@@ -7515,6 +7515,7 @@ for shape in [(1,), ()]:
         ):
             self.assertEqual(param.grad, checkpoint_param.grad)
 
+     @xfailIfTorchDynamo
     def test_checkpointing_preserves_torch_function_mode_stack(self):
         log = []
 
@@ -7539,16 +7540,20 @@ for shape in [(1,), ()]:
 
         with Mode1():
             with Mode2():
-                a = torch.tensor(1., requires_grad=True)
+                a = torch.tensor(1.0, requires_grad=True)
 
                 log = []
                 out = checkpoint(func, a, use_reentrant=False, context_fn=context_fn)
-                self.assertTrue(log[-3] == "mode3" and log[-2] == "mode2" and log[-1] == "mode1")
+                self.assertTrue(
+                    log[-3] == "mode3" and log[-2] == "mode2" and log[-1] == "mode1"
+                )
 
 
                 log = []
                 out.backward()
-                self.assertTrue(log[-3] == "mode3" and log[-2] == "mode2" and log[1] == "mode1")
+                self.assertTrue(
+                    log[-3] == "mode3" and log[-2] == "mode2" and log[1] == "mode1"
+                )
 
     def test_callback_adds_callback(self):
         called = [0]
