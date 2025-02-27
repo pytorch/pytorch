@@ -176,7 +176,7 @@ jobs:
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_build_triton_wheels_trust_pytorch_policy
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
