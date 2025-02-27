@@ -62,7 +62,8 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
-      PLATFORM: 'manylinux_2_28_x86_64'
+      # TODO: We need to get rid of this when we remove manylinux1 builds
+      PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux' }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
