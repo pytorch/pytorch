@@ -18,7 +18,6 @@ import sympy
 from sympy import Expr
 
 import torch
-import torch._library.utils as lib_utils
 import torch._logging
 import torch.fx
 from torch import device, Tensor
@@ -1165,9 +1164,14 @@ class GraphLowering(torch.fx.Interpreter):
                         # (fake_args, fake_kwargs) might not align with (args, kwargs).
                         # we need to normalize them based on the schema
                         assert isinstance(target, torch._ops.OpOverload)
-                        normalize = functools.partial(
-                            lib_utils.normalize_args_kwargs, target._schema
-                        )
+
+                        def normalize(args: Any, kwargs: Any) -> tuple[Any, Any]:
+                            result = torch.fx.operator_schemas.normalize_function(
+                                target, args, kwargs
+                            )
+                            assert result is not None
+                            return result[0], result[1]
+
                         fake_args, fake_kwargs = normalize(fake_args, fake_kwargs)
                         args, kwargs = normalize(args, kwargs)
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
