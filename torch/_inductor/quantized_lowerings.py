@@ -159,8 +159,13 @@ def register_woq_mm_ops() -> None:
 
         # define functions to generate example inputs for weight and group size
         # otherwise, autotuner generates example inputs of all zeros for them
+        def get_example_weight(x: torch._inductor.ir.IRNode) -> torch.Tensor:
+            shape = x.get_size()
+            device = x.get_device()
+            return torch.randint(0, 255, shape, dtype=torch.uint8, device=device)
+
         input_gen_fns = {
-            1: lambda x: V.graph.constants[x.get_name()],  # packed weight
+            1: get_example_weight,  # packed weight
             2: lambda x: V.graph.constants[x.get_name()],  # group size
         }
 
