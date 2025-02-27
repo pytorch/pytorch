@@ -210,10 +210,6 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # real tensor outputs.
 generate_fake_kernels_from_real_mismatches = False
 
-# CUDAGraph save run_with_rng functionalization.
-# TODO: turn on by default
-graphsafe_rng_functionalization = True
-
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
