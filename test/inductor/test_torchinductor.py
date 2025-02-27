@@ -75,8 +75,8 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
-    _has_sufficient_memory,
     expectedFailureXPU,
+    largeTensorTest,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -269,7 +269,15 @@ def get_divisible_by_16(cfg):
     # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
     if hasattr(cfg, "divisibility_16"):
         return cfg.divisibility_16
-    return cfg.divisible_by_16
+    elif hasattr(cfg, "divisible_by_16"):
+        return cfg.divisible_by_16
+    # `cfg` example:
+    # {(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}
+    return [
+        key[0]
+        for key, value in cfg.items()
+        if len(key) == 1 and value[0] == ["tt.divisibility", 16]
+    ]
 
 
 class TestCase(InductorTestCase):
@@ -763,6 +771,16 @@ class SweepInputs2:
 
 def is_cpp_backend(device):
     return getattr(device, "type", device) == "cpu" and config.cpu_backend == "cpp"
+
+
+def skip_if_cpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("cpu not supported")
+        return fn(self)
+
+    return wrapper
 
 
 def skip_if_halide(fn):
@@ -3321,18 +3339,10 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skip_if_cpu
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("4GB", inductor=True)
     def test_large_tensor_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Fails on CPU")
-
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**33 if config.cpp_wrapper else 2**32 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         # Test 64-bit indexing works correctly
         def fn(a):
             return torch.max(a)
@@ -3346,11 +3356,9 @@ class CommonTemplate:
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
+    @skip_if_cpu
     @skip_if_gpu_halide  # only 32-bit indexing
     def test_large_broadcast_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Fails on CPU")
-
         # Test 64-bit indexing works correctly when inputs are less than 32-bit
         # but intermediate tensors require 64-bit indexing
         def fn(a, b):
@@ -3369,16 +3377,8 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return a + 1
 
@@ -3394,16 +3394,11 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("3GB", inductor=True)
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
-
-        # Memory requirements derived experimentally.
-        required_memory = 2**32 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return a + 4
 
@@ -3414,17 +3409,10 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
-
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**32 + 2**16 if config.cpp_wrapper else 2**31 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return torch.max(a)
 
@@ -11767,6 +11755,7 @@ class CommonTemplate:
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
     @serialTest()
+    @largeTensorTest("13GB", inductor=True)
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will
@@ -11775,16 +11764,6 @@ class CommonTemplate:
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**34 + 2**32 + 2**31
-            if config.cpp_wrapper
-            else 2**33 + 2**32 + 2**31
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
         def fn(x, y):
@@ -12212,16 +12191,8 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
+    @largeTensorTest("1GB", inductor=True)
     def test_large_grid(self):
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -12252,6 +12223,17 @@ class CommonTemplate:
         b = torch.randint(size=(512,), low=0, high=4095)
 
         self.common(forward, (a, b))
+
+    def test_isin_tensor_scalar(self):
+        for invert in [True, False]:
+            torch._dynamo.reset()
+            elements = 1
+            test_elements = torch.tensor([1, 2, 3, 4])
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
+            torch._dynamo.reset()
+            elements = torch.tensor([1, 2, 3, 4])
+            test_elements = 1
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
@@ -12541,6 +12523,231 @@ class CommonTemplate:
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_no_inputs(self):
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        foo = torch.compile(foo)
+        foo()
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_arange1(self):
+        def fn(step, device):
+            return torch.arange(512, -512, step, device=device)
+
+        compiled_fn = torch.compile(fn)
+
+        for step in (-1, -1.0):
+            expect = fn(step, "cpu")
+            actual = compiled_fn(step, "cpu")
+            self.assertEqual(expect, actual)
+
+        self.assertEqual(expect, actual)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_arange2(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
+
+        compiled_fn = torch.compile(fn)
+
+        x = make_arg(1, dtype=torch.float32)
+        self.assertEqual(fn(x), compiled_fn(x))
+
+        x = make_arg(1, dtype=torch.int64)
+        self.assertEqual(fn(x), compiled_fn(x))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_argmax(self):
+        def fn():
+            a = torch.zeros([2, 2])
+            b = a.argmax(0)
+            return b.float().mean()
+
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(fn(), compiled_fn())
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_both_scalars(self):
+        def fn(a, b):
+            return (
+                aten.add(a, b),
+                aten.add(b, a),
+                aten.sub(a, b),
+                aten.sub(b, a),
+                aten.mul(a, b),
+                aten.mul(b, a),
+            )
+
+        compiled_fn = torch.compile(fn)
+
+        self.assertEqual(fn(4, 3.3), compiled_fn(4, 3.3))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    @config.patch(assume_aligned_inputs=False)
+    def test_graph_partition_misaligned_input(self):
+        def fn(x):
+            return x.cos() * x.sin()
+
+        fn_c = torch.compile(fn, mode="reduce-overhead", dynamic=True)
+
+        for size, stride, offset in (
+            ((32, 32), (32, 1), 4),
+            ((48, 48), (48, 1), 4),
+            ((64, 64), (64, 1), 5),
+        ):
+            torch.manual_seed(42)
+            base = torch.randn(
+                64 * 64 + 64,
+                dtype=torch.float32,
+                device=self.device,
+                requires_grad=True,
+            )
+            torch.manual_seed(42)
+            base_ref = torch.randn(
+                64 * 64 + 64,
+                dtype=torch.float32,
+                device=self.device,
+                requires_grad=True,
+            )
+
+            inp = torch.as_strided(base, size, stride, offset)
+            inp_ref = torch.as_strided(base_ref, size, stride, offset)
+
+            inp.requires_grad_(True)
+            inp_ref.requires_grad_(True)
+
+            res = fn_c(inp)
+            ref = fn(inp_ref)
+            self.assertEqual(ref, res)
+
+            res.sum().backward()
+            ref.sum().backward()
+            self.assertEqual(base.grad, base_ref.grad)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_constant_tensor1(self):
+        def fn():
+            a = torch.zeros([1, 2], dtype=torch.int32)
+            a = a + a
+            b = a.to(dtype=torch.float32)
+            return b * 0.8
+
+        compiled_fn = torch.compile(fn)
+
+        self.assertEqual(fn(), compiled_fn())
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_constant_tensor2(self):
+        def fn(x):
+            return torch.tensor(list(range(2, 40, 2)), device=self.device) + x
+
+        compiled_fn = torch.compile(fn)
+
+        x = torch.randn(1, device=self.device)
+
+        self.assertEqual(fn(x), compiled_fn(x))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_scalar_inputs(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(fn(1024, 100), compiled_fn(1024, 100))
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_unbacked_symint_as_output(self):
+        def nested(x, repeats):
+            rank = torch.arange(repeats.numel(), device=x.device)
+            index = rank.repeat_interleave(repeats, dim=0)
+            return torch.index_select(x, index=index, dim=0)
+
+        example_inputs = (
+            torch.randn((32, 64), device=self.device),
+            repeats := torch.tensor([5, 10, 15], device=self.device),
+        )
+        torch._dynamo.mark_dynamic(repeats, 0)
+
+        nested_opt = torch.compile(nested, backend="inductor")
+
+        expect = nested(*example_inputs)
+        actual = nested_opt(*example_inputs)
+        self.assertEqual(expect, actual)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_refcount(self):
+        contexts = [
+            contextlib.nullcontext,
+            lambda: torch._inductor.config.patch({"triton.cudagraphs": True}),
+        ]
+
+        for context in contexts:
+            with context():
+                inps = [
+                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(self.device),
+                ]
+                inp_refs = [weakref.ref(inp) for inp in inps]
+
+                def fn(x, y):
+                    a = x + y
+                    return (a @ a,)
+
+                fn_fx = make_fx(fn)(inps[0], inps[1])
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+
+                matmul_seen = False
+
+                class TestRefMode(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+
+                        nonlocal inps
+                        nonlocal inp_refs
+                        nonlocal matmul_seen
+
+                        gc.collect()
+                        if func is aten.mm.out:
+                            matmul_seen = True
+                            assert len(inps) == 0
+                            assert inp_refs[0]() is None
+                            assert inp_refs[1]() is None
+
+                        return func(*args, **kwargs)
+
+                with TestRefMode():
+                    fn_compiled(inps)
+
+                # do an extra run to make sure we are deallocating on warmup and record
+                inps.extend(
+                    [
+                        torch.rand([5, 5]).to(self.device),
+                        torch.rand([5, 5]).to(self.device),
+                    ]
+                )
+                inp_refs.extend([weakref.ref(inp) for inp in inps])
+                matmul_seen = False
+
+                with TestRefMode():
+                    fn_compiled(inps)
+
+                assert len(inps) == 0
 
 
 @dataclasses.dataclass
@@ -12839,17 +13046,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue(max_live_tensors == 3)
 
         # See https://github.com/pytorch/pytorch/issues/100348
-        def test_inductor_detach_view(self):
+        @parametrize("backend", ["aot_eager", "inductor"])
+        def test_inductor_detach_view(self, backend):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 a = x * 2
                 return a, a.detach()
 
-            fn_opt = torch.compile(fn, backend="inductor")
+            fn_opt = torch.compile(fn, backend=backend)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
             inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
-            out = fn_opt(inp)
             out_ref[0].sum().backward()
+            out = fn_opt(inp)
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
@@ -13820,6 +14028,136 @@ if HAS_GPU and not TEST_WITH_ASAN:
             FileCheck().check("triton_meta").check("'signature':").check(
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+            self.assertEqual(eager_out, compiled_out)
+
+            _, code = run_and_get_code(f_compiled, x_cloned, y_cloned)
+
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").check(
+                    "(buf0, buf1) = self.partitions[0](partition0_args)"
+                ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
+                    code[0]
+                )
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_multiple_functions(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            def g(x):
+                return x + 1
+
+            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = g(f(x, y))
+
+            f_compiled = torch.compile(f)
+            g_compiled = torch.compile(g)
+            compiled_out = g_compiled(f_compiled(x_cloned, y_cloned))
+
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_condition_op(self):
+            def f(p, b):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+            p = torch.tensor([True], device=self.device)
+            a = torch.ones([2, 3], device=self.device)
+
+            compiled_f = torch.compile(f)
+            eager_out = f(p, a)
+            compiled_out = compiled_f(p, a)
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device=self.device), torch.randn(
+                3, 3, device=self.device
+            )
+            compiled_out = f_compiled(x, y)
+            self.assertEqual(compiled_out, f(x, y))
+
+            x, y = torch.ones(4, 4, device=self.device), torch.randn(
+                4, 4, device=self.device
+            )
+            compiled_out = f_compiled(x, y)
+            self.assertEqual(compiled_out, f(x, y))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_unbacked_symint(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device=self.device), torch.randn(
+                3, 3, device=self.device
+            )
+
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(y, 1)
+
+            compiled_out = f_compiled(x, y)
+            eager_out = f(x, y)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_buffer_reuse(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x1 + y1 + x @ y
+                u = (y_cpu.cuda() + 2) @ y + 3
+                u_cpu = u.cpu() + 2
+                return z + u_cpu.cuda()
+
+            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f)
+            compiled_out = f_compiled(x_cloned, y_cloned)
+
+            self.assertEqual(eager_out, compiled_out)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
