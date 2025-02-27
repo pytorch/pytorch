@@ -194,6 +194,7 @@ def user_defined_kernel_grid_fn_code(
     configs: list[triton.Config],  # type: ignore[name-defined]
     grids: list[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
+    original_name: Optional[str] = None,
 ) -> tuple[str, str]:
     output = IndentedBuffer()
 
@@ -202,6 +203,7 @@ def user_defined_kernel_grid_fn_code(
 
     def determine_grid(
         grid: TritonGrid,
+        example_grid: Optional[TritonGrid] = None,
     ):
         """
         This function return a tuple of two values: the first one is for the real grid
@@ -214,13 +216,15 @@ def user_defined_kernel_grid_fn_code(
             return grid, grid
         # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        if not example_grid:
+            example_grid = sympy_grid
         return (
             wrapper.codegen_python_shape_tuple(sympy_grid),
             (
                 wrapper.codegen_python_shape_tuple(
                     tuple(
                         wrapper.generate_example_arg_value(g, type(g))
-                        for g in sympy_grid
+                        for g in example_grid  # type: ignore[union-attr]
                     )
                 )
                 if config.triton.autotune_at_compile_time
@@ -245,8 +249,17 @@ def user_defined_kernel_grid_fn_code(
         else contextlib.nullcontext()
     )
     with output.indent(), kernel_autotune_calls_indent:
+        if (
+            config.triton.autotune_at_compile_time
+            and original_name
+            and V.graph.autotuning_grids
+            and original_name in V.graph.autotuning_grids
+        ):
+            example_grids = V.graph.autotuning_grids[original_name]
+        else:
+            example_grids = [None] * len(grids)
         if len(grids) == 1:
-            grid, example_grid = determine_grid(grids[0])
+            grid, example_grid = determine_grid(grids[0], example_grids[0])
             writeline(f"return {grid}", f"return {example_grid}")
         else:
             assert len(grids) > 1
@@ -257,8 +270,10 @@ def user_defined_kernel_grid_fn_code(
             # TODO(aakhundov): the sorting below is generally not sufficient, so
             # maybe we'll need to restrict the supported cases to identical kwarg
             # names in all autotuning configs.
-            for grid, c in sorted(
-                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            for grid, c, example_grid in sorted(
+                zip(grids, configs, example_grids),
+                key=lambda x: len(x[1].kwargs),
+                reverse=True,
             ):
                 if c.kwargs:
                     guards = [
@@ -267,7 +282,7 @@ def user_defined_kernel_grid_fn_code(
                     guards = " and ".join(guards)
                 else:
                     guards = "True"  # for configs with empty kwargs
-                grid, example_grid = determine_grid(grid)
+                grid, example_grid = determine_grid(grid, example_grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
                     continue
@@ -1128,7 +1143,9 @@ class PythonWrapperCodegen(CodeGen):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
+        original_name: str,
         raw_args: list[Any],
+        original_kwargs: list[str],
         grid: list[Any],
         configs,
         triton_meta,
@@ -1161,6 +1178,8 @@ class PythonWrapperCodegen(CodeGen):
             grid_fn=grid_fn,
             arg_types=arg_types,
             raw_args=raw_args,
+            original_triton_name=original_name,
+            original_triton_kwargs=original_kwargs,
         )
 
     def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
@@ -1324,11 +1343,17 @@ class PythonWrapperCodegen(CodeGen):
         """
         )
         scope = {}  # type: ignore[var-annotated]
+        if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
+            scope = {
+                self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
+                for idx, v in enumerate(V.graph.autotuning_inputs)
+            }
         tuning_code = (
             self.kernel_autotune_defs.getvalue()
             + "\n"
             + self.kernel_autotune_calls.getvalue()
         )
+
         if output_code_log.level == logging.DEBUG:
             # Save the autotuning code block into a file
             # Create a temporary file
@@ -2138,6 +2163,8 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        original_triton_name: Optional[str] = None,
+        original_triton_kwargs: Optional[list[str]] = None,
     ):
         """
         Generates kernel call code.
@@ -2186,15 +2213,31 @@ class PythonWrapperCodegen(CodeGen):
                     call_args
                 ), "call_args and raw_args do not match"
 
-            for i, (arg, arg_type, raw_arg) in enumerate(
-                zip(call_args, arg_types, raw_args)
+            if original_triton_kwargs is None:
+                original_triton_kwargs = [None] * len(call_args)  # type: ignore[list-item]
+
+            autotune_args = None
+            if original_triton_name and V.graph.autotuning_mapping:
+                autotune_args = V.graph.autotuning_mapping.get(
+                    original_triton_name, None
+                )
+            for i, (arg, arg_type, raw_arg, raw_key) in enumerate(
+                zip(call_args, arg_types, raw_args, original_triton_kwargs)
             ):
                 key = None
                 if isinstance(arg, str) and "=" in str(arg):
                     # arg may be passed in a kwarg style, and then we need to extract its value
                     key, arg = arg.split("=")
 
-                if isinstance(arg_type, torch_dtype):
+                triton_input: Optional[str] = None
+                if autotune_args and raw_key in autotune_args:
+                    triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                        autotune_args[raw_key]
+                    )
+
+                if triton_input:
+                    arg_str = triton_input
+                elif isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
                     if re.match(r"^(workspace|semaphore)", arg):
@@ -2223,9 +2266,10 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
             )
-            self.kernel_autotune_calls.writeline(
-                f"del {', '.join(arg for arg in tensor_args.values())}\n",
-            )
+            if tensor_args:
+                self.kernel_autotune_calls.writeline(
+                    f"del {', '.join(arg for arg in tensor_args.values())}\n",
+                )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
