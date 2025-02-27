@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-"""This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention"""
-
+""" This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
 from collections.abc import Iterable
 from typing import Union
@@ -107,7 +106,6 @@ def sdpa_kernel(
 
         from torch.nn.functional import scaled_dot_product_attention
         from torch.nn.attention import SDPBackend, sdpa_kernel
-
         # Only enable flash attention backend
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             scaled_dot_product_attention(...)
@@ -119,9 +117,9 @@ def sdpa_kernel(
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(backends, (list, SDPBackend)), (
-        "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
-    )
+    assert isinstance(
+        backends, (list, SDPBackend)
+    ), "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
 
     if isinstance(backends, SDPBackend):
         backends = [backends]
@@ -132,9 +130,7 @@ def sdpa_kernel(
 
     if set_priority:
         user_priority = [
-            int(x)  # type: ignore[call-overload]
-            for idx, x in enumerate(backends)
-            if backends.index(x) == idx
+            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx  # type: ignore[call-overload]
         ]
         previous_priority = torch._C._get_sdp_priority_order()
         for backend in previous_priority:

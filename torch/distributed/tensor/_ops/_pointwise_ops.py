@@ -445,9 +445,9 @@ def pointwise_strategy(
 
         followed_strategy = op_schema.args_schema[max_shards_strategy_index]
 
-    assert isinstance(followed_strategy, OpStrategy), (
-        f"no strategy to follow for {op_schema}!"
-    )
+    assert isinstance(
+        followed_strategy, OpStrategy
+    ), f"no strategy to follow for {op_schema}!"
     return common_pointwise_strategy(
         mesh, op_schema.args_schema, followed_strategy, linearity
     )

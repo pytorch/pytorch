@@ -153,7 +153,7 @@ class FSDPMemTracker(MemTracker):
             loss.backward()
             optimizer.step()
         fmt.display_snapshot("peak")
-        fmt.display_modulewise_snapshots(depth=3, units="MB")
+        fmt.display_modulewise_snapshots(depth = 3, units = "MB")
 
     """
 

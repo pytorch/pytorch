@@ -29,7 +29,6 @@ class Gumbel(TransformedDistribution):
         loc (float or Tensor): Location parameter of the distribution
         scale (float or Tensor): Scale parameter of the distribution
     """
-
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
 

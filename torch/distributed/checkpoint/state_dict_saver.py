@@ -127,9 +127,7 @@ def save(
 
         >>> state_dict = {"model": my_model}
 
-        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter(
-        ...     "/checkpoint/1"
-        ... )
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> torch.distributed.checkpoint.save(
         >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
@@ -208,9 +206,7 @@ def async_save(
 
         >>> state_dict = {"model": my_model}
 
-        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter(
-        ...     "/checkpoint/1"
-        ... )
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> checkpoint_future = torch.distributed.checkpoint.async_save(
         >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
@@ -227,9 +223,7 @@ def async_save(
         pg = process_group or _get_default_group()
         assert (
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
-        ), (
-            "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
-        )
+        ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
 
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
