@@ -459,7 +459,6 @@ class TestTensorCreation(TestCase):
                                       dtype=complex_dtype),
                          z, atol=1e-5, rtol=1e-5)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.complex64, torch.complex128, torch.bool)
@@ -846,7 +845,6 @@ class TestTensorCreation(TestCase):
                 expected_error_message = dimension_error_message if len(shape) < bound else divisibiliy_error_message
                 self.assertRaisesRegex(RuntimeError, expected_error_message, lambda: torch_fn(t, arg))
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_hsplit(self, device, dtype):
@@ -868,7 +866,6 @@ class TestTensorCreation(TestCase):
         )
         self._hvd_split_helper(torch.hsplit, np.hsplit, "torch.hsplit", inputs, device, dtype, 1)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_vsplit(self, device, dtype):
@@ -885,7 +882,6 @@ class TestTensorCreation(TestCase):
         )
         self._hvd_split_helper(torch.vsplit, np.vsplit, "torch.vsplit", inputs, device, dtype, 0)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_dsplit(self, device, dtype):
@@ -3844,7 +3840,6 @@ class TestBufferProtocol(TestCase):
             for j in range(SIZE - i + 1):
                 self._run_test(SHAPE, dtype, count=i, first=j)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_invalid_positional_args(self, device, dtype):
         bytes = get_dtype_size(dtype)
@@ -3909,7 +3904,6 @@ class TestBufferProtocol(TestCase):
                 arr[first] = x.item() - 1
                 self.assertEqual(arr[first:last], tensor)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_not_a_buffer(self, device, dtype):
         with self.assertRaisesRegex(ValueError,
