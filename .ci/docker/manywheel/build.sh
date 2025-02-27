@@ -122,7 +122,7 @@ fi
     set -x
 
     # Only activate this if in CI
-    if [ "$(uname -m)" != "s390x" ] && [ "${CI:false}" = "true" ]; then
+    if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
         # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
         # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
         sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
