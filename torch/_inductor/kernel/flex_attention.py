@@ -606,7 +606,8 @@ def forward_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    k = load_checked_block(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    # NB reversed order to since K is transposed
+    k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -1255,6 +1256,15 @@ def flex_attention(
         )
 
     # below is cuda path if device is not cpu
+    # tl.dot does not support embedding size less than 16
+    small_dqk = V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-1], 16))
+    small_dv = V.graph.sizevars.evaluate_expr(sympy.Lt(value.get_size()[-1], 16))
+    if small_dqk or small_dv:
+        raise NotImplementedError(
+            f"NYI: embedding dimension of the query, key, and value must be "
+            f"at least 16 but got E={query.get_size()[-1]} and Ev={value.get_size()[-1]}"
+        )
+
     (
         _,  # q_length
         _,  # kv_length
