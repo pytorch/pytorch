@@ -211,7 +211,7 @@ def get_default_mmap_options() -> Optional[int]:
     return config.load.mmap_flags
 
 
-def _get_storage_alignment() -> Optional[int]:
+def _get_storage_alignment() -> int:
     """
     Gets alignment for storages in torch.save files/
 
