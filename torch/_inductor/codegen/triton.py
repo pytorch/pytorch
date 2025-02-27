@@ -33,8 +33,8 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..ops_handler import DefaultHandler
 from ..exc import TritonMissing
+from ..ops_handler import DefaultHandler
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,

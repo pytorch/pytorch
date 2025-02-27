@@ -155,10 +155,10 @@ class DeviceInterface:
         Returns True if the device has Triton support, False otherwise, even if
         the appropriate Triton backend is not available.
         """
-        raise NotImplementedError
+        return False
 
-    @staticmethod
-    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+    @classmethod
+    def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
         Raises a `RuntimeError` with the appropriate human-readable instructions
         to resolve the issue if Triton is not available for the given device, or
@@ -167,7 +167,8 @@ class DeviceInterface:
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
-        raise RuntimeError("This device type does not support Triton")
+        if not cls.is_triton_capable():
+            raise RuntimeError("This device is not capable of supporting Triton")
 
 
 class DeviceGuard:
