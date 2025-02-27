@@ -303,9 +303,7 @@ Important Notices
 
     local_rank = int(os.environ["LOCAL_RANK"])
     model = torch.nn.parallel.DistributedDataParallel(
-        model,
-        device_ids=[local_rank],
-        output_device=local_rank,
+        model, device_ids=[local_rank], output_device=local_rank
     )
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
