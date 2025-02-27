@@ -65,15 +65,15 @@ set DISTUTILS_USE_SDK=1
 
 :: Print all existing environment variable for debugging
 set
-sccache --stop-server
+
+:: start sccache server and reset sccache stats
 sccache --start-server
 sccache --zero-stats
+sccache --show-stats
 
 python setup.py bdist_wheel
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
-
-sccache --show-stats
 
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 
