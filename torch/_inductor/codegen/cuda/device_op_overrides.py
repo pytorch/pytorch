@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 
+from ...utils import triton_version_uses_attrs_dict
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
@@ -237,6 +240,11 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
+
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        if triton_version_uses_attrs_dict():
+            return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
+        return None
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())
