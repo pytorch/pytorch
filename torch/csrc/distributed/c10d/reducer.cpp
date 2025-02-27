@@ -183,21 +183,23 @@ Reducer::Reducer(
 #endif
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
-          grad_accumulator->add_post_hook(
-              std::make_unique<torch::autograd::utils::LambdaPostHook>(
-                  [this, variable_index](
-                      const torch::autograd::variable_list& outputs,
-                      const torch::autograd::variable_list& /* unused */) {
+          grad_accumulator->add_post_hook(std::make_unique<
+                                          torch::autograd::utils::
+                                              LambdaPostHook>(
+              [this, variable_index](
+                  const torch::autograd::variable_list& outputs,
+                  const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
-                    this->rpc_context_.set(
-                        ThreadLocalDistAutogradContext::getContextPtr());
+                this->rpc_context_.set(
+                    ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                    this->autograd_hook(variable_index);
-                    return outputs;
-                  },
-                  [=](torch::autograd::CompiledNodeArgs& args) {
-                    // Make post_hook an noop if compiled_autograds is enabled.
-                  })),
+                this->autograd_hook(variable_index);
+                return outputs;
+              },
+              [=](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_INTERNAL_ASSERT(
+                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+              })),
           grad_accumulator);
 
       // Map raw function pointer to parameter index.
@@ -1183,7 +1185,7 @@ void Reducer::initialize_buckets(
             << "Reducer: default comm backend not found, skipping bucket memory optimization";
       }
       if (ddpDisableCommMem == 0 && backend != nullptr &&
-          backend->supportsTensorAlloc()) {
+          backend->supportsTensorAlloc(options.device().index())) {
         // Comm-optimized memory pool is available, use it to allocate tensor
         LOG(INFO)
             << "Reducer: found comm-optimized memory allocator, using it to create bucket";
