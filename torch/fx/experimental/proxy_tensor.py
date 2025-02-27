@@ -1113,8 +1113,13 @@ class PythonKeyTracer(Tracer):
             return extract_val(v.meta["val"])
 
         if _should_save_arg_kwarg_vals(target, (args, kwargs)):
+            # NOTE "original_arg_kwarg_vals"
+            # We save the original (args, kwargs) FakeTensor values for nodes
+            # that have exact stride requirements. This is useful downstream.
+            # We use this information inside Inductor to ensure that inputs to
+            # stride-sensitive operators have the correct strides.
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
-            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
+            node.meta["original_arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
 

@@ -259,17 +259,17 @@ class Match:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-            if len(self.nodes) == 1 and "arg_kwarg_vals" in self.nodes[0].meta:
-                # arg_kwarg_vals are the FakeTensor vals we saw during
+            if len(self.nodes) == 1 and "original_arg_kwarg_vals" in self.nodes[0].meta:
+                # original_arg_kwarg_vals are the FakeTensor vals we saw during
                 # AOTDispatcher tracing that match the eager-mode metadata.
                 # We want to use these vals to trace out the replacement graph,
-                # so that any arg_kwarg_vals in the replacement graph are
+                # so that any original_arg_kwarg_vals in the replacement graph are
                 # set correctly.
 
-                # Construct a map of node -> FakeTensor val in arg_kwarg_vals
+                # Construct a map of node -> FakeTensor val in original_arg_kwarg_vals
                 node_to_val = {}
 
-                fake_args, fake_kwargs = self.nodes[0].meta["arg_kwarg_vals"]
+                fake_args, fake_kwargs = self.nodes[0].meta["original_arg_kwarg_vals"]
                 fake_kwargs = {**fake_kwargs}
                 match_args, match_kwargs = tuple(self.args), self.kwargs
 
@@ -281,7 +281,7 @@ class Match:
                     record, (match_args, match_kwargs), (fake_args, fake_kwargs)
                 )
 
-                # map args to their FakeTensor val in arg_kwarg_vals
+                # map args to their FakeTensor val in original_arg_kwarg_vals
                 example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
             else:
                 example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
@@ -1111,8 +1111,10 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name="Interpreter_Replacer",
                     )
-                    if "arg_kwarg_vals" in node.meta:
-                        result.meta["arg_kwarg_vals"] = node.meta["arg_kwarg_vals"]
+                    if "original_arg_kwarg_vals" in node.meta:
+                        result.meta["original_arg_kwarg_vals"] = node.meta[
+                            "original_arg_kwarg_vals"
+                        ]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
