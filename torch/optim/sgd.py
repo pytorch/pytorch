@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
-
 from typing import cast, Optional, Union
 
 import torch
@@ -390,8 +389,7 @@ def _multi_tensor_sgd(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list],  # type: ignore[list-item]
-        with_indices=True,
+        [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
     )
 
     for (
@@ -497,8 +495,7 @@ def _fused_sgd(
         for i, g in enumerate(grads):
             momentum_buffer_list[i] = torch.empty_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list],  # type: ignore[list-item]
-        with_indices=False,
+        [params, grads, momentum_buffer_list], with_indices=False  # type: ignore[list-item]
     )
     for (device, _), (
         (device_params_, device_grads_, device_momentum_buffer_list),

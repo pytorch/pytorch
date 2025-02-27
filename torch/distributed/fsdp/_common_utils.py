@@ -2,7 +2,6 @@
 """
 This file includes private common utilities for FSDP.
 """
-
 import logging
 import traceback
 import warnings
@@ -201,9 +200,9 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamH
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
         if state._handle is None:
             return None
-        assert module in state._fully_sharded_module_to_handle, (
-            f"Expects a fully sharded module but got {module} on rank {state.rank}"
-        )
+        assert (
+            module in state._fully_sharded_module_to_handle
+        ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
         return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -256,9 +255,9 @@ def _named_parameters_with_duplicates(
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
     """
-    assert "remove_duplicate" not in kwargs, (
-        "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
-    )
+    assert (
+        "remove_duplicate" not in kwargs
+    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))

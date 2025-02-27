@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Learning Rate Scheduler."""
-
 import math
 import types
 import warnings
@@ -307,7 +306,7 @@ class LambdaLR(LRScheduler):
         >>> # xdoctest: +SKIP
         >>> # Assuming optimizer has two groups.
         >>> lambda1 = lambda epoch: epoch // 30
-        >>> lambda2 = lambda epoch: 0.95**epoch
+        >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):
         >>>     train(...)
@@ -571,7 +570,7 @@ class MultiStepLR(LRScheduler):
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 80
         >>> # lr = 0.0005   if epoch >= 80
-        >>> scheduler = MultiStepLR(optimizer, milestones=[30, 80], gamma=0.1)
+        >>> scheduler = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -851,9 +850,7 @@ class SequentialLR(LRScheduler):
         >>> # lr = 0.729   if epoch == 4
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
-        >>> scheduler = SequentialLR(
-        ...     optimizer, schedulers=[scheduler1, scheduler2], milestones=[2]
-        ... )
+        >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[2])
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -1294,11 +1291,11 @@ class ReduceLROnPlateau(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = ReduceLROnPlateau(optimizer, "min")
+        >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
         >>>     train(...)
         >>>     val_loss = validate(...)
-        >>> # Note that step should be called after validate()
+        >>>     # Note that step should be called after validate()
         >>>     scheduler.step(val_loss)
     """
 
@@ -1542,9 +1539,7 @@ class CyclicLR(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(
-        ...     optimizer, base_lr=0.01, max_lr=0.1
-        ... )
+        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
@@ -1833,7 +1828,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             >>> for epoch in range(20):
             >>>     scheduler.step()
             >>> scheduler.step(26)
-            >>> scheduler.step()  # scheduler.step(27), instead of scheduler(20)
+            >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
         """
         if epoch is None and self.last_epoch < 0:
             epoch = 0
@@ -1975,9 +1970,7 @@ class OneCycleLR(LRScheduler):
         >>> # xdoctest: +SKIP
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
-        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        ...     optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10
-        ... )
+        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
         >>>         train_batch(...)
@@ -2181,6 +2174,8 @@ class OneCycleLR(LRScheduler):
                 if self.use_beta1:
                     group["betas"] = (computed_momentum, *group["betas"][1:])  # type: ignore[possibly-undefined]
                 else:
-                    group["momentum"] = computed_momentum  # type: ignore[possibly-undefined]
+                    group[
+                        "momentum"
+                    ] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs

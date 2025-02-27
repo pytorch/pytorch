@@ -152,9 +152,9 @@ class OpStrategy(StrategyType):
         if isinstance(output_spec, DTensorSpec):
             return output_spec.mesh.shape
         else:
-            assert isinstance(output_spec, tuple), (
-                "found no DTensorSpec in the OpStrategy!"
-            )
+            assert isinstance(
+                output_spec, tuple
+            ), "found no DTensorSpec in the OpStrategy!"
             assert output_spec[0] is not None
             return output_spec[0].mesh.shape
 

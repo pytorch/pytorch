@@ -221,12 +221,8 @@ else:
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
-                res_flattened_mesh  # type: ignore[possibly-undefined]
-            )
-            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(
-                flatten_dims_in_root
-            )  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
@@ -246,9 +242,9 @@ else:
             root_mesh = self.get_root_mesh(device_mesh)
             child_mesh_dim_names = device_mesh.mesh_dim_names
             if root_mesh and child_mesh_dim_names:
-                assert len(child_mesh_dim_names) == 1, (
-                    "The submesh can only be a 1D mesh."
-                )
+                assert (
+                    len(child_mesh_dim_names) == 1
+                ), "The submesh can only be a 1D mesh."
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
             return None
@@ -767,9 +763,7 @@ else:
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[
-                    mesh_dim  # type: ignore[index]
-                ]._dim_group_infos[0][:2]
+                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][:2]  # type: ignore[index]
                 return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
             else:
                 mesh_dim = (
@@ -911,9 +905,9 @@ else:
                 mesh_dim = 0
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
-            assert isinstance(mesh_dim_group, ProcessGroup), (
-                "We expect ProcessGroup before calling `get_rank`!"
-            )
+            assert isinstance(
+                mesh_dim_group, ProcessGroup
+            ), "We expect ProcessGroup before calling `get_rank`!"
             return not_none(get_rank(mesh_dim_group))
 
         def get_coordinate(self) -> Optional[list[int]]:

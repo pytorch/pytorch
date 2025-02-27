@@ -27,7 +27,6 @@ class Weibull(TransformedDistribution):
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
     """
-
     arg_constraints = {
         "scale": constraints.positive,
         "concentration": constraints.positive,

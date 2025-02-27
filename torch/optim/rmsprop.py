@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RMSprop algorithm."""
-
 from typing import cast, Optional, Union
 
 import torch
@@ -289,9 +288,7 @@ def _single_tensor_rmsprop(
             assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -365,9 +362,7 @@ def _multi_tensor_rmsprop(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, square_avgs, grad_avgs, momentum_buffer_list, state_steps]  # type: ignore[list-item]

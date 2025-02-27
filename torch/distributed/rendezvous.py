@@ -80,9 +80,9 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         world_size = world_size_opt
     if rank != -1 or world_size != -1 or world_size_opt is None:
         query_dict = _query_to_dict(result.query)
-        assert "rank" not in query_dict and "world_size" not in query_dict, (
-            f"The url: {url} has node-specific arguments(rank, world_size) already."
-        )
+        assert (
+            "rank" not in query_dict and "world_size" not in query_dict
+        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
