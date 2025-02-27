@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
-
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -24,27 +24,10 @@
 namespace {
 
 bool device_has_multicast_support(int device_idx) {
-#if defined(CUDART_SUPPORTS_MULTICAST)
   if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
     return false;
   }
-  // Multicast support requirements:
-  // - CUDA Runtime version >= 12030: Checked at compile time using
-  // CUDART_VERSION.
-  // - Driver version >= 535: Checked at runtime by verifying the existence of
-  // cuMulticastCreate_.
-  // - Device support: Determined by querying
-  // CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED at runtime.
-  auto driver_api = c10::cuda::DriverAPI::get();
-  int multicast_supported;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
-      &multicast_supported,
-      CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED,
-      device_idx));
-  return driver_api->cuMulticastCreate_ != nullptr && multicast_supported;
-#else
-  return false;
-#endif
+  return c10d::cuda::deviceSupportsMulticast(device_idx);
 }
 
 bool allow_overlapping_devices() {
@@ -458,7 +441,7 @@ static __global__ void barrier_kernel(
     if (target_rank == rank) {
       return;
     }
-    auto put_success = try_put_signal<MemOpSem::Release>(
+    auto put_success = try_put_signal<std::memory_order_release>(
         signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
     if (!put_success) {
       printf(
@@ -470,7 +453,7 @@ static __global__ void barrier_kernel(
           timeout_ms);
       trap();
     }
-    auto wait_success = try_wait_signal<MemOpSem::Acquire>(
+    auto wait_success = try_wait_signal<std::memory_order_acquire>(
         signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
     if (!wait_success) {
       printf(
@@ -505,7 +488,7 @@ static __global__ void put_signal_kernel(
     int world_size,
     size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    bool success = try_put_signal<MemOpSem::Release>(
+    bool success = try_put_signal<std::memory_order_release>(
         signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
     if (!success) {
       printf(
@@ -544,7 +527,7 @@ static __global__ void wait_signal_kernel(
     int world_size,
     size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    bool success = try_wait_signal<MemOpSem::Acquire>(
+    bool success = try_wait_signal<std::memory_order_acquire>(
         signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
     if (!success) {
       printf(
@@ -817,6 +800,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   if (it != block->symm_mems.end()) {
     return it->second;
   }
+
+  c10::cuda::CUDAGuard guard(block->device_idx);
 
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);

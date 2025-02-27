@@ -168,7 +168,7 @@ TensorFlow DTensor:
 -   DTensor also allows sharding and replication on an n-d mesh like device network.
 -   DTensor implements MLIR passes to do propagation and operator implementations.
 
-There are also several cutting edge research fields that embeds tensor sharding as part of the system, i.e. [Megatron-LM](https://arxiv.org/pdf/1909.08053.pdf) for tensor parallelism on Transformer based models. [DeepSpeed](https://github.com/microsoft/DeepSpeed) for training large scale models with different optimization techniques on top of tensor sharding.
+There are also several cutting edge research fields that embeds tensor sharding as part of the system, i.e. [Megatron-LM](https://arxiv.org/pdf/1909.08053.pdf) for tensor parallelism on Transformer based models. [DeepSpeed](https://github.com/deepspeedai/DeepSpeed) for training large scale models with different optimization techniques on top of tensor sharding.
 
 ### Additional context
 

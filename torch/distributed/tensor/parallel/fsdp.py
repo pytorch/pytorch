@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, List, Optional
+from typing import Any, cast, Optional
 
 import torch
 import torch.distributed as dist
@@ -163,7 +163,7 @@ def _chunk_tensor(
         )
 
         outer_local_shard = tensor.local_shards()[0]
-        shards: List[Shard] = [
+        shards: list[Shard] = [
             Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
         ]
         st_meta = copy.deepcopy(tensor.metadata())
@@ -284,7 +284,7 @@ def _chunk_dtensor(
 
 def _pre_load_state_dict(
     tensor: torch.Tensor,
-) -> tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, list[Shard]]:
     shards = cast(ShardedTensor, tensor).local_shards()
     if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
         inner_tensor = shards[0].tensor
@@ -379,7 +379,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, list[Shard]]:
         return _pre_load_state_dict(tensor)
 
     def all_gather_dtensor(
