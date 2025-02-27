@@ -4534,7 +4534,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )  # output is a dense tensor
             self.assertEqual(out_actual, out_expected)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -4575,7 +4574,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )  # output is a nested tensor
             self.assertTrue(torch.allclose(out_actual.values(), out_expected))
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -4660,7 +4658,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 self.assertEqual(out_actual._values.shape, out_expected.shape)
                 self.assertTrue(torch.allclose(out_actual.values(), out_expected))
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -4699,7 +4696,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         nt, normalized_shape=(nt.shape[nt._ragged_idx],)
                     )
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -4805,7 +4801,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 )  # output is a dense tensor
                 self.assertEqual(out_actual, out_expected)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize(
         "transpose_offset", [1, 2]
@@ -4977,7 +4972,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     torch.allclose(out_actual.values().view(-1), out_expected.view(-1))
                 )
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
@@ -5017,7 +5011,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
@@ -5058,7 +5051,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float32)
     @parametrize(
         "func",
@@ -5098,7 +5090,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             ):
                 out = func(nt, dim=reduce_dim, keepdim=keepdim)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")    
     @dtypes(torch.float32)
     @parametrize(
         "func",
@@ -5156,7 +5147,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 else:
                     out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons") 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -5640,7 +5630,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.fx.symbolic_trace(user_unwrapped)
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize(
@@ -7459,7 +7448,6 @@ torch.cuda.synchronize()
         (out1, _) = f(nt)
         out1.backward(torch.ones_like(out1))
 
-    @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
