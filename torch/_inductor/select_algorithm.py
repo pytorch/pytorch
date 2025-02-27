@@ -1746,7 +1746,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 benchmark=None,
             )
 
-            if timings:
+            if timings and len(timings) == len(choices):
                 return no_op
 
             if config.search_autotune_cache and not (
