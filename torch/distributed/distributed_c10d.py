@@ -92,7 +92,6 @@ __all__ = [
     "is_torchelastic_launched",
     "is_ucc_available",
     "is_xccl_available",
-    "is_hccl_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -259,13 +258,10 @@ class Backend(str):  # noqa: SLOT000
     UCC = "ucc"
     MPI = "mpi"
     XCCL = "xccl"
-    HCCL = "hccl"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
-
-    # Out-of-tree backend such as hccl will append to this list calling register_backend
 
     backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
@@ -274,7 +270,6 @@ class Backend(str):  # noqa: SLOT000
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
-        "hpu": HCCL,
     }
 
     backend_capability: dict[str, list[str]] = {
@@ -283,7 +278,6 @@ class Backend(str):  # noqa: SLOT000
         XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
-        HCCL: ["hpu"],
     }
 
     backend_type_map: dict[str, ProcessGroup.BackendType] = {
@@ -293,7 +287,6 @@ class Backend(str):  # noqa: SLOT000
         XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
-        HCCL: ProcessGroup.BackendType.CUSTOM,
     }
 
     def __new__(cls, name: str):
@@ -1251,11 +1244,6 @@ def is_ucc_available() -> bool:
 def is_xccl_available() -> bool:
     """Check if the XCCL backend is available."""
     return _XCCL_AVAILABLE
-
-
-def is_hccl_available() -> bool:
-    """Check if the HCCL backend is registered."""
-    return "hccl" in Backend.backend_list
 
 
 def is_backend_available(backend: str) -> bool:
