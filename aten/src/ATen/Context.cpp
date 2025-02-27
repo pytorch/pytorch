@@ -254,7 +254,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
-    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
     if (allow_tf32 != true) {
       return false;
     }
@@ -264,7 +264,7 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
-  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
     C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
                               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
@@ -332,7 +332,10 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
@@ -430,6 +433,18 @@ void Context::setAllowFP16AccumulationCuBLAS(bool b) {
   allow_fp16_accumulation_cublas = b;
 }
 
+std::optional<int32_t> Context::_SMCarveout_EXPERIMENTAL() const {
+  return sm_carveout;
+}
+
+void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int32_t> c) {
+  if (c.has_value()) {
+    TORCH_WARN_ONCE(
+      "Setting the SM carveout for matmuls is a temporary experimental mitigation for performance issues, "
+      "while more robust solutions are developed. It may be removed at any moment without notice.");
+  }
+  sm_carveout = c;
+}
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()

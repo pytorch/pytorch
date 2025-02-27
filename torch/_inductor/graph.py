@@ -75,6 +75,7 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
+    constrain_to_fake_tensors,
     constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -232,6 +233,13 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
+        if isinstance(
+            cur.target,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
         op = _get_overload_packet(cur)
         if not op:
             continue
@@ -1031,6 +1039,18 @@ class GraphLowering(torch.fx.Interpreter):
             # Alternately we could filter this out in AotAutograd
             self.graph_input_names.append(target)
             return None
+        # See note: Note: [Generator arguments in AOTDispatcher]
+        elif isinstance(example, torch.Generator):
+            assert (
+                len(V.graph.current_node.users) == 1
+                and next(iter(V.graph.current_node.users)).target
+                is torch._prims.rng_prims.graphsafe_run_with_rng_state
+            )
+            gen = ir.GeneratorState(name=target, device=example.device)
+            self.graph_inputs[target] = gen  # type: ignore[assignment]
+            self.graph_input_names.append(target)
+            return gen
+
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -1279,7 +1299,7 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(value, TorchBindObject):
                 continue
             assert isinstance(
-                value, (TensorBox, sympy.Expr)
+                value, (TensorBox, sympy.Expr, torch._inductor.ir.GeneratorState)
             ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
@@ -1354,8 +1374,9 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_args:
+                if old_arg is new_arg:
                     continue
+
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
             return
 
@@ -1438,7 +1459,15 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+
+                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
+                        inp_args = arg_kwarg_vals[0]
+                        inp_kwargs = arg_kwarg_vals[1]
+                        args, kwargs = constrain_to_fake_tensors(
+                            args, kwargs, inp_args, inp_kwargs
+                        )
+                    else:
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
