@@ -740,7 +740,18 @@ def extract_loop_body_with_args(
             ):
                 continue
             # check if the coefficient is the stride
+            buffer = None
+            if read.name in V.graph.name_to_buffer:
+                buffer = V.graph.name_to_buffer[read.name]
+            elif read.name in V.graph.graph_inputs:
+                buffer = V.graph.graph_inputs[read.name]
 
+            if buffer is None or not isinstance(
+                buffer.layout, torch._inductor.ir.FixedLayout
+            ):
+                continue
+            if coefficient not in buffer.layout.stride:
+                continue
             # check the indirect variable
             indirect_load_dim_indexing_expr = None
             indirect_var = multiplied_symbol
