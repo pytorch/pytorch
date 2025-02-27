@@ -1757,10 +1757,14 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
+                # compilation in precompile stage is much cheaper than that in 
+                # autotuning stage
                 if len(timings) == len(choices):
                     log.debug("Timings found in cache, returning no_op")
                     return no_op
                 else:
+                    # TODO: remove this branch in April 2025
+                    # added warning for debugging purpose
                     log.warning(
                         "Found only %d/%d timings for %s, not skipping precompilation",
                         len(timings),
