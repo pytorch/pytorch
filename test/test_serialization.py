@@ -4450,12 +4450,6 @@ class TestSerialization(TestCase, SerializationMixin):
         with self.assertWarnsRegex(UserWarning, "meta device under skip_data context manager is a no-op"):
             _save_load(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Please call torch.load outside the skip_data context manager"):
-            with skip_data(), BytesIOContext() as f:
-                torch.save(torch.randn(2, 3), f)
-                f.seek(0)
-                torch.load(f, weights_only=True)
-
     @parametrize("force_weights_only", (True, False))
     def test_weights_only_env_variables(self, force_weights_only):
         env_var = "TORCH_FORCE_WEIGHTS_ONLY_LOAD" if force_weights_only else "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"

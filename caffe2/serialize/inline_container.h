@@ -178,7 +178,7 @@ class TORCH_API PyTorchStreamReader final {
       size_t cursor,
       std::string filename,
       size_t size,
-      uint64_t storage_alignment);
+      uint64_t alignment);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
 
@@ -226,11 +226,11 @@ class TORCH_API PyTorchStreamWriter final {
   explicit PyTorchStreamWriter(
       const std::string& archive_name,
       bool compute_crc32 = true,
-      uint64_t storage_alignment = 64);
+      uint64_t alignment = 64);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func,
       bool compute_crc32 = true,
-      uint64_t storage_alignment = 64);
+      uint64_t alignment = 64);
 
   void setMinVersion(const uint64_t version);
 
@@ -272,7 +272,7 @@ class TORCH_API PyTorchStreamWriter final {
   uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
   bool compute_crc32_;
-  uint64_t storage_alignment_;
+  uint64_t alignment_;
 
   // This number will be updated when the model has operators
   // that have valid upgraders.
