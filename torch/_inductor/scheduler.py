@@ -4024,7 +4024,7 @@ class Scheduler:
         for partition_id, (partition, signature) in enumerate(
             zip(partitions, signatures)
         ):
-            if not self.should_generate_partition_wrapper(partition):
+            if signature.skip_cudagraph:
                 # number of partition info should be the same as the number of generated
                 # partition functions. This assumption will be used when cudagraphify
                 # each partition function.
@@ -4094,6 +4094,7 @@ class Scheduler:
                 if name in name_to_node
             }
             output_nodes = [name_to_node[name] for name in returned_output_names]
+
             constant_names = [
                 name for name in partition_input_names if name not in name_to_node
             ]
@@ -4107,6 +4108,7 @@ class Scheduler:
             )
 
             signatures.append(partition_signature)
+
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
@@ -4177,13 +4179,6 @@ class Scheduler:
         V.graph.wrapper_code.allocated.update(
             [node.get_name() for node in signature.output_nodes]
         )
-
-    def should_generate_partition_wrapper(self, partition: PartitionType) -> bool:
-        if len(partition) > 1:
-            return True
-        else:
-            # Inline small partitions to avoid overheads from function calls.
-            return False
 
     def _codegen_partitions(self) -> None:
         """

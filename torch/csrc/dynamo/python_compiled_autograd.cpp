@@ -52,6 +52,12 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
+namespace {
+PyObject* the_autograd_compiler = nullptr;
+int default_dyn_type_int = 0;
+PyObject* python_verbose_logger = nullptr;
+} // namespace
+
 // List[Optional[Tensor]] in Python can't be directly parsed into a
 // List[Tensor], so we need to do this conversion manually.
 static std::vector<at::Tensor> toTensorList(
@@ -266,9 +272,6 @@ static variable_list validate_outputs(
       });
   return new_outputs;
 }
-
-// snapshot of python verbose logging toggle
-static PyObject* python_verbose_logger = nullptr;
 
 struct PythonLogger {
   PythonLogger() = delete;
@@ -550,8 +553,6 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
   }
 };
 
-static PyObject* the_autograd_compiler = nullptr;
-static int default_dyn_type_int = 0;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
@@ -823,8 +824,8 @@ static CacheNode* _compiled_autograd_impl(
   }
   const bool check_exec_info = !graph_task.exec_info_.empty();
   CacheNode* cache = CacheNode::root();
-  std::vector<NodeCall*> calls;
-  calls.reserve(
+  std::vector<NodeCall*> ordered_calls;
+  ordered_calls.reserve(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   int i = 0;
@@ -834,7 +835,7 @@ static CacheNode* _compiled_autograd_impl(
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
-    calls.emplace_back(&call);
+    ordered_calls.emplace_back(&call);
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
@@ -890,8 +891,8 @@ static CacheNode* _compiled_autograd_impl(
     TORCH_INTERNAL_ASSERT(!vlogger.has_value() || compile_reason.has_value());
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
-
-    setPyCompilerInterface(std::make_unique<PyCompilerInterfaceImpl>());
+    PyCompilerGuard py_compiler_guard(
+        std::make_unique<PyCompilerInterfaceImpl>());
 
     TraceState state = call_begin_capture(
         py_compiler,
@@ -901,8 +902,8 @@ static CacheNode* _compiled_autograd_impl(
         std::move(compile_reason));
     InputBuffers input_buffers;
 
-    for (size_t i = 0; i < calls.size(); i++) {
-      NodeCall& call = *calls[i];
+    for (size_t i = 0; i < ordered_calls.size(); i++) {
+      NodeCall& call = *ordered_calls[i];
 
       std::string _node_name = call.node->name();
       THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
@@ -1038,7 +1039,6 @@ static CacheNode* _compiled_autograd_impl(
       }
     }
 
-    resetPyCompilerInterface();
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
     TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
     TORCH_CHECK(
@@ -1057,7 +1057,8 @@ static CacheNode* _compiled_autograd_impl(
 
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
-    for (auto& call : calls) {
+    for (auto& call : ordered_calls) {
+      // Once we release variables, we can no longer fallback to eager autograd
       call->node->release_variables();
     }
   }
