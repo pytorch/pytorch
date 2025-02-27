@@ -339,7 +339,7 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
-  # NOTE: The PyTorch build does not actually add_subdirectory 
+  # NOTE: The PyTorch build does not actually add_subdirectory
   # third_party/composable_kernel or use it as a CMake library. What is used
   # is header only, so this should be ok, except that the CMake build generates
   # a ck/config.h. We just do that part here. Without this, the ck.h from the
