@@ -267,15 +267,6 @@ def normalize_args_kwargs(
     return tuple(new_args), new_kwargs
 
 
-def get_kwarg_names(schema: _C.FunctionSchema) -> set[str]:
-    names = set()
-    for i in range(len(schema.arguments)):
-        info = schema.arguments[i]
-        if info.kwarg_only:
-            names.add(info.name)
-    return names
-
-
 def hop_schema_from_fx_node(node):
     from torchgen.gen_schema_utils import FunctionSchemaGen
 
