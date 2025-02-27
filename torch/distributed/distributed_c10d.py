@@ -2806,6 +2806,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     if group is None:
         group = _get_default_group()
 
@@ -2882,6 +2883,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 

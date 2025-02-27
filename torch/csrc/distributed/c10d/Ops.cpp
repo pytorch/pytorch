@@ -19,9 +19,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool asyncOp, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool asyncOp, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
+      "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool asyncOp, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
@@ -169,12 +169,13 @@ IMPL_BROADCAST(PrivateUse1)
           const c10::intrusive_ptr<ProcessGroup>& process_group,              \
           const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
           const std::optional<at::Tensor>& sparse_indices,                    \
+          bool asyncOp,                                                       \
           int64_t timeout) {                                                  \
     auto tensor_vec = tensors.vec();                                          \
     auto work = process_group->getBackend(c10::DeviceType::DEV) -> allreduce( \
         tensor_vec,                                                           \
         AllreduceOptions{                                                     \
-            *reduce_op.get(), std::chrono::milliseconds(timeout)});           \
+            *reduce_op.get(), std::chrono::milliseconds(timeout), asyncOp});  \
     return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(     \
         std::move(tensor_vec), work);                                         \
   }
@@ -188,11 +189,13 @@ IMPL_ALLREDUCE(PrivateUse1)
       at::TensorList tensors,                                     \
       const c10::intrusive_ptr<ProcessGroup>& process_group,      \
       const c10::intrusive_ptr<ReduceOp>& reduce_op,              \
+      bool asyncOp,                                               \
       int64_t timeout) {                                          \
     auto tensor_vec = tensors.vec();                              \
     AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{}; \
     opts.reduceOp = *reduce_op.get();                             \
     opts.timeout = std::chrono::milliseconds(timeout);            \
+    opts.asyncOp = asyncOp;                                       \
     return process_group->getBackend(c10::DeviceType::DEV)        \
         ->allreduce_coalesced(tensor_vec, opts);                  \
   }
@@ -464,6 +467,7 @@ allreduce_sparse_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     const std::optional<at::Tensor>& sparse_indices,
+    bool asyncOp,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->getBackend(c10::DeviceType::CUDA)
@@ -472,6 +476,7 @@ allreduce_sparse_cuda_(
                       AllreduceOptions{
                           *reduce_op,
                           std::chrono::milliseconds(timeout),
+                          asyncOp,
                           sparse_indices});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
