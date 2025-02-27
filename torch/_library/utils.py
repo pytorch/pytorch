@@ -215,58 +215,6 @@ def zip_schema(
     return
 
 
-def normalize_args_kwargs(
-    schema: _C.FunctionSchema, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    """Normalizes (args, kwargs) to the PyTorch dispatcher calling convention.
-
-    That is, all kwarg-only-args are in the keywords and the rest are in args.
-    This may result in some default values being pulled and filled in.
-    Also, any defaults that are equal to their default values in the schema are removed
-    if allowed.
-
-    Assumes that (args, kwargs) are bindable to the schema.
-    """
-    assert len(schema.arguments) >= len(args) + len(kwargs)
-
-    new_args = []
-    new_kwargs = {}
-
-    # separate args and kwargs into new_args, new_kwargs
-    for i in range(len(schema.arguments)):
-        if i < len(args):
-            new_args.append(args[i])
-            continue
-
-        info = schema.arguments[i]
-        if not info.kwarg_only:
-            if info.name in kwargs:
-                new_args.append(kwargs[info.name])
-            else:
-                # This Argument was not present in args or kwargs.
-                # Fill in the default temporarily
-                # (we may remove it in the second loop below)
-                new_args.append(info.default_value)
-            continue
-
-        assert info.kwarg_only
-        if info.name in kwargs:
-            # Ignore any kwargs that are equal to their default value.
-            if info.default_value != kwargs[info.name]:
-                new_kwargs[info.name] = kwargs[info.name]
-
-    # Remove defaults from args. We didn't do this in the previous
-    # loop because it requires iterating backward.
-    for i in range(len(new_args) - 1, 0, -1):
-        info = schema.arguments[i]
-        if info.default_value == new_args[i]:
-            del new_args[i]
-        else:
-            break
-
-    return tuple(new_args), new_kwargs
-
-
 def hop_schema_from_fx_node(node):
     from torchgen.gen_schema_utils import FunctionSchemaGen
 
