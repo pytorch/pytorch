@@ -488,8 +488,13 @@ def unimplemented_v2(
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
     """
-    hints_str = "\n".join(hints)
-    hints_str = textwrap.indent(hints_str, "  Hint: ")
+
+    explanation = textwrap.indent(explanation, "    ").lstrip()
+    hints_str = "\n".join(
+        "  Hint: " + textwrap.indent(hint, "    ").lstrip() for hint in hints
+    )
+    context = textwrap.indent(context, "    ").lstrip()
+
     msg = f"""\
 {gb_type}
   Explanation: {explanation}
