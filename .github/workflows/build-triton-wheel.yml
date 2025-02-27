@@ -168,6 +168,7 @@ jobs:
       contents: read
     container:
       image: continuumio/miniconda3:4.12.0
+    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -175,7 +176,7 @@ jobs:
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_build_triton_wheels_trust_pytorch_policy
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
