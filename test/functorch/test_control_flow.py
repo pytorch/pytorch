@@ -2099,17 +2099,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             "scan must be captured completely.*",
         ):
             scan(fct_wrong_pytree, init, inp, dim=0)
-            
+
     def test_scan_float_output(self):
         # Init and input have same pytree
         def fct_float_output(x, y):
-            return 0., x + y
+            return 0.0, x + y
 
         x = torch.randn(3, 2, 2)
         init = torch._ops.ops.aten.slice(x, 0, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            # Should be: 
+            # Should be:
             # torch._dynamo.exc.Unsupported,
             # "HigherOrderOperator body's output must consist of tensors or ints only"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
@@ -2524,19 +2524,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         )
 
         with self.assertRaisesRegex(
-                # Should be:
-                #torch._dynamo.exc.Unsupported,
-                # "The pytree of init and the carry produced by the combine_fn must be identical!"
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "scan must be captured completely.*",
-            ):
-                scan_fct(add_one_carry, init, x, dim=dim)
-                
+            # Should be:
+            # torch._dynamo.exc.Unsupported,
+            # "The pytree of init and the carry produced by the combine_fn must be identical!"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely.*",
+        ):
+            scan_fct(add_one_carry, init, x, dim=dim)
+
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_pytree_init_shorter_carry(self, compile_mode):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
-            return (x+1, x+2), x+3
+            return (x + 1, x + 2), x + 3
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -2548,19 +2548,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-                # Should be:
-                #torch._dynamo.exc.Unsupported,
-                # "The pytree of init and the carry produced by the combine_fn must be identical!"
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "scan must be captured completely.*",
-            ):
-                scan_fct(add_one_carry, init, x, dim=dim)
-                
+            # Should be:
+            # torch._dynamo.exc.Unsupported,
+            # "The pytree of init and the carry produced by the combine_fn must be identical!"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely.*",
+        ):
+            scan_fct(add_one_carry, init, x, dim=dim)
+
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_pytree_carry_shape(self, compile_mode):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
-            return x[0, :], x+3
+            return x[0, :], x + 3
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -2572,10 +2572,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Expected init and carry to have same metadata.*",
-            ):
-                scan_fct(add_one_carry, init, x, dim=dim)
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected init and carry to have same metadata.*",
+        ):
+            scan_fct(add_one_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
@@ -2915,7 +2915,7 @@ def forward(self, fct_1, init_1, xs_1):
     sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, (init_1,), (flip,), [sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3]);  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, (init_1,), (flip,), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None

@@ -11,8 +11,8 @@ from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
     _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
     make_fx,
 )
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -97,7 +97,7 @@ def _maybe_compile_and_run_fn(fn, *args):
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
                 else:
                     backend = "eager"
-                return torch.compile(fn, backend=backend, fullgraph=False)(*args)
+                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
 
@@ -582,7 +582,6 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
     ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
-
 
 
 def check_input_alias_and_mutation(

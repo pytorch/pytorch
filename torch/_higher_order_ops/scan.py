@@ -105,11 +105,11 @@ def scan(
     # and we also want to the input ordering matches the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
-    
+
     # Shortcut if no xs is provided
     if len(leaves_xs_orig) == 0:
         return init, []
-    
+
     def _validate_input(cfn, lxs, linit, d, r):
         if not callable(cfn):
             raise RuntimeError("Combine_fn must be a callable, but got {cfn}")
@@ -123,14 +123,14 @@ def scan(
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
-            
+
         for x in lxs:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
-    
+
     _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse)
 
     # Move scan dim to 0 and always perform scan on dim 0
@@ -158,7 +158,10 @@ def scan(
         return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=())
 
     carry, out = _maybe_compile_and_run_fn(
-        run_flattened_scan, combine_fn, leaves_init, leaves_xs,
+        run_flattened_scan,
+        combine_fn,
+        leaves_init,
+        leaves_xs,
     )
 
     if reverse:
@@ -190,10 +193,9 @@ scan_op = ScanOp()
 
 
 def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
-    
     def call_operator(*args):
         return pytree.tree_leaves(operator(*args))
-    
+
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init

@@ -1446,13 +1446,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
-        
+
         # combine_fn input check
         # We need to get the pure combine_fn from the functools.partial
         _check_supported_callable_arg(
             tx, combine_fn.keywords["combine_fn"], "combine_fn"
         )
-        
+
         # init input check
         if not isinstance(init, (ListVariable, TupleVariable)):
             unimplemented(
@@ -1463,11 +1463,12 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         init_len = len(init.items)
         if init_len == 0:
             unimplemented(
-                f"scan() operator requires init leaves.  It seems to be an "
-                f"internal error, please report an issue to PyTorch.")
+                "scan() operator requires init leaves.  It seems to be an "
+                "internal error, please report an issue to PyTorch."
+            )
         init_vars = init.unpack_var_sequence(tx)
         check_subgraph_args_types(init_vars)
-        
+
         # xs input check
         if not isinstance(xs, (ListVariable, TupleVariable)):
             unimplemented(
@@ -1477,7 +1478,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         xs_vars = xs.unpack_var_sequence(tx)
         check_subgraph_args_types(xs_vars)
-        
+
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
@@ -1501,14 +1502,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
-            sub_args_inp = [
-                _make_inlined(tx, first_slice_copy)(inp) for inp in xs_vars
-            ]
+            sub_args_inp = [_make_inlined(tx, first_slice_copy)(inp) for inp in xs_vars]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs_vars
             ]
-
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
@@ -1522,51 +1520,56 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description="scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
-            should_flatten_outputs=True
+            should_flatten_outputs=True,
         )
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
-        
+
         xs_proxy = tuple(x.as_proxy() for x in xs_vars)
         init_proxy = tuple(i.as_proxy() for i in init_vars)
         additional_inputs_proxy = list(
             ai.as_proxy() for ai in additional_inputs_vars
         ) + list(combine_freevars_proxy)
-        
+
         results = combine_result.unpack_var_sequence(tx)
         carry_vars, out_vars = _extract_carry_and_out(results, init_len)
-        
+
         # Try to pack the out_vars back into the tree structure provided by the speculate_subgraph
         # If this fails, it is an indication that the tree structure of the inits and the carries does not match
         try:
-            out_tree_structure = _combine_treespec.fields['children_specs'].items[1].as_python_constant()
+            out_tree_structure = (
+                _combine_treespec.fields["children_specs"].items[1].as_python_constant()
+            )
             out_tree = pytree.tree_unflatten(out_vars, out_tree_structure)
         except:
-            unimplemented('The pytree of init and the carry produced by the combine_fn must be identical!')
-        
-        # Try to pack the init and the carries into the same tree structure.
+            unimplemented(
+                "The pytree of init and the carry produced by the combine_fn must be identical!"
+            )
+
+        # Try to pack the init_vars and the carry_vars into the same tree structure.
         # This will fail if the carries and the init do not have the same tree structure.
         # If the accidentially have the same tree structure, we will check their meta data below
-        # carry_vars_tree, out_vars_tree = combine_result.unpack_var_sequence(tx)
-        # carry_treespec = _make_inlined(tx, pytree.tree_structure)(carry_vars_tree)
-        # init_tree = _make_inlined(tx, pytree.tree_unflatten)(init, _combine_treespec.fields['children_specs'].items[0])
-        # carry_tree = _make_inlined(tx, pytree.tree_unflatten)(ListVariable(carry_vars), _combine_treespec.fields['children_specs'].items[0])
         try:
-            carry_tree_structure = _combine_treespec.fields['children_specs'].items[0].as_python_constant()
+            carry_tree_structure = (
+                _combine_treespec.fields["children_specs"].items[0].as_python_constant()
+            )
             carry_tree = pytree.tree_unflatten(carry_vars, carry_tree_structure)
             init_tree = pytree.tree_unflatten(init_vars, carry_tree_structure)
         except:
-            unimplemented('The pytree of init and the carry produced by the combine_fn must be identical!')
-        
+            unimplemented(
+                "The pytree of init and the carry produced by the combine_fn must be identical!"
+            )
+
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
-        
+
+        # Check meta data of carries and inits. If we pass this stage, we are sure that the init and carries
+        # have the same tree structure
         check_meta_consistency_vt(
             init_vars,
             carry_vars,
             "init",
             "carry",
         )
-        
-        # TODO: Check the treespec of the init and the output treespec
+
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
 
