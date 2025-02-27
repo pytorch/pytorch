@@ -4965,9 +4965,7 @@ class ExternKernel(InputsKernel):
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
-            is_arg_tensor.append(
-                isinstance(arg, IRNode) and not isinstance(arg, NonTensorObj)
-            )
+            is_arg_tensor.append(isinstance(arg, IRNode))
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
@@ -4998,9 +4996,7 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args: list[
-            Union[torch.Tensor, torch._C.ScriptObject, torch.Generator]
-        ] = []
+        example_args: list[Union[torch.Tensor, torch._C.ScriptObject]] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -5017,12 +5013,6 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_real_obj())
-            elif isinstance(x, torch._inductor.ir.GeneratorState):
-                device_index = x.device.index
-                assert x.device.type == "cuda" and device_index is not None
-                example_args.append(
-                    torch.cuda.default_generators[device_index].clone_state()
-                )
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -5153,7 +5143,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, (NonTensorObj)):
+        if isinstance(x, TorchBindObject):
             return x
         return cls.copy_input(x)
 
@@ -7568,12 +7558,8 @@ class EffectfulKernel(FallbackKernel):
         return True
 
 
-class NonTensorObj(IRNode):
-    pass
-
-
 @ir_dataclass
-class TorchBindObject(NonTensorObj):
+class TorchBindObject(IRNode):
     from torch._library.fake_class_registry import FakeScriptObject
 
     name: str
@@ -7605,18 +7591,6 @@ class TorchBindObject(NonTensorObj):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
-
-
-@ir_dataclass
-class GeneratorState(NonTensorObj):
-    name: str
-    device: torch.device
-
-    def get_name(self):  # type: ignore[no-untyped-def]
-        return self.name
-
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return self.name
 
 
 class _CollectiveKernel(FallbackKernel):

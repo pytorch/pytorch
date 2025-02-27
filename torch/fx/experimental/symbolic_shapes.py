@@ -819,9 +819,6 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         yield from _iterate_exprs(val.storage_offset())
     elif val is None:
         pass
-    # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator):
-        pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
