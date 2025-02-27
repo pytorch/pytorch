@@ -340,19 +340,22 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 
 
 def _recursive_pre_grad_passes(
-    gm: GraphModule, example_inputs: Sequence[InputType]
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
 ) -> GraphModule:
     with dynamo_timed(
         "_recursive_pre_grad_passes",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
+        add_passes = config.add_pre_grad_passes
+        remove_passes = config.remove_pre_grad_passes
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
             new_subgraph = _recursive_pre_grad_passes(subgraph, ())
             setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs)
+        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
@@ -491,6 +494,18 @@ def maybe_disable_comprehensive_padding(
             "Skip comprehensive padding for use_runtime_constant_folding"
         )
         return config.patch(comprehensive_padding=False)
+    else:
+        return contextlib.nullcontext()
+
+
+def maybe_disable_graph_partition(
+    cpp_wrapper: bool, aot_mode: bool
+) -> AbstractContextManager[None, None]:
+    """
+    graph partition does not support cpp_wrapper and aot_mode yet.
+    """
+    if cpp_wrapper or aot_mode:
+        return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
 
@@ -1000,14 +1015,32 @@ class _InProcessFxCompile(FxCompile):
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
                         provenance_tracking_json
                     )
-                if config.is_fbcode():
-                    log_optimus_to_scuba(
-                        extra_logging={"pt2_configs": str(get_patched_config_dict())}
+
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    # TODO: Remove this when 3.9 is no longer supported
+                    if sys.version_info < (3, 10):
+                        num_graph_breaks = sum(counters["graph_break"].values())
+                    else:
+                        num_graph_breaks = counters["graph_break"].total()
+                    CompileEventLogger.compilation_metric(
+                        overwrite=True, num_graph_breaks=num_graph_breaks
                     )
+                if config.is_fbcode():
+                    try:
+                        log_optimus_to_scuba(
+                            extra_logging={
+                                "pt2_configs": str(get_patched_config_dict())
+                            }
+                        )
+                    except ValueError:
+                        # TODO(T216453900): need to work around for now to support vllm
+                        # See details in vllm/compilation/pass_manager.py.
+                        log.warning("failed to log pt2_configs")
 
             with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
                 example_inputs
-            ):
+            ), maybe_disable_graph_partition(cpp_wrapper, aot_mode):
                 const_output_index = None
                 const_graph = None
                 const_code = None
