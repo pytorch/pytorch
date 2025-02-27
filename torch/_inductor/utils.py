@@ -2694,15 +2694,3 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
-
-
-def enable_graph_partition(graph: Optional[GraphLowering] = None) -> bool:
-    if not config.graph_partition:
-        return False
-
-    # cpp_wrapper and aot inductor do not support graph partition yet
-    # config.cpp_wrapper may have been patched, thus different from graph.cpp_wrapper
-    if graph:
-        return not graph.cpp_wrapper and not graph.aot_mode
-    else:
-        return not config.cpp_wrapper

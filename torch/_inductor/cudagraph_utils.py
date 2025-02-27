@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor.utils import InputType
+from torch._inductor.utils import GraphPartitionInfo, InputType
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -334,3 +334,75 @@ class CudagraphCachedInfo:
     placeholders: Sequence[PlaceholderInfo]
     stack_traces: list[Optional[str]]
     cudagraph_fail_reasons: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphMetadata:
+    """
+    Metadata needed to record a CUDA graph.
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    static_input_idxs: list[int]
+    mutated_input_idxs: list[int]
+    stack_traces: list[Optional[str]]
+    constants: tuple[torch.Tensor, ...]
+
+
+def get_partition_cudagraph_metadata(
+    partition_info: GraphPartitionInfo,
+    constants: dict[str, torch.Tensor],
+    static_input_idxs: Sequence[int],
+    mutated_input_idxs: Sequence[int],
+    cudagraph_info: CudagraphCachedInfo,
+) -> CudagraphMetadata:
+    """
+    Convert the cudagraph metadata at the graph level to the graph partition level,
+    according to the index mapping from partition input/output index to the graph
+    input/output index.
+    """
+    placeholders = cudagraph_info.placeholders
+    stack_traces = cudagraph_info.stack_traces
+
+    partition_placeholders = []
+    partition_static_input_idxs = []
+    partition_mutated_input_idxs = []
+    for partition_input_idx, graph_input_idx in enumerate(
+        partition_info.input_index_mapping
+    ):
+        if graph_input_idx in static_input_idxs:
+            partition_static_input_idxs.append(partition_input_idx)
+
+        if graph_input_idx in mutated_input_idxs:
+            partition_mutated_input_idxs.append(partition_input_idx)
+
+        if graph_input_idx:
+            placeholder = placeholders[graph_input_idx]
+        else:
+            # create a dummy placeholder info since this partition input is not a graph input
+            placeholder = PlaceholderInfo(
+                name=f"partition_{partition_info.id}_placeholder_{partition_input_idx}",
+                stack_trace=None,
+                users=[],
+                mutating_use_stack_trace=None,
+            )
+        partition_placeholders.append(placeholder)
+
+    partition_stack_traces = []
+    for graph_output_idx in partition_info.output_index_mapping:
+        if graph_output_idx:
+            partition_stack_traces.append(stack_traces[graph_output_idx])
+        else:
+            partition_stack_traces.append(None)
+
+    partition_constants = tuple(
+        constants[name] for name in partition_info.constant_names
+    )
+
+    return CudagraphMetadata(
+        partition_placeholders,
+        partition_static_input_idxs,
+        partition_mutated_input_idxs,
+        partition_stack_traces,
+        partition_constants,
+    )

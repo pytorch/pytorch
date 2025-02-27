@@ -36,15 +36,14 @@ from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
+    get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
-    enable_graph_partition,
     GraphPartitionInfo,
     InputType,
     output_node,
@@ -162,126 +161,6 @@ def handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
         compiled_graph.current_callable = compiled_artifact
 
 
-def get_cudagraph_partition_info(
-    compiled_graph: CompiledFxGraph,
-    partition_info: GraphPartitionInfo,
-    constants: dict[str, torch.Tensor],
-) -> tuple[
-    list[PlaceholderInfo],
-    list[int],
-    list[int],
-    list[Optional[str]],
-    tuple[torch.Tensor, ...],
-]:
-    assert compiled_graph.cudagraph_info is not None
-    static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
-    mutated_input_idxs = compiled_graph.mutated_input_idxs
-    cached_info = compiled_graph.cudagraph_info
-    placeholders = cached_info.placeholders
-    stack_traces = cached_info.stack_traces
-
-    partition_placeholders = []
-    partition_static_input_idxs = []
-    partition_mutated_input_idxs = []
-    for partition_input_idx, graph_input_idx in enumerate(
-        partition_info.input_index_mapping
-    ):
-        if graph_input_idx in static_input_idxs:
-            partition_static_input_idxs.append(partition_input_idx)
-
-        if graph_input_idx in mutated_input_idxs:
-            partition_mutated_input_idxs.append(partition_input_idx)
-
-        if graph_input_idx:
-            placeholder = placeholders[graph_input_idx]
-        else:
-            # create a dummy placeholder info since this partition input is not a graph input
-            placeholder = PlaceholderInfo(
-                name=f"partition_{partition_info.id}_placeholder_{partition_input_idx}",
-                stack_trace=None,
-                users=[],
-                mutating_use_stack_trace=None,
-            )
-        partition_placeholders.append(placeholder)
-
-    partition_stack_traces = []
-    for graph_output_idx in partition_info.output_index_mapping:
-        if graph_output_idx:
-            partition_stack_traces.append(stack_traces[graph_output_idx])
-        else:
-            partition_stack_traces.append(None)
-
-    partition_constants = tuple(
-        constants[name] for name in partition_info.constant_names
-    )
-
-    return (
-        partition_placeholders,
-        partition_static_input_idxs,
-        partition_mutated_input_idxs,
-        partition_stack_traces,
-        partition_constants,
-    )
-
-
-def cudagraph_partition_post_compile(
-    example_inputs: Sequence[InputType],
-    compiled_graph: CompiledFxGraph,
-    cudagraphs: BoxedBool,
-    constants: dict[str, torch.Tensor],
-) -> None:
-    if (
-        compiled_graph.partition_infos is None
-        or len(compiled_graph.partition_infos) == 0
-    ):
-        BoxedBool.disable(cudagraphs)
-        handle_backward_generation(compiled_graph)
-        return
-
-    from .compile_fx import cudagraphify
-
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.recursively_apply_fns
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
-    is_inference = compiled_graph.fx_kwargs["is_inference"]
-    is_backward = compiled_graph.fx_kwargs["is_backward"]
-    device_index = next(iter(compiled_graph.device_idxs))
-
-    if not config.triton.cudagraph_trees:
-        # Force specialize all inputs so that CUDA graphs will work
-        for t in example_inputs:
-            if isinstance(t, torch.SymInt):
-                int(t)  # guard
-
-    if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(device_index)
-
-    cudagraphify_fns = []
-    for partition_info in compiled_graph.partition_infos:
-        (
-            partition_placeholders,
-            partition_static_input_idxs,
-            partition_mutated_input_idxs,
-            partition_stack_traces,
-            partition_constants,
-        ) = get_cudagraph_partition_info(compiled_graph, partition_info, constants)
-
-        cudagraphify_fn = partial(
-            cudagraphify,
-            static_input_idxs=partition_static_input_idxs,
-            device_index=device_index,
-            stack_traces=partition_stack_traces,
-            is_backward=is_backward,
-            is_inference=is_inference,
-            constants=partition_constants,
-            placeholders=partition_placeholders,
-            mutated_input_idxs=tuple(partition_mutated_input_idxs),
-        )
-        cudagraphify_fns.append(cudagraphify_fn)
-
-    compiled_graph.recursively_apply_fns(cudagraphify_fns)
-
-
 def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -351,6 +230,68 @@ def cudagraph_post_compile(
                 log_cudagraph_skip_and_bump_counter(
                     f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                 )
+
+
+def cudagraph_partition_post_compile(
+    example_inputs: Sequence[InputType],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+    constants: dict[str, torch.Tensor],
+) -> None:
+    if (
+        compiled_graph.partition_infos is None
+        or len(compiled_graph.partition_infos) == 0
+    ):
+        BoxedBool.disable(cudagraphs)
+        handle_backward_generation(compiled_graph)
+        return
+
+    from .compile_fx import cudagraphify
+
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.recursively_apply_fns is not None
+    assert compiled_graph.cudagraph_info is not None
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+    static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
+    mutated_input_idxs = tuple(compiled_graph.mutated_input_idxs)
+
+    device_index = next(iter(compiled_graph.device_idxs))
+
+    if not config.triton.cudagraph_trees:
+        # Force specialize all inputs so that CUDA graphs will work
+        for t in example_inputs:
+            if isinstance(t, torch.SymInt):
+                int(t)  # guard
+
+    if boxed_forward_device_index is not None and not is_inference and not is_backward:
+        boxed_forward_device_index.set(device_index)
+
+    cudagraphify_fns = []
+    for partition_info in compiled_graph.partition_infos:
+        partition_metadata = get_partition_cudagraph_metadata(
+            partition_info,
+            constants,
+            static_input_idxs,
+            mutated_input_idxs,
+            compiled_graph.cudagraph_info,
+        )
+
+        cudagraphify_fn = partial(
+            cudagraphify,
+            static_input_idxs=partition_metadata.static_input_idxs,
+            device_index=device_index,
+            stack_traces=partition_metadata.stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=partition_metadata.constants,
+            placeholders=partition_metadata.placeholders,
+            mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
+        )
+        cudagraphify_fns.append(cudagraphify_fn)
+
+    compiled_graph.recursively_apply_fns(cudagraphify_fns)
 
 
 def maybe_realign_inputs(
@@ -507,7 +448,7 @@ class CompiledFxGraph(OutputCode):
 
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
-        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason  # TODO: mismatch self.cudagraph_info.cudagraph_fail_reasons
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None
@@ -615,7 +556,7 @@ class CompiledFxGraph(OutputCode):
         """
         set_tracing_context_output_strides(example_inputs, self)
 
-        if enable_graph_partition():
+        if config.graph_partition:
             cudagraph_partition_post_compile(
                 example_inputs,
                 self,
