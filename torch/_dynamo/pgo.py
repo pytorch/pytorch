@@ -1,3 +1,14 @@
+"""
+Profile Guided Optimization (PGO) implementation for Dynamo.
+
+This module provides functionality for caching and managing code state profiles
+that guide optimization decisions in Dynamo. It implements both local and remote
+caching mechanisms for storing profile information across runs, handles profile
+merging across distributed ranks, and manages the lifecycle of profile data
+during compilation. The profiles track dynamic vs static properties of tensors
+and help Dynamo make better specialization decisions.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -7,8 +18,9 @@ import enum
 import logging
 import os
 import pickle
+import re
 from collections import defaultdict
-from typing import DefaultDict, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch._dynamo.config
@@ -105,13 +117,13 @@ class CodeId:
 
 @dataclasses.dataclass
 class CodeState:
-    automatic_dynamic: DefaultDict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
 
-_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
-_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -489,7 +501,8 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
     from torch._inductor.runtime.runtime_utils import cache_dir
 
-    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
+    code_state_key = re.sub(r'[<>:"/\\|?*]', "_", f"code_state_{cache_key}.pkl")
+    return os.path.join(cache_dir(), "dynamo", code_state_key)
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
@@ -529,7 +542,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
         f"{k.filename}:{k.firstlineno}:{k.name}:\n"
         + "\n".join(
@@ -539,7 +552,7 @@ def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
     )
 
 
-def get_code_state() -> DefaultDict[CodeId, CodeState]:
+def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
@@ -551,7 +564,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     if cache_key is None:
         return _CODE_STATE
 
-    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
         global _INIT_CODE_STATE
         assert isinstance(_CODE_STATE, defaultdict)
         log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
@@ -672,7 +685,7 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
         with open(tmp_path, "wb") as f:
             f.write(pickled_code)
             size = f.tell()
-        os.rename(tmp_path, path)
+        os.replace(tmp_path, path)
     return path, size
 
 

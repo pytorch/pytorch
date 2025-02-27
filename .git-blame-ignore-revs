@@ -24,6 +24,10 @@ e3900d2ba5c9f91a24a9ce34520794c8366d5c54
 2e26976ad3b06ce95dd6afccfdbe124802edf28f
 # 2021-06-07 Strictly typed everything in `.github` and `tools`
 737d920b21db9b4292d056ee1329945990656304
+# 2021-08-12 [codemod][lint][fbcode/c*] Enable BLACK by default
+b0043072529b81276a69df29e00555333117646c
+# 2021-08-25 Reformat run_test.py
+67d8e7b659b19e1ee68208b28bfa7dba73375dbc
 # 2022-06-09 Apply clang-format to ATen headers
 95b15c266baaf989ef7b6bbd7c23a2d90bacf687
 # 2022-06-11 [lint] autoformat test/cpp and torch/csrc
@@ -43,6 +47,8 @@ a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e
 # 2024-06-28 enable UFMT in `torch/storage.py`
 d80939e5e9337e8078f11489afefec59fd42f93b
 # 2024-06-28 enable UFMT in `torch.utils.data`
+7cf0b90e49689d45be91aa539fdf54cf2ea8a9a3
+# 2024-07-03 Enable UFMT on test/test_public_bindings.py (#128389)
 fe5424d0f8604f6e66d827ae9f94b05cb7119d55
 # 2024-07-03 Enable UFMT on test/test_public_bindings.py (#128389)
 c686304277f7cd72331f685605325498cff94a0b
@@ -78,8 +84,6 @@ e74ba1b34a476b46e76b4e32afe2d481f97e9a47
 b25ef91bf158ce459d8654e33c50c8e6ed8db716
 # 2024-07-20 [BE][Easy][13/19] enforce style for empty lines in import segments in `test/j*/` (#129764)
 6ff1e43a416c43cd82b210e22ac47384494c172e
-# 2024-09-30 Fix lint (#137023)
-0f80a70fab672e96a088796fa1b742a70b93070
 # 2024-11-01 [Lint] Clang-format all metal kernels (#139530)
 b3ad45733bd908b7358959ca1e1f8d026f4507eb
 # 2024-11-17 [BE][MPS] Apply clang-format to mps headers (#140906)

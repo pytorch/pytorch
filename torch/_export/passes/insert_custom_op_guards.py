@@ -1,5 +1,4 @@
 import functools
-from typing import List
 
 import torch
 from torch._export.passes._node_metadata_hook import (
@@ -8,19 +7,22 @@ from torch._export.passes._node_metadata_hook import (
 )
 
 
-def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: List[str]) -> None:
+def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: list[str]) -> None:
     """
     This is used by draft_export to insert guards in front of calls to custom
     operators which have a generated fake kernel.
     """
     for node in gm.graph.nodes:
         if node.op == "call_function" and str(node.target) in ops_to_guard:
-            with _set_node_metadata_hook(
-                gm,
-                functools.partial(
-                    _node_metadata_hook, stack_trace=node.meta["stack_trace"]
+            with (
+                _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook, stack_trace=node.meta.get("stack_trace")
+                    ),
                 ),
-            ), gm.graph.inserting_before(node):
+                gm.graph.inserting_before(node),
+            ):
                 for arg in (*node.args, *node.kwargs.values()):
                     if isinstance(arg, torch.fx.Node) and isinstance(
                         arg.meta.get("val"), torch.Tensor

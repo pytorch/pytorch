@@ -4,20 +4,8 @@ import collections
 import io
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterator, Mapping
+from typing import Any, Callable, Optional, TypeVar, Union
 
 import torch
 import torch.distributed.rpc as rpc
@@ -112,8 +100,8 @@ def _create_module_with_interface(
     return rpc.RRef(module, module_interface_cls)
 
 
-def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
-    ret: List[rpc.RRef[Parameter]] = [
+def _param_rrefs(module_rref, recurse) -> list[rpc.RRef[Parameter]]:
+    ret: list[rpc.RRef[Parameter]] = [
         rpc.RRef(param) for param in module_rref.local_value().parameters(recurse)
     ]
     return ret
@@ -132,9 +120,9 @@ class _RemoteModule(nn.Module):
     def __init__(
         self,
         remote_device: str,
-        module_cls: Type[nn.Module],
-        args: Optional[Tuple] = None,
-        kwargs: Optional[Dict[str, Any]] = None,
+        module_cls: type[nn.Module],
+        args: Optional[tuple] = None,
+        kwargs: Optional[dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -285,7 +273,7 @@ class _RemoteModule(nn.Module):
         self._install_generated_methods()
         self._check_attribute_picklability()
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
+    def remote_parameters(self, recurse: bool = True) -> list[rpc.RRef[Parameter]]:
         """
         Return a list of :class:`~torch.distributed.rpc.RRef` pointing to the remote module's parameters.
 
@@ -374,8 +362,8 @@ class _RemoteModule(nn.Module):
         hook: Union[
             Callable[[T, tuple[Any, ...]], Optional[Any]],
             Callable[
-                [T, tuple[Any, ...], Dict[str, Any]],
-                Optional[tuple[Any, Dict[str, Any]]],
+                [T, tuple[Any, ...], dict[str, Any]],
+                Optional[tuple[Any, dict[str, Any]]],
             ],
         ],
         prepend: bool = False,
@@ -387,7 +375,7 @@ class _RemoteModule(nn.Module):
         self,
         hook: Union[
             Callable[[T, tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -434,7 +422,7 @@ class _RemoteModule(nn.Module):
 
     def named_modules(
         self,
-        memo: Optional[Set[Module]] = None,
+        memo: Optional[set[Module]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):
@@ -684,9 +672,9 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         remote_device: str,
-        module_cls: Type[nn.Module],
-        args: Optional[Tuple] = None,
-        kwargs: Optional[Dict[str, Any]] = None,
+        module_cls: type[nn.Module],
+        args: Optional[tuple] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
