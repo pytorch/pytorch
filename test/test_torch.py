@@ -1779,8 +1779,7 @@ else:
             self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
 
     @onlyCUDA
-    @largeTensorTest('24GB', device='cuda')
-    @largeTensorTest('24GB', device='cpu')
+    @largeTensorTest('49GB')
     def test_cumsum_64bit_indexing(self, device):
         b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
         b /= 100000

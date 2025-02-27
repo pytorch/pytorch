@@ -3405,8 +3405,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        x = torch.randn(4, 4, 2, 2, device="cuda")
-        other = torch.randn(4, 4, 2, 2, device="cuda")
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
 
         def add_triton(y, z):
             grid = (z.numel(),)
@@ -3471,7 +3471,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_out_op(Tensor x, Tensor y, Tensor(a!) out) -> ()",
-                # tags=[torch._C.Tag.flexible_layout],
                 tags=[torch._C.Tag.needs_exact_strides],
             )
 
