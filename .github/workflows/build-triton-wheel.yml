@@ -46,8 +46,14 @@ jobs:
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu"]
-        docker-image: ["pytorch/manylinux2_28-builder:cpu"]
+        docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
         exclude:
+          # TODO: Remove this for rocm when manylinux2_28 migration for xpu is done
+          - device: "rocm"
+            docker-image: "pytorch/manylinux-builder:cpu"
+          # TODO: Remove this for cuda when manylinux2_28 migration for xpu is done
+          - device: "cuda"
+            docker-image: "pytorch/manylinux-builder:cpu"
           - device: "xpu"
             docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
