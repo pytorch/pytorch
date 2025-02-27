@@ -179,6 +179,7 @@ def aot_dispatch_base(
     ) = functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
+    assert isinstance(fw_module, GraphModule)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -207,6 +208,24 @@ def aot_dispatch_base(
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
 
+        fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
+        for out_idx, node in enumerate(fw_outs):
+            dynamic_dims: list[int] = []
+
+            if not hasattr(node, "meta") and "val" in node.meta:
+                # non dynamo frontends
+                continue
+
+            if not isinstance(node.meta["val"], FakeTensor):
+                # non tensors
+                continue
+
+            for dim, size in enumerate(node.meta["val"].shape):
+                if not isinstance(size, int):
+                    dynamic_dims.append(dim)
+
+            if dynamic_dims:
+                fw_metadata.mark_dynamic_outs[out_idx] = dynamic_dims
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     # However, RuntimeWrapper does not expect the rng offsets in the
@@ -477,7 +496,7 @@ def aot_dispatch_autograd(
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
             for out_idx, node in enumerate(fw_outs):
-                dynamic_dims = []
+                dynamic_dims: list[int] = []
 
                 if not hasattr(node, "meta") and "val" in node.meta:
                     # non dynamo frontends
