@@ -38,7 +38,6 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
-    enable_graph_partition,
     get_benchmark_name,
     LineContext,
     sympy_product,

@@ -54,7 +54,6 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
-    enable_graph_partition,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -4141,7 +4140,9 @@ class Scheduler:
             partitions.append(cur_partition)
             skip_cudagraphs.append(skip_cudagraph)
 
-        signatures = self.get_graph_partition_signature(partitions=partitions, skip_cudagraphs=skip_cudagraphs)
+        signatures = self.get_graph_partition_signature(
+            partitions=partitions, skip_cudagraphs=skip_cudagraphs
+        )
         self.compute_graph_partition_infos(partitions, signatures)
 
         return partitions, signatures

@@ -36,6 +36,7 @@ from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
+    CudagraphMetadata,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -257,6 +258,14 @@ def cudagraph_partition_post_compile(
     static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
     mutated_input_idxs = tuple(compiled_graph.mutated_input_idxs)
 
+    graph_metadata = CudagraphMetadata(
+        compiled_graph.cudagraph_info.placeholders,
+        static_input_idxs,
+        mutated_input_idxs,
+        compiled_graph.cudagraph_info.stack_traces,
+        constants,
+    )
+
     device_index = next(iter(compiled_graph.device_idxs))
 
     if not config.triton.cudagraph_trees:
@@ -272,10 +281,7 @@ def cudagraph_partition_post_compile(
     for partition_info in compiled_graph.partition_infos:
         partition_metadata = get_partition_cudagraph_metadata(
             partition_info,
-            constants,
-            static_input_idxs,
-            mutated_input_idxs,
-            compiled_graph.cudagraph_info,
+            graph_metadata,
         )
 
         cudagraphify_fn = partial(
@@ -285,7 +291,7 @@ def cudagraph_partition_post_compile(
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=partition_metadata.constants,
+            constants=tuple(partition_metadata.constants.values()),
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
         )
