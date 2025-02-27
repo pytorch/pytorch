@@ -2316,7 +2316,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
                 return x
 
-        model = Repro().cuda()
+        model = Repro().to(self.device)
         x = torch.randn((1, 512, 256), device=GPU_TYPE, requires_grad=True)
         out = torch.compile(model, backend="aot_eager")(x)
         out.backward(torch.ones_like(out))
@@ -2524,9 +2524,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_strided_backwards(self):
         shape = (1, 2, 4096, 64)
-        Q = torch.randn(shape, requires_grad=True, device="cuda")
-        K = torch.randn(shape, requires_grad=True, device="cuda")
-        V = torch.randn(shape, requires_grad=True, device="cuda")
+        Q = torch.randn(shape, requires_grad=True, device=self.device)
+        K = torch.randn(shape, requires_grad=True, device=self.device)
+        V = torch.randn(shape, requires_grad=True, device=self.device)
         func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
 
         K_sliced = K[:, :, :-128]
@@ -2617,7 +2617,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         dtype = torch.float32
         make_tensor = functools.partial(
-            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+            torch.randn, shape, device=self.device, dtype=dtype, requires_grad=False
         )
 
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3075,7 +3075,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return score_mod
 
-        m = Attention().cuda().eval().to(dtype)
+        m = Attention().to(self.device).eval().to(dtype)
         m = torch.compile(m, mode="default", fullgraph=False)
 
         q = torch.randn(B, H, N, D, device=device, dtype=dtype)
@@ -3211,7 +3211,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_captured_wrong_device_error_message(self):
-        means = torch.randn(64, 3).cuda()
+        means = torch.randn(64, 3, self.device)
         length_scales = torch.logspace(0.001, 0.1, 8)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
@@ -3231,8 +3231,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_cant_lower_error_message(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(64, 256).cuda()
-        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+        means = torch.randn(64, 256, self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3251,8 +3251,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_reduction_unrolled(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3).cuda()
-        length_scales = torch.logspace(0.001, 0.1, H).cuda()
+        means = torch.randn(S, 3, self.device)
+        length_scales = torch.logspace(0.001, 0.1, H, self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3349,7 +3349,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return x
 
-        model = Model(128).cuda()
+        model = Model(128).to(self.device)
         B, F, T = 16, 256, 12
         for _ in range(5):
             x = torch.randn(B, T, F, device=GPU_TYPE)
@@ -3365,7 +3365,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 1024, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3382,7 +3382,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 1024, 64),
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3482,7 +3482,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(self.device)
         model.compile(mode="default", dynamic=True)
         sequence_len = 256
 
@@ -3490,7 +3490,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
             # Create dense mask
-            rand_mask = torch.randint(0, 2, (batch_shape, sequence_len)).cuda().bool()
+            rand_mask = torch.randint(0, 2, (batch_shape, sequence_len), self.device).bool()
             block_mask = torch.compile(create_block_mask, dynamic=True)(
                 B=batch_shape,
                 BLOCK_SIZE=128,
@@ -3502,7 +3502,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
             # Run forward pass
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, self.device)
             model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
@@ -3529,7 +3529,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     block_mask=block_mask,
                 )
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(self.device)
         from torch._dynamo.testing import EagerAndRecordGraphs
 
         backend = EagerAndRecordGraphs()
@@ -3538,7 +3538,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, self.device)
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
@@ -4039,10 +4039,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_upcast_appropriately(self):
-        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
-        mass = torch.ones((1), dtype=torch.float16, device="cuda")
+        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=self.device)
+        mass = torch.ones((1), dtype=torch.float16, device=self.device)
 
         def score_mod(score, b, h, q_idx, kv_idx):
             return score + torch.log(mass[0])

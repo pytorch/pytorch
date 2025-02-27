@@ -1674,7 +1674,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             1,
             max_seq_len,
             max_seq_len,
-            device="cuda",
+            device=self.device,
             BLOCK_SIZE=page_size,
         )
 
@@ -1687,7 +1687,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 1,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1696,7 +1696,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1705,7 +1705,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1734,12 +1734,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         golden_outs = torch.cat(golden_outs)
 
         # init paged attention
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device="cuda")
-        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device="cuda"))
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device=self.device)
+        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device=self.device))
 
         # allocate paged kv cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -1748,7 +1748,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             n_heads,
             MAX_CACHED_SEQ_LEN,
             head_dim,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         )
         v_cache = torch.zeros(
@@ -1756,14 +1756,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             n_heads,
             MAX_CACHED_SEQ_LEN,
             head_dim,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         )
 
         # prefill paged kv cache
         for i, seq_len in enumerate(prefill_length):
-            batch_idx = torch.tensor([i], device="cuda", dtype=torch.int32)
-            input_pos = torch.arange(seq_len, device="cuda", dtype=torch.int32).view(
+            batch_idx = torch.tensor([i], device=self.device, dtype=torch.int32)
+            input_pos = torch.arange(seq_len, device=self.device, dtype=torch.int32).view(
                 1, seq_len
             )
             paged_cache.assign(
@@ -1771,8 +1771,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
         # get paged out and check correctness
-        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
-        input_pos = torch.tensor(prefill_length, device="cuda", dtype=torch.int32).view(
+        batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
+        input_pos = torch.tensor(prefill_length, device=self.device, dtype=torch.int32).view(
             max_batch_size, 1
         )
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)

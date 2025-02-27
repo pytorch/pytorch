@@ -454,6 +454,7 @@ record_compile_time_instruction_count = False
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]
+    os.environ["TORCH_COMPILE_DEBUG_DIR"] = "/home/yunfei/code/docker_folder/pytorch/torch_compile_debug/"
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
         return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
