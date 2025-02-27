@@ -3661,6 +3661,11 @@ def check_verbose(obj, is_inlined_call=False):
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
         )
+    elif issubclass(rule, TorchInGraphFunctionVariable):
+        return SkipResult(
+            False,
+            f"registered in torch_obj_rule {reasons.pop()}",
+        )
     else:
         assert rule == SkipFunctionVariable, rule
         return SkipResult(
