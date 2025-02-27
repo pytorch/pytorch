@@ -1223,13 +1223,11 @@ class ConvertFrame:
             # when we do not support graph breaks on bytecodes like LOAD_ATTR,
             # BUILD_SET etc. In such case, we can fallback to eager without
             # scaring users.
-            if isinstance(e, Unsupported) and graph_break_log.isEnabledFor(
-                logging.DEBUG
-            ):
+            if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
                 # Log this message in the graph break. Also use the string
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
-                if hasattr(e, "compile_id"):
+                if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
                     with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
                         user_stack = e.real_stack
                         user_stack_formatted = "".join(
