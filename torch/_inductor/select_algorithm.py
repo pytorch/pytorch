@@ -27,6 +27,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -1639,6 +1640,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
             ]
         ] = []
+
+        clear_on_fresh_inductor_cache(self)
+
+    def cache_clear(self) -> None:
+        self.precompile_cache.clear()
+        self.feedback_saver_fns.clear()
 
     def __call__(
         self,
