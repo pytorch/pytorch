@@ -137,8 +137,8 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       MARK_AS_ADVANCED(${lang}_SVE_FOUND ${lang}_SVE_FLAGS)
     ENDMACRO()
 
-    # Check for SVE support using the base flag `-march=armv8.2-a+sve`
-    CHECK_SVE(CXX "-march=armv8.2-a+sve")
+    # Check for SVE support using the base flag `-march=armv8-a+sve`
+    CHECK_SVE(CXX "-march=armv8-a+sve")
 
     # Assume all vector lengths are supported if SVE is detected
     IF(CXX_SVE_FOUND)

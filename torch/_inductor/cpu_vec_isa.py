@@ -166,6 +166,7 @@ class VecNEON(VecISA):
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
+
 class VecSVE128(VecISA):
     # SVE with 128-bit width
     _bit_width = 128
@@ -181,6 +182,7 @@ class VecSVE128(VecISA):
         return "sve128"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
 
 @dataclasses.dataclass
 class VecSVE256(VecISA):
