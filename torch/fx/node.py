@@ -758,10 +758,13 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self) -> bool:
+    def is_impure(self, impure_random: bool = True) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
+
+        Args:
+            impure_random (bool): Whether to treat rand op as impure.
 
         Returns:
 
@@ -777,8 +780,8 @@ class Node(_NodeBase):
                 return True
 
             if getattr(self.target, "_nondeterministic_seeded", False):
-                # Treat as impure if fallback to eager since it mutates RNG state.
-                return torch._inductor.config.fallback_random
+                # impure since it mutates RNG state
+                return impure_random
 
             return self.target in _side_effectful_functions
 
