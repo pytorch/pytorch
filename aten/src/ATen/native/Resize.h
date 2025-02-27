@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/SymBool.h>
 
 #include <utility>
 
