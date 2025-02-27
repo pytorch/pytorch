@@ -204,7 +204,6 @@ class TestAnnotation(expecttest.TestCase):
 
 
 class TestBaseOperatorName(expecttest.TestCase):
-
     def test_base_operator_name_with_ns_has_same_attributes_as_the_one_without_ns(
         self,
     ) -> None:

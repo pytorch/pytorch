@@ -1707,9 +1707,11 @@ class FunctionSchema:
             for a in itertools.chain(
                 # Order is important here (otherwise e.g. inplace with mutable args
                 # and out= with mutable args won't have the same signature)
-                [self.arguments.self_arg.argument]
-                if self.arguments.self_arg is not None
-                else [],
+                (
+                    [self.arguments.self_arg.argument]
+                    if self.arguments.self_arg is not None
+                    else []
+                ),
                 self.arguments.out,
                 self.arguments.post_self_positional,
             )
@@ -2301,9 +2303,11 @@ class Arguments:
             pre_self_positional=tuple(
                 map(strip_arg_annotation, self.pre_self_positional)
             ),
-            self_arg=SelfArgument(strip_arg_annotation(self.self_arg.argument))
-            if self.self_arg is not None
-            else None,
+            self_arg=(
+                SelfArgument(strip_arg_annotation(self.self_arg.argument))
+                if self.self_arg is not None
+                else None
+            ),
             post_self_positional=tuple(
                 map(strip_arg_annotation, self.post_self_positional)
             ),
@@ -2538,7 +2542,6 @@ class BaseOperatorName:
     # we have a usecase in ExecuTorch where we want to support BaseOperatorName with namespace.
     namespace: str = ""
 
-
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
         assert op != ""
@@ -2547,7 +2550,7 @@ class BaseOperatorName:
             "did you mean to specify an out overload name instead?"
         )
         # Extract namespace out. Base operator name may or may not contain namespace.
-        # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid. 
+        # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid.
         # We want to split the namespace out from the base operator name.
         match = re.match(r"^(.*::|)(.*)$", op)
         namespace = match.group(1) if match else ""
