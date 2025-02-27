@@ -65,7 +65,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, logging as torchdynamo_logging, variables
+from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -81,7 +81,7 @@ from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
     SkipFrame,
-    unimplemented,
+    unimplemented_v2,
     unimplemented_v2_with_warning,
 )
 from .graph_deduplication import apply_graph_deduplication
@@ -486,7 +486,12 @@ class OutputGraph:
     def get_backward_state_proxy(self):
         if self.backward_state_proxy is None:
             if self.export:
-                unimplemented("backward_state does not support export")
+                unimplemented_v2(
+                    gb_type="backward_state does not support export",
+                    context="",
+                    explanation="Compiled autograd doesn't work with `torch.export`.",
+                    hints=[],
+                )
             example_value = BackwardState()
             self.backward_state_proxy = self.root_tracer.create_graph_input(
                 "dynamo_backward_state",
@@ -994,7 +999,14 @@ class OutputGraph:
         log.debug("COMPILING GRAPH due to %s", reason)
 
         if not all(block.can_restore() for block in tx.block_stack):
-            unimplemented("compile_subgraph with block_depth != 0")
+            unimplemented_v2(
+                gb_type="Attempt to compile graph in a try block",
+                context="",
+                explanation="Dynamo cannot compile traced graphs while in a try block.",
+                hints=[
+                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                ],
+            )
 
         prefix_insts: list[Instruction] = []
         if sys.version_info >= (3, 11):
@@ -1564,8 +1576,8 @@ class OutputGraph:
         return result
 
     def remove_unused_get_attr_nodes(self) -> None:
-        for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):
-            if len(list(node.users)) == 0:
+        for node in reversed(list(self.graph.nodes)):
+            if node.op == "get_attr" and len(list(node.users)) == 0:
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
@@ -1855,7 +1867,12 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
     def encountered_non_compliant_op(target, msg):
         output_graph.non_compliant_ops.add(target)
         if config.only_allow_pt2_compliant_ops:
-            unimplemented(msg + " " + err_epilogue)
+            unimplemented_v2(
+                gb_type="Encountered non-PT2-compliant op",
+                context="",
+                explanation=msg + " " + err_epilogue,
+                hints=[],
+            )
 
     if isinstance(target, torch._ops.OpOverload):
         if torch.Tag.pt2_compliant_tag in target.tags:
@@ -1893,7 +1910,12 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
                 target._qualified_op_name, *args, **kwargs
             )
         except RuntimeError as e:
-            unimplemented(str(e))
+            unimplemented_v2(
+                gb_type="Error when attempting to resolve op packet",
+                context="",
+                explanation=str(e),
+                hints=[],
+            )
 
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
@@ -1945,6 +1967,7 @@ class SubgraphTracer(fx.Tracer):
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
+        self.source_target = source_target
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
@@ -2127,7 +2150,13 @@ class SubgraphTracer(fx.Tracer):
             ]
         elif kind == "call_module":
             if self.parent is not None:
-                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+                # TODO can remove once inline_inbuilt_nn_modules is always True
+                unimplemented_v2(
+                    gb_type="Invoking an nn.Module inside a higher order operator",
+                    context=f"Higher order op name: {self.source_target}",
+                    explanation="This is not supported.",
+                    hints=[],
+                )
             # For modules we store the class
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                 (
@@ -2155,8 +2184,12 @@ class SubgraphTracer(fx.Tracer):
                     ]
                 elif kind == "call_module":
                     if self.parent is not None:
-                        unimplemented(
-                            "Invoking an nn.Module inside HigherOrderOperator"
+                        # TODO can remove once inline_inbuilt_nn_modules is always True
+                        unimplemented_v2(
+                            gb_type="Invoking an nn.Module inside a HigherOrderOperator",
+                            context="",
+                            explanation="This is not supported.",
+                            hints=[],
                         )
                     # For modules we store the class
                     rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
