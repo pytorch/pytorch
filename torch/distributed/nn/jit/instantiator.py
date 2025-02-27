@@ -1,11 +1,11 @@
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
+import atexit
 import importlib
 import logging
 import os
 import sys
 import tempfile
-import atexit
 from typing import Optional
 
 import torch
