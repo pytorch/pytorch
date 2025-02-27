@@ -67,6 +67,7 @@ from .ir import (
     DonatedBuffer,
     FixedLayout,
     get_device_type,
+    GraphPartitionSignature,
     InputBuffer,
     Pointwise,
     Reduction,
@@ -313,7 +314,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
-        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject]] = {}
+        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
@@ -1039,18 +1040,6 @@ class GraphLowering(torch.fx.Interpreter):
             # Alternately we could filter this out in AotAutograd
             self.graph_input_names.append(target)
             return None
-        # See note: Note: [Generator arguments in AOTDispatcher]
-        elif isinstance(example, torch.Generator):
-            assert (
-                len(V.graph.current_node.users) == 1
-                and next(iter(V.graph.current_node.users)).target
-                is torch._prims.rng_prims.graphsafe_run_with_rng_state
-            )
-            gen = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = gen  # type: ignore[assignment]
-            self.graph_input_names.append(target)
-            return gen
-
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -1299,7 +1288,7 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(value, TorchBindObject):
                 continue
             assert isinstance(
-                value, (TensorBox, sympy.Expr, torch._inductor.ir.GeneratorState)
+                value, (TensorBox, sympy.Expr)
             ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
@@ -1340,6 +1329,14 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_node = old
+
+    @contextmanager
+    def set_current_wrapper_code(self) -> Iterator[None]:
+        old = self.wrapper_code
+        try:
+            yield
+        finally:
+            self.wrapper_code = old
 
     def propagate_mutation(
         self,
@@ -1805,6 +1802,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1827,7 +1825,10 @@ class GraphLowering(torch.fx.Interpreter):
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph, subgraph_name, parent_wrapper_code
+            is_subgraph,
+            subgraph_name,
+            parent_wrapper_code,
+            partition_signatures,
         )
 
         if self.const_module:
@@ -2144,6 +2145,7 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,

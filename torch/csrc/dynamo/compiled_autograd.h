@@ -78,9 +78,15 @@ struct TORCH_API PyCompilerInterface {
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
-TORCH_API void setPyCompilerInterface(
-    std::unique_ptr<PyCompilerInterface>&& impl);
-TORCH_API void resetPyCompilerInterface();
+struct TORCH_API PyCompilerGuard {
+  explicit PyCompilerGuard(std::unique_ptr<PyCompilerInterface>&& impl);
+  PyCompilerGuard(const PyCompilerGuard&) = delete;
+  PyCompilerGuard& operator=(const PyCompilerGuard&) = delete;
+  PyCompilerGuard(PyCompilerGuard&&) = delete;
+  PyCompilerGuard& operator=(PyCompilerGuard&&) = delete;
+
+  ~PyCompilerGuard();
+};
 
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
