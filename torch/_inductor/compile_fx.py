@@ -498,6 +498,18 @@ def maybe_disable_comprehensive_padding(
         return contextlib.nullcontext()
 
 
+def maybe_disable_graph_partition(
+    cpp_wrapper: bool, aot_mode: bool
+) -> AbstractContextManager[None, None]:
+    """
+    graph partition does not support cpp_wrapper and aot_mode yet.
+    """
+    if cpp_wrapper or aot_mode:
+        return config.patch(graph_partition=False)
+    else:
+        return contextlib.nullcontext()
+
+
 def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -1010,7 +1022,7 @@ class _InProcessFxCompile(FxCompile):
 
             with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
                 example_inputs
-            ):
+            ), maybe_disable_graph_partition(cpp_wrapper, aot_mode):
                 const_output_index = None
                 const_graph = None
                 const_code = None
