@@ -115,6 +115,7 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
+    get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -753,6 +754,17 @@ class OutputGraph:
 
         return name
 
+    def register_static_attr_and_return_proxy(
+        self, attr_prefix: str, attr_value: Any
+    ) -> fx.Proxy:
+        attr_name = get_unique_name_wrt(attr_prefix, self.nn_modules)
+        # TODO `nn_modules` has been historically overloaded to store a lot more
+        # than just nn module objects, fix that.
+        self.nn_modules[attr_name] = attr_value
+        proxy = self.create_proxy("get_attr", attr_name, (), {})
+        set_example_value(proxy.node, attr_value)
+        return proxy
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -864,36 +876,30 @@ class OutputGraph:
                 return wrap_name(k)
 
         name = OutputGraph.module_key_name(*names)
+        name = get_unique_name_wrt(name, self.nn_modules, self.global_scope)
+        self.nn_modules[name] = target
+        if isinstance(target, torch.nn.Module):
 
-        base = name
-        for i in itertools.count():
-            if name not in self.nn_modules and name not in self.global_scope:
-                self.nn_modules[name] = target
-                if isinstance(target, torch.nn.Module):
+            def register_leaf_name(leaf_name):
+                assert self.param_name_to_source is not None
+                new_source = ParamBufferSource(source, leaf_name)
+                new_name = f"{name}.{leaf_name}"
+                self.param_name_to_source[new_name] = new_source
+                if isinstance(source, LocalSource):
+                    self.dynamo_flat_name_to_original_fqn[
+                        OutputGraph.module_key_name(new_source.name())
+                    ] = leaf_name
 
-                    def register_leaf_name(leaf_name):
-                        assert self.param_name_to_source is not None
-                        new_source = ParamBufferSource(source, leaf_name)
-                        new_name = f"{name}.{leaf_name}"
-                        self.param_name_to_source[new_name] = new_source
-                        if isinstance(source, LocalSource):
-                            self.dynamo_flat_name_to_original_fqn[
-                                OutputGraph.module_key_name(new_source.name())
-                            ] = leaf_name
+            # annoying, but there are cases when we do not have parameters
+            # see test_nn_moduledict_contains
+            if hasattr(target, "_parameters"):
+                for leaf_name, _ in target.named_parameters():
+                    register_leaf_name(leaf_name)
+            if hasattr(target, "_buffers"):
+                for leaf_name, _ in target.named_buffers():
+                    register_leaf_name(leaf_name)
 
-                    # annoying, but there are cases when we do not have parameters
-                    # see test_nn_moduledict_contains
-                    if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters():
-                            register_leaf_name(leaf_name)
-                    if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers():
-                            register_leaf_name(leaf_name)
-
-                return wrap_name(name)
-            name = f"{base}_{i}"
-
-        raise AssertionError("unreachable")
+        return wrap_name(name)
 
     def handle_aliases_for_stolen_lists(self, tx):
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
@@ -1548,15 +1554,7 @@ class OutputGraph:
             return dict()
 
     def install_subgraph(self, name, sub_gm):
-        next_name = None
-        i = 0
-        while not next_name:
-            candidate = f"{name}_{i}"
-            if candidate in self.nn_modules:
-                i += 1
-            else:
-                next_name = candidate
-
+        next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
         sub_gm.__name__ = next_name
         sub_gm.torchdynamo_force_dynamic = False
         # This graph module is not present in the user space, so it can't be
@@ -2283,14 +2281,7 @@ class SubgraphTracer(fx.Tracer):
                     TracingContext.extract_stack()
                 )
 
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
-
+        name = get_unique_name_wrt(name, self.input_name_to_proxy)
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
             node = self.input_name_to_proxy[prev_name].node
