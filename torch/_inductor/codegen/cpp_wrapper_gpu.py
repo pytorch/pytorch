@@ -577,8 +577,12 @@ class CppWrapperGpu(CppWrapperCpu):
                     triton_meta is not None
                     and triton_meta.get("configs")
                     and triton_meta.get("signature")
-                ):  
-                    arg_signatures = [val for val in triton_meta.get("signature").values() if val != "constexpr"]
+                ):
+                    arg_signatures = [
+                        val
+                        for val in triton_meta.get("signature").values()
+                        if val != "constexpr"
+                    ]
                     call_args = [
                         call_arg
                         for call_arg, arg_name in zip(call_args, arg_signatures)
