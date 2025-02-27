@@ -632,11 +632,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return x * y * z[0]
 
         with torch.compiler.set_stance("eager_then_compile"):
-            print(fn(1, torch.randn(1), {0: torch.randn(1)}))
-            print(fn(2, torch.randn(2), {0: torch.randn(2)}))
-            print(fn(3, torch.randn(3), {0: torch.randn(3)}))
-            print(fn(4, torch.randn(4), {0: torch.randn(4)}))
-            print(fn(5, torch.randn(5), {0: torch.randn(5)}))
+            fn(1, torch.randn(1), {0: torch.randn(1)})
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+            fn(5, torch.randn(5), {0: torch.randn(5)})
 
         self.assertEqual(cnts.frame_count, 1)
 

@@ -196,7 +196,6 @@ def _callback_from_stance(callback):
                     example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
 
                 dynamism = track_dynamism_across_examples(example_inputs)
-                hooks = Hooks()
                 if len(example_inputs) == 1:
                     return ConvertFrameReturn(
                         frame_exec_strategy=FrameExecStrategy(
@@ -207,6 +206,7 @@ def _callback_from_stance(callback):
                 compiler_fn = (
                     callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
                 )
+                hooks = Hooks()
                 return convert_frame.catch_errors_wrapper(
                     convert_frame.convert_frame(  # type: ignore[arg-type]
                         compiler_fn,

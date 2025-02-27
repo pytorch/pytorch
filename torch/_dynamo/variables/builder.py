@@ -45,6 +45,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch.fx.experimental._dynamism import normalize_source_name
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -1947,7 +1948,6 @@ class VariableBuilder:
                 is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
             )
 
-            from torch.fx.experimental.dynamism import normalize_source_name
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
@@ -2821,7 +2821,6 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        from torch.fx.experimental.dynamism import normalize_source_name
 
         normalized_source_name = normalize_source_name(source.name())
         base_source = source
