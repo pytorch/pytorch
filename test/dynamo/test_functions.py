@@ -2075,10 +2075,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_sourceless_build_method_type(a, b):
         cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
 
-        # The type of `cls._make` and `cls._asdict` is method type
-        if callable(getattr(cls, "_make", None)) and callable(
-            getattr(cls, "_asdict", None)
-        ):
+        # The type of `cls._make` is method type
+        if callable(getattr(cls, "_make", None)):
             return a + b
         else:
             return a - b
