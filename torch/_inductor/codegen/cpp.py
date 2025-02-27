@@ -511,6 +511,8 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         # For example (test_expr_vec_non_contiguous in test_cpu_repro.py):
         #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
         # If the check failed, we should fall back to standard loop codegen.
+        # If the range of the first inner loop is much larger than
+        # the range of all outer loops, fall back to standard loop codegen.
         def _inner(
             left_loop_nest: LoopNest,
             right_loop_nest: LoopNest,
@@ -561,6 +563,25 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                 right_loop_nest,
                 outer_loop_fusion_depth,
                 0,
+            ):
+                return False
+
+        for cpp_kernel_proxy in cpp_kernel_proxy_list:
+            outer_ranges = functools.reduce(
+                lambda x, y: x * y,
+                cpp_kernel_proxy.ranges[:outer_loop_fusion_depth],
+            )
+            # If the range of the first inner loop is much larger than
+            # the range of all outer loops, fallback to standard codegen.
+            if (
+                len(cpp_kernel_proxy.ranges) > outer_loop_fusion_depth
+                and isinstance(outer_ranges, sympy.Integer)
+                and isinstance(
+                    cpp_kernel_proxy.ranges[outer_loop_fusion_depth],
+                    sympy.Integer,
+                )
+                and outer_ranges * 300
+                < cpp_kernel_proxy.ranges[outer_loop_fusion_depth]
             ):
                 return False
 
@@ -4908,28 +4929,6 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
-
-                    outer_ranges = functools.reduce(
-                        lambda x, y: x * y,
-                        cpp_kernel_proxy.ranges[: node.outer_loop_fusion_depth],
-                    )
-                    # If the range of the first inner loop is much larger than
-                    # the range of all outer loops, fallback to standard codegen.
-                    if (
-                        len(cpp_kernel_proxy.ranges) > node.outer_loop_fusion_depth
-                        and isinstance(outer_ranges, sympy.Integer)
-                        and isinstance(
-                            cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth],
-                            sympy.Integer,
-                        )
-                        and outer_ranges * 300
-                        < cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
-                    ):
-                        for removed_buffer in scope.removed_buffers:
-                            # Restore the removed buffers by this context before
-                            # fallback to codegen without using Local Buffer
-                            V.graph.removed_buffers.remove(removed_buffer)
-                        return False
 
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
