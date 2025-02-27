@@ -1898,8 +1898,6 @@ def _precompile_header(
     _worker_compile_cpp(
         os.path.join(_HEADER_LOCK_DIR, f"{header_hash}.lock"),
         cpp_builder,
-        header_full_path,
-        cpp_builder.get_target_file_path(),
     )
 
     return header_full_path
