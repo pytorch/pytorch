@@ -2235,6 +2235,75 @@ class TestOptimRenewed(TestCase):
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
 
+    @onlyCUDA
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_bf16_fused(self, device, dtype, optim_info):
+        optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            # currently not supported
+            if kwargs.get("amsgrad", False):
+                continue
+            kwargs["fused"] = True
+
+            print(kwargs)
+
+            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(600)]
+            for p in params:
+                p.grad = torch.rand_like(p)
+
+            params_c = [p.clone() for p in params]
+            for p, pc in zip(params, params_c):
+                pc.grad = p.grad.clone()
+
+            ref_optim = optim_cls(params, **kwargs)
+            bf16_optim = optim_cls(params_c, **kwargs)
+            mp_policy = {
+                "exp_avg": lambda _: torch.bfloat16,
+                "exp_avg_sq": lambda _: torch.bfloat16,
+                "max_exp_avg_sq": lambda _: torch.bfloat16,
+            }
+            bf16_optim.set_dtype_policy(mp_policy)
+
+            # to simulate bf16 training, we are going to fake cast the ref_optim's state to
+            # to bf16 and then cast back to fp32 after every step.
+            tracker = TensorTracker()
+            for i in range(7):
+                ref_optim.step()
+                bf16_optim.step()
+                for p in params:
+                    tracker.add(p)
+                    tracker.add(p.grad)
+                for d in ref_optim.state.values():
+                    tracker.add(d["exp_avg"].to(torch.bfloat16))
+                    tracker.add(d["exp_avg_sq"].to(torch.bfloat16))
+                    d["exp_avg"] = d["exp_avg"].to(torch.bfloat16).to(torch.float32)
+                    d["exp_avg_sq"] = (
+                        d["exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
+                    )
+                    if "max_exp_avg_sq" in d:
+                        tracker.add(d["max_exp_avg_sq"].to(torch.bfloat16))
+                        d["max_exp_avg_sq"] = (
+                            d["max_exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
+                        )
+
+                for e, pc in enumerate(params_c):
+                    tracker.pop_check_set(pc, self)
+                    tracker.pop_check_set(pc.grad, self)
+
+                self.assertEqual(params[0], params_c[0])
+
+                for dc in bf16_optim.state.values():
+                    tracker.pop_check_set(dc["exp_avg"], self)
+                    tracker.pop_check_set(dc["exp_avg_sq"], self)
+                    if "max_exp_avg_sq" in dc:
+                        tracker.pop_check_set(dc["max_exp_avg_sq"], self)
+                self.assertTrue(tracker.all_popped())
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 

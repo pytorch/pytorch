@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
+#include <cuda/std/type_traits>
 #include <utility>
 
 namespace at::native {
@@ -195,6 +196,223 @@ struct FusedAdamMathFunctor {
     }
   }
 };
+
+template <
+    typename scalar_type,
+    typename param_type,
+    typename grad_type,
+    typename exp_avg_type,
+    typename exp_avg_sq_type,
+    int depth,
+    ADAM_MODE adam_mode,
+    bool amsgrad>
+struct FusedAdamMathFunctorMP {
+  static_assert(
+      depth == 4 || depth == 5,
+      "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
+  using opmath_t = at::opmath_type<scalar_type>;
+  C10_DEVICE __forceinline__ void operator()(
+      int chunk_size,
+      FusedOptimizerTensorListMetadata<depth>& tl,
+      const float* lr_ptr,
+      const double& lr,
+      const double& beta1,
+      const double& beta2,
+      const double& weight_decay,
+      const double& eps,
+      const bool& maximize,
+      const float* grad_scale_ptr,
+      const float* found_inf_ptr) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const double lr_double = lr_ptr ? *lr_ptr : lr;
+
+    if (found_inf_ptr && *found_inf_ptr == 1) {
+      return;
+    }
+    const auto [bias_correction1, bias_correction2_sqrt] =
+        [&]() -> std::pair<double, double> {
+      auto* step_count =
+          reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
+      const auto bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
+      const auto bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
+      const auto bias_correction2_sqrt = std::sqrt(bias_correction2);
+      return {bias_correction1, bias_correction2_sqrt};
+    }();
+
+    param_type* param_args;
+    grad_type* grad_args;
+    exp_avg_type* exp_avg_args;
+    exp_avg_sq_type* exp_avg_sq_args;
+
+    // r_args represents the state when everything is casted to scalar_type
+    // to be passed into the adam_math function. scalar_type is our operation
+    // math type.
+    scalar_type r_args[depth][kILP];
+
+    // n = total numel of tensor - what's already been processed
+    // so n = numel in current tensor not yet processed
+    const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
+
+    const bool all_aligned{init_args_mixed_prec<
+        depth,
+        param_type,
+        grad_type,
+        exp_avg_type,
+        exp_avg_sq_type>(
+        &param_args,
+        &grad_args,
+        &exp_avg_args,
+        &exp_avg_sq_args,
+        tl,
+        chunk_idx,
+        chunk_size,
+        tensor_loc)};
+    if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        if (!std::is_same_v<scalar_type, param_type>) {
+          scalar_type casted_param_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_param_args[ii] =
+                static_cast<scalar_type>(param_args[ii + i_start * kILP]);
+          }
+          load_store(r_args[kParamIdx], casted_param_args, 0, 0);
+        } else {
+          load_store(r_args[kParamIdx], (scalar_type*)param_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, grad_type>) {
+          scalar_type casted_grad_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_grad_args[ii] =
+                static_cast<scalar_type>(grad_args[ii + i_start * kILP]);
+          }
+          load_store(r_args[kGradIdx], casted_grad_args, 0, 0);
+        } else {
+          load_store(r_args[kGradIdx], (scalar_type*)grad_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+          scalar_type casted_exp_avg_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_exp_avg_args[ii] =
+                static_cast<scalar_type>(exp_avg_args[ii + i_start * kILP]);
+          }
+          load_store(r_args[kExpAvgIdx], casted_exp_avg_args, 0, 0);
+        } else {
+          load_store(
+              r_args[kExpAvgIdx], (scalar_type*)exp_avg_args, 0, i_start);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+          scalar_type casted_exp_avg_sq_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_exp_avg_sq_args[ii] =
+                static_cast<scalar_type>(exp_avg_sq_args[ii + i_start * kILP]);
+          }
+          load_store(r_args[kExpAvgSqIdx], casted_exp_avg_sq_args, 0, 0);
+        } else {
+          load_store(
+              r_args[kExpAvgSqIdx], (scalar_type*)exp_avg_sq_args, 0, i_start);
+        }
+        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+            r_args,
+            lr_double,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr,
+            bias_correction1,
+            bias_correction2_sqrt);
+        if (!std::is_same_v<scalar_type, param_type>) {
+          param_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] = static_cast<param_type>(r_args[kParamIdx][ii]);
+          }
+          load_store(param_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(param_args, (param_type*)r_args[kParamIdx], i_start, 0);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+          exp_avg_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] =
+                static_cast<exp_avg_type>(r_args[kExpAvgIdx][ii]);
+          }
+          load_store(exp_avg_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(
+              exp_avg_args, (exp_avg_type*)r_args[kExpAvgIdx], i_start, 0);
+        }
+        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+          exp_avg_sq_type casted_r_args[kILP];
+          for (int ii = 0; ii < kILP; ii++) {
+            casted_r_args[ii] =
+                static_cast<exp_avg_sq_type>(r_args[kExpAvgSqIdx][ii]);
+          }
+          load_store(exp_avg_sq_args, casted_r_args, i_start, 0);
+        } else {
+          load_store(
+              exp_avg_sq_args,
+              (exp_avg_sq_type*)r_args[kExpAvgSqIdx],
+              i_start,
+              0);
+        }
+        if (grad_scale_ptr) {
+          if (!std::is_same_v<scalar_type, grad_type>) {
+            grad_type casted_r_args[kILP];
+            for (int ii = 0; ii < kILP; ii++) {
+              casted_r_args[ii] = static_cast<grad_type>(r_args[kGradIdx][ii]);
+            }
+            load_store(grad_args, casted_r_args, i_start, 0);
+          } else {
+            load_store(grad_args, (grad_type*)r_args[kGradIdx], i_start, 0);
+          }
+        }
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+        load_args<
+            scalar_type,
+            param_type,
+            grad_type,
+            exp_avg_type,
+            exp_avg_sq_type>(
+            r_args,
+            param_args,
+            grad_args,
+            exp_avg_args,
+            exp_avg_sq_args,
+            i_start,
+            chunk_size,
+            n);
+        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+            r_args,
+            lr_double,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr,
+            bias_correction1,
+            bias_correction2_sqrt);
+        store_args(param_args, r_args[kParamIdx], i_start, chunk_size, n);
+        store_args(exp_avg_args, r_args[kExpAvgIdx], i_start, chunk_size, n);
+        store_args(
+            exp_avg_sq_args, r_args[kExpAvgSqIdx], i_start, chunk_size, n);
+        if (grad_scale_ptr) {
+          store_args(grad_args, r_args[kGradIdx], i_start, chunk_size, n);
+        }
+      }
+    }
+  }
+};
+
 } // namespace
 
 } // namespace at::native
