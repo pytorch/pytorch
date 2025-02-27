@@ -1854,10 +1854,14 @@ class Graph:
         # DCE below will not behave as expected.
         self.lint()
 
+        impure_random = True
+        if torch._guards.TracingContext.try_get():
+            impure_random = torch._inductor.config.fallback_random
+
         def has_side_effect(node):
             if is_impure_node is not None:
                 return is_impure_node(node)
-            return node.is_impure()
+            return node.is_impure(impure_random)
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
