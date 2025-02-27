@@ -1015,6 +1015,17 @@ class _InProcessFxCompile(FxCompile):
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
                         provenance_tracking_json
                     )
+
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    # TODO: Remove this when 3.9 is no longer supported
+                    if sys.version_info < (3, 10):
+                        num_graph_breaks = sum(counters["graph_break"].values())
+                    else:
+                        num_graph_breaks = counters["graph_break"].total()
+                    CompileEventLogger.compilation_metric(
+                        overwrite=True, num_graph_breaks=num_graph_breaks
+                    )
                 if config.is_fbcode():
                     try:
                         log_optimus_to_scuba(
