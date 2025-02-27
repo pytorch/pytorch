@@ -57,7 +57,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    GraphPartitionInfo,
+    GraphPartitionMap,
     IndentedBuffer,
     is_collective,
     is_gpu,
@@ -4038,7 +4038,7 @@ class Scheduler:
                 output_mapping.append(name_to_graph_output_index.get(node.get_name()))
 
             V.graph.partition_maps.append(
-                GraphPartitionInfo(
+                GraphPartitionMap(
                     partition_id,
                     input_mapping,
                     output_mapping,
