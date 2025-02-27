@@ -116,7 +116,7 @@ def get_test_reports(
         os.chdir(temp_dir)
 
         artifact_paths = download_s3_artifacts(
-            "test-reports-test-dynamo_wrapped", workflow_run_id, workflow_run_attempt
+            "test-reports", workflow_run_id, workflow_run_attempt
         )
         for path in artifact_paths:
             unzip(path)
