@@ -2532,6 +2532,13 @@ class BaseOperatorName:
     # Doing that is BC-breaking though, so we're stuck with the above modeling.
     functional_overload: bool = False
 
+    # NB: We don't officially support namespace in FunctionSchema, we treat this prefix
+    # as part of the base operator name, for __str__() to consume.
+    # The canonical input (from the rest of the infra) will not contain namespace, but
+    # we have a usecase in ExecuTorch where we want to support BaseOperatorName with namespace.
+    namespace: str = ""
+
+
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
         assert op != ""
@@ -2539,7 +2546,13 @@ class BaseOperatorName:
             "_out suffix is reserved and not permitted for operator names; "
             "did you mean to specify an out overload name instead?"
         )
-        m = re.match(r"^__([^_]+)__$", op)
+        # Extract namespace out. Base operator name may or may not contain namespace.
+        # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid. 
+        # We want to split the namespace out from the base operator name.
+        match = re.match(r"^(.*::|)(.*)$", op)
+        namespace = match.group(1) if match else ""
+        op_without_ns = match.group(2) if match else op
+        m = re.match(r"^__([^_]+)__$", op_without_ns)
         if m is not None:
             dunder_method = True
             base = m.group(1)
@@ -2555,7 +2568,7 @@ class BaseOperatorName:
                 assert base[0] != "i"
         else:
             dunder_method = False
-            base = op
+            base = op_without_ns
             if base[-1] == "_":
                 inplace = True
                 base = base[:-1]
@@ -2578,6 +2591,7 @@ class BaseOperatorName:
             inplace=inplace,
             dunder_method=dunder_method,
             functional_overload=functional_overload,
+            namespace=namespace,
         )
         assert str(r) == op, f"{str(r)} != {op}"
         return r
@@ -2585,7 +2599,7 @@ class BaseOperatorName:
     def __str__(self) -> str:
         if self.dunder_method:
             i = "i" if self.inplace else ""
-            return f"__{i}{self.base}__"
+            return f"{self.namespace}__{i}{self.base}__"
         else:
             i = (
                 "_"
@@ -2594,7 +2608,7 @@ class BaseOperatorName:
                 if self.functional_overload
                 else ""
             )
-            return f"{self.base}{i}"
+            return f"{self.namespace}{self.base}{i}"
 
 
 # Operator name is the base operator name along with the (typically not
