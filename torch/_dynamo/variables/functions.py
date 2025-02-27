@@ -1169,7 +1169,7 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
-            qualname = self.value.__qualname__
+            qualname = getattr(self.value, "__qualname__", "Unknown qualname")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1177,7 +1177,7 @@ class SkipFunctionVariable(VariableTracker):
                     f"in file `{path}` should not be traced."
                 )
                 hints = [
-                    f"Avoid calling the function `{self.value.__qualname__}`.",
+                    f"Avoid calling the function `{qualname}`.",
                 ]
                 # TODO improve trace_rules reasoning to provide better hints.
                 # How do we tell that a function/file should NOT be removed from skip files?
@@ -1231,7 +1231,7 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
-            if self.value.__qualname__ == "allow_in_graph":
+            if qualname == "allow_in_graph":
                 explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
@@ -1241,7 +1241,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {self.value.__qualname__}, skip reason: {reason}",
+                context=f"module: {self.value.__module__}, qualname: qualname, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
