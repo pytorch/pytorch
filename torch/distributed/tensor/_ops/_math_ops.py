@@ -994,9 +994,9 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
             output_specs_list.append(weight_out_spec if output_mask[1] else None)
         else:
-            assert output_mask[1] is False, (
-                "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
-            )
+            assert (
+                output_mask[1] is False
+            ), "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
             output_specs_list.append(None)
 
         # arg: bias
@@ -1020,9 +1020,9 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
             output_specs_list.append(bias_out_spec if output_mask[2] else None)
         else:
-            assert output_mask[2] is False, (
-                "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
-            )
+            assert (
+                output_mask[2] is False
+            ), "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
             output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(

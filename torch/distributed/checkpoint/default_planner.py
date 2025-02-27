@@ -550,7 +550,9 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                assert item.tensor_data.chunk is not None, f"""
+                assert (
+                    item.tensor_data.chunk is not None
+                ), f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
                 """

@@ -61,9 +61,9 @@ def _post_order_apply(
                 "Non-root modules should have their module name set but got "
                 f"an empty module name for {module}"
             )
-            assert isinstance(optional_module, nn.Module), (
-                f"fn should return None or an nn.Module but got {optional_module}"
-            )
+            assert isinstance(
+                optional_module, nn.Module
+            ), f"fn should return None or an nn.Module but got {optional_module}"
             setattr(parent_module, module_name, optional_module)
 
     _post_order_apply_inner(root_module, "", None)
@@ -575,9 +575,9 @@ class _ConfigAutoWrap:
             )
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys(), (
-            "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
-        )
+        assert (
+            "wrapper_cls" in kwargs.keys()
+        ), "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
         _ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.

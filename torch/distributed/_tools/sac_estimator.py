@@ -245,7 +245,7 @@ class SACEstimator(TorchDispatchMode):
             with FakeTensorMode():
                 module = ...
                 inp = ...
-                with sac_estimator("operator-level-cost-model"):
+                with sac_estimator('operator-level-cost-model'):
                     output = module(inp)
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
@@ -442,9 +442,9 @@ class SACEstimator(TorchDispatchMode):
                     out_storages_cpu.update(_get_untyped_storages(o))
 
         # Check if there's more than 1 CUDA device
-        assert len(cuda_devices) <= 1, (
-            f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
-        )
+        assert (
+            len(cuda_devices) <= 1
+        ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
 
         # 2. Get the memory consumed by output
         nbytes_cuda = sum(
@@ -484,9 +484,9 @@ class SACEstimator(TorchDispatchMode):
             if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                 acm_stats.sac_metadata.append(acm)
             else:
-                assert mod_fqn == "Global", (
-                    f"Module {mod_fqn} not found in AC Mod Stats"
-                )
+                assert (
+                    mod_fqn == "Global"
+                ), f"Module {mod_fqn} not found in AC Mod Stats"
                 self._sac_metadata.append(acm)
 
         return out
@@ -979,9 +979,9 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        assert isinstance(fake_mode, FakeTensorMode), (
-            "SAC Estimator should be called in FakeTensorMode"
-        )
+        assert isinstance(
+            fake_mode, FakeTensorMode
+        ), "SAC Estimator should be called in FakeTensorMode"
         RuntimeEstimator.fake_mode = fake_mode
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,

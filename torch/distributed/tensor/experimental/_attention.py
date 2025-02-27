@@ -253,18 +253,22 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> tuple[torch.Tensor, ...]: ...
+    ) -> tuple[torch.Tensor, ...]:
+        ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
+        ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
+        ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor: ...
+    def next_buffer(self) -> torch.Tensor:
+        ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -1093,13 +1097,15 @@ class _LoadBalancer(ABC):
     @abstractmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
     @classmethod
     @abstractmethod
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
 
 class _SequentialSharder(_LoadBalancer):
@@ -1141,9 +1147,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1157,9 +1163,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 

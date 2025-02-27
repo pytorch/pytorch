@@ -40,7 +40,6 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-
     arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(

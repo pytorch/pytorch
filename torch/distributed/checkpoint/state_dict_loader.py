@@ -125,9 +125,7 @@ def load(
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()
-        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader(
-        ...     "/checkpoint/1"
-        ... )
+        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader("/checkpoint/1")
 
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
