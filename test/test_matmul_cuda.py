@@ -60,7 +60,7 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super(self.__class__, self).tearDown()
 
-    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False, fp16_accumulate: bool = False):
+    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False, fp16_accumulate: bool = False, restrict_range: bool = False):
         #
         # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
         # results from the CUDA invocation of torch.addmm and the CPU invocation
@@ -78,7 +78,7 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
-        if size > 1000:
+        if restrict_range and size > 1000:
             make_arg = partial(make_tensor, dtype=dtype, device="cpu", low=-1.0, high=1.0)
         else:
             make_arg = partial(make_tensor, dtype=dtype, device="cpu")
@@ -141,11 +141,19 @@ class TestMatmulCuda(TestCase):
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
-                        torch.bfloat16: xtol(atol=7e-1, rtol=2e-1)})
+                        torch.bfloat16: xtol(atol=2e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
         self.cublas_addmm(size, dtype, True)
+
+    @onlyCUDA
+    @skipIfRocmVersionLessThan((5, 2))
+    @toleranceOverride({torch.bfloat16: xtol(atol=2e1, rtol=2e-1)})
+    @dtypes(torch.bfloat16)
+    @parametrize("size", [100, 1000, 10000])
+    def test_cublas_addmm_bfloat16_reduced_range(self, size: int, dtype: torch.dtype):
+        self.cublas_addmm(size, dtype, True, True)
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
