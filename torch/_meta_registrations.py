@@ -556,9 +556,9 @@ def meta_sparse_structured_linear(
     transposed_strides = (1, input.size(0))
 
     if out_dtype is not None:
-        assert (
-            input.dtype == torch.int8 and out_dtype == torch.int32
-        ), "out_dtype is only supported for i8i8->i32 linear operator"
+        assert input.dtype == torch.int8 and out_dtype == torch.int32, (
+            "out_dtype is only supported for i8i8->i32 linear operator"
+        )
     output = input.new_empty(
         output_sizes,
         dtype=input.dtype if out_dtype is None else out_dtype,
@@ -581,9 +581,9 @@ def meta_sparse_structured_mm(
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert (
-            mat2.dtype == torch.int8 and out_dtype == torch.int32
-        ), "out_dtype is only supported for i8i8->i32 linear operator"
+        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
+            "out_dtype is only supported for i8i8->i32 linear operator"
+        )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -603,22 +603,22 @@ def meta_sparse_structured_addmm(
     beta=1,
     out_dtype: Optional[torch.dtype] = None,
 ):
-    assert (
-        len(input.shape) == 1
-    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert len(input.shape) == 1, (
+        "only input broadcasted to columns of mat1 * mat2 product is supported"
+    )
     assert len(mat1.shape) == 2
     assert len(mat1_meta.shape) == 2
     assert len(mat2.shape) == 2
-    assert input.size(0) == mat1.size(
-        0
-    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert input.size(0) == mat1.size(0), (
+        "only input broadcasted to columns of mat1 * mat2 product is supported"
+    )
     assert mat1.size(1) == mat2.size(0) / 2
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert (
-            mat2.dtype == torch.int8 and out_dtype == torch.int32
-        ), "out_dtype is only supported for i8i8->i32 linear operator"
+        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
+            "out_dtype is only supported for i8i8->i32 linear operator"
+        )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -653,9 +653,9 @@ def meta__cslt_sparse_mm(
     compression_factor = 10 if is_8bit_input_type else 9
 
     if is_8bit_input_type:
-        assert (
-            not dense_B.is_contiguous()
-        ), "dense input must be transposed for 8bit dtypes"
+        assert not dense_B.is_contiguous(), (
+            "dense input must be transposed for 8bit dtypes"
+        )
 
     k = dense_B.size(0)
     n = dense_B.size(1)
@@ -664,16 +664,14 @@ def meta__cslt_sparse_mm(
         assert m == bias.size(0)
 
     if out_dtype is not None:
-        assert (
-            is_8bit_input_type
-            and out_dtype
-            in {
-                torch.float16,
-                torch.bfloat16,
-                torch.int32,
-                torch.float8_e4m3fn,
-            }
-        ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+        assert is_8bit_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+            torch.float8_e4m3fn,
+        }, (
+            "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+        )
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -876,12 +874,12 @@ def functional_assert_async_meta(val, assert_msg, dep_token):
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
-    assert (
-        self.dim() >= 2
-    ), f"{f_name}: The input tensor must have at least 2 dimensions."
-    assert (
-        self.size(-1) == self.size(-2)
-    ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+    assert self.dim() >= 2, (
+        f"{f_name}: The input tensor must have at least 2 dimensions."
+    )
+    assert self.size(-1) == self.size(-2), (
+        f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+    )
 
 
 # Validates input shapes and devices
@@ -6565,9 +6563,9 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 def meta__segment_reduce_backward(
     grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None
 ):
-    assert (
-        lengths is not None or offsets is not None
-    ), "segment_reduce(): Either lengths or offsets must be defined"
+    assert lengths is not None or offsets is not None, (
+        "segment_reduce(): Either lengths or offsets must be defined"
+    )
     data_contig = data.contiguous()
     grad_contig = grad.contiguous()
     return torch.empty_like(
@@ -6644,7 +6642,9 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 def meta_pixel_shuffle(self, upscale_factor):
     assert (
         len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ), f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
+    ), (
+        f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
+    )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
@@ -6818,15 +6818,14 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
 
 @register_meta(torch.ops.aten.transpose_)
 def transpose_(self, dim0, dim1):
-    assert (
-        self.layout
-        not in {
-            torch.sparse_csr,
-            torch.sparse_csc,
-            torch.sparse_bsr,
-            torch.sparse_bsc,
-        }
-    ), f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+    assert self.layout not in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }, (
+        f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+    )
 
     ndims = self.ndim
 
@@ -6853,13 +6852,14 @@ def t_(self):
     if self.is_sparse:
         sparse_dim = self.sparse_dim()
         dense_dim = self.dense_dim()
-        assert (
-            sparse_dim <= 2 and dense_dim == 0
-        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"  # noqa: B950
+        assert sparse_dim <= 2 and dense_dim == 0, (
+            f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
+            f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
+        )
     else:
-        assert (
-            self.dim() <= 2
-        ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+        assert self.dim() <= 2, (
+            f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+        )
 
     return transpose_(self, 0, 0 if ndims < 2 else 1)
 
