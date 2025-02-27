@@ -1,40 +1,15 @@
+#include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
-using namespace c10::metal;
 using namespace metal;
-
-constant float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
-constant float b[4] = {-2.118377725, 1.442710462, -0.329097515, 0.012229801};
-constant float c[4] = {-1.970840454, -1.624906493, 3.429567803, 1.641345311};
-constant float d[2] = {3.543889200, 1.637067800};
+using namespace c10::metal;
 
 template <typename T0, typename T1>
 kernel void erfinv_kernel(
     device T0* output [[buffer(0)]],
     constant T1* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
-  float y = input[index];
-  float x, z, num, dem; /*working variables */
-  /* coefficients in rational expansion */
-
-  float y_abs = abs(y);
-  if (y_abs >= 1.0f) {
-    output[index] = T0(y_abs > 1.0f ? NAN : copysign(INFINITY, y));
-    return;
-  }
-  if (y_abs <= 0.7f) {
-    z = y * y;
-    num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
-    dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
-    x = y * num / dem;
-  } else {
-    z = sqrt(-1.0f * log((1.0 - y_abs) / 2.0));
-    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
-    dem = (d[1] * z + d[0]) * z + 1.0f;
-    x = copysign(num, y) / dem;
-  }
-
-  output[index] = T0(x);
+  output[index] = T0(erfinv(input[index]));
 }
 
 template <typename T0, typename T1>
@@ -133,3 +108,70 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 
 INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
 INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
+
+template <typename T0, typename T1>
+kernel void sinc_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(sinc(static_cast<float>(input[index])));
+}
+
+template <typename T>
+kernel void sinc_complex(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T(sinc(float2(input[index])));
+}
+
+#define INSTANTIATE_SINC_KERNEL(DTYPE0, DTYPE1)                                \
+  template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]])
+
+#define INSTANTIATE_SINC_COMPLEX_KERNEL(DTYPE)                          \
+  template [[host_name("sinc_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sinc_complex(                                                         \
+      device DTYPE##2 * output [[buffer(0)]],                           \
+      constant DTYPE##2 * input [[buffer(1)]],                          \
+      uint id [[thread_position_in_grid]])
+
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_SINC_KERNEL(bfloat, bfloat);
+#endif
+INSTANTIATE_SINC_KERNEL(half, half);
+INSTANTIATE_SINC_KERNEL(float, float);
+INSTANTIATE_SINC_KERNEL(float, long);
+INSTANTIATE_SINC_KERNEL(float, int);
+INSTANTIATE_SINC_KERNEL(float, short);
+INSTANTIATE_SINC_KERNEL(float, char);
+INSTANTIATE_SINC_KERNEL(float, uchar);
+INSTANTIATE_SINC_KERNEL(float, bool);
+INSTANTIATE_SINC_COMPLEX_KERNEL(half);
+INSTANTIATE_SINC_COMPLEX_KERNEL(float);
+
+template <typename T>
+kernel void round_decimals_kernel(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant long& ndigits [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = static_cast<T>(
+      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
+}
+
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                 \
+  template [[host_name("round_decimals_" #DTYPE "_" #DTYPE)]] kernel void \
+  round_decimals_kernel(                                                  \
+      device DTYPE* output [[buffer(0)]],                                 \
+      constant DTYPE* input [[buffer(1)]],                                \
+      constant long& ndigits [[buffer(2)]],                               \
+      uint id [[thread_position_in_grid]])
+
+INSTANTIATE_ROUND_DECIMALS(float);
+INSTANTIATE_ROUND_DECIMALS(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_ROUND_DECIMALS(bfloat);
+#endif

@@ -15,7 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, BinaryIO, Callable, cast, IO, Optional, Union
+from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -23,7 +23,7 @@ import torch._weights_only_unpickler as _weights_only_unpickler
 from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
-from torch.types import Storage
+from torch.types import FileLike, Storage
 
 
 __all__ = [
@@ -65,7 +65,6 @@ MAGIC_NUMBER = 0x1950A86A20F9469CFC6C
 PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ","
 
-FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[
     Union[Callable[[Storage, str], Storage], torch.device, str, dict[str, str]]
 ]
@@ -275,9 +274,9 @@ def add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]) 
     (function/class, string) where string is the full path of the function/class.
 
     Within the serialized format, each function is identified with its full
-    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    path as ``{__module__}.{__qualname__}``. When calling this API, you can provide this
     full path that should match the one in the checkpoint otherwise the default
-    ``{fn.__module__}.{fn.__name__}`` will be used.
+    ``{fn.__module__}.{fn.__qualname__}`` will be used.
 
     Args:
         safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
@@ -326,7 +325,7 @@ class safe_globals(_weights_only_unpickler._safe_globals):
     """
 
 
-def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> list[str]:
+def get_unsafe_globals_in_checkpoint(f: FileLike) -> list[str]:
     """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
 
     For a given function or class ``f``, the corresponding string will be of the form
@@ -702,13 +701,16 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer) -> TypeIs[Union[str, os.PathLike]]:
+def _is_path(name_or_buffer: object) -> TypeIs[Union[str, os.PathLike]]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
-class _opener:
-    def __init__(self, file_like):
-        self.file_like = file_like
+T = TypeVar("T")
+
+
+class _opener(Generic[T]):
+    def __init__(self, file_like: T) -> None:
+        self.file_like: T = file_like
 
     def __enter__(self):
         return self.file_like
@@ -717,26 +719,26 @@ class _opener:
         pass
 
 
-class _open_file(_opener):
-    def __init__(self, name, mode):
+class _open_file(_opener[IO[bytes]]):
+    def __init__(self, name: Union[str, os.PathLike[str]], mode: str) -> None:
         super().__init__(open(name, mode))
 
     def __exit__(self, *args):
         self.file_like.close()
 
 
-class _open_buffer_reader(_opener):
-    def __init__(self, buffer):
+class _open_buffer_reader(_opener[IO[bytes]]):
+    def __init__(self, buffer: IO[bytes]) -> None:
         super().__init__(buffer)
         _check_seekable(buffer)
 
 
-class _open_buffer_writer(_opener):
+class _open_buffer_writer(_opener[IO[bytes]]):
     def __exit__(self, *args):
         self.file_like.flush()
 
 
-def _open_file_like(name_or_buffer, mode):
+def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
     if _is_path(name_or_buffer):
         return _open_file(name_or_buffer, mode)
     else:
@@ -748,15 +750,15 @@ def _open_file_like(name_or_buffer, mode):
             raise RuntimeError(f"Expected 'r' or 'w' in mode but got {mode}")
 
 
-class _open_zipfile_reader(_opener):
-    def __init__(self, name_or_buffer) -> None:
+class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
+    def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
-class _open_zipfile_writer_file(_opener):
-    def __init__(self, name) -> None:
+class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
+    def __init__(self, name: str) -> None:
         self.file_stream = None
-        self.name = str(name)
+        self.name = name
         try:
             self.name.encode("ascii")
         except UnicodeEncodeError:
@@ -776,8 +778,8 @@ class _open_zipfile_writer_file(_opener):
             self.file_stream.close()
 
 
-class _open_zipfile_writer_buffer(_opener):
-    def __init__(self, buffer) -> None:
+class _open_zipfile_writer_buffer(_opener[torch._C.PyTorchFileWriter]):
+    def __init__(self, buffer: IO[bytes]) -> None:
         if not callable(getattr(buffer, "write", None)):
             msg = f"Buffer of {str(type(buffer)).strip('<>')} has no callable attribute 'write'"
             if not hasattr(buffer, "write"):
@@ -791,7 +793,7 @@ class _open_zipfile_writer_buffer(_opener):
         self.buffer.flush()
 
 
-def _open_zipfile_writer(name_or_buffer):
+def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
     container: type[_opener]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
@@ -879,7 +881,7 @@ def _check_save_filelike(f):
 
 def save(
     obj: object,
-    f: FILE_LIKE,
+    f: FileLike,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
@@ -928,6 +930,9 @@ def save(
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
+
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1180,6 +1185,10 @@ def _save(
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
+    # .format_version is used to track
+    #     1. version 1 represents the order of storages being changed from
+    #        lexicographical based on keys to numerically ordered based on keys
+    zip_file.write_record(".format_version", "1", len("1"))
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -1189,7 +1198,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()):
+    for key in serialized_storages.keys():
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
@@ -1222,7 +1231,7 @@ def _save(
 
 
 def load(
-    f: FILE_LIKE,
+    f: FileLike,
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
@@ -1313,10 +1322,16 @@ def load(
         >>> # xdoctest: +SKIP("undefined filepaths")
         >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location=torch.device("cpu"),
+        ...     weights_only=True,
+        ... )
         # Load all tensors onto the CPU, using a function
         >>> torch.load(
-        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
+        ...     "tensors.pt",
+        ...     map_location=lambda storage, loc: storage,
+        ...     weights_only=True,
         ... )
         # Load all tensors onto GPU 1
         >>> torch.load(
@@ -1325,7 +1340,11 @@ def load(
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location={"cuda:1": "cuda:0"},
+        ...     weights_only=True,
+        ... )
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open("tensor.pt", "rb") as f:
@@ -1597,9 +1616,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 return saved_id[0]
             return deserialized_objects[int(saved_id)]
 
-        with closing(
-            tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
-        ) as tar, mkdtemp() as tmpdir:
+        with (
+            closing(
+                tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
+            ) as tar,
+            mkdtemp() as tmpdir,
+        ):
             if pickle_module is _weights_only_unpickler:
                 raise RuntimeError(
                     "Cannot use ``weights_only=True`` with files saved in the "
@@ -1741,13 +1763,6 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
-    if not hasattr(f, "readinto") and (3, 8, 0) <= sys.version_info < (3, 8, 2):
-        raise RuntimeError(
-            "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            f'Received object of type "{type(f)}". Please update to Python 3.8.2 or newer to restore this '
-            "functionality."
-        )
-
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")
@@ -1847,6 +1862,11 @@ def _load(
 
     loaded_storages = {}
 
+    can_calculate_storage_offsets = False
+    if zip_file.has_record(".format_version"):
+        version = zip_file.get_record(".format_version")
+        can_calculate_storage_offsets = version >= b"1"
+
     # check if byteswapping is needed
     byteordername = "byteorder"
     byteorderdata = None
@@ -1882,15 +1902,92 @@ def _load(
             UserWarning,
         )
 
+    from torch.utils.serialization import config
+
+    calculate_storage_offsets = config.load.calculate_storage_offsets
+    run_debug_asserts = os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1"
+    current_offset = None
+    # constants from miniz.h/miniz.c
+    data_descripter_size64 = 24
+    data_descripter_size32 = 16
+    mz_uint32_max = 0xFFFFFFFF
+    offsets: dict[str, int] = dict()
+
+    def _get_offset(key, name, numel):
+        """
+        Return the offset of the storage associated with key with record name `name` and size numel.
+        It is expected that the zipfile header of this storage starts at current_offset.
+
+        WARNING: This function relies on the behavior of the zipwriter in miniz.c. In particular,
+        the behavior of `mz_zip_writer_add_mem_ex_v2`. The behavior of this function must be kept
+        in sync with that of miniz!
+
+        After reading a storage of size numel that starts at storage_offset
+        if it is the first time that storage was read, update nonlocal variable
+        current_offset to the start of the next zipfile header by incrementing
+        it by numel and the data descriptor size.
+        """
+        nonlocal current_offset, offsets
+        if name in offsets:
+            storage_offset = offsets[name]
+            return storage_offset
+
+        if current_offset is None:
+            assert key == "0"
+            current_offset = zip_file.get_record_offset(name)
+            local_header_offset = zip_file.get_record_header_offset(name)
+            storage_offset = current_offset
+        else:
+            storage_offset = zip_file.get_record_offset_no_read(
+                current_offset, name, numel
+            )
+            local_header_offset = current_offset
+
+        # This is only actually needed for storages that have typed_storage._data_ptr() == 0
+        # after being read. Otherwise persistent_load would never "re-call" load_tensor
+        # for a given key.
+        offsets[name] = storage_offset
+
+        # Increment current_offset of offset where next zipfile header starts
+        current_offset = storage_offset + numel
+        # add size of data descriptor after payload
+        if numel > 0:
+            if local_header_offset >= mz_uint32_max or numel >= mz_uint32_max:
+                current_offset += data_descripter_size64
+            else:
+                current_offset += data_descripter_size32
+
+        return storage_offset
+
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            storage_offset = zip_file.get_record_offset(name)
+            if can_calculate_storage_offsets and calculate_storage_offsets:
+                storage_offset = _get_offset(key, name, numel)
+                if run_debug_asserts:
+                    if storage_offset != zip_file.get_record_offset(name):
+                        raise RuntimeError(
+                            "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
+                            f"variable was set: Incorrect offset for {name}, got {storage_offset} expected "
+                            f"{zip_file.get_record_offset(name)}"
+                        )
+            else:
+                storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset : storage_offset + numel]
         else:
+            if can_calculate_storage_offsets and run_debug_asserts:
+                # This is debug code that we use to test the validity of
+                # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
+                storage_offset = _get_offset(key, name, numel)
+                if storage_offset != zip_file.get_record_offset(name):
+                    raise RuntimeError(
+                        "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
+                        f"variable was set: Incorrect offset for {name}, got {storage_offset} expected "
+                        f"{zip_file.get_record_offset(name)}"
+                    )
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
                 ._typed_storage()

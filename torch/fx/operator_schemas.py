@@ -281,10 +281,6 @@ def create_type_hint(x):
     return x
 
 
-_LIST_TYPES = (list, typing.List)  # noqa: UP006
-_TUPLE_TYPES = (tuple, typing.Tuple)  # noqa: UP006
-
-
 @compatibility(is_backward_compatible=False)
 def type_matches(signature_type: Any, argument_type: Any):
     sig_origin_type = getattr(signature_type, "__origin__", signature_type)
@@ -298,24 +294,23 @@ def type_matches(signature_type: Any, argument_type: Any):
         sig_contained = signature_type.__args__
         return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if signature_type is typing.List[int] and argument_type is int:  # noqa: UP006
-        # int can be promoted to List[int]
-        return True
-
-    if getattr(signature_type, "__origin__", None) in _LIST_TYPES:
+    if getattr(signature_type, "__origin__", None) is list:
         sig_el_type = signature_type.__args__[0]
-        if sig_el_type is argument_type:
+
+        # int can be promoted to list[int]
+        if argument_type is int and sig_el_type is int:
             return True
+
         if not inspect.isclass(sig_el_type):
             warnings.warn(
                 f"Does not support nested parametric types, got {signature_type}. Please file a bug."
             )
             return False
-        if getattr(argument_type, "__origin__", None) in _LIST_TYPES:
+        if getattr(argument_type, "__origin__", None) is list:
             return issubclass(argument_type.__args__[0], sig_el_type)
 
         def is_homogeneous_tuple(t):
-            if getattr(t, "__origin__", None) not in _TUPLE_TYPES:
+            if getattr(t, "__origin__", None) is not tuple:
                 return False
             contained = t.__args__
             if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
@@ -340,7 +335,7 @@ def type_matches(signature_type: Any, argument_type: Any):
 @compatibility(is_backward_compatible=False)
 def normalize_function(
     target: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     arg_types: Optional[tuple[Any]] = None,
     kwarg_types: Optional[dict[str, Any]] = None,

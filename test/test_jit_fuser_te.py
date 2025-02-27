@@ -2499,7 +2499,7 @@ class TestTEFuser(JitTestCase):
 
                     for i, func in enumerate(funcs):
                         num_args = i + 1
-                        for j, gen in enumerate(gen_tensor):
+                        for gen in gen_tensor:
                             inps = (gen(n), gen(n), gen(n))
                             func_s = torch.jit.trace(func, inps, check_trace=False)
                             torch._C._jit_pass_erase_shape_information(func_s.graph)
@@ -2878,8 +2878,8 @@ class TestNNCOpInfo(TestNNCOpInfoParent):
                     fx_args.append(f"{k} = {repr(v)}")
 
             code = f"""
-def f({', '.join(param_names)}):
-    return op.op({', '.join(fx_args)})"""
+def f({", ".join(param_names)}):
+    return op.op({", ".join(fx_args)})"""
             g = {"torch": torch, "inf": math.inf, "op": op}
             exec(code, g)
             f = g["f"]

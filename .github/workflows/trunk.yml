@@ -125,12 +125,12 @@ jobs:
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
@@ -142,29 +142,30 @@ jobs:
         ]}
     secrets: inherit
 
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-test:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-test.yml
     needs:
-      - win-vs2019-cpu-py3-build
+      - win-vs2022-cpu-py3-build
       - target-determination
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
+  win-vs2022-cuda12_1-py3-build:
+    name: win-vs2022-cuda12.1-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cuda12.1-py3
+      build-environment: win-vs2022-cuda12.1-py3
       cuda-version: "12.1"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-build:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -182,6 +183,7 @@ jobs:
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-test:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     permissions:
       id-token: write
       contents: read
@@ -235,12 +237,38 @@ jobs:
     secrets: inherit
 
   # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm80
+  linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
+    name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
+    secrets: inherit
+
+  verify-cachebench-cpu-build:
+    name: verify-cachebench-cpu-build
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
+      test-matrix: |
+        { include: [
+          { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  verify-cachebench-cpu-test:
+    name: verify-cachebench-cpu-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - verify-cachebench-cpu-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit

@@ -73,14 +73,13 @@ nn/qat/ @jerryzh168
 /test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk
+/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
 # code
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
@@ -103,9 +102,14 @@ test/test_type_promotion.py @mruberry
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# This is the file where people can add new argument types to torch.fx.
+torch/fx/proxy.py @zou3519
+
 # HOPs
 torch/_higher_order_ops/*.py @zou3519
 torch/_dynamo/variables/higher_order_ops.py @zou3519
+test/test_hop_infra.py @zou3519
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh
@@ -179,3 +183,9 @@ torch/cuda/ @eqy @syed-ahmed
 torch/csrc/cuda/ @eqy @syed-ahmed
 torch/backends/cuda/ @eqy @syed-ahmed
 torch/backends/cudnn/ @eqy @syed-ahmed
+
+# PyTree utilities
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/utils/pytree/ @XuehaiPan
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan

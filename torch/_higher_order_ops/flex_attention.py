@@ -780,16 +780,27 @@ def sdpa_dense_backward(
 ]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    # Get outputs before calling repeat interleave
+    Bq, _, _, qk_head_dim = query.shape
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
+
+    # Get outputs before calling repeat interleave and permute to input stride orders
     actual_grad_query = torch.empty_like(query)
-    actual_grad_key = torch.empty_like(key)
-    actual_grad_value = torch.empty_like(value)
+
+    actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+    actual_grad_key = _permute_strides(actual_grad_key, key.stride())
+
+    actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+    actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int]
     ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
         if isinstance(buffer, torch.Tensor):
-            return torch.empty_like(buffer) if buffer.requires_grad else None
+            return (
+                torch.empty_like(buffer, memory_format=torch.contiguous_format)
+                if buffer.requires_grad
+                else None
+            )
         return buffer
 
     actual_grad_score_mod_captured = [
@@ -884,18 +895,19 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
+    # Fill to correctly strided outputs
+    actual_grad_query.copy_(grad_query)
+    actual_grad_key.copy_(grad_key)
+    actual_grad_value.copy_(grad_value)
+
     if Bq != Bkv:
         assert (
             Bq > 1 and Bkv == 1
         ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
 
-        # Reduce DK, DV along broadcasted batches.
-        grad_key = torch.sum(grad_key, 0, keepdim=True)
-        grad_value = torch.sum(grad_value, 0, keepdim=True)
+        actual_grad_key = torch.sum(actual_grad_key, 0, keepdim=True)
+        actual_grad_value = torch.sum(actual_grad_value, 0, keepdim=True)
 
-    actual_grad_query.copy_(grad_query)
-    actual_grad_key.copy_(grad_key)
-    actual_grad_value.copy_(grad_value)
     score_mod_other_buffer_grads = [
         actual_grad.copy_(grad) if isinstance(actual_grad, torch.Tensor) else None
         for actual_grad, grad in zip(
@@ -1146,17 +1158,35 @@ def flex_attention_backward_fake_tensor_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     with mode:
+        Bq, _, _, qk_head_dim = query.shape
+        Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
+
         grad_query = torch.empty_like(query)
-        grad_key = torch.empty_like(key)
-        grad_value = torch.empty_like(value)
+        # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer)
+                torch.empty_like(buffer, memory_format=torch.contiguous_format)
                 if isinstance(buffer, torch.Tensor) and buffer.requires_grad
                 else None
                 for buffer in score_mod_other_buffers
             ]
         )
+
+        broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+        broadcasted_grad_key = _permute_strides(broadcasted_grad_key, key.stride())
+
+        broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+        broadcasted_grad_value = _permute_strides(
+            broadcasted_grad_value, value.stride()
+        )
+
+        if Bq > 1 and Bkv == 1:
+            grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
+            grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
+        else:
+            grad_key = broadcasted_grad_key
+            grad_value = broadcasted_grad_value
+
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 
 
