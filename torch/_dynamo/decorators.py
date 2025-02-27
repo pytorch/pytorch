@@ -224,14 +224,12 @@ def disallow_in_graph(fn):
 
         torch._dynamo.disallow_in_graph(torch.sub)
 
-
         @torch._dynamo.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = torch.sub(x, 1)
             x = torch.add(x, 1)
             return x
-
 
         fn(...)
 

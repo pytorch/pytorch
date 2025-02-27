@@ -533,10 +533,8 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
-        msg += (
-            f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
+        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
-        )
 
     if not config.verbose and hasattr(exc, "real_stack"):
         msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'

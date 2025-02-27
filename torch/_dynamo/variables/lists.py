@@ -524,9 +524,9 @@ class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert maxlen.is_python_constant(), (
-            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
-        )
+        assert (
+            maxlen.is_python_constant()
+        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         self.maxlen = maxlen
         items = list(items)
         if self.maxlen.as_python_constant() is not None:
