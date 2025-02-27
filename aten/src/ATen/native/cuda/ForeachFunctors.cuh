@@ -140,8 +140,8 @@ __device__ void load_args(
     const int64_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    // const auto i = i_start + threadIdx.x + ii * blockDim.x;
-    const auto i = i_start + threadIdx.x * kILP + ii;
+    const auto i = i_start + threadIdx.x + ii * blockDim.x;
+    // why not const auto i = i_start + threadIdx.x * kILP ?+ ii;
     r_args[0][ii] = 0;
     if (i < n && i < chunk_size) {
       r_args[0][ii] = static_cast<T>(param_args[i]);
@@ -170,8 +170,8 @@ __device__ void store_args(
     const int64_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    // const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
-    const auto i = i_start + threadIdx.x * kILP + ii;
+    const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
+    // why not const auto i = i_start + threadIdx.x * kILP + ii;?
     if (i < n && i < chunk_size)
       dst[i] = src[ii];
   }
@@ -186,8 +186,8 @@ __device__ void store_args(
     const int64_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    // const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
-    const auto i = i_start + threadIdx.x * kILP + ii;
+    const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
+    // why not const auto i = i_start + threadIdx.x * kILP + ii;?
     if (i < n && i < chunk_size)
       dst[i] = static_cast<dT>(src[ii]);
   }

@@ -2273,13 +2273,9 @@ class TestOptimRenewed(TestCase):
             # to simulate bf16 training, we are going to fake cast the ref_optim's state to
             # to bf16 and then cast back to fp32 after every step.
             tracker = TensorTracker()
-            for i in range(3):
-                # if i > 0:
-                    # breakpoint()
+            for i in range(7):
                 ref_optim.step()
                 bf16_optim.step()
-                # if i > 0:
-                    # breakpoint()
                 for p in params:
                     tracker.add(p)
                     tracker.add(p.grad)
@@ -2296,13 +2292,10 @@ class TestOptimRenewed(TestCase):
                             d["max_exp_avg_sq"].to(torch.bfloat16).to(torch.float32)
                         )
 
-                # breakpoint()
                 for e, pc in enumerate(params_c):
-                    print(f"{e=}")
                     tracker.pop_check_set(pc, self)
                     tracker.pop_check_set(pc.grad, self)
-                
-                print(i)
+
                 self.assertEqual(params[0], params_c[0])
 
                 for dc in bf16_optim.state.values():
