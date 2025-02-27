@@ -676,7 +676,7 @@ Missing bytecode handler
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    s = re.sub(""",
+    class Foo:""",
             post_munge=post_munge,
         )
 
@@ -706,7 +706,7 @@ Reconstruction failure
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    lambda: torch.compile(fn, backend="eager", fullgraph=True)(),""",
+    return Foo().meth""",
             post_munge=post_munge,
         )
 
