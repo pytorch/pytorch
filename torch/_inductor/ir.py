@@ -5276,6 +5276,7 @@ class ExternKernel(InputsKernel):
         # Without representation of the expand in inductor IR, in codegen we end up
         # launching a grid for the full size tensor and doing redundant computation
         # across expanded dims.
+        # TODO: could also be good to have a codegen fix to recognize overlapping elements
 
         expanded_dims: Optional[list[int]] = None
         orig_size = x.get_size()
