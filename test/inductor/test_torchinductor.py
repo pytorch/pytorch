@@ -12524,7 +12524,6 @@ class CommonTemplate:
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
-    @config.patch(implicit_fallbacks=True)
     def test_slice_overflow(self):
         # https://github.com/pytorch/pytorch/issues/147071
         def f(input):
