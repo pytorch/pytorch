@@ -1233,7 +1233,7 @@ class GitHubPR:
             latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
             if pulled_sha != latest_pr_status.last_commit()["oid"]:
                 raise RuntimeError(
-                    f"PR has been updated since CI checks last passed. Please rerun the merge command."
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
                 )
             return []
         else:
