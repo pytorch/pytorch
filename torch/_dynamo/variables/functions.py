@@ -31,10 +31,10 @@ import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
-from typing_extensions import Never
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -363,6 +363,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `nonstrict_trace(fn)` call
+        if self.fn is torch._dynamo.nonstrict_trace:
+            bound = inspect.signature(self.fn).bind(*args, **kwargs)
+            fn_var = bound.args[0]
+            if not isinstance(fn_var, BaseUserFunctionVariable):
+                typ = fn_var.python_type()
+                unimplemented(
+                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                )
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                fn_name = fn_var.get_name()
+                unimplemented(
+                    f"""
+Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+                )
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -858,6 +879,23 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
+        # a `nonstrict_trace`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if is_nonstrict_trace_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1639,7 +1677,8 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs): ...
+    def call_function(self, tx, args, kwargs):
+        ...
 
 
 class SysFunctionVariable(VariableTracker):
