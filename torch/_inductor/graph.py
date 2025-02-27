@@ -1039,18 +1039,6 @@ class GraphLowering(torch.fx.Interpreter):
             # Alternately we could filter this out in AotAutograd
             self.graph_input_names.append(target)
             return None
-        # See note: Note: [Generator arguments in AOTDispatcher]
-        elif isinstance(example, torch.Generator):
-            assert (
-                len(V.graph.current_node.users) == 1
-                and next(iter(V.graph.current_node.users)).target
-                is torch._prims.rng_prims.graphsafe_run_with_rng_state
-            )
-            gen = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = gen  # type: ignore[assignment]
-            self.graph_input_names.append(target)
-            return gen
-
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -1299,7 +1287,7 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(value, TorchBindObject):
                 continue
             assert isinstance(
-                value, (TensorBox, sympy.Expr, torch._inductor.ir.GeneratorState)
+                value, (TensorBox, sympy.Expr)
             ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue

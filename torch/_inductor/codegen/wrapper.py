@@ -884,9 +884,6 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            if isinstance(buf, ir.GeneratorState):
-                continue
-
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
@@ -1349,9 +1346,7 @@ class PythonWrapperCodegen(CodeGen):
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
         elif isinstance(value, ir.TorchBindObject):
-            return
-        elif isinstance(value, ir.GeneratorState):
-            return
+            pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
@@ -1547,11 +1542,6 @@ class PythonWrapperCodegen(CodeGen):
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
                     add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
-                elif isinstance(value, ir.GeneratorState):
-                    add_expr_input(
-                        name,
-                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
-                    )
                 else:
                     shape = [
                         V.graph.sizevars.size_hint(x, fallback=42)
@@ -2222,8 +2212,6 @@ class PythonWrapperCodegen(CodeGen):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
-        elif isinstance(s, ir.GeneratorState):
-            return s.codegen_reference()
         else:
             return repr(s)
 
