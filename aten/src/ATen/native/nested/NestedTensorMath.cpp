@@ -171,8 +171,11 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
       std::nullopt /* device */,
       std::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
-  auto options = input_buffer.options().dtype(
-        at::toAccumulateType(input_buffer.scalar_type(), input_buffer.device().type()));
+  auto options = input_buffer.options();
+  if (input_buffer.is_cuda() || input_buffer.is_xpu()) {
+    auto acc_type = at::toAccumulateType(input_buffer.scalar_type(), input_buffer.device().type());
+    options = options.dtype(acc_type);
+  }
   Tensor mean = at::empty({M}, options);
   Tensor rstd = at::empty({M}, options);
   LayerNormKernel(
