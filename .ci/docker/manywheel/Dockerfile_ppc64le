@@ -1,0 +1,31 @@
+# Use UBI 9 as base image
+FROM registry.access.redhat.com/ubi9/ubi:9.5 AS base
+
+# Install necessary dependencies
+RUN dnf install -y \
+    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y git cmake ninja-build gcc-toolset-13 rust cargo zip \
+    python3 python3-devel && \
+    dnf clean all
+
+ENV PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
+ENV MANPATH="/opt/rh/gcc-toolset-13/root/usr/share/man"
+ENV INFOPATH="/opt/rh/gcc-toolset-13/root/usr/share/info"
+ENV PCP_DIR="/opt/rh/gcc-toolset-13/root"
+ENV LD_LIBRARY_PATH="/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib"
+
+# Set Python and pip aliases to use Python 3.9
+RUN ln -sf /usr/bin/python3 /usr/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/bin/pip
+
+COPY requirements.txt .
+# Install Python packages via pip
+RUN pip install wheel 
+RUN pip install -r requirements.txt
+
+RUN mkdir -p /workspace/pytorch
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+
