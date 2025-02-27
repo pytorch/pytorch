@@ -803,6 +803,13 @@ class FxGraphHashDetails:
         # Alignment checks
         self.inputs_to_check = inputs_to_check
 
+        no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
+        # This device index is usually already encoded by the device of the inputs
+        # but fx graphs don't necessarily have tensor inputs. If there aren't any,
+        # we need to guard on the device index in case we allocate cuda tensors
+        if no_tensor_inputs and torch.accelerator.is_available():
+            self.default_cuda_device_index = torch.accelerator.current_device_index()
+
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
             torch.are_deterministic_algorithms_enabled(),
@@ -1339,15 +1346,6 @@ class FxGraphCache:
             pass
 
 
-def run_command_and_check(cmd_: str) -> None:
-    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
-        cmd = shlex.split(cmd_)
-        try:
-            subprocess.check_call(cmd)
-        except subprocess.CalledProcessError as e:
-            raise exc.CppCompileError(cmd, e.output) from e
-
-
 @functools.lru_cache(None)
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
@@ -1424,12 +1422,6 @@ class AotCodeCompiler:
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
-
-        # Meta internal AOTInductor CPU
-        fbcode_aot_cpu_re = (
-            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
-        )
-        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1514,7 +1506,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=config.is_fbcode(),
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1522,15 +1514,8 @@ class AotCodeCompiler:
                 output_dir=str(consts_s.parent),
                 BuildOption=object_build_options,
             )
-            compile_cmd = object_builder.get_command_line()
             consts_o = object_builder.get_target_file_path()
-            if fbcode_aot_cpu_re:
-                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
-                consts_o = str(consts_s.with_suffix(".o"))
-                object_builder.build_fbcode(str(consts_s), consts_o)
-                os.chmod(consts_o, 0o644)
-            else:
-                run_command_and_check(compile_cmd)
+            object_builder.build()
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1643,7 +1628,7 @@ class AotCodeCompiler:
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=config.is_fbcode(),
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
@@ -1669,12 +1654,7 @@ class AotCodeCompiler:
                 object_builder.save_src_to_cmake(cmake_path, cpp_path)
                 generated_files.append(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_o = str(cpp_path_operator.with_suffix(".o"))
-                    object_builder.build_fbcode(cpp_path, output_o)
-                    os.chmod(output_o, 0o644)
-                else:
-                    run_command_and_check(compile_cmd)
+                object_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1701,12 +1681,14 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
+                use_relative_path=config.is_fbcode(),
             )
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o, kernels_o],
+                sources=[output_o, consts_o, kernels_o]
+                if kernels_o
+                else [output_o, consts_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1753,16 +1735,7 @@ class AotCodeCompiler:
                     so_builder.save_src_to_cmake(cmake_path, kernel_o)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_so = (
-                        config.aot_inductor.output_path
-                        if specified_artifact_name
-                        else str(cpp_path_operator.with_suffix(".so"))
-                    )
-                    so_builder.build_fbcode([output_o, consts_o], output_so)
-                    os.chmod(output_so, 0o755)
-                else:
-                    run_command_and_check(link_cmd)
+                so_builder.build()
 
                 for o_file in [
                     output_o,
@@ -1941,35 +1914,24 @@ class CppCodeCache:
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            """
-            If `fb_code` env, it need to be dispatched to original `compile_file` function.
-            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
-            """
-            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(**compile_command)
+            cpp_build_option = CppTorchDeviceOptions(
+                **compile_command, use_relative_path=config.is_fbcode()
+            )
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
                 output_dir=output_dir,
                 BuildOption=cpp_build_option,
             )
-
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
                 cpp_builder,
-                input_path,
-                fb_output_path,
             )
-
-            binary_path = normalize_path_separator(
-                fb_output_path
-                if config.is_fbcode()
-                else cpp_builder.get_target_file_path()
-            )
+            binary_path = normalize_path_separator(cpp_builder.get_target_file_path())
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -1999,23 +1961,12 @@ class CppCodeCache:
 def _worker_compile_cpp(
     lock_path: str,
     cpp_builder: CppBuilder,
-    fb_input_path: str,
-    fb_output_path: str,
 ) -> None:
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        binary_path = (
-            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
-        )
-        if not os.path.exists(binary_path):
-            if config.is_fbcode():
-                cpp_builder.build_fbcode(
-                    fb_input_path,
-                    fb_output_path,
-                )
-            else:
-                cpp_builder.build()
+        if not os.path.exists(cpp_builder.get_target_file_path()):
+            cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels
