@@ -50,6 +50,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .optimus_opportunity_finder import optimus_opportunity_finder_passes
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -182,6 +183,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
     )
+
+    if config.optimus_opportunity_finder:
+        optimus_opportunity_finder_passes(gm.graph, pre_grad=False)
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)

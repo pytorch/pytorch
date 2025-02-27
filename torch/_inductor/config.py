@@ -257,6 +257,9 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
+# Find more opportunities for optimizing the graph (Experimental)
+optimus_opportunity_finder = False
+
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
 
