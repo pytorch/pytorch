@@ -247,6 +247,8 @@ Train with FP32
 Train with AMP
 """"""""""""""
 
+Note: Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
+
 .. code-block::
 
    import torch
@@ -277,7 +279,7 @@ Train with AMP
    model = torchvision.models.resnet50()
    criterion = torch.nn.CrossEntropyLoss()
    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
-   scaler = torch.amp.GradScaler(enabled=use_amp)
+   scaler = torch.amp.GradScaler(device="xpu", enabled=use_amp)
 
    model.train()
    model = model.to("xpu")
