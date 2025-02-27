@@ -3653,7 +3653,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return t + res
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "Data-dependent branching",
+                torch._dynamo.exc.Unsupported,
+                "Data-dependent branching",
             ):
                 torch.compile(f, backend="eager", fullgraph=True)(torch.zeros(1))
 
