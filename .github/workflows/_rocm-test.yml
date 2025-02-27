@@ -252,7 +252,7 @@ jobs:
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Change permissions (only needed for MI300 runners for now)
-        if: ${{ contains(matrix.runner, 'mi300') }}
+        if: ${{ always() && steps.test.conclusion && contains(matrix.runner, 'mi300') }}
         run: |
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
 
