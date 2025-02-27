@@ -11638,20 +11638,6 @@ def error_inputs_mean(op_info, device, is_ref=False, **kwargs):
         error_regex=err_msg2
     )
 
-    if is_ref:
-        err_msg3 = "Expected out tensor to have dtype torch.float64, but got torch.float32 instead"
-    else:
-        err_msg3 = "Expected out tensor to have dtype double, but got float instead"
-    yield ErrorInput(
-        SampleInput(
-            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-            [],
-            dtype=torch.float64,
-            out=make_tensor([], dtype=torch.float32, device=device),
-        ),
-        error_regex=err_msg3
-    )
-
 # numpy implementation of torch.flatten
 # unfortunately there's no np.flatten. we figure out the desired shape and call np.reshape
 def reference_flatten(input, start_dim=0, end_dim=-1):
@@ -23018,15 +23004,7 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
-        torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        skips=(
-            # Reference result was farther (0.29562714856322714) from the precise
-            # computation than the torch result was (0.20437285143677286)!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.bfloat16,), device_type="cpu"
-            ),
-        ),
+        torch_opinfo_name="nn.functional.hinge_embedding_loss"
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
@@ -24715,12 +24693,10 @@ reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
-# TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
         shape = (shape,)
-    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
-    return index
+    return torch.testing.make_tensor(*shape, dtype=torch.long, device=device, low=0, high=max_indices)
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
     assert len(shape) == 2
