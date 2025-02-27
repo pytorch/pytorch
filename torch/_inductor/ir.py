@@ -174,6 +174,18 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionSignature:
+    # mapping from partition input name to IRNode or Expr. Need the name str since
+    # we cannot get name from Expr.
+    input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
+    output_nodes: list[IRNode]
+    # mapping from partition input name to a boolean for whether deallocating it
+    # in the partition function
+    input_deallocation: dict[str, bool]
+    skip_cudagraph: bool
+
+
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
         # Could expand this to check deeper properties

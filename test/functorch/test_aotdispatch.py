@@ -1087,6 +1087,46 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("dynamic_shapes", [False, True])
+    def test_alias_of_intermediate_detach(
+        self, backend, view_replay_for_aliased_outputs, dynamic_shapes
+    ):
+        with patch(
+            "torch._functorch.config.view_replay_for_aliased_outputs",
+            view_replay_for_aliased_outputs,
+        ):
+
+            def fn(x):
+                x = x + 1
+                a = x.transpose(0, 1)
+                return a.detach(), a
+
+            def inp_fn():
+                t = torch.ones(3, 3, requires_grad=True)
+                if dynamic_shapes:
+                    torch._dynamo.mark_dynamic(t, 0)
+                    torch._dynamo.mark_dynamic(t, 1)
+                return t
+
+            x_ref = inp_fn()
+            y_ref = fn(x_ref)
+
+            x = inp_fn()
+            y = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(y_ref, y)
+            y0, y1 = y
+            self.assertFalse(y0.requires_grad)
+            self.assertTrue(y1.requires_grad)
+            # Check that detach and diff view points to the same intermediate tensor storage
+            self.assertEqual(y0.data_ptr(), y1.data_ptr())
+            self.assertTrue(y1._is_view())
+
+            sum(y_ref).sum().backward()
+            sum(y).sum().backward()
+            self.assertEqual(x_ref.grad, x.grad)
+
     def test_input_mutation_storage_resize_up(self):
         def f(a):
             torch.ops.inductor.resize_storage_bytes_(a, 32)
