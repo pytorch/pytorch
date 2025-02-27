@@ -7515,7 +7515,7 @@ for shape in [(1,), ()]:
         ):
             self.assertEqual(param.grad, checkpoint_param.grad)
 
-     @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     def test_checkpointing_preserves_torch_function_mode_stack(self):
         log = []
 
