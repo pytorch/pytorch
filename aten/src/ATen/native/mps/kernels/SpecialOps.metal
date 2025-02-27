@@ -33,7 +33,7 @@ void kernel entr(
   output[index] = c10::metal::entr(static_cast<T0>(input[index]));
 }
 
-#define REGISTER_SPECIAL(DTI, DTO)                                            \
+#define REGISTER_SPECIAL(DTI, DTO)                                          \
   template [[host_name("i0_" #DTO "_" #DTI)]] void kernel i0<DTO, DTI>(     \
       device DTO*, constant DTI*, uint);                                    \
   template [[host_name("i1_" #DTO "_" #DTI)]] void kernel i1<DTO, DTI>(     \
