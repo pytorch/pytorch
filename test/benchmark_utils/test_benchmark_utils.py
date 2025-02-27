@@ -7,7 +7,7 @@ import re
 import textwrap
 import timeit
 import unittest
-from typing import Any, List, Tuple
+from typing import Any
 
 import expecttest
 import numpy as np
@@ -66,8 +66,9 @@ def generate_callgrind_artifacts() -> None:
         json.dump(artifacts, f, indent=4)
 
 
-def load_callgrind_artifacts() -> Tuple[
-    benchmark_utils.CallgrindStats, benchmark_utils.CallgrindStats
+def load_callgrind_artifacts() -> tuple[
+    benchmark_utils.CallgrindStats,
+    benchmark_utils.CallgrindStats,
 ]:
     """Hermetic artifact to unit test Callgrind wrapper.
 
@@ -85,9 +86,9 @@ def load_callgrind_artifacts() -> Tuple[
     pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")
 
     def to_function_counts(
-        count_strings: List[str], inclusive: bool
+        count_strings: list[str], inclusive: bool
     ) -> benchmark_utils.FunctionCounts:
-        data: List[benchmark_utils.FunctionCount] = []
+        data: list[benchmark_utils.FunctionCount] = []
         for cs in count_strings:
             # Storing entries as f"{c} {fn}" rather than [c, fn] adds some work
             # reviving the artifact, but it makes the json much easier to read.

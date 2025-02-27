@@ -6,7 +6,7 @@ import dataclasses
 import io
 import logging
 import typing
-from typing import AbstractSet, Protocol, Tuple
+from typing import Protocol
 
 import torch
 from torch.onnx import errors
@@ -27,7 +27,7 @@ class _SarifLogBuilder(Protocol):
 
 def _assert_has_diagnostics(
     sarif_log_builder: _SarifLogBuilder,
-    rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
+    rule_level_pairs: set[tuple[infra.Rule, infra.Level]],
 ):
     sarif_log = sarif_log_builder.sarif_log()
     unseen_pairs = {(rule.id, level.name.lower()) for rule, level in rule_level_pairs}
@@ -62,7 +62,7 @@ class _RuleCollectionForTest(infra.RuleCollection):
 def assert_all_diagnostics(
     test_suite: unittest.TestCase,
     sarif_log_builder: _SarifLogBuilder,
-    rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
+    rule_level_pairs: set[tuple[infra.Rule, infra.Level]],
 ):
     """Context manager to assert that all diagnostics are emitted.
 

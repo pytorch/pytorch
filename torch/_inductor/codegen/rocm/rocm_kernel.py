@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
@@ -13,7 +14,7 @@ from .rocm_template_buffer import ROCmTemplateBuffer
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
+    from torch._inductor.codegen.rocm.rocm_template import ArgInfo, ROCmTemplate
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,12 @@ class ROCmTemplateKernel(ROCmKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, hipStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
+    ) -> None:
         """
         Initializes a new instance of the ROCmTemplateKernel class.
 
@@ -49,28 +55,20 @@ class ROCmTemplateKernel(ROCmKernel):
         super().__init__()
         self.kernel_name = kernel_name
         # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
-
-    def arg_name(self, node: IRNode) -> Optional[str]:
-        """
-        Returns arg name of a given input or output node.
-        """
-        if node is None:
-            return None
-        return {**self.args.input_buffers, **self.args.output_buffers}.get(
-            node.get_name(), None
-        )
+        self.named_nodes: dict[str, IRNode] = {}
+        self.runtime_arg_info = runtime_arg_info
+        self.runtime_arg_values = runtime_arg_values
 
     def get_signature(self):
         return self.signature
 
     def def_kernel(
         self,
-        inputs: List[IRNode],
-        outputs: List[IRNode],
-        size_args: List[str],
+        inputs: list[IRNode],
+        outputs: list[IRNode],
+        size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -113,7 +111,9 @@ class ROCmTemplateKernel(ROCmKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        runtime_arg_defs = [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args + runtime_arg_defs)},{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -132,6 +132,7 @@ class ROCmTemplateKernel(ROCmKernel):
         """
         wrapper = V.graph.wrapper_code
 
+        arg_types: list[Any]
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
@@ -143,6 +144,7 @@ class ROCmTemplateKernel(ROCmKernel):
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
+
         kernel_args = []
         for arg in call_args:
             # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -157,6 +159,7 @@ class ROCmTemplateKernel(ROCmKernel):
         size_args = [
             f"{V.graph.sizevars.simplify(sarg)}" for sarg in node.template.size_args()
         ]
+
         if V.graph.cpp_wrapper:
             kernel_args.extend(size_args)
         else:
@@ -164,6 +167,11 @@ class ROCmTemplateKernel(ROCmKernel):
 
         if V.graph.cpp_wrapper:
             arg_types.extend(["int"] * len(node.template.size_args()))
+
+        # the runtime args come right after the size args
+        kernel_args.extend(self.runtime_arg_values)
+        for arg in self.runtime_arg_info:
+            arg_types.append(arg.ty)
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
@@ -188,7 +196,6 @@ class ROCmTemplateKernel(ROCmKernel):
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
-
         current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
@@ -218,7 +225,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
             [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
@@ -226,7 +233,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
-            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
         ],  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
@@ -258,7 +265,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",
