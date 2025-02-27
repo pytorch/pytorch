@@ -1948,7 +1948,6 @@ class VariableBuilder:
                 is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
             )
 
-
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
