@@ -38,13 +38,12 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    skipIfCrossRef, TEST_WITH_CROSSREF, skipRocmIfTorchInductor, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
-    skipIfTorchDynamo)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -544,7 +543,6 @@ class TestTorchDeviceType(TestCase):
 
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
-    @xfailIfTorchDynamo
     def test_scalar_check(self, device):
         zero_d = torch.randn((), device=device)
         one_d = torch.randn((1,), device=device)
@@ -2232,7 +2230,6 @@ else:
         num_zeros = (torch.bernoulli(b) == 0).sum()
         self.assertEqual(num_zeros, 0)
 
-    @xfailIfTorchDynamo
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMPS
     def test_exponential(self, device, dtype):
@@ -2373,7 +2370,6 @@ else:
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
 
-    @xfailIfTorchDynamo
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
@@ -3085,7 +3081,6 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), list(expected))
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
-    @skipIfTorchDynamo("flaky test under torch Dynamo")
     @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_spacing_list_length_error(self, device, dtype):
@@ -4128,7 +4123,6 @@ else:
         dst = dst.masked_fill(mask, False)
         self.assertEqual(dst, torch.tensor([True, False, True], device=device))
 
-    @xfailIfTorchDynamo
     def test_tensor_shape_empty(self, device):
         x = torch.randn((0, 1, 3, 0), device=device)
         # flatten
@@ -4864,7 +4858,6 @@ else:
             result = ambiguous * 5
             self.assertEqual(ambiguous.stride(), result.stride())
 
-    @xfailIfTorchDynamo
     @skipIfMPS
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
