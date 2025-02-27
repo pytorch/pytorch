@@ -75,8 +75,8 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
-    _has_sufficient_memory,
     expectedFailureXPU,
+    largeTensorTest,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -269,7 +269,15 @@ def get_divisible_by_16(cfg):
     # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
     if hasattr(cfg, "divisibility_16"):
         return cfg.divisibility_16
-    return cfg.divisible_by_16
+    elif hasattr(cfg, "divisible_by_16"):
+        return cfg.divisible_by_16
+    # `cfg` example:
+    # {(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}
+    return [
+        key[0]
+        for key, value in cfg.items()
+        if len(key) == 1 and value[0] == ["tt.divisibility", 16]
+    ]
 
 
 class TestCase(InductorTestCase):
@@ -763,6 +771,16 @@ class SweepInputs2:
 
 def is_cpp_backend(device):
     return getattr(device, "type", device) == "cpu" and config.cpu_backend == "cpp"
+
+
+def skip_if_cpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("cpu not supported")
+        return fn(self)
+
+    return wrapper
 
 
 def skip_if_halide(fn):
@@ -3321,18 +3339,10 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skip_if_cpu
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("4GB", inductor=True)
     def test_large_tensor_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Fails on CPU")
-
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**33 if config.cpp_wrapper else 2**32 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         # Test 64-bit indexing works correctly
         def fn(a):
             return torch.max(a)
@@ -3346,11 +3356,9 @@ class CommonTemplate:
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
+    @skip_if_cpu
     @skip_if_gpu_halide  # only 32-bit indexing
     def test_large_broadcast_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Fails on CPU")
-
         # Test 64-bit indexing works correctly when inputs are less than 32-bit
         # but intermediate tensors require 64-bit indexing
         def fn(a, b):
@@ -3369,16 +3377,8 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return a + 1
 
@@ -3394,16 +3394,11 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("3GB", inductor=True)
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
-
-        # Memory requirements derived experimentally.
-        required_memory = 2**32 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return a + 4
 
@@ -3414,17 +3409,10 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
-
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**32 + 2**16 if config.cpp_wrapper else 2**31 + 2**16
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return torch.max(a)
 
@@ -4136,9 +4124,9 @@ class CommonTemplate:
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
             return torch.gather(x, 0, torch.trunc(y).to(torch.int64))
 
-        x1 = torch.randn(30)
-        x2 = torch.randn(36)
-        y = torch.ones(1, dtype=torch.float64)
+        x1 = torch.randn(30, device=self.device)
+        x2 = torch.randn(36, device=self.device)
+        y = torch.ones(1, dtype=torch.float64, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
@@ -4624,6 +4612,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -4648,6 +4637,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4947,6 +4937,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -11764,6 +11755,7 @@ class CommonTemplate:
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
     @serialTest()
+    @largeTensorTest("13GB", inductor=True)
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will
@@ -11772,16 +11764,6 @@ class CommonTemplate:
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**34 + 2**32 + 2**31
-            if config.cpp_wrapper
-            else 2**33 + 2**32 + 2**31
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
         def fn(x, y):
@@ -12209,16 +12191,8 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
+    @largeTensorTest("1GB", inductor=True)
     def test_large_grid(self):
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = (
-            2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
-        )
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -12249,6 +12223,17 @@ class CommonTemplate:
         b = torch.randint(size=(512,), low=0, high=4095)
 
         self.common(forward, (a, b))
+
+    def test_isin_tensor_scalar(self):
+        for invert in [True, False]:
+            torch._dynamo.reset()
+            elements = 1
+            test_elements = torch.tensor([1, 2, 3, 4])
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
+            torch._dynamo.reset()
+            elements = torch.tensor([1, 2, 3, 4])
+            test_elements = 1
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
@@ -12836,17 +12821,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue(max_live_tensors == 3)
 
         # See https://github.com/pytorch/pytorch/issues/100348
-        def test_inductor_detach_view(self):
+        @parametrize("backend", ["aot_eager", "inductor"])
+        def test_inductor_detach_view(self, backend):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 a = x * 2
                 return a, a.detach()
 
-            fn_opt = torch.compile(fn, backend="inductor")
+            fn_opt = torch.compile(fn, backend=backend)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
             inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
-            out = fn_opt(inp)
             out_ref[0].sum().backward()
+            out = fn_opt(inp)
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
