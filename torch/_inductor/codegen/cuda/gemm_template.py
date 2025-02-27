@@ -899,8 +899,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        log.info("Got cutlass configs: total number of ops: %d, ", len(res))
-        return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        sorted_res = sorted(list(res.items()))
+        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         """
