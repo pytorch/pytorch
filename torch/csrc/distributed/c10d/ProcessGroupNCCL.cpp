@@ -30,6 +30,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -1009,39 +1010,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
             << logCppStackOnUncleanShutdown_;
 
-  if (options_->global_ranks_in_group.empty()) {
-    this->globalRankStart = 0;
-  } else {
-    this->globalRankStart =
-        static_cast<int>(options_->global_ranks_in_group[0]);
-  }
-
-  if (options_->global_ranks_in_group.empty()) {
-    this->globalRankStride = 1;
-  } else if (options_->global_ranks_in_group.size() == 1) {
-    this->globalRankStride = 0;
-  } else {
-    bool ranksAreStrided = true;
-    auto startRank = options_->global_ranks_in_group[0];
-    auto stride =
-        options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
-    for (std::vector<uint64_t>::size_type i = 0;
-         i < options_->global_ranks_in_group.size();
-         i++) {
-      if (options_->global_ranks_in_group[i] != startRank + i * stride) {
-        ranksAreStrided = false;
-        break;
-      }
-    }
-
-    if (ranksAreStrided) {
-      this->globalRankStride = static_cast<int>(
-          options_->global_ranks_in_group[1] -
-          options_->global_ranks_in_group[0]);
-    } else {
-      this->globalRankStride = -1;
-    }
-  }
+  getGlobalRankStartAndStride(
+      options_->global_ranks_in_group,
+      this->globalRankStart,
+      this->globalRankStride);
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
   // action is called. In the following hooks, we register a newly allocated
@@ -4744,6 +4716,38 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       "nccl:reduce_scatter_tensor_coalesced");
 }
 
+c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
+  // 1st choice: don't use this function if your API can take a device_id
+  // argument.
+  if (getBoundDeviceId().has_value()) {
+    // 2nd choice: Use the bound GPU device id if available.
+    // Bounded device id can be passed to `init_process_group`.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return getBoundDeviceId().value().index();
+  } else if (!usedDeviceIdxs_.empty()) {
+    // 3rd choice: infer the device id from the used device ids.
+    return *usedDeviceIdxs_.begin();
+  }
+  // This means there is not yet a NCCL collective being called
+  // Here we have to use the best guesses and will use a single GPU to call
+  // allreduce to achieve barrier.
+  // In case the multiple processes fall into the same node, we use rank to
+  // ensure that each process is on a different GPU
+  // Note: it is better to use global rank because the group-local rank can be
+  // offset wrt the device id if intra-node GPUs are sharded into multiple
+  // dimensions.
+  int devIdx = globalRank() % localDeviceCount_;
+  LOG(WARNING)
+      << logPrefix()
+      << c10::str(
+             " using GPU ",
+             devIdx,
+             " as device used by this process is currently unknown. ",
+             "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
+             "You can pecify device_id in init_process_group() to force use of a particular device.");
+  return static_cast<c10::DeviceIndex>(devIdx);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       std::make_tuple(
@@ -4769,33 +4773,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
     barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else if (getBoundDeviceId().has_value()) {
-    // 2nd choice: Use the bound GPU device id if available.
-    // Bounded device id can be passed to `init_process_group`.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    barDevIdx = getBoundDeviceId().value().index();
-  } else if (!usedDeviceIdxs_.empty()) {
-    // 3rd choice: infer the device id from the used device ids.
-    barDevIdx = *usedDeviceIdxs_.begin();
   } else {
-    // This means there is not yet a NCCL collective being called
-    // Here we have to use the best guesses and will use a single GPU to call
-    // allreduce to achieve barrier.
-    // In case the multiple processes fall into the same node, we use rank to
-    // ensure that each process is on a different GPU
-    // Note: it is better to use global rank because the group-local rank can be
-    // offset wrt the device id if intra-node GPUs are sharded into multiple
-    // dimensions.
-    barDevIdx = static_cast<c10::DeviceIndex>(globalRank() % localDeviceCount_);
-    LOG(WARNING)
-        << logPrefix()
-        << c10::str(
-               " using GPU ",
-               static_cast<int>(barDevIdx),
-               " to perform barrier as devices used by this process are currently unknown. ",
-               "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-               "Specify device_ids in barrier() to force use of a particular device, ",
-               "or call init_process_group() with a device_id.");
+    // 2nd choice: Use the bound or used GPU device id if available.
+    barDevIdx = guessDeviceId();
   }
 
   TORCH_CHECK_WITH(
@@ -5420,7 +5400,8 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
-  if (!supportsTensorAlloc()) {
+  c10::DeviceIndex deviceIdx = guessDeviceId();
+  if (!supportsTensorAlloc(deviceIdx)) {
     TORCH_CHECK(
         false, "NCCL mem allocator is not supported in this NCCL version");
   }
@@ -5431,14 +5412,20 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   return ncclMemAllocator;
 }
 
-bool ProcessGroupNCCL::supportsTensorAlloc() {
+bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  // Check if NCCL has `ncclMemAlloc` and `ncclMemFree` functions
   int version = 0;
   // Rely on link-time versioning
   ncclGetVersion(&version);
-  if (version >= NCCL_VERSION(2, 19, 0)) {
-    return true;
+  if (version < NCCL_VERSION(2, 19, 0)) {
+    return false;
   }
-  return false;
+
+  // We do an extra check to see if CUDA driver supports multicast.  If not, we
+  // will return false. Although `ncclMemAlloc` will fall back to regular
+  // `cudaMalloc` and hence not error out, we may still want to avoid creating a
+  // separate memory pool for NCCL.
+  return c10d::cuda::deviceSupportsMulticast(deviceIdx);
 }
 
 at::Tensor ProcessGroupNCCL::allocateTensor(

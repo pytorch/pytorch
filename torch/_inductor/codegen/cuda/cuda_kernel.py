@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, List, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
@@ -160,8 +160,8 @@ class CUDATemplateKernel(CUDAKernel):
     def __init__(
         self,
         kernel_name: str,
-        runtime_arg_info: List["ArgInfo"],
-        runtime_arg_values: List[Any],
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
     ) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
