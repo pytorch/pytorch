@@ -968,7 +968,7 @@ def forward(self, pred_1):
             result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
             return result
 
-        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
+        gm = make_fx(f, tracing_mode="real", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -2880,7 +2880,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
-    select_copy = torch.ops.aten.select_copy.int(permute, 0, 0)
+    flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
+    select_copy = torch.ops.aten.select_copy.int(flip, 0, 0)
     add = torch.ops.aten.add.Tensor(init_1, select_copy);  add = None
     add_1 = torch.ops.aten.add.Tensor(init_1, select_copy);  select_copy = add_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
@@ -2888,10 +2889,11 @@ def forward(self, fct_1, init_1, xs_1):
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute], True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = permute = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
+    flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
+    return (getitem, flip_1)""",  # noqa: B950
         )
 
         # Check graph
@@ -2906,14 +2908,16 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    select_copy = torch.select_copy(elem, 0, 0)
+    elem_1 = torch.flip(elem, [0]);  elem = None
+    select_copy = torch.select_copy(elem_1, 0, 0)
     new_carry = l_init_ + select_copy;  new_carry = None
     add_1 = l_init_ + select_copy;  select_copy = add_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem_1], []);  scan_combine_fn_0 = l_init_ = elem_1 = None
     getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
+    elem_2 = scan[1];  scan = None
+    flip_1 = torch.flip(elem_2, [0]);  elem_2 = None
+    return (getitem, flip_1)""",  # noqa: B950
         )
 
 
@@ -5379,8 +5383,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5396,8 +5400,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5552,8 +5556,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -5569,8 +5573,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -6860,7 +6864,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     r_4 = r_3.add(l_add_closure_0_cell_contents_1_0_);  r_3 = None
     r_5 = r_4.sum();  r_4 = r_5 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6882,7 +6886,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
     sum_1 = ret.sum();  ret = sum_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -7546,6 +7550,215 @@ class GraphModule(torch.nn.Module):
         model = M()
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
+
+    @skipIfTorchDynamo(
+        "Skip because _merge_tensors is not intended for dynamo to compile"
+    )
+    def test_merge_tensors(self):
+        from torch._higher_order_ops.cond import _merge_tensors
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
+        valid_test_cases = [
+            # [(size1, stride1), (size2, stride2), (expected_stride, expected_size)]
+            [((3,), (1,)), ((4,), (1,)), ("(u0,)", "(1,)")],
+            [((1, 3), (3, 1)), ((3, 2), (2, 1)), ("(u0, u1)", "(u1, 1)")],
+            [((2, 1), (1, 1)), ((7, 3), (3, 1)), ("(u0, u1)", "(u1, 1)")],
+            [((5, 5), (1, 5)), ((4, 5), (1, 4)), ("(u0, 5)", "(1, u0)")],
+            [
+                ((7, 3, 1), (1, 7, 1)),
+                ((4, 3, 3), (3, 12, 1)),
+                ("(u0, 3, u1)", "(u1, u0*u1, 1)"),
+            ],
+            [
+                ((5, 7, 4), (7, 1, 35)),
+                ((7, 4, 4), (4, 1, 28)),
+                ("(u0, u1, 4)", "(u1, 1, u0*u1)"),
+            ],
+            [
+                ((1, 6, 3, 2), (36, 1, 6, 18)),
+                ((4, 2, 2, 6), (24, 1, 2, 4)),
+                ("(u0, u1, u2, u3)", "(u1*u2*u3, 1, u1, u1*u2)"),
+            ],
+            [
+                ((6, 1, 6, 3), (18, 1, 1, 6)),
+                ((2, 1, 3, 4), (12, 1, 1, 3)),
+                ("(u0, 1, u1, u2)", "(u1*u2, 1, 1, u1)"),
+            ],
+            [
+                ((3, 1, 2, 4, 1), (8, 8, 4, 1, 1)),
+                ((2, 4, 1, 4, 1), (16, 4, 4, 1, 1)),
+                ("(u0, u1, u2, 4, 1)", "(4*u1*u2, 4*u2, 4, 1, 1)"),
+            ],
+        ]
+
+        def _inner(case):
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+            (size1, stride1), (size2, stride2), (merged_size, merged_stride) = case
+            with fake_mode:
+                t1 = torch.empty_strided(size1, stride1)
+                t2 = torch.empty_strided(size2, stride2)
+            out = _merge_tensors(t1, t2, fake_mode)
+            self.assertEqual(str(tuple(out.size())), merged_size)
+            self.assertEqual(str(tuple(out.stride())), merged_stride)
+
+        for case in valid_test_cases:
+            _inner(case)
+
+        # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
+        invalid_test_cases = [
+            # [(size1, stride1), (size2, stride2)]
+            [((1,), (1,)), ((1,), (0,))],
+            [
+                ((1, 3), (1, 1)),
+                ((5, 6), (6, 1)),
+            ],  # t1 is not contiguous, t2 is contiguous
+            [
+                ((2, 1), (1, 1)),
+                ((7, 3), (1, 3)),
+            ],  # t1 is contiguous, t2 is not contiguous
+            [
+                ((5, 4), (4, 1)),
+                ((5, 5), (1, 5)),
+            ],  # t1 is contiguous, t2 is not contiguous
+            [((7, 3, 1), (1, 7, 1)), ((4, 3, 3), (9, 1, 3))],  # layout is different
+            [((5, 7, 4), (7, 1, 35)), ((7, 4, 4), (4, 28, 1))],  # layout is different
+            [
+                ((1, 6, 3, 2), (36, 1, 6, 18)),
+                ((4, 1, 1, 6), (1, 4, 4, 4)),
+            ],  # layout is different
+            [
+                ((6, 1, 6, 3), (18, 1, 1, 6)),
+                ((1, 1, 1, 1), (1, 1, 1, 1)),
+            ],  # layout is different
+            [
+                ((6, 1, 1, 6, 3), (3, 18, 18, 18, 1)),
+                ((5, 1, 2, 1, 1), (2, 10, 1, 10, 1)),
+            ],  # layout is different
+        ]
+        for case in invalid_test_cases:
+            with self.assertRaisesRegex(Exception, r"."):
+                _inner(case)
+
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_mismatched_branch_output(self, dynamic, backend):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + a)[2:].clone()
+
+                def false_fn(x):
+                    # clone the outputs so branches have the same storage_offset
+                    return (x + b * z)[:2].clone()
+
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                return y.sum() - ret
+
+        m = M()
+        x, y, z = torch.randn(5, 4), torch.randn(5, 4), torch.randn(5, 4)
+        out = m(x, y, z)
+        if not (backend == "eager" and dynamic and not TEST_WITH_CROSSREF):
+            compiled_out = torch.compile(
+                m, backend=backend, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+        else:
+            bk = EagerAndRecordGraphs()
+            compiled_out = torch.compile(
+                m, backend=bk, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+            self.assertExpectedInline(
+                normalize_gm(bk.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_y_: "f32[s0, s1]", L_z_: "f32[s0, s1]", L_x_: "f32[s0, s1]"):
+        l_y_ = L_y_
+        l_z_ = L_z_
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum()
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+
+        cond_true_0 = self.cond_true_0
+        cond_false_0 = self.cond_false_0
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, s1, s0, s0, l_z_]);  gt = cond_true_0 = cond_false_0 = l_x_ = s1 = s0 = l_z_ = None
+
+        getitem_5: "f32[u0, s1]" = cond[0]
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+        ret: "f32[u0, s1]" = cond[0];  cond = None
+
+        sum_2: "f32[]" = l_y_.sum();  l_y_ = None
+        sub: "f32[u0, s1]" = sum_2 - ret;  sum_2 = ret = None
+        return (sub,)
+
+    class cond_true_0(torch.nn.Module):
+        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+            s1_1 = s1
+
+            add: "f32[s0, s1]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
+            getitem: "f32[s0 - 2, s1]" = add[slice(2, None, None)];  add = None
+            clone: "f32[s0 - 2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
+
+    class cond_false_0(torch.nn.Module):
+        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+            s1_1 = s1
+
+            mul: "f32[s0, s1]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            add: "f32[s0, s1]" = l_x__1 + mul;  l_x__1 = mul = None
+            getitem: "f32[2, s1]" = add[slice(None, 2, None)];  add = None
+            clone: "f32[2, s1]" = getitem.clone();  getitem = None
+            return (clone,)
+""",  # noqa: B950
+            )
+
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_mismatched_branch_strided_output(self, dynamic, backend):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def true_fn(x, y):
+                    return (
+                        (x.swapaxes(-1, 0) + 1)
+                        .unsqueeze(1)
+                        .expand(-1, 5, -1, -1, -1, -1, -1),
+                        torch.empty_strided((3, 3), (0, 1)),
+                    )
+
+                def false_fn(x, y):
+                    return (
+                        (y.swapaxes(-1, 0) + 1)
+                        .unsqueeze(1)
+                        .expand(-1, 4, -1, -1, -1, -1, -1),
+                        torch.empty_strided((4, 5), (0, 1)),
+                    )
+
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x, y))
+                return y.sum() + ret[0]
+
+        m = M()
+        x, y = torch.randn(1, 6, 1, 5, 4, 3), torch.randn(1, 4, 5, 1, 3, 8)
+        out = m(x, y)
+        compiled_out = torch.compile(
+            m, backend=backend, dynamic=dynamic, fullgraph=True
+        )(x, y)
+        self.assertEqual(compiled_out, out)
 
 
 _hop_schema_test_schema_types = [
