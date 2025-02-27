@@ -4918,11 +4918,9 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            (
-                buffer._version + 1
-                if k in ["m.running_mean", "m.running_var"]
-                else buffer._version
-            )
+            buffer._version + 1
+            if k in ["m.running_mean", "m.running_var"]
+            else buffer._version
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -13518,11 +13516,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    (
-                        "triton_poi_fused_layer_norm_relu"
-                        if torch._dynamo.config.inline_inbuilt_nn_modules
-                        else "triton_poi_fused_LayerNorm_ReLU"
-                    ),
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
