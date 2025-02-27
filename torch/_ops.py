@@ -4,6 +4,7 @@ import contextlib
 import ctypes
 import importlib
 import inspect
+import itertools
 import sys
 import types
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -1011,6 +1012,14 @@ def _has_pytree_object_arg(schema: torch.FunctionSchema) -> bool:
     return any(isinstance(arg.type, torch.AnyType) for arg in schema.arguments)
 
 
+def _has_pytree_type_in_args_or_kwargs(args, kwargs) -> bool:
+    return any(
+        not isinstance(x, (list, tuple))
+        and type(x) in torch.utils._pytree.SUPPORTED_NODES
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 # TorchBindOpOverload are those custom ops which have at least one overload's
 # schema consists of torch.ScriptObject (i.e. custom class) input.
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
@@ -1145,6 +1154,9 @@ class OpOverloadPacket:
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
+        self._has_pytree_arg_overload = any(
+            _has_pytree_object_arg(schema) for schema in self._schemas.values()
+        )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -1240,7 +1252,11 @@ class OpOverloadPacket:
         # Directly calling OverloadPacket goes into C++, which will check
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
-        if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+        if (
+            self._has_torchbind_op_overload
+            and _must_dispatch_in_python(args, kwargs)
+            or self._has_pytree_arg_overload
+        ):
             return _call_overload_packet_from_python(self, args, kwargs)
         return self._op(*args, **(kwargs or {}))
 
@@ -1259,6 +1275,10 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
 
     if torch_function_called:
         return ret
+
+    if _has_pytree_type_in_args_or_kwargs(args, kwargs):
+        op_overload = getattr(op, op.overloads()[0])
+        return op_overload(*args, **kwargs)
 
     # The following mirrors getOpWithStack.
     # In cpp, we do a schema matching for the arguments, and call ToIValue to

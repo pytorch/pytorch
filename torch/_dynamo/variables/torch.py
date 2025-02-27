@@ -1114,9 +1114,12 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
                 return result
 
         # If the function is custom op, we need to wrap it as flat_apply call in the fx graph.
-        if isinstance(self.value, torch._ops.CustomOpOverload):
-            from torch._higher_order_ops.flat_apply import ConstantFunction, flat_apply
+        if isinstance(
+            self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        ) and any(not isinstance(x, (variables.ConstantVariable)) for x in args):
+            from torch._higher_order_ops.flat_apply import _ConstantFunction, flat_apply
 
+            # fn = self.value.op
             fn = self.value.py_kernels[torch._C.DispatchKey.CompositeExplicitAutograd]
             packed_input_vt = TupleVariable.build(
                 tx,
@@ -1130,7 +1133,7 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
             ).call_function(tx, [packed_input_vt], {})
 
             flat_args_vt, in_spec_vt = flat_args_and_spec.items
-            _, func_spec = pytree.tree_flatten(ConstantFunction(fn))
+            _, func_spec = pytree.tree_flatten(_ConstantFunction(fn))
             in_spec = in_spec_vt.as_python_constant()
             func_spec_proxy = tx.output.register_static_attr_and_return_proxy(
                 f"{fn.__name__}_spec", func_spec
