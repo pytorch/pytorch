@@ -160,8 +160,7 @@ def register_woq_mm_ops() -> None:
     lowering.make_fallback(aten._dyn_quant_matmul_4bit)
     lowering.make_fallback(aten._dyn_quant_pack_4bit_weight)
 
-
-    @register_lowering(aten._weight_int8pack_mm_with_scale_and_zeros, type_promotion_kind=None)  # type: ignore[misc]
+    @register_lowering(aten._weight_int4pack_mm_with_scales_and_zeros, type_promotion_kind=None)  # type: ignore[misc]
     def int8pack_mm_with_scale_and_zeros(
         input: torch.Tensor,
         weight: torch.Tensor,
@@ -180,7 +179,11 @@ def register_woq_mm_ops() -> None:
 
         # options to tune from
         choices = (
-            [aten__weight_int4pack_mm_with_scales_and_zeros.bind((mat1, mat2, scale), aten_layout)]
+            [
+                aten__weight_int4pack_mm_with_scales_and_zeros.bind(
+                    (mat1, mat2, scale), aten_layout
+                )
+            ]
             if use_aten_gemm_kernels()
             else []
         )
