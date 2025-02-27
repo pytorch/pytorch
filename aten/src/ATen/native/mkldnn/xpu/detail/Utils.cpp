@@ -1,7 +1,8 @@
 #include <ATen/Context.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
-#include <oneapi/dnnl.hpp>
+
+#include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_common.hpp>
 
 namespace at::native::onednn {
