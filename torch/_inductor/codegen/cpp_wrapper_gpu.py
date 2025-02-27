@@ -466,6 +466,15 @@ class CppWrapperGpu(CppWrapperCpu):
         ):
             process_args(arg, arg_type, arg_signature)
 
+        if (
+            global_scratch := self.device_codegen.cpp_global_scratch(
+                next(self.arg_var_id)
+            )
+        ) is not None:
+            global_scratch_def, global_scratch_var = global_scratch
+            self.writeline(global_scratch_def)
+            new_args.append(f"&{global_scratch_var}")
+
         return ", ".join(new_args)
 
     def generate_default_grid(
