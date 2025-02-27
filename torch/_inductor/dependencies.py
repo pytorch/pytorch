@@ -156,7 +156,7 @@ class MemoryDep(Dep):
         this method does not reorder loops while normalize_with_stride_order reorder
         loops based on stride order.
         """
-        index, var_names, sizes, replacement = _RecordLoadStoreInner.canonicalize(
+        index, var_names, sizes, replacement = _RecordLoadStoreInner._normalize(
             self.index, self.ranges
         )
         return MemoryDep(
