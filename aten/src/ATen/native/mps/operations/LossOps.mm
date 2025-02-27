@@ -700,7 +700,10 @@ static void smooth_l1_loss_template(const Tensor& input,
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
-
+  if ((input.numel() == 0) | (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
+    return;
+  }
   MPSShape* mpsInputShape = nil;
   MPSShape* mpsOutputShape = nil;
 
