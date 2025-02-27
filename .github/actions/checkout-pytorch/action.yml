@@ -40,6 +40,11 @@ runs:
         fi
         mkdir "${GITHUB_WORKSPACE}"
 
+        # Use all available CPUs for fetching
+        cd "${GITHUB_WORKSPACE}"
+        git config --global fetch.parallel 0
+        git config --global submodule.fetchJobs 0
+
     - name: Checkout PyTorch
       uses: actions/checkout@v4
       with:

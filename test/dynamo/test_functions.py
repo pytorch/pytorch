@@ -2072,6 +2072,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
 
     @make_test
+    def test_sourceless_build_method_type(a, b):
+        cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
+
+        # The type of `cls._make` and `cls._asdict` is method type
+        if callable(getattr(cls, "_make", None)) and callable(
+            getattr(cls, "_asdict", None)
+        ):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_torch_size_hasattr(x):
         if hasattr(x.shape, "_fields"):
             return x + 1
@@ -2392,6 +2404,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
+    def test_is(x, y):
+        exc = ValueError("abcd")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is exc
+            return x + y
+
+    @make_test
+    def test_is_not(x, y):
+        exc = ValueError("abcd")
+        exc1 = TypeError("abc")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is not exc1
+            return x + y
+
+    @make_test
     def test_are_functorch_transforms_active(x):
         if torch._C._are_functorch_transforms_active():
             return x + 1
@@ -2627,6 +2658,35 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
+
+    @make_test
+    def test_getattr(x):
+        def fn(y):
+            return y + 1
+
+        try:
+            _exit = type(fn).__exit__
+        except AttributeError:
+            return x.sin()
+        else:
+            return x.cos()
+
+    @unittest.expectedFailure
+    def test_getattr_metaclass(self):
+        class Meta(type):
+            def __getattr__(cls, name):
+                return len(name)
+
+        class C(metaclass=Meta):
+            attr = 123
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t + C.attr + C.dynamic_attr
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 123 + 12)
 
     def test_two_point_iter(self):
         def fn(x, y):
@@ -4488,7 +4548,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             immutable_inputs = torch.fx.immutable_collections.immutable_list(inputs)
             try:
                 immutable_inputs.append(x)
-            except NotImplementedError:
+            except TypeError:
                 pass
             return torch.fx.node.map_aggregate(immutable_inputs, f)
 
