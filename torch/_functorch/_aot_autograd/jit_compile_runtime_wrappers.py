@@ -456,6 +456,9 @@ def run_joint_graph_passes_on_hops(
                     )
                 env[node].meta = copy.copy(node.meta)
             elif node.op == "output":
+                # Reverse the (*grads, *fw_outs) to (*fw_outs, *grads)
+                # The reason for having the reversed signature in the first
+                # place is to simplify step 3.
                 old_outputs = node.args[0]
                 new_outputs = (
                     *old_outputs[-num_fw_outputs:],
@@ -483,6 +486,11 @@ def run_joint_graph_passes_on_hops(
     # HOP graphs.
     # So we will merge step 1 and step 2 in this next section
 
+    # Save the fw and bwd hop nodes. We will later in-place modify the graph
+    # using these nodes.
+    fw_hop_nodes = []
+    bw_hop_nodes = []
+
     for node in joint_gm.graph.nodes:
         if (
             node.op == "call_function"
@@ -493,7 +501,15 @@ def run_joint_graph_passes_on_hops(
                 node.args[1].replace("___forward", "").replace("___backward", "")
             )
 
-            # If partitioning already done for this identifier, skip.
+            # NB: This is done in a separate if else condition because we early
+            # return if the partitioning_done is True.
+            if node.args[1].startswith("___forward"):
+                fw_hop_nodes.append(node)
+            elif node.args[1].startswith("___backward"):
+                bw_hop_nodes.append(node)
+
+            # If partitioning already done for this identifier, skip. This saves
+            # redundant joint graph passes for same subgraphs.
             if new_hop_graphs[identifier].partitioning_done:
                 continue
 
@@ -547,7 +563,7 @@ def run_joint_graph_passes_on_hops(
 
     # Step 3) Restitch the new fw and bw graphs back into the main graph.
     #
-    # This is a very mechanical process. There are a quite of pieces that we
+    # This is a very mechanical process. There are a quite a few pieces that we
     # need to connect together to make it work. Lets try to understand the
     # problem statement first.
     #
@@ -578,11 +594,6 @@ def run_joint_graph_passes_on_hops(
     # see the forward graph, and save it into a map and then later use it during
     # the backward.
 
-    env = {}  # type: ignore[var-annotated]
-    new_graph = torch.fx.Graph()
-
-    already_added_new_hop_mods = set()
-
     # The stack of fw_nodes for invoke_subgraph HOP. There is an implicit
     # assumption about the graph structure, i.e., if we have hop1, hop2, hop3,
     # ... in the forward part of the joint graph, we will have .., hop3, hop2,
@@ -593,6 +604,8 @@ def run_joint_graph_passes_on_hops(
     # Collect the saved tensor nodes that we need to pass as inputs to the
     # backward hop.
     fw_node_to_saved_tensors_map = {}
+
+    already_added_new_hop_mods = set()
 
     def add_new_hop_gm(new_subgraph_mod, name):
         new_subgraph_attr_name = f"{name}_post_graph"
@@ -612,121 +625,124 @@ def run_joint_graph_passes_on_hops(
         out_example_vals = [n.meta["val"] if n else None for n in output.args[0]]
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
-    for node in joint_gm.graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target is invoke_subgraph
-            and isinstance(node.args[1], str)
-        ):
-            identifier = (
-                node.args[1].replace("___forward", "").replace("___backward", "")
+    for fw_node in fw_hop_nodes:
+        # Insert the new_fw_hop_gm. This is straightforward. Get the
+        # new_fw_hop_gm, insert the hop_gm as a get_attr fw_node, and then
+        # add a call_function fw_node. Additionally, also use getitem
+        # call_functions to collect the saved_tensor nodes
+
+        identifier = (
+            fw_node.args[1].replace("___forward", "").replace("___backward", "")
+        )
+        new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
+        assert new_fw_hop_gm is not None
+
+        old_num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
+        new_num_sym_nodes = new_hop_graphs[identifier].new_num_sym_nodes
+        new_num_saved_nodes = new_hop_graphs[identifier].new_num_saved_nodes
+        assert old_num_fw_outputs is not None
+        assert new_num_sym_nodes is not None
+        assert new_num_saved_nodes is not None
+        total_outputs = old_num_fw_outputs + new_num_saved_nodes + new_num_sym_nodes
+
+        extra_fw_outputs = []
+
+        # Insert the new_fw_hop_gm into the joint_gm
+        with joint_gm.graph.inserting_after(fw_node):
+            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, fw_node.args[1])
+            new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
+
+        # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
+        with joint_gm.graph.inserting_after(new_fw_mod_attr):
+            new_fw_node = joint_gm.graph.call_function(
+                the_function=invoke_subgraph,
+                args=(
+                    new_fw_mod_attr,
+                    new_fw_mod_attr_name,
+                    fw_node.args[2],
+                ),
             )
-            if node.args[1].startswith("___forward"):
-                # Insert the new_fw_hop_gm. This is straightforward. Get the
-                # new_fw_hop_gm, insert the hop_gm as a get_attr node, and then
-                # add a call_function node. Additionally, also use getitem
-                # call_functions to collect the saved_tensor nodes
+            propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
 
-                new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
-                assert new_fw_hop_gm is not None
-                new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, node.args[1])
-                new_fw_mod_attr = new_graph.get_attr(new_fw_mod_attr_name)
-
-                old_operands = node.args[2]
-                new_operands = [env[n] for n in old_operands]
-                env[node] = new_graph.call_function(
-                    the_function=invoke_subgraph,
-                    args=(
-                        new_fw_mod_attr,
-                        new_fw_mod_attr_name,
-                        tuple(new_operands),
-                    ),
+        # old_num_fw_outputs = (*fw_outs)
+        # new_num_fw_outputs = (*fw_outs, *saved_tensors, *sym_nodes)
+        with joint_gm.graph.inserting_after(new_fw_node):
+            for fw_out_idx in range(old_num_fw_outputs, total_outputs):
+                saved_tensor_node = joint_gm.graph.call_function(
+                    the_function=operator.getitem, args=(new_fw_node, fw_out_idx)
                 )
-                propagate_meta_info(new_fw_hop_gm, env[node], node)
+                saved_tensor_node.meta = copy.copy(new_fw_node.meta)
+                saved_tensor_node.meta["val"] = new_fw_node.meta["val"][fw_out_idx]
+                extra_fw_outputs.append(saved_tensor_node)
 
-                old_num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
-                new_num_sym_nodes = new_hop_graphs[identifier].new_num_sym_nodes
-                new_num_saved_nodes = new_hop_graphs[identifier].new_num_saved_nodes
-                assert old_num_fw_outputs is not None
-                assert new_num_sym_nodes is not None
-                assert new_num_saved_nodes is not None
+        fw_node.replace_all_uses_with(new_fw_node)
+        joint_gm.graph.erase_node(fw_node)
 
-                extra_fw_outputs = []
-                # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
-                # old_num_fw_outputs = len(fw_outs)
-                # new_num_fw_outputs = len(*fw_outs, *saved_tensors, *sym_nodes)
-                total_outputs = (
-                    old_num_fw_outputs + new_num_saved_nodes + new_num_sym_nodes
-                )
-                for fw_out_idx in range(old_num_fw_outputs, total_outputs):
-                    saved_tensor_node = new_graph.call_function(
-                        the_function=operator.getitem, args=(env[node], fw_out_idx)
-                    )
-                    saved_tensor_node.meta = copy.copy(env[node].meta)
-                    saved_tensor_node.meta["val"] = env[node].meta["val"][fw_out_idx]
-                    extra_fw_outputs.append(saved_tensor_node)
+        # Save the saved_tensors info for the fw_node. This will be used
+        # to form the inputs for the backward hop.
+        old_fw_hop_nodes_stack.append(fw_node)
+        fw_node_to_saved_tensors_map[fw_node] = (identifier, extra_fw_outputs)
 
-                # Save the saved_tensors info for the fw_node. This will be used
-                # to form the inputs for the backward hop.
-                old_fw_hop_nodes_stack.append(node)
-                fw_node_to_saved_tensors_map[node] = (identifier, extra_fw_outputs)
-            elif node.args[1].startswith("___backward"):
-                # Get the saved_tensors from the forward graph and find the new
-                # tangents, and replace the old bw hop with the new bw hop.
-                new_bw_hop_gm = new_hop_graphs[identifier].new_bw_hop_gm
-                assert new_bw_hop_gm is not None
-                new_bw_mod_attr_name = add_new_hop_gm(new_bw_hop_gm, node.args[1])
-                new_bw_mod_attr = new_graph.get_attr(new_bw_mod_attr_name)
+    for bw_node in bw_hop_nodes:
+        # Get the saved_tensors from the forward graph and find the new
+        # tangents, and replace the old bw hop with the new bw hop.
+        identifier = (
+            bw_node.args[1].replace("___forward", "").replace("___backward", "")
+        )
+        new_bw_hop_gm = new_hop_graphs[identifier].new_bw_hop_gm
+        assert new_bw_hop_gm is not None
 
-                # Prepare the operands for the bwd graph
-                # Old bw graph signature : (*primals, *tangents)
-                # New signature will be : (*sym_nodes, *saved_tensors, *tangents)
-                # We have already collected the saved_tensors in the forward hop processing.
+        # Prepare the operands for the bwd graph
+        # Old bw graph signature : (*primals, *tangents)
+        # New signature will be : (*sym_nodes, *saved_tensors, *tangents)
+        # We have already collected the saved_tensors in the forward hop processing.
 
-                assert len(old_fw_hop_nodes_stack)
-                fw_hop_node = old_fw_hop_nodes_stack.pop()
-                (
-                    fw_hop_node_identifier,
-                    extra_fw_outputs,
-                ) = fw_node_to_saved_tensors_map[fw_hop_node]
+        assert len(old_fw_hop_nodes_stack)
+        fw_hop_node = old_fw_hop_nodes_stack.pop()
+        (
+            fw_hop_node_identifier,
+            extra_fw_outputs,
+        ) = fw_node_to_saved_tensors_map[fw_hop_node]
+        assert fw_hop_node_identifier == identifier
 
-                # extra_fw_outputs are in the order (*saved_nodes, *sym_nodes).
-                # Partitioner has this quirk where the backward wants sym_nodes
-                # first. So extract the sym and saved nodes.
-                num_sym_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_sym_nodes
-                num_saved_nodes = new_hop_graphs[
-                    fw_hop_node_identifier
-                ].new_num_saved_nodes
-                assert num_sym_nodes is not None
-                assert num_saved_nodes is not None
-                saved_tensor_nodes = extra_fw_outputs[:num_saved_nodes]
-                sym_nodes = extra_fw_outputs[num_saved_nodes:]
+        # extra_fw_outputs are in the order (*saved_nodes, *sym_nodes).
+        # Partitioner has this quirk where the backward wants sym_nodes
+        # first. So extract the sym and saved nodes.
+        num_sym_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_sym_nodes
+        num_saved_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_saved_nodes
+        assert num_sym_nodes is not None
+        assert num_saved_nodes is not None
+        saved_tensor_nodes = extra_fw_outputs[:num_saved_nodes]
+        sym_nodes = extra_fw_outputs[num_saved_nodes:]
 
-                assert fw_hop_node_identifier == identifier
+        num_primals = new_hop_graphs[identifier].old_num_fw_inputs
+        assert num_primals is not None
+        tangents = list(bw_node.args[2][num_primals:])
+        operands = sym_nodes + saved_tensor_nodes + tangents
 
-                num_primals = new_hop_graphs[identifier].old_num_fw_inputs
-                assert num_primals is not None
-                old_tangents = node.args[2][num_primals:]
-                new_tangents = [env[n] for n in old_tangents]
-                new_operands = sym_nodes + saved_tensor_nodes + new_tangents
+        # Insert the new_bw_hop_gm into the joint_gm
+        with joint_gm.graph.inserting_after(bw_node):
+            new_bw_mod_attr_name = add_new_hop_gm(new_bw_hop_gm, bw_node.args[1])
+            new_bw_mod_attr = joint_gm.graph.get_attr(new_bw_mod_attr_name)
 
-                env[node] = new_graph.call_function(
-                    the_function=invoke_subgraph,
-                    args=(
-                        new_bw_mod_attr,
-                        new_bw_mod_attr_name,
-                        tuple(new_operands),
-                    ),
-                )
-                propagate_meta_info(new_bw_hop_gm, env[node], node)
-        else:
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
-            env[node].meta = copy.copy(node.meta)
+        with joint_gm.graph.inserting_after(new_bw_mod_attr):
+            new_bw_node = joint_gm.graph.call_function(
+                the_function=invoke_subgraph,
+                args=(
+                    new_bw_mod_attr,
+                    new_bw_mod_attr_name,
+                    tuple(operands),
+                ),
+            )
+            propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
 
-    new_graph.eliminate_dead_code()
-    new_graph.lint()
-    new_joint_gm = torch.fx.GraphModule(joint_gm, new_graph)
-    return new_joint_gm
+        bw_node.replace_all_uses_with(new_bw_node)
+        joint_gm.graph.erase_node(bw_node)
+
+    joint_gm.graph.eliminate_dead_code()
+    joint_gm.graph.lint()
+    joint_gm.recompile()
+    return joint_gm
 
 
 def aot_dispatch_autograd(

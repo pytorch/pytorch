@@ -311,18 +311,18 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
         ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
-        getitem: "f32[8]" = invoke_subgraph[1]
-        getitem_1: "f32[8]" = invoke_subgraph[2]
-        getitem_2: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
+        getitem_9: "f32[8]" = invoke_subgraph_4[2]
+        getitem_8: "f32[8]" = invoke_subgraph_4[1]
+        getitem: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
         ___forward_invoke_subgraph_0_post_graph_1 = self.___forward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem_2, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem_2 = primals_2 = None
-        getitem_3: "f32[8]" = invoke_subgraph_1[1]
-        getitem_4: "f32[8]" = invoke_subgraph_1[2]
-        getitem_5: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_5, getitem, getitem_1, getitem_3, getitem_4)
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem = primals_2 = None
+        getitem_11: "f32[8]" = invoke_subgraph_5[2]
+        getitem_10: "f32[8]" = invoke_subgraph_5[1]
+        getitem_1: "f32[8]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
+        return (getitem_1, getitem_9, getitem_8, getitem_11, getitem_10)
 
     class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]"):
