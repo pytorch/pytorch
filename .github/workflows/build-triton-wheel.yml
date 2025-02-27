@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
-        device: ["cuda", "rocm"]
+        device: ["cuda", "rocm", "xpu"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         exclude:
           - device: "xpu"
@@ -55,7 +55,7 @@ jobs:
             rocm_version: "6.3"
           - device: "cuda"
             rocm_version: ""
-          # TODO: Move xpu back into the regular matrix when manylinux2_28 migration for xpu is done
+          # TODO: Remove this for xpu when manylinux2_28 migration for xpu is done
           - device: "xpu"
             docker-image: "pytorch/manylinux-builder:cpu"
     timeout-minutes: 40
