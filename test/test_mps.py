@@ -151,14 +151,6 @@ def mps_ops_grad_modifier(ops):
         '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
-    MACOS_12_3_XFAILLIST_GRAD = {
-        # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
-        # Unimplemented
-        'logaddexp2': [torch.float32],
-
-    }
-
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'masked.softmin': [torch.float32, torch.float16],
@@ -226,11 +218,6 @@ def mps_ops_grad_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=ON_MPS_XFAILLIST[key]))
 
-        if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
-
         if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and MACOS_VERSION < 13.3):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
@@ -248,6 +235,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        '_unsafe_masked_index',
         'abs',
         'add',
         'alias_copy',
@@ -297,6 +285,7 @@ def mps_ops_modifier(ops):
         'linalg.svd',
         'mH',
         'mT',
+        'masked_fill',
         'masked_scatter',
         'masked_select',
         'meshgridlist_of_tensors',
@@ -336,6 +325,7 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.entr',
         'special.xlog1py',
         'special.zeta',
         'split',
@@ -376,7 +366,6 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
-        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -454,7 +443,6 @@ def mps_ops_modifier(ops):
         'logical_xor',
         'logsumexp',
         'long',
-        'masked_fill',
         'masked.mean',
         'masked.prod',
         'masked.std',
@@ -503,116 +491,6 @@ def mps_ops_modifier(ops):
         'byte',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
-    MACOS_12_3_XFAILLIST = {
-        # Top 60
-        # expected failures
-        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13.3. Currently error is not raised.
-        'pow': [torch.int16, torch.int64, torch.uint8, torch.int8],
-        # expected failures
-        '__rpow__': [torch.uint8, torch.int8],
-
-        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-        'cdist': [torch.float32],
-        'tan': [torch.uint8, torch.float32],
-
-        # Data type support starts from macOS 13
-        'nn.functional.avg_pool1d': [torch.int64],
-        'nn.functional.avg_pool2d': [torch.int64],
-        'nn.functional.local_response_norm': [torch.int64],
-        '__radd__': [torch.uint8],
-        '__rdiv__': [torch.uint8],
-        '__rmul__': [torch.uint8],
-        'abs': [torch.uint8],
-        'acos': [torch.uint8],
-        'acosh': [torch.uint8],
-        'add': [torch.uint8],
-        'asin': [torch.uint8],
-        'asinh': [torch.uint8],
-        'atan': [torch.uint8],
-        'atanh': [torch.uint8],
-        'ceil': [torch.uint8],
-        'corrcoef': [torch.uint8],
-        'cos': [torch.uint8],
-        'cosh': [torch.uint8],
-        'cov': [torch.uint8],
-        'cumulative_trapezoid': [torch.uint8],
-        'deg2rad': [torch.uint8],
-        'diff': [torch.uint8],
-        'eq': [torch.uint8],
-        'equal': [torch.uint8],
-        'erf': [torch.uint8],
-        'exp2': [torch.uint8],
-        'exp': [torch.uint8],
-        'expm1': [torch.uint8],
-        'floor': [torch.uint8],
-        'fmax': [torch.uint8],
-        'fmin': [torch.uint8],
-        'fmod': [torch.uint8],
-        'ge': [torch.uint8],
-        'gt': [torch.uint8],
-        'isclose': [torch.uint8],
-        'isnan': [torch.uint8],
-        'kron': [torch.uint8],
-        'le': [torch.uint8],
-        'log10': [torch.uint8],
-        'log1p': [torch.uint8],
-        'log2': [torch.uint8],
-        'log': [torch.uint8],
-        'logical_and': [torch.uint8],
-        'logical_or': [torch.uint8],
-        'logical_xor': [torch.uint8],
-        'logit': [torch.uint8],
-        'lt': [torch.uint8],
-        'masked.mean': [torch.uint8],
-        'masked.std': [torch.uint8],
-        'masked.var': [torch.uint8],
-        'maximum': [torch.uint8],
-        'minimum': [torch.uint8],
-        'mul': [torch.uint8],
-        'ne': [torch.uint8],
-        'neg': [torch.uint8],
-        'nn.functional.cosine_embedding_loss': [torch.uint8],
-        'nn.functional.margin_ranking_loss': [torch.uint8],
-        'nn.functional.poisson_nll_loss': [torch.uint8],
-        'nn.functional.softsign': [torch.uint8],
-        'nn.functional.tanhshrink': [torch.uint8],
-        'nn.functional.triplet_margin_loss': [torch.uint8],
-        'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8],
-        'outer': [torch.uint8],
-        'rad2deg': [torch.uint8],
-        'reciprocal': [torch.uint8],
-        'remainder': [torch.uint8],
-        'round': [torch.uint8],
-        'rsqrt': [torch.uint8],
-        'sigmoid': [torch.uint8],
-        'sign': [torch.uint8],
-        'signbit': [torch.uint8],
-        'sin': [torch.uint8],
-        'sinh': [torch.uint8],
-        'special.ndtr': [torch.uint8],
-        'sqrt': [torch.uint8],
-        'sub': [torch.uint8],
-        'trapezoid': [torch.uint8],
-        'trapz': [torch.uint8],
-        'true_divide': [torch.uint8],
-        'trunc': [torch.uint8],
-        'xlogy': [torch.uint8],
-        'minbinary': [torch.uint8],
-        'maxbinary': [torch.uint8],
-        'divtrunc_rounding': [torch.uint8],
-        'divfloor_rounding': [torch.uint8],
-        'divno_rounding_mode': [torch.uint8],
-        'floor_divide': [torch.uint8],
-        'ldexp': [torch.uint8],
-        # square internally calls into power, and will type cast to int64, which supports starting from macOS 13
-        'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-
-        # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    }
-
     MACOS_BEFORE_13_3_XFAILLIST = {
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
@@ -772,7 +650,6 @@ def mps_ops_modifier(ops):
         'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
-        'special.entr': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
@@ -838,6 +715,9 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # entr does not support boolean types
+        'special.entr': [torch.bool],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -1028,11 +908,6 @@ def mps_ops_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=MACOS_13_3_XFAILLIST[key]))
 
-        if key in MACOS_12_3_XFAILLIST and (not torch.backends.mps.is_macos13_or_newer()):
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_12_3_XFAILLIST[key]))
-
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or MACOS_VERSION < 14.0):
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
@@ -1061,9 +936,6 @@ def mps_ops_error_inputs_modifier(ops):
         'gather',
         'scatter',
         'scatter_add',
-
-        # unsupported complex dtypes
-        'masked_fill',
 
         # MPS does not support tensor dimensions > 16
         'amax',
@@ -2410,6 +2282,13 @@ class TestMPS(TestCaseMPS):
             if mask_cpu[i]:
                 dst2[i] = val
         self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
+
+        if MACOS_VERSION >= 14.0:
+            # Regression test for https://github.com/pytorch/pytorch/issues/143477
+            # Allocating 48x25x1024x1024 tensor crashes on MacOS-13
+            mask_bool = torch.triu(torch.ones(1024, 1024, device=device), diagonal=1).bool()
+            attn_scores = torch.rand(48, 25, 1024, 1024, device=device)
+            attn_scores.masked_fill_(mask_bool, 0)
 
     def test_masked_fill__non_contiguous(self):
         shape = (3, 5)
@@ -9923,7 +9802,8 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
-    def _test_sdpa_3d_input(self, dtype):
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
 
         q = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
@@ -9950,13 +9830,8 @@ class TestSDPA(TestCaseMPS):
 
             self._compare_tensors(y.cpu(), y_ref)
 
-    def test_sdpa_3d_input_fp32(self):
-        self._test_sdpa_3d_input(torch.float32)
-
-    def test_sdpa_3d_input_fp16(self):
-        self._test_sdpa_3d_input(torch.float16)
-
-    def _test_sdpa_no_mask_5d(
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_no_mask_5d(
         self,
         dtype: torch.dtype,
         B: int = 2,
@@ -9981,13 +9856,8 @@ class TestSDPA(TestCaseMPS):
             y_ref.sum().backward()
             self._compare_tensors(q.grad.cpu(), q.cpu().grad)
 
-    def test_sdpa_no_mask_5d_fp32(self):
-        self._test_sdpa_no_mask_5d(torch.float32)
-
-    def test_sdpa_no_mask_5d_fp16(self):
-        self._test_sdpa_no_mask_5d(torch.float16)
-
-    def _test_sdpa_mask_5d(
+    @parametrize('dtype', [torch.float16, torch.float32])
+    def test_sdpa_mask_5d(
         self,
         dtype: torch.dtype,
         B: int = 2,
@@ -10007,11 +9877,6 @@ class TestSDPA(TestCaseMPS):
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
-    def test_sdpa_mask_5d_fp32(self):
-        self._test_sdpa_mask_5d(torch.float32)
-
-    def test_sdpa_mask_5d_fp16(self):
-        self._test_sdpa_mask_5d(torch.float16)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -13020,6 +12885,7 @@ instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="m
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
+instantiate_parametrized_tests(TestSDPA)
 
 if __name__ == "__main__":
     run_tests()
