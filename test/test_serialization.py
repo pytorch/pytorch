@@ -888,7 +888,7 @@ class SerializationMixin:
         with BytesIOContext() as f:
             torch.save(sd, f)
             f.seek(0)
-            with safe_globals([TwoTensor]): # , skip_data():
+            with safe_globals([TwoTensor]), skip_data():
                 sd_loaded = torch.load(f)
             self.assertNotEqual(sd_loaded, sd)
             for k in sd_loaded.keys():
