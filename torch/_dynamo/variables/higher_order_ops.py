@@ -1429,6 +1429,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.scan import (
+            _extract_carry_and_out,
             first_slice_copy,
             stack_y,
         )
@@ -1445,45 +1446,38 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
-        assert isinstance(additional_inputs, variables.BaseListVariable)
-
-        if xs.python_type() != list:
-            unimplemented(
-                f"Expected xs to be a list of tensors but got {xs.python_type()}",
-            )
-        assert isinstance(xs, variables.BaseListVariable)
-        if init.python_type() != list:
-            unimplemented(
-                f"Expected init to be a list of tensors but got {init.python_type()}",
-            )
-        assert isinstance(init, variables.BaseListVariable)
         
         # combine_fn input check
         # We need to get the pure combine_fn from the functools.partial
         _check_supported_callable_arg(
             tx, combine_fn.keywords["combine_fn"], "combine_fn"
         )
-
+        
         # init input check
-        if not isinstance(init, (ListVariable, TupleVariable)) and len(init.items) > 0:
+        if not isinstance(init, (ListVariable, TupleVariable)):
             unimplemented(
                 f"Expected init to be a list/tuple with at least one element but got "
                 f"{init.python_type()}. It seems to be an "
                 f"internal error, please report an issue to PyTorch."
             )
-        init_seq = init.unpack_var_sequence(tx)
-        check_subgraph_args_types(init_seq)
-
+        init_len = len(init.items)
+        if init_len == 0:
+            unimplemented(
+                f"scan() operator requires init leaves.  It seems to be an "
+                f"internal error, please report an issue to PyTorch.")
+        init_vars = init.unpack_var_sequence(tx)
+        check_subgraph_args_types(init_vars)
+        
         # xs input check
         if not isinstance(xs, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected additional_inputs to be a list/tuple but got "
+                f"Expected xs to be a list/tuple but got "
                 f"{xs.python_type()}. It seems to be an "
                 f"internal error, please report an issue to PyTorch."
             )
-        xs_seq = xs.unpack_var_sequence(tx)
-        check_subgraph_args_types(xs_seq)
-
+        xs_vars = xs.unpack_var_sequence(tx)
+        check_subgraph_args_types(xs_vars)
+        
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
@@ -1491,8 +1485,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"{additional_inputs.python_type()}. It seems to be an "
                 f"internal error, please report an issue to PyTorch."
             )
-        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
-        check_subgraph_args_types(additional_inputs_seq)
+        additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
+        check_subgraph_args_types(additional_inputs_vars)
 
         # dim_fake = (
         #     dim.as_proxy()
@@ -1505,25 +1499,21 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "scan() operator doesn't support zero-sized tensors during tracing."
             )
 
-        init_len = len(init.items)
-        if init_len == 0:
-            unimplemented("scan() operator requires init leaves.")
-
         # Trace the subgraph
         with discard_graph_changes(tx):
             sub_args_init = [
-                ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init_seq
+                ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init_vars
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
             sub_args_inp = [
                 # _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
                 _make_inlined(tx, first_slice_copy)(inp)
-                for inp in xs_seq
+                for inp in xs_vars
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
-                for t in additional_inputs_seq
+                for t in additional_inputs_vars
             ]
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
@@ -1538,6 +1528,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description="scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
+            should_flatten_outputs=True
         )
 
         # key in the combine_lifted_freevars are proxies in the root tracer.
@@ -1557,35 +1548,47 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
         
-        xs_proxy = tuple(x.as_proxy() for x in xs_seq)
-        init_proxy = tuple(i.as_proxy() for i in init_seq)
+        xs_proxy = tuple(x.as_proxy() for x in xs_vars)
+        init_proxy = tuple(i.as_proxy() for i in init_vars)
         additional_inputs_proxy = list(
-            ai.as_proxy() for ai in additional_inputs_seq
+            ai.as_proxy() for ai in additional_inputs_vars
         ) + list(combine_freevars_proxy)
         
-        # Flatten manually and get the tree_spec.
-        # We need to do it this way, as if speculate_subgraph already returns the flattened output
-        # we may run into issues that we actually mistake an output for a carry.
-        # E.g., consider that the combine_fn returns two leaves.
-        # One of them is supposed to be the carry and one the output, but we may confuse the output for
-        # an additional carry.
-        carry_vars_tree, out_vars_tree = combine_result.unpack_var_sequence(tx)
-        combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
-        carry_vars = _make_inlined(tx, pytree.tree_leaves)(
-            carry_vars_tree
-        ).unpack_var_sequence(tx)
-        out_vars = _make_inlined(tx, pytree.tree_leaves)(
-            out_vars_tree
-        ).unpack_var_sequence(tx)
+        results = combine_result.unpack_var_sequence(tx)
+        carry_vars, out_vars = _extract_carry_and_out(results, init_len)
+        
+        # Try to pack the out_vars back into the tree structure provided by the speculate_subgraph
+        # If this fails, it is an indication that the tree structure of the inits and the carries does not match
+        try:
+            out_tree_structure = _combine_treespec.fields['children_specs'].items[1].as_python_constant()
+            out_tree = pytree.tree_unflatten(out_vars, out_tree_structure)
+        except:
+            unimplemented('The pytree of init and the carry produced by the combine_fn must be identical!')
+        
+        # Try to pack the init and the carries into the same tree structure.
+        # This will fail if the carries and the init do not have the same tree structure.
+        # If the accidentially have the same tree structure, we will check their meta data below
+        # carry_vars_tree, out_vars_tree = combine_result.unpack_var_sequence(tx)
+        # carry_treespec = _make_inlined(tx, pytree.tree_structure)(carry_vars_tree)
+        # init_tree = _make_inlined(tx, pytree.tree_unflatten)(init, _combine_treespec.fields['children_specs'].items[0])
+        # carry_tree = _make_inlined(tx, pytree.tree_unflatten)(ListVariable(carry_vars), _combine_treespec.fields['children_specs'].items[0])
+        try:
+            carry_tree_structure = _combine_treespec.fields['children_specs'].items[0].as_python_constant()
+            carry_tree = pytree.tree_unflatten(carry_vars, carry_tree_structure)
+            init_tree = pytree.tree_unflatten(init_vars, carry_tree_structure)
+        except:
+            unimplemented('The pytree of init and the carry produced by the combine_fn must be identical!')
+        
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
-
+        
         check_meta_consistency_vt(
-            init.unpack_var_sequence(tx),
+            init_vars,
             carry_vars,
             "init",
             "carry",
         )
-
+        
+        # TODO: Check the treespec of the init and the output treespec
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
 
@@ -1609,7 +1612,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = [*example_carry, *example_stacked_out]
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, out_meta, combine_treespec
+            tx, torch.ops.higher_order.scan, p_args, {}, out_meta, _combine_treespec
         )
 
 
