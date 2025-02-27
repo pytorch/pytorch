@@ -161,7 +161,7 @@ def _any_str_or_dim_in_dynamic_shapes(
     """Check if there is any string or _Dim in the dynamic_shapes."""
     flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
     # This indicates the dynamic_shapes includes something we don't support in axes, and it's flattened
-    # to itself, otherwisee, flat_dynamic_shapes should be a list of dict/list/tuple (or None).
+    # to itself. Otherwise, flat_dynamic_shapes should be a list of dict/list/tuple (or None).
     if any(
         not isinstance(axes, (dict, list, tuple)) and axes is not None
         for axes in flat_dynamic_shapes
