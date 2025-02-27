@@ -3643,9 +3643,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         shapes_collection = torch.export.ShapesCollection()
         dim = torch.export.Dim("dim", max=10)
+        # specify shape of tensor
         shapes_collection[x] = (dim,)
+        # tensor can be arbitrarily deep
         shapes_collection[y[0]] = (dim,)
-        shapes_collection[z["k"]] = (dim,)
+        # can also specify some dimension in shape of tensor
+        shapes_collection[z["k"]][0] = dim
 
         ep = export(m, args, dynamic_shapes=shapes_collection)
         sym = next(iter(ep.range_constraints.keys()))
