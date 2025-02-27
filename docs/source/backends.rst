@@ -21,6 +21,7 @@ These backends include:
 - ``torch.backends.openmp``
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
+- ``torch.backends.xpu``
 
 torch.backends.cpu
 ^^^^^^^^^^^^^^^^^^^
@@ -238,3 +239,13 @@ torch.backends.xeon
 ^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xeon
 .. py:module:: torch.backends.xeon.run_cpu
+
+torch.backends.xpu
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.xpu
+
+.. currentmodule:: torch.backends.xpu.matmul
+.. attribute::  allow_tf32
+
+    A :class:`bool` that controls whether allow tf32 down-conversion in FP32 matrix
+    multiplications.
