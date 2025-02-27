@@ -609,7 +609,7 @@ test_perf_for_dashboard() {
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
