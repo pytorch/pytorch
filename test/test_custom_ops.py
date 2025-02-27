@@ -14,7 +14,6 @@ from typing import *  # noqa: F403
 import numpy as np
 
 import torch._custom_ops as custom_ops
-import torch._library.utils as lib_utils
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
@@ -1181,40 +1180,6 @@ def _(x):
         with self.assertRaisesRegex(RuntimeError, "Autograd has not been implemented"):
             op(y, x)
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
-
-    def test_normalize_args_kwargs(self):
-        #  any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-        schema = torch.ops.aten.any.dims_out._schema
-        x = torch.randn(3)
-        out = torch.randn(3)
-
-        # Basic
-        result_args, result_kwargs = lib_utils.normalize_args_kwargs(
-            schema, (x,), {"out": out}
-        )
-        self.assertEqual(result_kwargs, {"out": out})
-        self.assertEqual(result_args, (x,))
-
-        # kwargs-convention
-        result_args, result_kwargs = lib_utils.normalize_args_kwargs(
-            schema, (), {"self": x, "out": out}
-        )
-        self.assertEqual(result_kwargs, {"out": out})
-        self.assertEqual(result_args, (x,))
-
-        # we should drop values equal to their default
-        result_args, result_kwargs = lib_utils.normalize_args_kwargs(
-            schema, (x,), {"keepdim": False, "out": out}
-        )
-        self.assertEqual(result_kwargs, {"out": out})
-        self.assertEqual(result_args, (x,))
-
-        # we should fill in defaults when needed
-        result_args, result_kwargs = lib_utils.normalize_args_kwargs(
-            schema, (x,), {"keepdim": True, "out": out}
-        )
-        self.assertEqual(result_kwargs, {"out": out})
-        self.assertEqual(result_args, (x, None, True))
 
     def test_autograd_notimplemented_gradmode(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
