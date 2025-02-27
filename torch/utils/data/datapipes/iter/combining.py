@@ -3,17 +3,8 @@ import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Iterator,
-    List,
-    Literal,
-    Optional,
-    Sized,
-    TypeVar,
-)
+from collections.abc import Iterator, Sized
+from typing import Any, Callable, Literal, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -163,7 +154,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
-        self.buffer: Deque = deque()
+        self.buffer: deque = deque()
         self.buffer_size = buffer_size
         if self.buffer_size < 0:
             warnings.warn(
@@ -182,13 +173,13 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`."
             )
 
-        self.child_pointers: List[int] = [
+        self.child_pointers: list[int] = [
             0
         ] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
         self.end_ptr: Optional[int] = None  # The index to stop child
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
         return len(self.main_datapipe)
@@ -468,11 +459,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
-        self.child_buffers: List[Deque[_T_co]] = [deque() for _ in range(num_instances)]
+        self.child_buffers: list[deque[_T_co]] = [deque() for _ in range(num_instances)]
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def _find_next(self, instance_id: int) -> _T_co:  # type: ignore[type-var]
         while True:
@@ -618,7 +609,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __init__(self, *datapipes):
         self.datapipes = datapipes
-        self.buffer: List = (
+        self.buffer: list = (
             []
         )  # Store values to be yielded only when every iterator provides one
 
@@ -689,7 +680,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError(
-                "All inputs are required to be `IterDataPipe` " "for `ZipIterDataPipe`."
+                "All inputs are required to be `IterDataPipe` for `ZipIterDataPipe`."
             )
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]

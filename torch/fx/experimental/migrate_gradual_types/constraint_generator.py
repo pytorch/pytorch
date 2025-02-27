@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from typing import Callable, Dict, Iterable, TypeVar
+from collections.abc import Iterable
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -57,7 +58,7 @@ from torch.nn.modules.conv import Conv2d
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_INFERENCE_RULES: Dict[Target, Callable] = {}
+_INFERENCE_RULES: dict[Target, Callable] = {}
 
 MAX_TENSOR_RANK = 4
 
@@ -1227,7 +1228,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     )
 
 
-@register_inference_rule("dim")  # type: ignore[attr-defined]
+@register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
@@ -1253,7 +1254,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
 
 
-@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+@register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)

@@ -1,13 +1,12 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number, Real
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Normal"]
@@ -54,7 +53,7 @@ class Normal(ExponentialFamily):
 
     def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, Number) and isinstance(scale, Number):
+        if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
@@ -85,7 +84,9 @@ class Normal(ExponentialFamily):
         # compute the variance
         var = self.scale**2
         log_scale = (
-            math.log(self.scale) if isinstance(self.scale, Real) else self.scale.log()
+            math.log(self.scale)
+            if isinstance(self.scale, _Number)
+            else self.scale.log()
         )
         return (
             -((value - self.loc) ** 2) / (2 * var)

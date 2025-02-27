@@ -8,12 +8,7 @@ from torch.testing._internal.autocast_test_lists import (
     TestAutocast,
 )
 from torch.testing._internal.common_device_type import expectedFailureMPSPre14
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -151,7 +146,6 @@ class TestAutocastCPU(TestAutocast):
                 op, args2, torch.float32, device="cpu", amp_dtype=torch.float16
             )
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_autocast_rnn(self):
         if (
             torch.backends.mkldnn.is_available()
