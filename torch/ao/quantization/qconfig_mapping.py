@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Union
 
 import torch
 
@@ -41,7 +41,7 @@ _MODULE_NAME_DICT_KEY = "module_name"
 _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
 # TODO: derive this map from the BackendConfig
-_FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
+_FIXED_QPARAMS_OP_TO_OBSERVER: dict[Union[Callable, str], _PartialWrapper] = {
     torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
     torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
     "hardsigmoid": default_fixed_qparams_range_0to1_observer,
@@ -102,7 +102,7 @@ def _get_default_qconfig_mapping(
         .set_object_type(torch.nn.PReLU, default_quint8_weight_qconfig)
     )
     # Use special observers for ops with fixed qparams
-    fixed_qparams_observer_to_qconfig: Dict[Any, QConfigAny] = {}
+    fixed_qparams_observer_to_qconfig: dict[Any, QConfigAny] = {}
     for fixed_qparams_op, observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
         if observer in fixed_qparams_observer_to_qconfig:
             fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
@@ -189,7 +189,7 @@ def _get_default_qconfig_mapping_with_default_qconfig(
     return qconfig_mapping
 
 
-_QCONFIG_STYLE_ORDER: List[str] = [
+_QCONFIG_STYLE_ORDER: list[str] = [
     "global_qconfig",
     "object_type_qconfigs",
     "module_name_regex_qconfigs",
@@ -317,7 +317,7 @@ class QConfigMapping:
         return output + "\n)"
 
     # TODO: remove this
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert this ``QConfigMapping`` to a dictionary with the following keys:
 
@@ -345,7 +345,7 @@ class QConfigMapping:
 
     # TODO: remove this
     @classmethod
-    def from_dict(cls, qconfig_dict: Dict[str, Any]) -> QConfigMapping:
+    def from_dict(cls, qconfig_dict: dict[str, Any]) -> QConfigMapping:
         """
         Create a ``QConfigMapping`` from a dictionary with the following keys (all optional):
 

@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -452,8 +452,8 @@ class PrepareModuleInput(ParallelStyle):
         desired_input_layouts: Optional[
             Union[Placement, tuple[Optional[Placement]]]
         ] = None,
-        input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
-        desired_input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
+        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         use_local_output: bool = False,
     ):
         self.input_layouts = (
