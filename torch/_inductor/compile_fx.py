@@ -832,7 +832,7 @@ def _compile_fx_inner(
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-        compiled_graph.post_compile(example_inputs, cudagraphs, constants)
+        compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -893,9 +893,6 @@ class _InProcessFxCompile(FxCompile):
         extern_node_serializer: Optional[
             Callable[[list[ExternKernelNode]], Any]
         ] = graph_kwargs.get("extern_node_serializer", None)
-        boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
-            "boxed_forward_device_index", None
-        )
 
         with _WaitCounter(
             "pytorch.wait_counter.actual_codegen_and_compile"
@@ -1226,7 +1223,6 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         graph_kwargs,
                         inputs_to_check,
-                        boxed_forward_device_index,
                     )
 
 

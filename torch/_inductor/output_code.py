@@ -81,8 +81,8 @@ class OutputCode:
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
         constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
     ) -> None:
         raise NotImplementedError(type(self))
 
@@ -137,6 +137,7 @@ def cudagraph_post_compile(
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
     constants: dict[str, torch.Tensor],
+    boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
     Checks for any reasons not to run cudagraphs and then
@@ -147,7 +148,6 @@ def cudagraph_post_compile(
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
@@ -318,7 +318,6 @@ class CompiledFxGraph(OutputCode):
     cudagraph_info: Optional[CudagraphCachedInfo]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
-    boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
@@ -337,7 +336,6 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
     ) -> None:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -379,7 +377,6 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.fx_kwargs = {}
         self.inputs_to_check = ()
-        self.boxed_forward_device_index = None
 
         cudagraph_info = None
         if cudagraphs:
@@ -448,8 +445,6 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
-        # TODO: should this be part of fx_kwargs
-        self.boxed_forward_device_index = boxed_forward_device_index
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -465,8 +460,8 @@ class CompiledFxGraph(OutputCode):
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
         constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
     ) -> None:
         """
         Run a set of post processing steps after loading from the cache. These involve:
@@ -478,7 +473,7 @@ class CompiledFxGraph(OutputCode):
         The results of this function are *not* saved in the cache itself.
         """
         set_tracing_context_output_strides(example_inputs, self)
-
+        cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
@@ -497,6 +492,7 @@ class CompiledFxGraph(OutputCode):
                     self,
                     cudagraphs,
                     constants.unwrap(self),
+                    graph_kwargs.get("boxed_forward_device_index", None),
                 )
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
@@ -578,8 +574,8 @@ class CompiledAOTI(OutputCode):
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
         constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
     ) -> None:
         pass
 
@@ -597,8 +593,8 @@ class MockFXGraphCacheOutput(OutputCode):
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
         constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
     ) -> None:
         pass
 

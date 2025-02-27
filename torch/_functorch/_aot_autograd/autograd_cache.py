@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
+    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
@@ -392,7 +393,7 @@ class FXGraphCacheLoadable:
         )
 
         # TODO: How come cudagraphs could be None here?
-        result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
+        result.post_compile(example_inputs, constants, fx_config)  # type: ignore[arg-type]
         return result
 
 
@@ -679,6 +680,7 @@ class AOTAutogradCache:
         args,
         aot_config: AOTConfig,
         cudagraphs: BoxedBool,
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
         local: bool,
         remote: bool,
     ) -> Callable:
@@ -694,7 +696,10 @@ class AOTAutogradCache:
             debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
-            fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
+            fx_config: _CompileFxKwargs = {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            }
             try:
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
