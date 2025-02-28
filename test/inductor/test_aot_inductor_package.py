@@ -65,7 +65,7 @@ def compile(
 
 
 # @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(True, "Temporarily skip due to broken codecace handling for this")
+@unittest.skipIf(True, "Temporarily skip due to broken codecache handling for this")
 @parameterized_class(
     [
         {"device": "cpu", "package_cpp_only": False},

@@ -1662,11 +1662,11 @@ class AotCodeCompiler:
             }
             wrapper_build_options = CppTorchDeviceOptions(
                 **compile_command,
+                min_optimize=True,
                 compile_only=True,
             )
             kernel_build_options = CppTorchDeviceOptions(
                 **compile_command,
-                max_optimize=True,
                 compile_only=True,
             )
 
@@ -1678,13 +1678,13 @@ class AotCodeCompiler:
                 wrapper_build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
+                    min_optimize=True,
                     **compile_command,
                 )
                 if cpp_prefix := _get_cpp_prefix_header(device_type):
                     kernel_build_options.precompiled_header = _precompile_header(
                         cpp_prefix,
                         cpp_command,
-                        max_optimize=True,
                         **compile_command,
                     )
 

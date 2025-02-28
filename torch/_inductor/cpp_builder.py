@@ -562,15 +562,15 @@ def _get_ffast_math_flags() -> list[str]:
 
 
 def _get_optimization_cflags(
-    cpp_compiler: str, max_optimize: bool = False
+    cpp_compiler: str, min_optimize: bool = False
 ) -> list[str]:
     if _IS_WINDOWS:
-        return ["O2" if max_optimize else "O1"]
+        return ["O1" if min_optimize else "O2"]
     else:
         cflags = (
             ["O0", "g"]
             if config.aot_inductor.debug_compile
-            else ["O3" if max_optimize else "O1", "DNDEBUG"]
+            else ["O1" if min_optimize else "O3", "DNDEBUG"]
         )
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
@@ -617,7 +617,7 @@ def get_cpp_options(
     compile_only: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
-    max_optimize: bool = False,
+    min_optimize: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -629,7 +629,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(compile_only)
-        + _get_optimization_cflags(cpp_compiler, max_optimize)
+        + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -668,7 +668,7 @@ class CppOptions(BuildOptionsBase):
         compiler: str = "",
         precompiling: bool = False,
         preprocessing: bool = False,
-        max_optimize: bool = False,
+        min_optimize: bool = False,
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -691,7 +691,7 @@ class CppOptions(BuildOptionsBase):
             compile_only=compile_only,
             extra_flags=extra_flags,
             warning_all=warning_all,
-            max_optimize=max_optimize,
+            min_optimize=min_optimize,
         )
 
         _append_list(self._definitions, definitions)
@@ -1148,7 +1148,7 @@ class CppTorchOptions(CppOptions):
         compiler: str = "",
         precompiling: bool = False,
         preprocessing: bool = False,
-        max_optimize: bool = False,
+        min_optimize: bool = False,
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1158,7 +1158,7 @@ class CppTorchOptions(CppOptions):
             compiler=compiler,
             precompiling=precompiling,
             preprocessing=preprocessing,
-            max_optimize=max_optimize,
+            min_optimize=min_optimize,
         )
 
         self._aot_mode = aot_mode
@@ -1317,7 +1317,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         extra_flags: Sequence[str] = (),
         precompiling: bool = False,
         preprocessing: bool = False,
-        max_optimize: bool = False,
+        min_optimize: bool = False,
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1329,7 +1329,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             extra_flags=extra_flags,
             precompiling=precompiling,
             preprocessing=preprocessing,
-            max_optimize=max_optimize,
+            min_optimize=min_optimize,
         )
 
         device_definitions: list[str] = []
