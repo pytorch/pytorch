@@ -121,7 +121,7 @@ If you are removing an existing torch level API:
 
 
 """
-manual_torch_name_rule_map = {
+manual_torch_name_rule_map: dict[str, Any] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -305,6 +305,7 @@ manual_torch_name_rule_map = {
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -466,6 +467,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_getDevice",
         "torch._C._cuda_getDeviceCount",
         "torch._C._cuda_hasPrimaryContext",
+        "torch._C._cuda_hostMemoryStats",
         "torch._C._cuda_init",
         "torch._C._cuda_ipc_collect",
         "torch._C._cuda_isCurrentStreamCapturing",
@@ -479,7 +481,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_record_memory_history_legacy",
         "torch._C._cuda_record_memory_history",
         "torch._C._cuda_releasePool",
+        "torch._C._cuda_resetAccumulatedHostMemoryStats",
         "torch._C._cuda_resetAccumulatedMemoryStats",
+        "torch._C._cuda_resetPeakHostMemoryStats",
         "torch._C._cuda_resetPeakMemoryStats",
         "torch._C._cuda_set_cudnn_benchmark_limit",
         "torch._C._cuda_set_sync_debug_mode",
@@ -2544,6 +2548,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
         "torch.cuda.memory.get_per_process_memory_fraction",
+        "torch.cuda.memory.host_memory_stats_as_nested_dict",
+        "torch.cuda.memory.host_memory_stats",
         "torch.cuda.memory.list_gpu_processes",
         "torch.cuda.memory.max_memory_allocated",
         "torch.cuda.memory.max_memory_cached",
@@ -2556,9 +2562,11 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.memory_stats_as_nested_dict",
         "torch.cuda.memory.memory_stats",
         "torch.cuda.memory.memory_summary",
+        "torch.cuda.memory.reset_accumulated_host_memory_stats",
         "torch.cuda.memory.reset_accumulated_memory_stats",
         "torch.cuda.memory.reset_max_memory_allocated",
         "torch.cuda.memory.reset_max_memory_cached",
+        "torch.cuda.memory.reset_peak_host_memory_stats",
         "torch.cuda.memory.reset_peak_memory_stats",
         "torch.cuda.memory.set_per_process_memory_fraction",
         "torch.cuda.nccl._check_sequence_type",
@@ -2998,6 +3006,12 @@ def _disallowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _nonstrict_trace_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
@@ -3100,6 +3114,11 @@ def _maybe_init_lazy_module(obj: object) -> None:
 def is_callable_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
+
+
+def is_nonstrict_trace_callable(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _nonstrict_trace_callable_ids
 
 
 def is_callable_disallowed(obj) -> bool:
@@ -3627,7 +3646,10 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         fi = FunctionInfo(
-            obj, obj.__name__, getfile(obj), obj.__code__  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
+            obj,
+            obj.__name__,
+            getfile(obj),
+            obj.__code__,  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
         )
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
@@ -3646,6 +3668,11 @@ def check_verbose(obj, is_inlined_call=False):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
+        )
+    elif issubclass(rule, TorchInGraphFunctionVariable):
+        return SkipResult(
+            False,
+            f"registered in torch_obj_rule {reasons.pop()}",
         )
     else:
         assert rule == SkipFunctionVariable, rule

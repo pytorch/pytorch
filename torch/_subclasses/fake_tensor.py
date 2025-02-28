@@ -8,6 +8,7 @@ import functools
 import logging
 import math
 import os
+import threading
 import traceback
 import typing
 import weakref
@@ -126,6 +127,18 @@ class UnsupportedOperatorException(RuntimeError):
 @dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
+
+
+class FakeTensorTLS(threading.local):
+    # Default to None, otherwise it'll be used to override _all_
+    # `FakeTensorMode.allow_non_fake_inputs` in this thread.
+    allow_non_fake_inputs_override: Optional[bool]
+
+    def __init__(self) -> None:
+        self.allow_non_fake_inputs_override = None
+
+
+fake_tensor_tls = FakeTensorTLS()
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -2466,7 +2479,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
-                if not self.allow_non_fake_inputs:
+                allow_non_fake_inputs = (
+                    self.allow_non_fake_inputs
+                    if fake_tensor_tls.allow_non_fake_inputs_override is None
+                    else fake_tensor_tls.allow_non_fake_inputs_override
+                )
+                if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
