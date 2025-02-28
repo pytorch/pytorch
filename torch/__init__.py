@@ -355,7 +355,7 @@ def _load_global_deps() -> None:
         # TODO: Remove once CUDA 11.8 binaries are deprecated
         if cuda_version is not None:
             t_version = cuda_version.split(".")
-            t_major = int(t_version[0]) # type: ignore[operator]
+            t_major = int(t_version[0])  # type: ignore[operator]
             if t_major >= 12:
                 cuda_libs["cufile"] = "libcufile.so.*[0-9]"
 
