@@ -226,9 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -363,6 +363,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `nonstrict_trace(fn)` call
+        if self.fn is torch._dynamo.nonstrict_trace:
+            bound = inspect.signature(self.fn).bind(*args, **kwargs)
+            fn_var = bound.args[0]
+            if not isinstance(fn_var, BaseUserFunctionVariable):
+                typ = fn_var.python_type()
+                unimplemented(
+                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                )
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                fn_name = fn_var.get_name()
+                unimplemented(
+                    f"""
+Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+                )
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -858,6 +879,23 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
+        # a `nonstrict_trace`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if is_nonstrict_trace_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1169,7 +1207,7 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
-            qualname = getattr(self.value, "__qualname__", "Unknown qualname")
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1184,7 +1222,7 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{self.value.__qualname__}` or the file `{path}` "
+                        f"Remove the function `{qualname}` or the file `{path}` "
                         "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
                         "attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
@@ -1640,8 +1678,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs):
-        ...
+    def call_function(self, tx, args, kwargs): ...
 
 
 class SysFunctionVariable(VariableTracker):
