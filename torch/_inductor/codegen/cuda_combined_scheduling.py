@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from ..scheduler import (

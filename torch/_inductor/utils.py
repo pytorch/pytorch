@@ -1292,7 +1292,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices):
+def use_triton_tma_template(*matrices: IRNode) -> bool:
     from torch.utils._triton import has_triton_tma
 
     from .virtualized import V
