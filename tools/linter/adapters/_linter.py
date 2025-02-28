@@ -12,7 +12,7 @@ from enum import Enum
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
-from typing import Any, Generic, get_args, Type, TYPE_CHECKING
+from typing import Any, Generic, get_args, TYPE_CHECKING
 from typing_extensions import Never, Self, TypeVar
 
 
@@ -374,8 +374,8 @@ class FileLinter(Generic[PythonFileT], ABC):
     @classmethod
     def make_file(cls, pc: Path | str | None = None) -> PythonFileT:
         c = cls.__orig_bases__[0]  # type: ignore[attr-defined]
-        actual_python_file_type = get_args(c)[0]  # type: ignore[no-any-return]
-
+        # See https://github.com/microsoft/pyright/issues/3442
+        actual_python_file_type: PythonFileT = get_args(c)[0]
         return actual_python_file_type.make(cls.linter_name, pc)
 
     @cached_property
