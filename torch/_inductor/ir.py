@@ -174,6 +174,18 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionSignature:
+    # mapping from partition input name to IRNode or Expr. Need the name str since
+    # we cannot get name from Expr.
+    input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
+    output_nodes: list[IRNode]
+    # mapping from partition input name to a boolean for whether deallocating it
+    # in the partition function
+    input_deallocation: dict[str, bool]
+    skip_cudagraph: bool
+
+
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
         # Could expand this to check deeper properties
@@ -4965,7 +4977,9 @@ class ExternKernel(InputsKernel):
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
+            is_arg_tensor.append(
+                isinstance(arg, IRNode) and not isinstance(arg, GeneratorState)
+            )
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
@@ -4996,7 +5010,9 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args: list[Union[torch.Tensor, torch._C.ScriptObject]] = []
+        example_args: list[
+            Union[torch.Tensor, torch._C.ScriptObject, torch.Generator]
+        ] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -5013,6 +5029,12 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_real_obj())
+            elif isinstance(x, torch._inductor.ir.GeneratorState):
+                device_index = x.device.index
+                assert x.device.type == "cuda" and device_index is not None
+                example_args.append(
+                    torch.cuda.default_generators[device_index].clone_state()
+                )
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -5143,7 +5165,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, TorchBindObject):
+        if isinstance(x, (NonTensorObj)):
             return x
         return cls.copy_input(x)
 
@@ -5220,7 +5242,7 @@ class ExternKernel(InputsKernel):
             ):
                 return (
                     try_match_insignificant_strides(x, exact_strides)
-                    if exact_strides
+                    if exact_strides is not None
                     else x
                 )
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
@@ -5271,9 +5293,31 @@ class ExternKernel(InputsKernel):
                     )
             except NotImplementedError:
                 pass
+
+        # Preserve ExpandView representation that would be lost during copy_input
+        # Without representation of the expand in inductor IR, in codegen we end up
+        # launching a grid for the full size tensor and doing redundant computation
+        # across expanded dims.
+        # TODO: could also be good to have a codegen fix to recognize overlapping elements
+
+        expanded_dims: Optional[list[int]] = None
+        orig_size = x.get_size()
+        if exact_strides is not None:
+            sizevars = V.graph.sizevars
+            expanded_dims = [
+                i
+                for i in range(len(x.get_size()))
+                if sizevars.statically_known_equals(exact_strides[i], 0)
+                and sizevars.statically_known_geq(x.get_size()[i], 2)
+            ]
+
+            for dim in expanded_dims:
+                x = torch._inductor.lowering.slice_(x, dim, 0, 1)
+
         # Although this is a clone, inductor is good about fusing clones into previous
         # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)
+
         as_storage_and_layout(
             x,
             freeze=True,
@@ -5284,6 +5328,12 @@ class ExternKernel(InputsKernel):
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)
+        elif expanded_dims:
+            assert orig_size is not None and exact_strides is not None
+            x = torch._inductor.lowering.expand(x, orig_size)
+            # the expand will sometimes may change insignificant strides, so match them back
+            return try_match_insignificant_strides(x, exact_strides)
+
         return x
 
     @classmethod
@@ -6479,7 +6529,16 @@ class FallbackKernel(ExternKernelAlloc):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
+                        out = self.outputs[0]
+                        # When fallback kernel returns a list consisting of a single tensor,
+                        # the output is represented as a MultiOutput with non empty indices.
+                        # In this case, we strip the first key path away.
+                        return go(
+                            self.outputs[0].get_name(),
+                            keypath[1:]
+                            if isinstance(out, MultiOutput) and len(out.indices) != 0
+                            else keypath,
+                        )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
@@ -7549,8 +7608,12 @@ class EffectfulKernel(FallbackKernel):
         return True
 
 
+class NonTensorObj(IRNode):
+    pass
+
+
 @ir_dataclass
-class TorchBindObject(IRNode):
+class TorchBindObject(NonTensorObj):
     from torch._library.fake_class_registry import FakeScriptObject
 
     name: str
@@ -7582,6 +7645,18 @@ class TorchBindObject(IRNode):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
+
+
+@ir_dataclass
+class GeneratorState(NonTensorObj):
+    name: str
+    device: torch.device
+
+    def get_name(self):  # type: ignore[no-untyped-def]
+        return self.name
+
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        return self.name
 
 
 class _CollectiveKernel(FallbackKernel):

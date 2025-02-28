@@ -60,8 +60,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    MI300_ARCH,
-    NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
     serialTest,
@@ -69,7 +67,6 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
-    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -503,6 +500,26 @@ class TestCuda(TestCase):
                 os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
             else:
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hipblaslt_allow_tf32(self):
+        tf32_ctx = self._hip_allow_tf32
+        with tf32_ctx():
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "0"
+            # Save original value of allow_tf32
+            orig = torch.backends.cuda.matmul.allow_tf32
+            # If allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
+            # then matmul.allow_tf32 will return False after this point even if
+            # HIP_BLASLT_ALLOW_TF32 is set to 1 and matmul.allow_tf32 is changed.
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+            # Toggle torch.backends.cuda.matmul.allow_tf32 couple of times.
+            torch.backends.cuda.matmul.allow_tf32 = not orig
+            test1 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+            test2 = torch.backends.cuda.matmul.allow_tf32
+            self.assertNotEqual(test1, test2)
+            # Restore original value of allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_cublas_allow_tf32_get_set(self):
         """
@@ -1070,11 +1087,6 @@ except RuntimeError as e:
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
@@ -1103,11 +1115,6 @@ except RuntimeError as e:
             return err
 
     @slowTest
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     @skipIfRocm
     def test_index_out_of_bounds_exception_cuda(self):
         test_method = TestCuda._test_index_bounds_cuda
@@ -4136,12 +4143,10 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 

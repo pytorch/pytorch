@@ -371,6 +371,10 @@ class MetalOverrides(OpOverrides):
     def xlog1py(x: CSEVariable) -> str:
         return f"c10::metal::xlog1py({x})"
 
+    @staticmethod
+    def entr(x: CSEVariable) -> str:
+        return f"c10::metal::entr({x})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
