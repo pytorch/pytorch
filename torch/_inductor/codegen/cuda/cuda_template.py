@@ -19,7 +19,7 @@ from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 
-log = getArtifactLogger(__name__, "autotuning")
+autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 
 @dataclass(frozen=True)
@@ -80,8 +80,8 @@ class CUDATemplate(KernelTemplate):
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
-            log.debug("Generated Code:\n%s", code)
-            log.debug(
+            autotuning_log.debug("Generated Code:\n%s", code)
+            autotuning_log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
                 kernel.args.cpp_argdefs(),
                 kernel.args.python_argdefs(),
