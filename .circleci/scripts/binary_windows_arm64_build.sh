@@ -12,6 +12,8 @@ df -h
 
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
+pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat
+
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     pytorch/.ci/pytorch/windows/arm64/build_libtorch.bat
 elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
