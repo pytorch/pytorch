@@ -72,7 +72,8 @@ if PYTORCH_USE_CXX_PYTREE:
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
-            "Please install `optree` via `python -m pip install --upgrade optree`."
+            "Please install `optree` via `python -m pip install --upgrade optree`. "
+            "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
 
 
