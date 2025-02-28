@@ -1024,7 +1024,6 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
     def perThreadSetUp(self) -> None:
         super().perThreadSetUp()
         torch.set_default_device("cuda")
-        rank = dist.get_rank()
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_custom_hook_custom_stream(self):
