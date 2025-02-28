@@ -4462,6 +4462,7 @@ class AOTInductorTestsTemplate:
                 rtol=1e-3,
             )
 
+    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4501,6 +4502,7 @@ class AOTInductorTestsTemplate:
         }
         self.code_check_count(Model(), (x, y, m), "Grid(1023L, 1L, 1L)", 1)
 
+    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
