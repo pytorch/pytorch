@@ -11,8 +11,7 @@ echo PYTHON_VERSION is %PYTHON_VERSION%
 if "%PYTHON_VERSION%" == "3.13" (
     echo Python version is set to 3.13
     set DOWNLOAD_URL=https://www.python.org/ftp/python/3.13.2/python-3.13.2-arm64.exe
-)
-else if "%PYTHON_VERSION%" == "3.12" (
+) else if "%PYTHON_VERSION%" == "3.12" (
     echo Python version is set to 3.12
     set DOWNLOAD_URL=https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe
 ) else if "%PYTHON_VERSION%" == "3.11" (
