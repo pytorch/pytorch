@@ -958,7 +958,7 @@ class MemoryProfile:
             if event.typed[0] == _EventType.PyCall and event.typed[1].optimizer:
                 parameters = event.typed[1].optimizer.parameters
                 for _, t in it.chain.from_iterable(
-                    [state for _, _, state in parameters]
+                    (state for _, _, state in parameters)
                 ):
                     key = TensorKey.from_tensor(t)
                     if key is not None:

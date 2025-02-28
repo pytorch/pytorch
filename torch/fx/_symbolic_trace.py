@@ -289,7 +289,7 @@ class Tracer(TracerBase):
         self._autowrap_function_ids: set[int] = {
             id(value)
             for name, value in chain.from_iterable(
-                [m.__dict__.items() for m in autowrap_modules]
+                m.__dict__.items() for m in autowrap_modules
             )
             if not name.startswith("_") and callable(value)
         }
