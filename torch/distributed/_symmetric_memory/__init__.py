@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -1525,8 +1525,7 @@ if TYPE_CHECKING:
 @overload
 def empty(
     *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 @overload
@@ -1535,8 +1534,7 @@ def empty(
     *,
     dtype: Optional[_dtype] = None,
     device: Optional[_device] = None,
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 def empty(  # type: ignore[misc]

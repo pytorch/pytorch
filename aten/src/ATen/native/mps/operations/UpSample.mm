@@ -9,6 +9,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_native.h>
 #include <ATen/ops/_upsample_nearest_exact1d.h>
 #include <ATen/ops/_upsample_nearest_exact1d_backward.h>
 #include <ATen/ops/_upsample_nearest_exact1d_backward_native.h>
@@ -287,6 +289,40 @@ static void upsample_kernel_out_template(const Tensor& input,
   });
 }
 
+static void upsample_kernel_out_template(const Tensor& input,
+                                         IntArrayRef output_size,
+                                         bool align_corners,
+                                         std::optional<double> scale_opt,
+                                         const Tensor& output,
+                                         const std::string name) {
+  if (output.numel() == 0) {
+    return;
+  }
+  float scale = area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_opt);
+  auto upsamplePSO = lib.getPipelineStateForFunc(fmt::format("upsample_{}_{}", name, scalarToMetalTypeString(input)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      std::array<int64_t, 3> output_strides = {output.stride(2), output.stride(1), output.stride(0)};
+      std::array<int64_t, 3> output_sizes = {output.size(2), output.size(1), output.size(0)};
+      std::array<int64_t, 3> input_sizes = {input.size(2), input.size(1), input.size(0)};
+      std::array<int64_t, 3> input_strides = {input.stride(2), input.stride(1), input.stride(0)};
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:upsamplePSO];
+      mtl_setArgs(computeEncoder,
+                  input,
+                  output,
+                  input_strides,
+                  output_strides,
+                  input_sizes,
+                  output_sizes,
+                  scale,
+                  align_corners);
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0]);
+    }
+  });
+}
+
 static void upsample_kernel_backward_out_template(const Tensor& grad_input,
                                                   const Tensor& grad_output,
                                                   IntArrayRef output_size,
@@ -403,7 +439,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
-  mps::upsample_out_template(input, output_size, std::nullopt, std::nullopt, scale, output, align_corners, "bilinear");
+  mps::upsample_kernel_out_template(input, output_size, align_corners, scale, output, "linear1d");
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
@@ -459,6 +495,18 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_mps)
  const Tensor& grad_input) {
   mps::upsample_kernel_backward_out_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w, "bicubic2d");
+}
+
+TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
+(const Tensor& input,
+ IntArrayRef output_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& output) {
+  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
+              "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
+  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
 }
 
 } // namespace at::native

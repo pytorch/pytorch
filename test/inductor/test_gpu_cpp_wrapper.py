@@ -54,6 +54,26 @@ class GpuWrapperTemplate:
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
+    def test_aoti_debug_printer_works_on_constants(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def test_fn():
+            inp = torch.randn(batch_size, seq_length, hidden_size, device=self.device)
+            weight = torch.randn(hidden_size, hidden_size, device=self.device)
+            matmul_output = inp @ weight
+            torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+            return True
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "aot_inductor.debug_intermediate_value_printer": "2",
+            }
+        )(test_fn)
+        comp()
+
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     device = GPU_TYPE

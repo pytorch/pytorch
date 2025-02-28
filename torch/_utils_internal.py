@@ -91,6 +91,8 @@ def compile_time_strobelight_meta(
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 

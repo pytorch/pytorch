@@ -32,6 +32,7 @@ SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
+SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
                   and torch.cuda.get_device_capability()[1] > 0)
@@ -41,7 +42,7 @@ IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
         gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
-        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx942"})
     return False
 
 def evaluate_gfx_arch_exact(matching_arch):
@@ -101,6 +102,7 @@ def evaluate_platform_supports_fp8():
 
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 
 if TEST_NUMBA:
     try:

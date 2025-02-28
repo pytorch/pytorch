@@ -193,6 +193,19 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     )
 
 
+def create_fake_tensor_with_dynamic_size(x, shape_env, dynamic_sizes, dynamic_strides):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode(shape_env=shape_env) as fake_mode:
+        return fake_mode.from_tensor(
+            x,
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                dynamic_strides=dynamic_strides,
+            ),
+        )
+
+
 def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
     from torch._dynamo.source import ConstantSource
 
@@ -1610,23 +1623,12 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIs(sz1 != sz2, False)
 
     def test_stride_symnode(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         shape_env = ShapeEnv()
 
-        def _create_symbolic_tensor(x, dynamic_sizes, dynamic_strides):
-            with FakeTensorMode(shape_env=shape_env) as fake_mode:
-                return fake_mode.from_tensor(
-                    x,
-                    symbolic_context=StatelessSymbolicContext(
-                        dynamic_sizes=dynamic_sizes,
-                        dynamic_strides=dynamic_strides,
-                    ),
-                )
-
         # check everything static
-        t = _create_symbolic_tensor(
-            x=torch.ones(3, 6),
+        t = create_fake_tensor_with_dynamic_size(
+            torch.ones(3, 6),
+            shape_env,
             dynamic_sizes=[
                 DimDynamic.STATIC,
                 DimDynamic.STATIC,
@@ -1640,8 +1642,9 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(all(isinstance(stride, int) for stride in t.stride()))
 
         # check dynamic size but static dims
-        t = _create_symbolic_tensor(
-            x=torch.ones(3, 6),
+        t = create_fake_tensor_with_dynamic_size(
+            torch.ones(3, 6),
+            shape_env,
             dynamic_sizes=[
                 DimDynamic.DYNAMIC,
                 DimDynamic.DYNAMIC,
@@ -1661,8 +1664,9 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertEqual(s3, 1)
 
         # Check dynamic stride but static dims
-        t = _create_symbolic_tensor(
-            x=torch.ones(3, 6),
+        t = create_fake_tensor_with_dynamic_size(
+            torch.ones(3, 6),
+            shape_env,
             dynamic_sizes=[
                 DimDynamic.STATIC,
                 DimDynamic.STATIC,
@@ -1680,8 +1684,9 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(isinstance(s3, int))
 
         # Check dynamic sizes and dims, and ensure different symbol
-        t = _create_symbolic_tensor(
-            x=torch.ones(3, 6),
+        t = create_fake_tensor_with_dynamic_size(
+            torch.ones(3, 6),
+            shape_env,
             dynamic_sizes=[
                 DimDynamic.DYNAMIC,
                 DimDynamic.DYNAMIC,
@@ -2821,6 +2826,32 @@ class TestGuardsExpressions(TestCase):
         self.assertIn("float(", guards)
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+
+    def test_remove_symbols_without_guarding(self):
+        from torch._functorch.partitioners import _remove_symbols_without_guarding
+
+        shape_env = ShapeEnv()
+
+        x = create_fake_tensor_with_dynamic_size(
+            torch.randn(5, 8),
+            shape_env,
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+
+        self.assertEqual(f"{x.stride()}", "(s1, 1)")
+        self.assertEqual(f"{x.shape}", "torch.Size([s0, s1])")
+
+        x_clean = _remove_symbols_without_guarding(x)
+
+        self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
+        self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
 
 if __name__ == "__main__":

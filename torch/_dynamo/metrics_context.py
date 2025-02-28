@@ -1,3 +1,18 @@
+"""Metrics collection and management system for Dynamo.
+
+This module provides context managers for gathering and reporting metrics during
+compilation and runtime.
+
+It includes two main components:
+- MetricsContext: A context manager for collecting metrics during compilation, supporting
+  nested contexts and various metric types (counters, sets, key-value pairs)
+- RuntimeMetricsContext: A specialized context for runtime metrics collection that doesn't
+  require explicit context management
+
+The metrics system enables comprehensive monitoring and analysis of both compilation and
+execution performance.
+"""
+
 import time
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
@@ -94,15 +109,16 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
-        metric has been assigned previously in the current context.
+        metric has been assigned previously in the current context and overwrite is
+        not set to True.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         existing = self._metrics.keys() & values.keys()
-        if existing:
+        if existing and not overwrite:
             raise RuntimeError(
                 f"Metric(s) {existing} have already been set in the current context"
             )
