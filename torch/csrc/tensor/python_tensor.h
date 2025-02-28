@@ -31,5 +31,5 @@ TORCH_API c10::DispatchKey get_default_dispatch_key();
 TORCH_PYTHON_API at::Device get_default_device();
 
 // Gets the ScalarType for the default tensor type.
-at::ScalarType get_default_scalar_type();
+TORCH_API at::ScalarType get_default_scalar_type();
 } // namespace torch::tensors

@@ -303,9 +303,9 @@ struct PythonArgs {
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
-  at::Tensor tensor_slow(int i);
-  at::Scalar scalar_slow(int i);
-  at::Scalar scalar_slow(PyObject* arg);
+  TORCH_PYTHON_API at::Tensor tensor_slow(int i);
+  TORCH_PYTHON_API at::Scalar scalar_slow(int i);
+  TORCH_PYTHON_API at::Scalar scalar_slow(PyObject* arg);
 };
 
 // FunctionParameter is a single formal parameter of a Python function.
@@ -320,7 +320,7 @@ struct FunctionParameter {
       int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
-  std::string type_name() const;
+  TORCH_PYTHON_API std::string type_name() const;
 
   ParameterType type_;
   bool optional;
