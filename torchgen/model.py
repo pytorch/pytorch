@@ -1499,15 +1499,14 @@ class FunctionSchema:
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert (
-                    len(
-                        [
-                            arg
-                            for arg in self.arguments.out
-                            if not arg.name.startswith("_scratch_")
-                        ]
-                    )
-                    == len(self.returns)
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
+                    self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
         if self.name.name.inplace:
@@ -2552,7 +2551,7 @@ class BaseOperatorName:
         # Extract namespace out. Base operator name may or may not contain namespace.
         # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid.
         # We want to split the namespace out from the base operator name.
-        match = re.match(r"^(.*::|)(.*)$", op)
+        match = re.match(r"^(?:(.*)::)?(.*)$", op)
         namespace = match.group(1) if match else ""
         op_without_ns = match.group(2) if match else op
         m = re.match(r"^__([^_]+)__$", op_without_ns)
@@ -2600,18 +2599,17 @@ class BaseOperatorName:
         return r
 
     def __str__(self) -> str:
+        namespace_prefix = f"{self.namespace}::" if self.namespace else ""
         if self.dunder_method:
             i = "i" if self.inplace else ""
-            return f"{self.namespace}__{i}{self.base}__"
+            return f"{namespace_prefix}__{i}{self.base}__"
         else:
             i = (
                 "_"
                 if self.inplace
-                else "_functional"
-                if self.functional_overload
-                else ""
+                else "_functional" if self.functional_overload else ""
             )
-            return f"{self.namespace}{self.base}{i}"
+            return f"{namespace_prefix}{self.base}{i}"
 
 
 # Operator name is the base operator name along with the (typically not
@@ -2731,7 +2729,9 @@ class NativeFunctionsViewGroup:
                 )
         if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
             if self.view_inplace is not None:
-                assert self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel, (
+                assert (
+                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
+                ), (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )
