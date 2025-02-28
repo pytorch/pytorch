@@ -6318,9 +6318,7 @@ class ShapeEnv:
                         t.is_integer for t in sympy.preorder_traversal(r[1])
                     ):
                         new_var = self._find(r[1])
-                        ok = len(free_unbacked_symbols(new_var)) == 0
-                        if ok:
-                            self._set_replacement(free[0], new_var, "solve")
+                        self._set_replacement(free[0], new_var, "solve")
             except NotImplementedError:
                 pass
         if expr.has(Mod):

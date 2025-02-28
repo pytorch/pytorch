@@ -60,7 +60,10 @@ class SizeVarAllocator:
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.var_to_val = self.shape_env.var_to_val
+        self.var_to_val = {
+            **self.shape_env.var_to_val,
+            **self.shape_env.unbacked_var_to_val,
+        }
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
