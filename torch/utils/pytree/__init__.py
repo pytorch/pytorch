@@ -34,6 +34,7 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
     FromDumpableContextFunc as FromDumpableContextFunc,
+    PyTree as PyTree,
     ToDumpableContextFunc as ToDumpableContextFunc,
     UnflattenFunc as UnflattenFunc,
 )
@@ -42,26 +43,16 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
 if _TYPE_CHECKING:
     from types import ModuleType
 
-    from torch.utils._cxx_pytree import (  # noqa: TC004
-        PyTreeSpec as PyTreeSpec,
-        tree_all as tree_all,
-        tree_all_only as tree_all_only,
-        tree_any as tree_any,
-        tree_any_only as tree_any_only,
-        tree_flatten as tree_flatten,
-        tree_iter as tree_iter,
-        tree_leaves as tree_leaves,
-        tree_map as tree_map,
-        tree_map_ as tree_map_,
-        tree_map_only as tree_map_only,
-        tree_map_only_ as tree_map_only_,
-        tree_structure as tree_structure,
-        tree_unflatten as tree_unflatten,
-        treespec_pprint as treespec_pprint,
-    )
+    from torch.utils._cxx_pytree import PyTreeSpec as PyTreeSpec
 
 
 __all__ = [
+    "PyTree",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "FlattenWithKeysFunc",
+    "ToDumpableContextFunc",
+    "FromDumpableContextFunc",
     "PyTreeSpec",
     "register_pytree_node",
     "tree_flatten",
@@ -79,16 +70,6 @@ __all__ = [
     "tree_any_only",
     "treespec_pprint",
 ]
-
-
-if _TYPE_CHECKING:
-    __all__ += [
-        "FlattenFunc",
-        "UnflattenFunc",
-        "FlattenWithKeysFunc",
-        "ToDumpableContextFunc",
-        "FromDumpableContextFunc",
-    ]
 
 
 PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
