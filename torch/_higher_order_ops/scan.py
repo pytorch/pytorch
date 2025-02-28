@@ -165,9 +165,7 @@ def scan(
     )
 
     if reverse:
-        out_flat, spec_out = pytree.tree_flatten(out)
-        out_flat = [torch.flip(elem, [0]) for elem in out_flat]
-        out = pytree.tree_unflatten(out_flat, spec_out)
+        out = pytree.tree_map(lambda elem: elem.flip([0]), out)
 
     return carry, out
 

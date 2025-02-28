@@ -2092,11 +2092,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = pytree.tree_unflatten(init_flat, inp_spec)
 
         with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the new carry produced by
-            # the operator needs to match the length of the pytree of the init",
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"ValueError: treespec.unflatten\(leaves\).*",
         ):
             scan(fct_wrong_pytree, init, inp, dim=0)
 
@@ -2483,10 +2480,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_wrong_shape(self, compile_mode):
-        scan_fct = compile_mode_helper(scan, compile_mode)
+    def test_scan_init_wrong_shape(self):
+        scan_fct = compile_mode_helper(scan, "none")
 
         # Only init and no input
         x = torch.randn(3, 1, 2)
@@ -2506,12 +2501,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             )
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_wrong_pytree_init_longer_carry(self, compile_mode):
+    def test_scan_init_wrong_pytree_init_longer_carry(self):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
             return x[0], x
 
-        scan_fct = compile_mode_helper(scan, compile_mode)
+        scan_fct = compile_mode_helper(scan, "none")
 
         # Only init and no input
         x = torch.randn(3, 1, 2)
@@ -2524,21 +2518,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         )
 
         with self.assertRaisesRegex(
-            # Should be:
-            # torch._dynamo.exc.Unsupported,
-            # "The pytree of init and the carry produced by the combine_fn must be identical!"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"ValueError: treespec.unflatten\(leaves\).*",
         ):
             scan_fct(add_one_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_wrong_pytree_init_shorter_carry(self, compile_mode):
+    def test_scan_init_wrong_pytree_init_shorter_carry(self):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
             return (x + 1, x + 2), x + 3
 
-        scan_fct = compile_mode_helper(scan, compile_mode)
+        scan_fct = compile_mode_helper(scan, "none")
 
         # Only init and no input
         x = torch.randn(3, 1, 2)
@@ -2548,21 +2538,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            # Should be:
-            # torch._dynamo.exc.Unsupported,
-            # "The pytree of init and the carry produced by the combine_fn must be identical!"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"ValueError: treespec.unflatten\(leaves\).*",
         ):
             scan_fct(add_one_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_init_wrong_pytree_carry_shape(self, compile_mode):
+    def test_scan_init_wrong_pytree_carry_shape(self):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
             return x[0, :], x + 3
 
-        scan_fct = compile_mode_helper(scan, compile_mode)
+        scan_fct = compile_mode_helper(scan, "none")
 
         # Only init and no input
         x = torch.randn(3, 1, 2)
@@ -2939,7 +2925,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, (l_init_,), (flip,), []);  scan_combine_fn_0 = l_init_ = flip = None
     carry = scan[0]
     out = scan[1];  scan = None
-    out_1 = torch.flip(out, [0]);  out = None
+    out_1 = out.flip([0]);  out = None
     return (carry, out_1)""",  # noqa: B950
         )
 

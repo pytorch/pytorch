@@ -1526,38 +1526,27 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         xs_proxy = tuple(x.as_proxy() for x in xs_vars)
         init_proxy = tuple(i.as_proxy() for i in init_vars)
-        additional_inputs_proxy = list(
+        additional_inputs_proxy = [
             ai.as_proxy() for ai in additional_inputs_vars
-        ) + list(combine_freevars_proxy)
+        ] + list(combine_freevars_proxy)
 
         results = combine_result.unpack_var_sequence(tx)
         carry_vars, out_vars = _extract_carry_and_out(results, init_len)
 
         # Try to pack the out_vars back into the tree structure provided by the speculate_subgraph
         # If this fails, it is an indication that the tree structure of the inits and the carries does not match
-        try:
-            out_tree_structure = (
-                _combine_treespec.fields["children_specs"].items[1].as_python_constant()
-            )
-            out_tree = pytree.tree_unflatten(out_vars, out_tree_structure)
-        except:
-            unimplemented(
-                "The pytree of init and the carry produced by the combine_fn must be identical!"
-            )
+        out_tree_structure = (
+            _combine_treespec.fields["children_specs"].items[1].as_python_constant()
+        )
+        out_tree = pytree.tree_unflatten(out_vars, out_tree_structure)  # noqa: F841
 
-        # Try to pack the init_vars and the carry_vars into the same tree structure.
-        # This will fail if the carries and the init do not have the same tree structure.
+        # Check whether the carry pytree is the same as the pytree from the init.
         # If the accidentially have the same tree structure, we will check their meta data below
-        try:
-            carry_tree_structure = (
-                _combine_treespec.fields["children_specs"].items[0].as_python_constant()
-            )
-            carry_tree = pytree.tree_unflatten(carry_vars, carry_tree_structure)
-            init_tree = pytree.tree_unflatten(init_vars, carry_tree_structure)
-        except:
-            unimplemented(
-                "The pytree of init and the carry produced by the combine_fn must be identical!"
-            )
+        init_spec = _make_inlined(tx, pytree.tree_structure)(init)
+        carry_tree_structure = _combine_treespec.fields["children_specs"].items[0]
+        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(  # noqa: F841
+            init_spec, carry_tree_structure
+        )
 
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
