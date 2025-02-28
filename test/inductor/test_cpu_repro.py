@@ -4114,6 +4114,33 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    def test_group_norm_large_input(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.group_norm = torch.nn.GroupNorm(2, 64)
+
+            def forward(self, x):
+                return self.group_norm(x)
+
+        for fmt in [torch.contiguous_format, torch.channels_last]:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn(2, 64, 168, 168).to(memory_format=fmt)
+            with torch.no_grad():
+                expected = mod(x)
+                compiled_m = torch.compile(mod)
+                actual = compiled_m(x)
+                self.assertEqual(expected, actual, atol=1e-4, rtol=1e-5)
+                # 3 generated kernels (first one for var_mean, last two for result)
+                check_metrics_vec_kernel_count(3)
+                # check that there is no outer loop fusion.
+                self.assertEqual(
+                    len(metrics.cpp_outer_loop_fused_inner_counts),
+                    0,
+                )
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
