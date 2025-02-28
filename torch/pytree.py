@@ -19,43 +19,27 @@ from __future__ import annotations
 from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
 import torch
-from torch.utils.pytree import register_pytree_node as register_node
+from torch.utils.pytree import (
+    register_pytree_node as register_node,
+    tree_all as all,
+    tree_all_only as all_only,
+    tree_any as any,
+    tree_any_only as any_only,
+    tree_flatten as flatten,
+    tree_iter as iter,
+    tree_leaves as leaves,
+    tree_map as map,
+    tree_map_ as map_,
+    tree_map_only as map_only,
+    tree_map_only_ as map_only_,
+    tree_structure as structure,
+)
 
 
 if _TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from torch.utils._cxx_pytree import (
-        PyTree as PyTree,
-        PyTreeSpec as PyTreeSpec,
-        tree_all as all,
-        tree_all_only as all_only,
-        tree_any as any,
-        tree_any_only as any_only,
-        tree_flatten as flatten,
-        tree_iter as iter,
-        tree_leaves as leaves,
-        tree_map as map,
-        tree_map_ as map_,
-        tree_map_only as map_only,
-        tree_map_only_ as map_only_,
-        tree_structure as structure,
-    )
-else:
-    from torch.utils.pytree import (
-        tree_all as all,
-        tree_all_only as all_only,
-        tree_any as any,
-        tree_any_only as any_only,
-        tree_flatten as flatten,
-        tree_iter as iter,
-        tree_leaves as leaves,
-        tree_map as map,
-        tree_map_ as map_,
-        tree_map_only as map_only,
-        tree_map_only_ as map_only_,
-        tree_structure as structure,
-    )
+    from torch.utils._cxx_pytree import PyTree as PyTree, PyTreeSpec as PyTreeSpec
 
 
 __all__ = [
