@@ -447,7 +447,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     """
 
 
-    torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
+    torch.ops.higher_order.invoke_quant_packed(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
     ->
     torch.ops.higher_order.invoke_quant(repeated_subgraph0, arg0_1, arg1_1, scheme = 'nf4');
     """
@@ -468,7 +468,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
         else:
             quant_options = torch._higher_order_ops.InvokeQuant()
 
-        subgraph, args = invoke_quant.args
+        subgraph, *args = invoke_quant.args
         with gm.graph.inserting_before(invoke_quant):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
