@@ -71,7 +71,7 @@ def unflatten(treespec: PyTreeSpec, leaves: Iterable[_Any]) -> PyTree:
     >>> tree == torch.pytree.unflatten(treespec, leaves)
     True
 
-    .. note::
+    .. warning::
 
         This function has a different signature than :func:`torch.utils.pytree.tree_unflatten`.
         The ``treespec`` argument comes first to have a better :class:`functools.partial` support:
@@ -80,7 +80,7 @@ def unflatten(treespec: PyTreeSpec, leaves: Iterable[_Any]) -> PyTree:
 
             import functools
 
-            unflatten_fn = functools.partial(unflatten, treespec)
+            unflatten_fn = functools.partial(torch.pytree.unflatten, treespec)
             tree1 = unflatten_fn(leaves1)
             tree2 = unflatten_fn(leaves2)
 
@@ -94,17 +94,3 @@ def unflatten(treespec: PyTreeSpec, leaves: Iterable[_Any]) -> PyTree:
         ``treespec``.
     """
     return _tree_unflatten(leaves, treespec)
-
-
-def __getattr__(name: str) -> _Any:
-    if name in ("PyTreeSpec", "TreeSpec"):
-        from torch.utils.pytree import PyTreeSpec
-
-        globals().update(
-            {
-                "PyTreeSpec": PyTreeSpec,
-                "TreeSpec": PyTreeSpec,
-            }
-        )
-        return PyTreeSpec
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
