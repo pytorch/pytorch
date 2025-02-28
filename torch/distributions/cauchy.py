@@ -29,6 +29,7 @@ class Cauchy(Distribution):
         loc (float or Tensor): mode or median of the distribution.
         scale (float or Tensor): half width at half maximum.
     """
+
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True
