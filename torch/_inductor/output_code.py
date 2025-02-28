@@ -320,6 +320,26 @@ def maybe_realign_inputs(
             compiled_graph.current_callable = new_callable
 
 
+def get_cudagraph_info(
+    gm: torch.fx.GraphModule, cudagraph_fail_reasons: Optional[list[str]] = None
+) -> CudagraphCachedInfo:
+    cudagraph_fail_reasons = cudagraph_fail_reasons or []
+
+    output = output_node(gm)
+    # output args are tuple of first argument
+    assert len(output.args) == 1
+    stack_traces = [
+        (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+        for arg in output.args[0]  # type: ignore[union-attr]
+    ]
+    placeholders = tuple(get_placeholder_info(gm.graph))
+
+    return CudagraphCachedInfo(
+        placeholders, stack_traces, cudagraph_fail_reasons
+    )
+
+
+
 class CompiledFxGraphConstants:
     """Wrapper class that unwraps constants from a compiled fx graph. This
     version of the class only supports directly grabbing the saved constants off of
@@ -515,18 +535,11 @@ class CompiledFxGraph(OutputCode):
                         "non-Tensor inputs",
                     ),
                 ]
-                output = output_node(gm)
-                # output args are tuple of first argument
-                assert len(output.args) == 1
-                stack_traces = [
-                    (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]  # type: ignore[union-attr]
-                ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                placeholders = tuple(get_placeholder_info(gm.graph))
-                cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
-                )
+                cudagraph_info = get_cudagraph_info(gm, cudagraph_fail_reasons)
+
+        if config.graph_partition: # TODO: How to control enable cudagraph or not? i.e., pass from mode=reduce-overhead
+            cudagraph_info = get_cudagraph_info(gm)
 
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check

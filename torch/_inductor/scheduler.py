@@ -4141,7 +4141,7 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
-        self.compute_graph_partition_maps(partitions, signatures)
+        self.compute_graph_partition_maps(signatures)
 
         return partitions, signatures
 
