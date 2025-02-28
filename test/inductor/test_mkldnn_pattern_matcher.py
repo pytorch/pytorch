@@ -4054,7 +4054,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         in_feature = 32
         out_feature = 64
         q_min, q_max = -32, 31
-
+        # we only test for qlinear_binary in this case
         test_for_pointwise_binary = (
             True
             if M == 1
@@ -4098,7 +4098,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 elif inplace_add and test_for_pointwise_binary:
                     # When M is 1, dynamic shapes are enabled with torch.compile, has_bias is False,
                     # expand_a_scale is False and inplace_add is true,
-                    # the output's innermost dim's stride can't be determined due to some Inductor bug.
+                    # the output's outermost dim's stride can't be determined due to some Inductor bug.
                     c.add_(self.additive)
                 return c
 
@@ -4120,6 +4120,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_autocast=dtype,
             compile_options={"dynamic": dynamic},
         )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
