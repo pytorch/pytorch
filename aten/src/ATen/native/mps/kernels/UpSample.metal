@@ -136,7 +136,7 @@ scalar_t upsample_get_value_bounded(
     long c,
     long x) {
   int access_x = max(min(x, dim - 1), 0L);
-  return data[n * strides.z + c * strides.y + access_x * strides.x];
+  return data[n * strides.x + c * strides.y + access_x * strides.z];
 }
 
 template <typename scalar_t>
@@ -208,16 +208,16 @@ kernel void upsample_linear1d(
       scale, output_x, align_corners, /*cubic=*/false);
   auto t_x = fract(real_x);
 
-  for (int n = 0; n < output_sizes.z; n++) {
+  for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
       auto i00 = upsample_get_value_bounded<T>(
-          inputData, input_sizes.x, input_strides, n, c, real_x);
+          inputData, input_sizes.z, input_strides, n, c, real_x);
       auto i01 = upsample_get_value_bounded<T>(
-          inputData, input_sizes.x, input_strides, n, c, real_x + 1);
+          inputData, input_sizes.z, input_strides, n, c, real_x + 1);
       auto res = linear_interp(i00, i01, t_x);
       outputData
-          [n * output_strides.z + c * output_strides.y +
-           output_x * output_strides.x] = static_cast<T>(res);
+          [n * output_strides.x + c * output_strides.y +
+           output_x * output_strides.z] = static_cast<T>(res);
     }
   }
 }
