@@ -693,6 +693,86 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_bwd_partitioning(self):
+        @mark_compile_region
+        def gn(x, y):
+            z = torch.matmul(x, y)
+            return torch.sin(z)
+
+        def fn(x, y):
+            return torch.sin(gn(x, y))
+
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+
+        ref = fn(x, y)
+        res = opt_fn(x_clone, y_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8, 8]", primals_2: "f32[8, 8]"):
+        ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = primals_2 = None
+        getitem_6: "f32[8, 8]" = invoke_subgraph_2[3]
+        getitem_5: "f32[8, 8]" = invoke_subgraph_2[2]
+        getitem_4: "f32[8, 8]" = invoke_subgraph_2[1]
+        getitem: "f32[8, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+
+        sin: "f32[8, 8]" = torch.ops.aten.sin.default(getitem)
+        cos: "f32[8, 8]" = torch.ops.aten.cos.default(getitem);  getitem = None
+        return (sin, getitem_6, getitem_5, getitem_4, cos)
+
+    class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]", primals_1: "f32[8, 8]"):
+            mm: "f32[8, 8]" = torch.ops.aten.mm.default(primals_0, primals_1)
+            sin: "f32[8, 8]" = torch.ops.aten.sin.default(mm)
+            t: "f32[8, 8]" = torch.ops.aten.t.default(primals_0);  primals_0 = None
+            t_1: "f32[8, 8]" = torch.ops.aten.t.default(primals_1);  primals_1 = None
+            return (sin, mm, t, t_1)
+""",
+            )
+
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getitem_6: "f32[8, 8]", getitem_5: "f32[8, 8]", getitem_4: "f32[8, 8]", cos: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+        mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
+
+        ___backward_invoke_subgraph_0_post_graph = self.___backward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (getitem_4, getitem_5, getitem_6, mul));  ___backward_invoke_subgraph_0_post_graph = getitem_4 = getitem_5 = getitem_6 = mul = None
+        getitem_1: "f32[8, 8]" = invoke_subgraph_3[0]
+        getitem_2: "f32[8, 8]" = invoke_subgraph_3[1];  invoke_subgraph_3 = None
+        return (getitem_1, getitem_2)
+
+    class ___backward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, mm: "f32[8, 8]", t: "f32[8, 8]", t_1: "f32[8, 8]", tangents_0: "f32[8, 8]"):
+            cos: "f32[8, 8]" = torch.ops.aten.cos.default(mm);  mm = None
+            mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_0, cos);  tangents_0 = cos = None
+            mm_1: "f32[8, 8]" = torch.ops.aten.mm.default(t, mul);  t = None
+            mm_2: "f32[8, 8]" = torch.ops.aten.mm.default(mul, t_1);  mul = t_1 = None
+            return (mm_2, mm_1)
+""",
+            )
+
 
 if __name__ == "__main__":
     run_tests()
