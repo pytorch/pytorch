@@ -420,11 +420,16 @@ class ViewAndMutationMeta:
     # Filled after tracing joint function.
     num_backward_tokens: int = 0
 
+    # Number of rng states that will get thread into the forward and backward for
+    # cudagraph compatible run_and_save_rng
+    num_graphsafe_rng_states: int = 0
+
+    graphsafe_rng_state_index: Optional[int] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
-
         mutated_inp_runtime_indices = [
             i
             for i, m in enumerate(self.input_info)
