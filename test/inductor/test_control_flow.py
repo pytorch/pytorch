@@ -919,9 +919,7 @@ class WhileLoopModels:
                 return it + 1, x_clone
 
             # We invoke the hop directly to avoid triggering dyanmo tracing
-            out_it, out_x = torch._higher_order_ops.while_loop(
-                cond_fn, body_fn, (0, x), tuple()
-            )
+            out_it, out_x = torch._higher_order_ops.while_loop(cond_fn, body_fn, (0, x))
             # We need torch._check to use it in torch.ones call
             torch._check(out_it > 0)
             return (
@@ -1310,6 +1308,7 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     def test_while_loop_with_const_and_symint_output(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.ConstAndSymIntOutput(),
