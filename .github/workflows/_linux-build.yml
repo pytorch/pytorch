@@ -76,6 +76,11 @@ on:
         required: false
         type: boolean
         default: false
+      max-jobs:
+        description: |
+          Overwrite the number of jobs to use for the build
+        required: false
+        type: string
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -211,6 +216,7 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+          MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
@@ -230,6 +236,12 @@ jobs:
             DOCKER_SHELL_CMD=
           fi
 
+          if [[ ${MAX_JOBS_OVERRIDE} == "" ]]; then
+            MAX_JOBS="$(nproc --ignore=2)"
+          else
+            MAX_JOBS="${MAX_JOBS_OVERRIDE}"
+          fi
+
           # Leaving 1GB for the runner and other things
           TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
           # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
@@ -241,7 +253,8 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e MAX_JOBS=${MAX_JOBS} \
+            -e MAX_JOBS_OVERRIDE \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \

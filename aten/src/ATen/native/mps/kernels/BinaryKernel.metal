@@ -39,6 +39,13 @@ struct zeta_functor {
   }
 };
 
+struct xlog1py_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::xlog1py(a, b));
+  }
+};
+
 struct nextafter_functor {
 #if __METAL_VERSION__ < 310
   template <typename U>
@@ -153,6 +160,8 @@ REGISTER_BINARY_INDEXING_OP(nextafter, float);
 REGISTER_BINARY_INDEXING_OP(nextafter, half);
 REGISTER_BINARY_INDEXING_OP(zeta, float);
 REGISTER_BINARY_INDEXING_OP(zeta, half);
+REGISTER_BINARY_INDEXING_OP(xlog1py, float);
+REGISTER_BINARY_INDEXING_OP(xlog1py, half);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
@@ -160,6 +169,7 @@ REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
 REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
 REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
 REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
+REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
 #endif
 
 // Complex binary functions

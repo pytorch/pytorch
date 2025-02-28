@@ -102,7 +102,7 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+MI300_ARCH = ("gfx942",)
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -235,6 +235,7 @@ IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False,
 )
+IN_RE_WORKER: bool = os.environ.get("INSIDE_RE_WORKER") is not None
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and
@@ -1293,14 +1294,9 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
-        if not RERUN_DISABLED_TESTS:
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            sys.exit(0 if exit_code == 5 else exit_code)
-        else:
-            # Only record the test report and always return a success code when running under rerun
-            # disabled tests mode
-            sys.exit(0)
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        sys.exit(0 if exit_code == 5 else exit_code)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -2705,6 +2701,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
+            # Probably test has disable issue but not for this platform
             skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
@@ -3102,13 +3099,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
+        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            if post_munge:
+                munged = post_munge(munged)
             self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+                munged, expect, skip=1
             )
             return
         self.fail(msg="Did not raise when expected to")

@@ -9,7 +9,7 @@ This package is lazily initialized, so you can always import it, and use
 import threading
 import traceback
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._C
@@ -420,6 +420,8 @@ def synchronize(device: _device_t = None) -> None:
 
 def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
+    if not _is_compiled():
+        return []
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:
         return []
