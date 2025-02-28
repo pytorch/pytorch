@@ -414,7 +414,10 @@ def check_tensor_meta_match(
 def _merge_tensors(
     a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
 ):
-    from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr, has_free_unbacked_symbols
+    from torch.fx.experimental.symbolic_shapes import (
+        has_free_unbacked_symbols,
+        SymIntEqByExpr,
+    )
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
@@ -457,6 +460,7 @@ def _merge_tensors(
         u3 has range [5, 7]
     """
     merged_size: list[Union[int, torch.SymInt]] = []
+
     def _has_unbacked_symbols(s: Union[int, torch.SymInt]) -> bool:
         if isinstance(s, int):
             return False
@@ -466,7 +470,11 @@ def _merge_tensors(
     for s0, s1 in zip(a.size(), b.size()):
         # If there are unbacked symbols leaked out of true_branch or false_branch
         # we need to merge them with a new unbacked symbol and track in parent graph.
-        if not _has_unbacked_symbols(s0) and not _has_unbacked_symbols(s1) and SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
+        if (
+            not _has_unbacked_symbols(s0)
+            and not _has_unbacked_symbols(s1)
+            and SymIntEqByExpr(s0) == SymIntEqByExpr(s1)
+        ):
             merged_size.append(s0)
         else:
 
