@@ -9,6 +9,8 @@
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
+#include <thrust/iterator/transform_iterator.h>
+
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 
 #include <cub/cub.cuh>

@@ -33,6 +33,7 @@
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
 #include <thrust/iterator/reverse_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
 #endif
 
 namespace at::native {

@@ -9,6 +9,8 @@
 #include <c10/core/DeviceArray.h>
 #include <c10/util/Load.h>
 
+#include <thrust/iterator/transform_iterator.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else

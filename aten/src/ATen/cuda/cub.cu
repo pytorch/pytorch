@@ -2,6 +2,8 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAConfig.h>
 
+#include <thrust/iterator/transform_iterator.h>
+
 namespace at::cuda::cub {
 
 namespace {

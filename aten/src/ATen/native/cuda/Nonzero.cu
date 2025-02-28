@@ -9,6 +9,9 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
 
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else

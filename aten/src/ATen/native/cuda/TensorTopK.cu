@@ -15,6 +15,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+
 #include <c10/macros/Macros.h>
 
 using namespace at::native;

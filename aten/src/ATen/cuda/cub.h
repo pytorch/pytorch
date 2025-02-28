@@ -3,10 +3,6 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#include <thrust/iterator/transform_iterator.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/constant_iterator.h>
-
 // NOTE: These templates are intentionally not defined in this header,
 // which aviods re-compiling them for each translation unit. If you get
 // a link error, you need to add an explicit instantiation for your
