@@ -112,7 +112,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "intel-sycl-rt==2025.0.2 | "
         "tcmlib==1.2.0 | "
         "umf==0.9.1 | "
-        "intel-pti==0.10.0"
+        "intel-pti==0.10.1"
     ),
 }
 
