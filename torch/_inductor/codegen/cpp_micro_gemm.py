@@ -231,9 +231,9 @@ micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 def register_micro_gemm(*configs):
     def inner(cls):
-        assert (
-            cls not in micro_gemm_configs
-        ), f"Duplicate micro_gemm registration for {cls}"
+        assert cls not in micro_gemm_configs, (
+            f"Duplicate micro_gemm registration for {cls}"
+        )
         assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
         micro_gemm_configs[cls] = list(configs)
         return cls
@@ -441,7 +441,6 @@ inline void {{kernel_name}}_kernel(
     int64_t ldc
 ) {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
-    using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
@@ -475,6 +474,7 @@ inline void {{kernel_name}}_kernel(
 
         if constexpr (row == 0) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+            using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
 {%- elif input2_dtype == torch.int8 %}
