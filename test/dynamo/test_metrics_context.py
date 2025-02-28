@@ -71,7 +71,15 @@ class TestMetricsContext(TestCase):
             with self.assertRaisesRegex(RuntimeError, "already been set"):
                 context.update({"m1": 7, "m3": 3})
 
-        self.assertEqual(self.metrics, {"m1": 1, "m2": 2})
+    def test_update_allow_overwrite(self):
+        """
+        Validate update will overwite when given param.
+        """
+        with MetricsContext(self._on_exit) as context:
+            context.update({"m1": 1, "m2": 2})
+            context.update({"m1": 7, "m3": 3}, overwrite=True)
+
+        self.assertEqual(self.metrics, {"m1": 7, "m2": 2, "m3": 3})
 
     def test_add_to_set(self):
         """

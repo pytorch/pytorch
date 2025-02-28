@@ -347,6 +347,7 @@ class TestCutlassBackend(TestCase):
                     2,
                     4,
                 ],  # guarantees > 1 choices
+                "force_disable_caches": True,
             }
         ):
             from torch._inductor.utils import run_and_get_code
