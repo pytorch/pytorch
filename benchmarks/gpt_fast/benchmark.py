@@ -63,7 +63,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = benchmarker.benchmark(compiled_mod, (x,)) * 1000
+            us_per_iter = benchmarker.benchmark(compiled_mod, (x,), {}) * 1000
             flops_utilization += us_per_iter * flops / 1e9 / A100_40G_BF16_TFLOPS
 
         flops_utilization = flops_utilization / len(input_shapes)
@@ -102,7 +102,7 @@ def run_layer_norm(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = benchmarker.benchmark(compiled_mod, (x,)) * 1000
+            us_per_iter = benchmarker.benchmark(compiled_mod, (x,), {}) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -155,6 +155,7 @@ def run_gather_gemv(device: str = "cuda"):
                         score_idxs,
                         x,
                     ),
+                    {},
                 )
                 * 1000
             )
@@ -207,6 +208,7 @@ def run_gemv(device: str = "cuda"):
                         W,
                         x,
                     ),
+                    {},
                 )
                 * 1000
             )

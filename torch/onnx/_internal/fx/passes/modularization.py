@@ -5,7 +5,7 @@ import abc
 import collections
 import copy
 import operator
-from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
+from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -13,14 +13,18 @@ from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
 
 
-_FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterator, Sequence
+
+
+_FX_TRACER_NN_MODULE_META_TYPE = tuple[str, type]
 """Legacy type of item from `node.meta["nn_module_stack"].items()` produced by FX symbolic tracer."""
 _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
 """Legacy type of `node.meta["nn_module_stack"]` produced by FX symbolic tracer."""
 
-_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
+_DYNAMO_NN_MODULE_META_TYPE = tuple[str, tuple[str, type]]
 """Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
-_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
+_DYNAMO_NN_MODULE_STACK_META_TYPE = dict[str, _DYNAMO_NN_MODULE_META_TYPE]
 """Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
 
 
@@ -62,8 +66,7 @@ class _ModuleMeta:
         """
         # E.g., from 'L__self___h_1_mlp_c_proj' to 'h_1_mlp_c_proj'.
         name = self.module_name
-        if name.startswith("L__self___"):
-            name = name[len("L__self___") :]
+        name = name.removeprefix("L__self___")
         return name
 
     @property
@@ -819,7 +822,10 @@ class Modularize(_pass.Transform):
         ... )
         >>> gm.print_readable()
 
-        >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
+        >>> gm = passes.Modularize(
+        ...     infra.DiagnosticContext("test_context", "1.0"),
+        ...     gm,
+        ... ).run()
         >>> gm.print_readable()
 
     """

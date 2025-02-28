@@ -980,7 +980,16 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
+    target_include_directories(torch_cuda PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1372,7 +1381,13 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1559,7 +1574,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT MSVC AND NOT LIBKINETO_NOCUPTI)
+  if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
@@ -1761,10 +1776,7 @@ if(BUILD_TEST)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
-          if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-            target_link_libraries(${test_name}_${CPU_CAPABILITY} sleef)
-          endif()
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library sleef gtest_main)
         endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
@@ -1790,7 +1802,7 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
-        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
       install(TARGETS ${test_name} DESTINATION test)
       # Install PDB files for MSVC builds
       if(MSVC AND BUILD_SHARED_LIBS)
@@ -1833,7 +1845,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
-      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)

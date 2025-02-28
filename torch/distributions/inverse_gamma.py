@@ -31,6 +31,7 @@ class InverseGamma(TransformedDistribution):
         rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
+
     arg_constraints = {
         "concentration": constraints.positive,
         "rate": constraints.positive,

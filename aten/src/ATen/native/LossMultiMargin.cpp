@@ -104,8 +104,7 @@ void multi_margin_loss_out_cpu_template(
     const Scalar& margin,
     const std::optional<Tensor>& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
@@ -216,8 +215,7 @@ void multi_margin_loss_backward_out_cpu_template(
     const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
