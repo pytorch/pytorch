@@ -82,7 +82,12 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttributeMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import DefaultDictVariable
 
 
@@ -711,6 +716,11 @@ def call_random_fn(tx, fn, args, kwargs):
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
+class SourcelessPytreeConstantError(AsPythonConstantNotImplementedError):
+    def __init__(self, vt: "UserDefinedObjectVariable"):
+        super().__init__(vt)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -765,21 +775,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.value_type
 
     def as_python_constant(self):
-        # For any `pytree.register_constant`-ed class, `torch.compile` can
-        # assume the instances of this class won't change (TODO clarify more)
         import torch.utils._pytree as pytree
 
-        if pytree.is_constant_cls(self.value_type):
-            if self.source is not None:
-                # TODO we already have `ID_MATCH` guard, emit a new hash guard
-                # for extra safety?
-                # TODO check for side effect on this object? What about nested
-                # attributes (e.g., `x.y` didn't get mutated, but `x.y.z` did)?
-                # The latter is somewhat infeasible to check completely.
+        if pytree.is_constant_class(self.value_type):
+            # TODO figure out the exact mutability expectation here.
+            if self.source is None:
+                raise SourcelessPytreeConstantError(self)
+            else:
+                # TODO emit equals match guard?
                 return self.value
-            # TODO else the object was constructed during Dynamo tracing,
-            # reconstructing this in general is hard... Just suggest normal pytree
-            # registration?
         return super().as_python_constant()
 
     def guard_as_python_constant(self):

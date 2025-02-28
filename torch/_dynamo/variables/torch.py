@@ -994,6 +994,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from torch._subclasses.fake_tensor import fake_tensor_tls
             from torch.utils._pytree import tree_flatten
 
+            from .base import AsPythonConstantNotImplementedError
+            from .user_defined import SourcelessPytreeConstantError
+
             # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
             #
             # Rather than reconstructing `args, kwargs` into python objects and
@@ -1036,15 +1039,27 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             # fx graph.
             try:
                 input_spec = input_spec_vt.as_python_constant()
-            except NotImplementedError:
+            except SourcelessPytreeConstantError as e:
+                type_name = e.vt.python_type().__qualname__
                 unimplemented(
-                    """
-TODO werid case, a user registered type whose `pytree_flatten` that puts some
-non-reconstructible object into the context (which then got stored into the spec).
+                    f"""
+You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
 
-https://github.com/pytorch/pytorch/pull/146367#discussion_r1969985257
+Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
+"""  # NOQA: B950
+                )
+            except AsPythonConstantNotImplementedError as e:
+                type_name = e.vt.python_type().__qualname__
+                unimplemented(
+                    f"""
+You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <{type_name}> into the context.
 
-What's the workaround? Should they just use `pytree.register_constant`?
+Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <{type_name}>
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+
+If the above doesn't work, please subtmit an issue to GitHub.
 """  # NOQA: B950
                 )
 
