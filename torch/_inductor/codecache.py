@@ -1586,8 +1586,15 @@ class AotCodeCompiler:
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
 
+            kernel_meta_json = str(
+                kernel_path_operator.with_name(
+                    f"{kernel_path_operator.stem}_metadata.json"
+                )
+            )
+            shutil.copy(meta_json, kernel_meta_json)
+
             if config.aot_inductor.package:
-                generated_files.append(meta_json)
+                generated_files.extend((meta_json, kernel_meta_json))
 
             output_so = (
                 config.aot_inductor.output_path
@@ -1673,9 +1680,9 @@ class AotCodeCompiler:
                     cpp_command,
                     **compile_command,
                 )
-                if header_file := _get_cpp_prefix_header(device_type):
+                if cpp_prefix := _get_cpp_prefix_header(device_type):
                     kernel_build_options.precompiled_header = _precompile_header(
-                        header_file,
+                        cpp_prefix,
                         cpp_command,
                         max_optimize=True,
                         **compile_command,

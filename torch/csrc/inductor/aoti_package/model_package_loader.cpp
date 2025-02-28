@@ -70,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
