@@ -145,6 +145,7 @@ def _mark_subclass_constructor_exportable_experimental(constructor_subclass):
     with pre-dispatch IR. To make your subclass traceble in export, you need to:
         1. Implement __init__ method for your subclass (Look at DTensor implementation)
         2. Decorate your __init__ method with _mark_constructor_exportable_experimental
+        3. Put torch._dynamo_disable decorator to prevent dynamo from peeking into its' impl
 
     Example:
 
@@ -153,7 +154,8 @@ def _mark_subclass_constructor_exportable_experimental(constructor_subclass):
         def __new__(cls, elem, *, requires_grad=False):
             # ...
             return torch.Tensor._make_subclass(cls, elem, requires_grad=requires_grad)
-
+            
+        @torch._dynamo_disable 
         @_mark_subclass_constructor_exportable_experimental
         def __init__(self, elem, ...):
             # ...
