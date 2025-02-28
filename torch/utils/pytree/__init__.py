@@ -18,18 +18,10 @@ from __future__ import annotations
 
 import os as _os
 import sys as _sys
-from dataclasses import dataclass as _dataclass
-from typing import (
-    Any as _Any,
-    Callable as _Callable,
-    Literal as _Literal,
-    TYPE_CHECKING as _TYPE_CHECKING,
-    TypeVar as _TypeVar,
-)
-from typing_extensions import ParamSpec as _ParamSpec, Self as _Self
+from typing import Any as _Any
 
 import torch.utils._pytree as python
-from torch._utils import classproperty as _classproperty
+from torch.utils._exposed_in import exposed_in as _exposed_in
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
@@ -38,12 +30,6 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
     ToDumpableContextFunc as ToDumpableContextFunc,
     UnflattenFunc as UnflattenFunc,
 )
-
-
-if _TYPE_CHECKING:
-    from types import ModuleType
-
-    from torch.utils._cxx_pytree import PyTreeSpec as PyTreeSpec
 
 
 __all__ = [
@@ -78,29 +64,6 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 }
 
 
-@_dataclass(frozen=True)
-class PyTreeImplementation:
-    """The underlying implementation for PyTree utilities."""
-
-    module: ModuleType = python
-    name: _Literal["python", "cxx"] = "python"
-
-    @_classproperty  # type: ignore[misc]
-    @classmethod
-    def python(cls) -> _Self:
-        """The Python implementation."""
-        return cls(module=python, name="python")
-
-    @_classproperty  # type: ignore[misc]
-    @classmethod
-    def cxx(cls) -> _Self:
-        """The C++ implementation."""
-        import torch.utils._cxx_pytree as cxx
-
-        return cls(module=cxx, name="cxx")
-
-
-implementation = PyTreeImplementation.python
 if PYTORCH_USE_CXX_PYTREE:
     import torch.utils._cxx_pytree as cxx  # noqa: F401
 
@@ -109,10 +72,8 @@ if PYTORCH_USE_CXX_PYTREE:
             "Cannot import package `optree`. "
             "Please install `optree` via `python -m pip install --upgrade optree`."
         )
-    implementation = PyTreeImplementation.cxx
 
 
-_sys.modules[f"{__name__}.python"] = python
 _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
 
@@ -160,7 +121,7 @@ def register_pytree_node(
         ...     lambda children, _: set(children),
         ... )
     """
-    implementation.module.register_pytree_node(
+    _register_pytree_node(
         cls,
         # intentionally use `*_func` over `*_fn` to match annotations
         flatten_fn=flatten_func,
@@ -173,44 +134,29 @@ def register_pytree_node(
     )
 
 
-_P = _ParamSpec("_P")
-_R = _TypeVar("_R")
-
-
-def _reexport(func: _Callable[_P, _R]) -> _Callable[_P, _R]:
-    import functools
-
-    name = func.__name__
-
-    @functools.wraps(func)
-    def exported(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        # Dynamically get the implementation function from the module to allow changing the
-        # implementation at runtime.
-        impl: _Callable[_P, _R] = getattr(implementation.module, name)
-        return impl(*args, **kwargs)
-
-    exported.__module__ = __name__
-    return exported
-
-
-if not _TYPE_CHECKING:
-    # flake8: noqa: F811
-    tree_all = _reexport(python.tree_all)
-    tree_all_only = _reexport(python.tree_all_only)
-    tree_any = _reexport(python.tree_any)
-    tree_any_only = _reexport(python.tree_any_only)
-    tree_flatten = _reexport(python.tree_flatten)  # type: ignore[arg-type]
-    tree_iter = _reexport(python.tree_iter)
-    tree_leaves = _reexport(python.tree_leaves)
-    tree_map = _reexport(python.tree_map)
-    tree_map_ = _reexport(python.tree_map_)
-    tree_map_only = _reexport(python.tree_map_only)
-    tree_map_only_ = _reexport(python.tree_map_only_)
-    tree_structure = _reexport(python.tree_structure)  # type: ignore[arg-type]
-    tree_unflatten = _reexport(python.tree_unflatten)  # type: ignore[arg-type]
-    treespec_pprint = _reexport(python.treespec_pprint)  # type: ignore[arg-type]
-else:
+if PYTORCH_USE_CXX_PYTREE:
     from torch.utils._cxx_pytree import (
+        PyTreeSpec as PyTreeSpec,
+        register_pytree_node as _register_pytree_node,
+        tree_all as tree_all,
+        tree_all_only as tree_all_only,
+        tree_any as tree_any,
+        tree_any_only as tree_any_only,
+        tree_flatten as tree_flatten,
+        tree_iter as tree_iter,
+        tree_leaves as tree_leaves,
+        tree_map as tree_map,
+        tree_map_ as tree_map_,
+        tree_map_only as tree_map_only,
+        tree_map_only_ as tree_map_only_,
+        tree_structure as tree_structure,
+        tree_unflatten as tree_unflatten,
+        treespec_pprint as treespec_pprint,
+    )
+else:
+    from torch.utils._pytree import (
+        PyTreeSpec as PyTreeSpec,
+        register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
         tree_any as tree_any,
@@ -227,24 +173,43 @@ else:
         treespec_pprint as treespec_pprint,
     )
 
-del _reexport
-del PyTreeImplementation
+
+# Change `__module__` of reexported public APIs to 'torch.utils.pytree'
+__func_names = frozenset(
+    {
+        "tree_all",
+        "tree_all_only",
+        "tree_any",
+        "tree_any_only",
+        "tree_flatten",
+        "tree_iter",
+        "tree_leaves",
+        "tree_map",
+        "tree_map_",
+        "tree_map_only",
+        "tree_map_only_",
+        "tree_structure",
+        "tree_unflatten",
+        "treespec_pprint",
+    }
+)
+globals().update(
+    {
+        name: _exposed_in(__name__)(func)
+        for name, func in globals().items()
+        if name in __func_names
+    }
+)
+del __func_names, _exposed_in
 
 
-# Use the __getattr__ function allowing us to change the underlying `implementation` at runtime.
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
-        import torch.utils._cxx_pytree as cxx  # noqa: F811
+        # Lazy import
+        import torch.utils._cxx_pytree as cxx
 
         globals()["cxx"] = cxx
         _sys.modules[f"{__name__}.cxx"] = cxx
         return cxx
 
-    try:
-        return getattr(implementation.module, name)
-    except AttributeError as ex:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}: "
-            f"no attribute {name!r} in "
-            f"{implementation.name} implementation: {implementation.module.__name__!r}"
-        ) from ex
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

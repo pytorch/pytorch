@@ -1095,6 +1095,7 @@
     "FlattenWithKeysFunc",
     "FromDumpableContextFunc",
     "PyTree",
+    "PyTreeSpec",
     "ToDumpableContextFunc",
     "UnflattenFunc"
   ],
