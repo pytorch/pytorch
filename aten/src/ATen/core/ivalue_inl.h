@@ -1780,7 +1780,7 @@ std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   std::vector<Elem> result;
   result.reserve(list.size());
   for (Elem v : list) {
@@ -1828,7 +1828,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
 template <typename T>
 T generic_to(IValue ivalue, _fake_type<T>) {
   using ElemType = typename std::remove_pointer<T>::type::element_type;
-  return std::move(ivalue).toCustomClass<ElemType>();
+  return std::move(ivalue).template toCustomClass<ElemType>();
 }
 
 template <typename T>
@@ -1872,7 +1872,7 @@ OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
     return {};
   }
   return createVectorFromList<T>(
-    std::move(ivalue).to<c10::List<T>>()
+    std::move(ivalue).template to<c10::List<T>>()
   );
 }
 
@@ -1885,7 +1885,7 @@ std::array<Elem, sizeof...(I)> generic_to_array(
   // We need to do a deep copy of the array because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   TORCH_CHECK(
       list.size() == sizeof...(I),
       "Tried to convert a List with ",
@@ -1930,7 +1930,7 @@ std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
     return std::nullopt;
   }
-  return std::move(ivalue).to<T>();
+  return std::move(ivalue).template to<T>();
 }
 
 namespace detail {

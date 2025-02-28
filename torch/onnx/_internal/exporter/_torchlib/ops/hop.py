@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def call_op(
@@ -56,7 +60,7 @@ def call_op(
     return node.outputs
 
 
-@onnx_impl(torch.ops.higher_order.cond)
+@onnx_impl(torch.ops.higher_order.cond, no_compile=True)
 def higher_order_cond(
     cond: ir.Value,
     true_func: ir.Function,

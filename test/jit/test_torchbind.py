@@ -445,6 +445,10 @@ class TestTorchbind(JitTestCase):
 
         self.checkScript(fn, (1,))
 
+    def test_hasattr(self):
+        ss = torch.classes._TorchScriptTesting._StackString(["foo", "bar"])
+        self.assertFalse(hasattr(ss, "baz"))
+
     def test_default_args(self):
         def fn() -> int:
             obj = torch.classes._TorchScriptTesting._DefaultArgs()

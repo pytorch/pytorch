@@ -2,7 +2,7 @@
 import itertools
 import operator
 from functools import reduce
-from typing import Callable, Dict, TypeVar
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import sympy
@@ -19,9 +19,9 @@ from torch.nn.modules.conv import Conv2d
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_INFERENCE_RULES: Dict[Target, Callable] = {}
-_REFINEMENT_RULES: Dict[Target, Callable] = {}
-_RULES: Dict[Target, Callable] = {}
+_INFERENCE_RULES: dict[Target, Callable] = {}
+_REFINEMENT_RULES: dict[Target, Callable] = {}
+_RULES: dict[Target, Callable] = {}
 
 __all__ = [
     "GraphTypeChecker",

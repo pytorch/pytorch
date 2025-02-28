@@ -1265,7 +1265,7 @@ def gen_pyi(
             ],
             "apply_": [defs("apply_", ["self", "callable: Callable"], "Tensor")],
             "map_": [
-                defs("map_", ["self", "tensor: Tensor", "callable: Callable"], "Tensor")
+                defs("map_", ["self", "other: Tensor", "callable: Callable"], "Tensor")
             ],
             "map2_": [
                 defs(
@@ -1355,7 +1355,7 @@ def gen_pyi(
             "copy_": [
                 defs(
                     "copy_",
-                    ["self", "src: Tensor", "non_blocking: _bool = False"],
+                    ["self", "other: Tensor", "non_blocking: _bool = False"],
                     "Tensor",
                 )
             ],
@@ -1364,8 +1364,8 @@ def gen_pyi(
                     "set_",
                     [
                         "self",
-                        "storage: Storage | TypedStorage | UntypedStorage",
-                        "offset: IntLikeType",
+                        "source: Storage | TypedStorage | UntypedStorage",
+                        "storage_offset: IntLikeType",
                         "size: _symsize",
                         "stride: _symsize",
                     ],
@@ -1373,7 +1373,7 @@ def gen_pyi(
                 ),
                 defs(
                     "set_",
-                    ["self", "storage: Storage | TypedStorage | UntypedStorage"],
+                    ["self", "source: Storage | TypedStorage | UntypedStorage"],
                     "Tensor",
                 ),
             ],
@@ -1552,7 +1552,7 @@ def gen_pyi(
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # TODO: don't explicitly list dtypes here; get it from canonical
+    # TODO(#146647): don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
         f"{n}: dtype = ..."
@@ -1567,6 +1567,7 @@ def gen_pyi(
             "float8_e4m3fnuz",
             "float8_e5m2",
             "float8_e5m2fnuz",
+            "float8_e8m0fnu",
             "half",
             "uint8",
             "uint16",
