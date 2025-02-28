@@ -260,19 +260,34 @@ namespace {
 [[maybe_unused]] void ClipRangesToGatherToOffsetsV2(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
+    graph(%a, %b, %c, %d, %to0_in0, %to0_in1):
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
+        %y0_type : int = prim::dtype(%y0)
+        %y2 : Tensor = aten::to(%y1, %y0_type, %to0_in0, %to0_in0, %to0_in1)
+        %y3 : Tensor = fb::lengths_to_offsets(%y2, %d)
+        return (%y3, %y0))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %b, %c, %d, %to0_in0, %to0_in1):
+        %a_type : int = prim::dtype(%a)
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather_to_offsets(%a, %b, %c, %d, %a_type)
+        return (%y1, %y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
     graph(%a, %b, %c, %d, %to0_in0):
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
         %y0_type : int = prim::dtype(%y0)
         %y2 : Tensor = aten::to(%y1, %y0_type, %to0_in0, %to0_in0)
         %y3 : Tensor = fb::lengths_to_offsets(%y2, %d)
         return (%y3, %y0))IR";
-  std::string fused_pattern = R"IR(
+  std::string fused_pattern2 = R"IR(
     graph(%a, %b, %c, %d, %to0_in0):
         %a_type : int = prim::dtype(%a)
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather_to_offsets(%a, %b, %c, %d, %a_type)
         return (%y1, %y0))IR";
-  SubgraphRewriter fuse;
-  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
   fuse.runOnGraph(graph);
 }
 
