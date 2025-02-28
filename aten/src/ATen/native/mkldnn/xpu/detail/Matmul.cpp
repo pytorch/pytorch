@@ -42,7 +42,7 @@ sycl::event matmul(
   m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
   m2 = is_onednn_matmul_strides(m2) ? m2 : m2.contiguous();
   at::Tensor dst =
-      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+      is_onednn_matmul_strides(result) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
