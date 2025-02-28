@@ -762,7 +762,7 @@ class TestUnion(JitTestCase):
             template,
             "List[str] | List[torch.Tensor]",
             lhs["list_literal_of_mixed"],
-            "none of those types match the types of the" " given list elements",
+            "none of those types match the types of the given list elements",
         )
 
         self._assert_passes(
@@ -790,21 +790,21 @@ class TestUnion(JitTestCase):
             template,
             "int | torch.Tensor",
             lhs["list_literal_empty"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["list_literal_of_tensor"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["list_comprehension_of_tensor"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         """
@@ -894,7 +894,7 @@ class TestUnion(JitTestCase):
             template,
             "List[str] | List[torch.Tensor]",
             lhs["dict_literal_empty"],
-            "Expected an Union type annotation with an " "inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         self._assert_passes(
@@ -978,14 +978,14 @@ class TestUnion(JitTestCase):
             template,
             "int | torch.Tensor",
             lhs["dict_literal_empty"],
-            "Expected an Union type annotation with " "an inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["dict_literal_of_str_tensor"],
-            "Expected an Union type annotation with " "an inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         # See above--string frontend does not support tuple unpacking

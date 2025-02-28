@@ -63,7 +63,7 @@ class TestSetLinter(LinterTestCase):
                 {0: 25, 2: 24, 3: 23, 6: 8, 12: 14, 18: 22},
             ),
         )
-        for i, (s, expected) in enumerate(TESTS):
+        for s, expected in TESTS:
             pl = python_lines(s)
             if s:
                 actual = pl.token_lines[0].bracket_pairs
@@ -83,7 +83,7 @@ class TestSetLinter(LinterTestCase):
             ("{1, 2}", 1),
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
         )
-        for i, (s, expected) in enumerate(TESTS):
+        for s, expected in TESTS:
             pl = python_lines(s)
             actual = pl.token_lines and pl.token_lines[0].braced_sets
             self.assertEqual(len(actual), expected)
