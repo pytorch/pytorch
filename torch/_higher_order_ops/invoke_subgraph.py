@@ -73,6 +73,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
 
     if torch.compiler.is_compiling():
+        # For non-strict export tracing, we still want to go through Dynamo
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
@@ -98,8 +99,8 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
 
 def export_cache(name):
     """
-    export_cache is a hackier version of @mark_compiled_region. 
-    
+    export_cache is a hackier version of @mark_compiled_region.
+
     In strict-export, the behavior will be the same as @mark_compiled_region,
     which is that it will differentiate calls to the same function by
     strict-exporting each function call, and compare the graphs and inputs to
@@ -122,8 +123,8 @@ def export_cache(name):
                 if len(args) >= 1 and isinstance(args[0], torch.nn.Module):
                     # For annotations on methods, we need to lift the module
                     # params/buffers as inputs
-                    inputs: List[torch.Tensor] = []
-                    keys: List[str] = []
+                    inputs: list[torch.Tensor] = []
+                    keys: list[str] = []
                     for n, p in args[0].named_parameters():
                         keys.append(n)
                         inputs.append(p)
@@ -136,7 +137,7 @@ def export_cache(name):
                         return func(args[0], *user_inputs)
 
                     inputs.extend(args[1:])
-                    return invoke_subgraph(_func_wrapper, name, inputs)
+                    return invoke_subgraph(_func_wrapper, name, inputs)  # type: ignore[arg-type]
 
                 return invoke_subgraph(func, name, args)
 
@@ -240,6 +241,13 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
 
                 with context:
                     grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+
+            if not isinstance(grad_outputs, (list, tuple)):
+                raise RuntimeError(
+                    "Outputs of invoke_subgraph with inputs containing "
+                    "requires_grad=True must be a list or tuple of tensors. Got: "
+                    f"{grad_outputs}"
+                )
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in grad_outputs
@@ -381,7 +389,6 @@ def hash_identifier_and_inputs(identifier, operands):
             hash_shape(t.shape),
             hash_shape(t.stride()),
             t.dtype,
-            t.requires_grad,
             t.device,
         )
         if isinstance(t, torch.Tensor)
@@ -415,40 +422,26 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
 
     invoke_subgraph_cache = get_invoke_subgraph_cache(proxy_mode)
     assert invoke_subgraph_cache is not None
-    if "invoke_subgraph" not in identifier:
-        # HACK: Nonstrict export case, dynamo will set the identifier to be "invoke_subgraph"
-        key = hash_identifier_and_inputs(identifier, operands)
-        qualname = invoke_subgraph_cache.get_proxy_dispatch_identifier(key)
-        if qualname is not None:
-            # If we have already traced the subgraph.
-            graph = invoke_subgraph_cache.get_proxy_dispatch_entry(qualname)
-            assert graph is not None
 
-        else:
-            graph, qualname = trace_invoke_subgraph(subgraph, operands)
-            invoke_subgraph_cache.add_proxy_dispatch_identifier(key, qualname)
-            invoke_subgraph_cache.add_proxy_dispatch_entry(qualname, graph)
-
-        # Unique name for the subgraph. In the non-strict export case, the
-        # existing identifier is just a string differentiating between functions
-        # annotated with @export_cache. In the strict export case, dynamo will
-        # provide us with unique identifiers.
-        identifier = qualname
+    key = hash_identifier_and_inputs(identifier, operands)
+    qualname = invoke_subgraph_cache.get_proxy_dispatch_identifier(key)
+    if qualname is not None:
+        # If we have already traced the subgraph.
+        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(qualname)
+        assert graph is not None
 
     else:
-        # Check if we have already traced the subgraph.
-        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
-        if graph is None:
-            graph, qualname = trace_invoke_subgraph(subgraph, operands)
-            invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
+        graph, qualname = trace_invoke_subgraph(subgraph, operands)
+        invoke_subgraph_cache.add_proxy_dispatch_identifier(key, qualname)
+        invoke_subgraph_cache.add_proxy_dispatch_entry(qualname, graph)
 
-    node_args = (graph, identifier, operands)
+    node_args = (graph, qualname, operands)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
 
-    example_out = invoke_subgraph(graph, identifier, operands)
+    example_out = invoke_subgraph(graph, qualname, operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

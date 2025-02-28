@@ -7012,11 +7012,13 @@ def meta_local_scalar_dense(self: Tensor):
 
 
 @register_meta(aten.silu)
+@out_wrapper()
 def silu(self: Tensor) -> Tensor:
     return torch.empty_like(self)
 
 
 @register_meta(aten.sigmoid)
+@out_wrapper()
 def sigmoid(self: Tensor) -> Tensor:
     _, result_dtype = elementwise_dtypes(
         self,
@@ -7026,6 +7028,7 @@ def sigmoid(self: Tensor) -> Tensor:
 
 
 @register_meta(aten._softmax)
+@out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
         assert x.dtype == torch.half

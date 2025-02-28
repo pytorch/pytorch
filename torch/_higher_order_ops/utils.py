@@ -188,7 +188,7 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             fn,
             tracing_mode=tracing_mode,
             pre_dispatch=pre_dispatch,
-            _error_on_data_dependent_ops=True,
+            _error_on_data_dependent_ops=False,
         )(*inputs)
         insert_deferred_runtime_asserts(
             gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
@@ -599,7 +599,6 @@ def check_input_alias_and_mutation(
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-
             outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]

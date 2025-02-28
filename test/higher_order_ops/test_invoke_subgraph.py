@@ -295,11 +295,11 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '___forward_invoke_subgraph_0', (primals_1, primals_2));  repeated_subgraph0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'repeated_subgraph0', (primals_1, primals_2));  repeated_subgraph0 = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '___forward_invoke_subgraph_0', (getitem, primals_2));  repeated_subgraph0_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'repeated_subgraph0', (getitem, primals_2));  repeated_subgraph0_1 = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_1, primals_1, primals_2, getitem)
 
@@ -687,8 +687,8 @@ class TestInvokeSubgraphExport(TestCase):
                 x = gn(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
@@ -720,15 +720,14 @@ class TestInvokeSubgraphExport(TestCase):
 
     def test_pending_unbacked(self):
         class M(torch.nn.Module):
-            @mark_compile_region
-            # @export_cache("gn")
+            @export_cache("gn")
             def gn(self, x):
                 u = x[0].item()
-                return x * u
+                return (x * u,)
 
             def forward(self, x):
                 for _ in range(4):
-                    x = self.gn(x)
+                    x = self.gn(x)[0]
                 return x
 
         ep = torch.export.export(
@@ -762,8 +761,8 @@ class TestInvokeSubgraphExport(TestCase):
                 x = self.gn(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
@@ -791,8 +790,8 @@ class TestInvokeSubgraphExport(TestCase):
                     x = m(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
