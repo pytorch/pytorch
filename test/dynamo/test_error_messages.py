@@ -704,13 +704,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer 
 
         self.assertExpectedInline(
             munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=0),
-            """\
-Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
-
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-""",
+            """None""",
         )
 
     def test_unsupported_bytecode(self):
@@ -944,7 +938,7 @@ Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
   File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None)
+    raise e.with_traceback(None) from None
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
