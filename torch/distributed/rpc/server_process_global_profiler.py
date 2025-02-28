@@ -63,10 +63,14 @@ class _server_process_global_profile(profile):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> x, y = torch.tensor(1), torch.tensor(2)
-        >>> outer_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        >>> outer_profile_rref = rpc.remote(
+        ...     dst_worker_name, rpc._server_process_global_profile
+        ... )
         >>> outer_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
-        >>> inner_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        >>> inner_profile_rref = rpc.remote(
+        ...     dst_worker_name, rpc._server_process_global_profile
+        ... )
         >>> inner_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
         >>> inner_profile_rref.rpc_sync().__exit__(None, None, None)

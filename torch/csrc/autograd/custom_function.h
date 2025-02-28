@@ -284,7 +284,7 @@ struct CppNode : public Node {
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
 
-  void compiled_args(CompiledNodeArgs& args) const override {
+  void compiled_args(CompiledNodeArgs& args) override {
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
     args.collect(static_cast<uint64_t>(typeid(T).hash_code()));

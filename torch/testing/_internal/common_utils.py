@@ -1437,11 +1437,7 @@ NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEP
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 
 
-# Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN: bool = TestEnvironment.def_flag(
-    "NO_MULTIPROCESSING_SPAWN",
-    env_var="NO_MULTIPROCESSING_SPAWN",
-)
+NO_MULTIPROCESSING_SPAWN: bool = False
 TEST_WITH_ASAN: bool = TestEnvironment.def_flag(
     "TEST_WITH_ASAN",
     env_var="PYTORCH_TEST_WITH_ASAN",

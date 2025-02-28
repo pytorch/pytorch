@@ -571,31 +571,31 @@ class CppWrapperGpu(CppWrapperCpu):
                 device_index, call_args
             )
             kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
-            if triton_version_uses_attrs_dict():
-                signature = triton_meta["signature"]
-                arg_signatures = [
-                    val for val in signature.values() if val != "constexpr"
-                ]
-                call_args = [
-                    call_arg
-                    for call_arg, arg_name in zip(call_args, signature)
-                    if signature[arg_name] != "constexpr"
-                ]
-                arg_types = [
-                    arg_type
-                    for arg_type, arg_name in zip(arg_types, signature)
-                    if signature[arg_name] != "constexpr"
-                ]
-            else:
-                # args with value 1 are added into equal_to_1 and constants
-                # in triton_meta (in the Python codegen) which makes them
-                # inlined in the PTX and compiled CUBIN
-                arg_signatures = []
-                if (
-                    triton_meta is not None
-                    and triton_meta.get("configs")
-                    and triton_meta.get("signature")
-                ):
+            arg_signatures = []
+            if (
+                triton_meta is not None
+                and triton_meta.get("configs")
+                and triton_meta.get("signature")
+            ):
+                if triton_version_uses_attrs_dict():
+                    signatures = triton_meta["signature"]
+                    arg_signatures = [
+                        val for val in signatures.values() if val != "constexpr"
+                    ]
+                    call_args = [
+                        call_arg
+                        for call_arg, arg_name in zip(call_args, signatures)
+                        if signatures[arg_name] != "constexpr"
+                    ]
+                    arg_types = [
+                        arg_type
+                        for arg_type, arg_name in zip(arg_types, signatures)
+                        if signatures[arg_name] != "constexpr"
+                    ]
+                else:
+                    # args with value 1 are added into equal_to_1 and constants
+                    # in triton_meta (in the Python codegen) which makes them
+                    # inlined in the PTX and compiled CUBIN
                     equal_to_1 = triton_meta["configs"][0].equal_to_1
                     call_args = [
                         arg for i, arg in enumerate(call_args) if i not in equal_to_1

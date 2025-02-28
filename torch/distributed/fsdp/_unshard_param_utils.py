@@ -185,9 +185,9 @@ def _unshard_fsdp_state_params(
         yield
         return
 
-    assert (
-        handle._training_state == HandleTrainingState.IDLE
-    ), f"Expects the handle training to be IDLE but got {handle._training_state}"
+    assert handle._training_state == HandleTrainingState.IDLE, (
+        f"Expects the handle training to be IDLE but got {handle._training_state}"
+    )
 
     handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 

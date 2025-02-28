@@ -133,9 +133,9 @@ class OperatorBase:
                 return fn
 
             assert isinstance(k, DispatchKey)
-            assert (
-                k != DispatchKey.Python
-            ), "Please register a mode for the DispatchKey.Python key instead."
+            assert k != DispatchKey.Python, (
+                "Please register a mode for the DispatchKey.Python key instead."
+            )
 
             if k in self.py_kernels:
                 raise RuntimeError(
@@ -422,12 +422,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 DispatchKey.Python
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
-                assert (
-                    type(curr_mode) in self.python_key_table
-                ), f"Current active mode {curr_mode} not registered"
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
+                )
+                assert type(curr_mode) in self.python_key_table, (
+                    f"Current active mode {curr_mode} not registered"
+                )
                 handler = self.python_key_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
@@ -828,9 +828,9 @@ class OpOverload(OperatorBase):
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
                 curr_mode = type(_get_current_dispatch_mode())
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                )
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):

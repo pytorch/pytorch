@@ -352,9 +352,9 @@ class SideEffects:
         from .variables.torch_function import TorchFunctionModeVariable
         from .variables.user_defined import is_forbidden_context_manager
 
-        variable_cls: type[
+        variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
-        ] = variables.UserDefinedObjectVariable
+        )
         if issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
@@ -508,7 +508,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var]  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):

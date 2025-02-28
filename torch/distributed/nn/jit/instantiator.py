@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
+import atexit
 import importlib
 import logging
 import os
@@ -19,20 +20,21 @@ logger = logging.getLogger(__name__)
 _FILE_PREFIX = "_remote_module_"
 _TEMP_DIR = tempfile.TemporaryDirectory()
 INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
+atexit.register(_TEMP_DIR.cleanup)
 logger.info("Created a temporary directory at %s", INSTANTIATED_TEMPLATE_DIR_PATH)
 sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
 def get_arg_return_types_from_interface(module_interface):
-    assert getattr(
-        module_interface, "__torch_script_interface__", False
-    ), "Expect a TorchScript class interface decorated by @torch.jit.interface."
+    assert getattr(module_interface, "__torch_script_interface__", False), (
+        "Expect a TorchScript class interface decorated by @torch.jit.interface."
+    )
     qualified_name = torch._jit_internal._qualified_name(module_interface)
     cu = torch.jit._state._python_cu
     module_interface_c = cu.get_interface(qualified_name)
-    assert (
-        "forward" in module_interface_c.getMethodNames()
-    ), f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
+    assert "forward" in module_interface_c.getMethodNames(), (
+        f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
+    )
     method_schema = module_interface_c.getMethod("forward")
 
     arg_str_list = []

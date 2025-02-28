@@ -41,9 +41,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
     ) -> None:
         """Rename the parameter/buffer and replace corresponding nodes with new nodes of updated target."""
         assert len(nodes) > 0, "`nodes` cannot be empty"
-        assert (
-            len({node.target for node in nodes}) == 1
-        ), "`nodes` must all have same `target`"
+        assert len({node.target for node in nodes}) == 1, (
+            "`nodes` must all have same `target`"
+        )
         old_name = nodes[0].target
         assert isinstance(old_name, str), f"Expected str, got type({old_name})"
         # Parameter/buffer name cannot contain "."
@@ -74,9 +74,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         to the same objects, allowing us to use it as key to retrieve the original name.
         """
         assert len(args) == 0, "RestoreParameterAndBufferNames does not take any args"
-        assert (
-            len(kwargs) == 0
-        ), "RestoreParameterAndBufferNames does not take any kwargs"
+        assert len(kwargs) == 0, (
+            "RestoreParameterAndBufferNames does not take any kwargs"
+        )
         # state_to_readable_name[parameter/buffer] returns the original readable name of
         # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: dict[torch.nn.Parameter | torch.Tensor, str] = {}
@@ -95,9 +95,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
 
         for node in self.module.graph.nodes:
             if node.op == "get_attr":
-                assert isinstance(
-                    node.target, str
-                ), f"Expected str, got type({node.target})"
+                assert isinstance(node.target, str), (
+                    f"Expected str, got type({node.target})"
+                )
                 if node.target.find(".") != -1:
                     raise RuntimeError(
                         f"Unexpected target {node.target} in get_attr, found '.' in target. "

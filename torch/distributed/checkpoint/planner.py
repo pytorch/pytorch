@@ -151,7 +151,7 @@ class SavePlanner(abc.ABC):
     >>>         storage_meta: Optional[StorageMeta],
     >>>         is_coordinator: bool,
     >>>     ) -> None:
-    >>>         # prefix all keys with `foo_``
+    >>> # prefix all keys with `foo_``
     >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
@@ -175,8 +175,8 @@ class SavePlanner(abc.ABC):
     >>> from itertools import zip_longest
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
-    >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
-    >>>     # This sample doesn't handle ShardedTensors
+    >>> # This uses the default local plan behavior of having all non-sharded writes in rank 0
+    >>> # This sample doesn't handle ShardedTensors
     >>>     def create_global_plan(self, all_plans):
     >>>         iters = [iter(all_plans[0].items)] * len(all_plans)
     >>>         items_per_rank = [
@@ -347,7 +347,7 @@ class LoadPlanner:
     >>>         self.is_coordinator = is_coordinator
     >>>
     >>>     def load_bytes(self, read_item, value):
-    >>>         # Remove the "foo_" prefix
+    >>> # Remove the "foo_" prefix
     >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 

@@ -898,7 +898,9 @@ class PythonWrapperCodegen(CodeGen):
                 continue
 
             # a graph partition may take an IRNode output from a previous partition
-            if name not in V.graph.graph_input_names:
+            if name not in V.graph.graph_input_names or isinstance(
+                buf, ir.GeneratorState
+            ):
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -1418,7 +1420,9 @@ class PythonWrapperCodegen(CodeGen):
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
                     bound_vars.add(stride)
         elif isinstance(value, ir.TorchBindObject):
-            pass
+            return
+        elif isinstance(value, ir.GeneratorState):
+            return
         else:
             if torch._inductor.config.graph_partition:
                 pass
@@ -1612,6 +1616,11 @@ class PythonWrapperCodegen(CodeGen):
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
                     add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
+                elif isinstance(value, ir.GeneratorState):
+                    add_expr_input(
+                        name,
+                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
+                    )
                 else:
                     shape = [
                         V.graph.sizevars.size_hint(x, fallback=42)
@@ -2287,6 +2296,8 @@ class PythonWrapperCodegen(CodeGen):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
+        elif isinstance(s, ir.GeneratorState):
+            return s.codegen_reference()
         else:
             return repr(s)
 

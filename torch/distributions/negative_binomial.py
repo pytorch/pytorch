@@ -30,6 +30,7 @@ class NegativeBinomial(Distribution):
         probs (Tensor): Event probabilities of success in the half open interval [0, 1)
         logits (Tensor): Event log-odds for probabilities of success
     """
+
     arg_constraints = {
         "total_count": constraints.greater_than_eq(0),
         "probs": constraints.half_open_interval(0.0, 1.0),

@@ -723,9 +723,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             else:
-                assert (
-                    prev_state_dict_type == submodule._state_dict_type
-                ), "All FSDP modules should have the same state_dict_type."
+                assert prev_state_dict_type == submodule._state_dict_type, (
+                    "All FSDP modules should have the same state_dict_type."
+                )
             if prev_state_dict_config is None:
                 prev_state_dict_config = submodule._state_dict_config
             else:
@@ -738,7 +738,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 assert isinstance(
                     submodule._optim_state_dict_config,
                     type(prev_optim_state_dict_config),
-                ), "All FSDP modules must have the same type of optim_state_dict_config."
+                ), (
+                    "All FSDP modules must have the same type of optim_state_dict_config."
+                )
 
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
@@ -2153,9 +2155,9 @@ def _get_param_to_fqn(
     """
     param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
-        assert (
-            len(param_names) > 0
-        ), "`_get_param_to_fqns()` should not construct empty lists"
+        assert len(param_names) > 0, (
+            "`_get_param_to_fqns()` should not construct empty lists"
+        )
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "

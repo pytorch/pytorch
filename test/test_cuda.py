@@ -60,7 +60,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
     serialTest,
@@ -1088,11 +1087,6 @@ except RuntimeError as e:
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
@@ -1121,11 +1115,6 @@ except RuntimeError as e:
             return err
 
     @slowTest
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     @skipIfRocm
     def test_index_out_of_bounds_exception_cuda(self):
         test_method = TestCuda._test_index_bounds_cuda

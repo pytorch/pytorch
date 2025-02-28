@@ -22,6 +22,7 @@ class Chi2(Gamma):
     Args:
         df (float or Tensor): shape parameter of the distribution
     """
+
     arg_constraints = {"df": constraints.positive}
 
     def __init__(self, df, validate_args=None):

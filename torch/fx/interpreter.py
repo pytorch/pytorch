@@ -173,7 +173,11 @@ class Interpreter:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
-                    if isinstance(self.module, GraphModule):
+                    if (
+                        isinstance(self.module, GraphModule)
+                        and self.module.graph is not None
+                        and isinstance(self.module.graph, torch.fx.Graph)
+                    ):
                         msg += f"\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}\n"
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]

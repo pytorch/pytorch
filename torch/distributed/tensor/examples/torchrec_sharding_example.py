@@ -3,6 +3,7 @@
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.
 """
+
 import argparse
 import os
 from functools import cached_property

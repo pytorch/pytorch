@@ -113,9 +113,15 @@ def local_map(
         >>>     device_mesh=device_mesh,
         >>> )
         >>>
-        >>> W_dt = distribute_tensor(W, device_mesh, (col_wise))  # col-wisely sharded W tensor
-        >>> X_dt = distribute_tensor(X, device_mesh, (row_wise))  # row-wisely sharded X tensor
-        >>> Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)  # apply local_mm_allreduce_forward to DTensors
+        >>> W_dt = distribute_tensor(
+        ...     W, device_mesh, (col_wise)
+        ... )  # col-wisely sharded W tensor
+        >>> X_dt = distribute_tensor(
+        ...     X, device_mesh, (row_wise)
+        ... )  # row-wisely sharded X tensor
+        >>> Y_dt = local_mm_allreduce_forward(
+        ...     device_mesh, W_dt, X_dt
+        ... )  # apply local_mm_allreduce_forward to DTensors
 
     .. note:: This API is currently experimental and subject to change
     """
@@ -151,9 +157,9 @@ def local_map(
                 )
                 if in_placements is not None:
                     spec = in_placements[idx]
-                    assert (
-                        spec is not None
-                    ), f"DTensor input {arg} expects placements but received {spec}!"
+                    assert spec is not None, (
+                        f"DTensor input {arg} expects placements but received {spec}!"
+                    )
 
                     if not isinstance(spec, tuple):
                         spec = tuple(spec)
@@ -208,17 +214,17 @@ def local_map(
             )
             for out, spec in zip(flat_out, out_placements_tuple):
                 if isinstance(out, torch.Tensor):
-                    assert not isinstance(
-                        out, DTensor
-                    ), f"torch.Tensor output expected but received {type(out)}: {out}"
+                    assert not isinstance(out, DTensor), (
+                        f"torch.Tensor output expected but received {type(out)}: {out}"
+                    )
 
                     flat_dist_out.append(
                         DTensor.from_local(out, device_mesh, spec, run_check=False)
                     )
                 else:
-                    assert (
-                        spec is None
-                    ), f"Non-tensor output {out} expects None placements but received {spec}!"
+                    assert spec is None, (
+                        f"Non-tensor output {out} expects None placements but received {spec}!"
+                    )
 
                     flat_dist_out.append(out)
 
