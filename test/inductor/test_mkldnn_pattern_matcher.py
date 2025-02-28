@@ -4114,7 +4114,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod,
             (a,),
             matcher_check_fn,
-            include_ops=["qlinear_pointwise.binary_tensor"]
+            include_ops=("qlinear_pointwise.binary_tensor",)
             if test_for_pointwise_binary
             else (),
             check_autocast=dtype,
