@@ -4053,10 +4053,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             and not has_bias
             else False
         )
-        self.skipTest(
-            test_for_pointwise_binary and not IS_X86,
-            "Some UTs are only supported on x86_64 CPUs",
-        )
+        if test_for_pointwise_binary and not IS_X86:
+            self.skipTest("Some UTs are only supported on x86_64 CPUs")
 
         class Mod(torch.nn.Module):
             def __init__(self, dtype: torch.dtype, has_bias: bool):
