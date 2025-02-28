@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import itertools
 import math
+import operator
 import re
 import sys
 import warnings
@@ -560,11 +561,14 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
 
         for cpp_kernel_proxy in cpp_kernel_proxy_list:
             outer_ranges = functools.reduce(
-                lambda x, y: x * y,
+                operator.mul,
                 cpp_kernel_proxy.ranges[:outer_loop_fusion_depth],
             )
-            # If the range of the first inner loop is much larger than
-            # the range of all outer loops, fallback to standard codegen.
+            # When the range of the first inner loop is much larger than the range of
+            # all outer loops, do not fuse outer loop and fallback to standard loop codegen,
+            # so that the inner loops with larger range have a chance to be parallelized.
+            # We set a conservative threshold here:
+            # First inner loop range / all outer loops range > 300.
             if (
                 len(cpp_kernel_proxy.ranges) > outer_loop_fusion_depth
                 and isinstance(outer_ranges, sympy.Integer)
