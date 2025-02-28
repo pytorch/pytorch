@@ -136,7 +136,9 @@ else:
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
+    ), (
+        "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
+    )
     if isinstance(constant_buffer, sympy.core.numbers.Integer):
         return torch.int64
 
@@ -308,9 +310,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.reuse_shape_env = True
         self._shape_env = shape_env
         # We're going to mutate ras_by_symbol as we finish generating them
-        self.ras_by_symbol: dict[
-            Optional[sympy.Symbol], list[RuntimeAssert]
-        ] = shape_env.deferred_runtime_asserts.copy()
+        self.ras_by_symbol: dict[Optional[sympy.Symbol], list[RuntimeAssert]] = (
+            shape_env.deferred_runtime_asserts.copy()
+        )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
@@ -400,9 +402,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: list[
             tuple[int, str]
-        ] = (
-            []
-        )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: Optional[str] = None
 
@@ -1012,7 +1012,10 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
     def placeholder(
-        self, target: str, args: tuple[object], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[object],  # type: ignore[override]
+        kwargs: dict[str, object],
     ) -> Union[Expr, TensorBox, None]:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
@@ -1118,9 +1121,9 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
-            assert isinstance(
-                target, torch._ops.OpOverload
-            ), f"{target} is not an OpOverload"
+            assert isinstance(target, torch._ops.OpOverload), (
+                f"{target} is not an OpOverload"
+            )
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target, warn=False, override_decomp=True)
@@ -1189,7 +1192,10 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: tuple[()], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[()],  # type: ignore[override]
+        kwargs: dict[str, object],
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1241,7 +1247,10 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError
 
     def output(
-        self, target: str, args: tuple[object], kwargs: dict[str, object]  # type: ignore[override]
+        self,
+        target: str,  # type: ignore[override]
+        args: tuple[object],  # type: ignore[override]
+        kwargs: dict[str, object],
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
@@ -1439,9 +1448,11 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(
-            n
-        ), V.set_current_node(n):
+        with (
+            ir.IRNode.current_origins(origins),
+            self.set_current_node(n),
+            V.set_current_node(n),
+        ):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1454,7 +1465,8 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs  # type: ignore[possibly-undefined]
+                    *args,  # type: ignore[possibly-undefined]
+                    **kwargs,  # type: ignore[possibly-undefined]
                 )
             elif (
                 n.op == "call_function"
@@ -1833,9 +1845,9 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(
             self.device_type, self.cpp_wrapper
         )
-        assert (
-            wrapper_code_gen_cls is not None
-        ), f"Device {self.device_type} not supported"
+        assert wrapper_code_gen_cls is not None, (
+            f"Device {self.device_type} not supported"
+        )
         self.wrapper_code = wrapper_code_gen_cls.create(
             is_subgraph,
             subgraph_name,
@@ -1866,7 +1878,7 @@ class GraphLowering(torch.fx.Interpreter):
                 compiled = self.compile_to_module().call
 
                 def materialize(
-                    x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
+                    x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
                 ) -> Union[int, float, torch.Tensor]:
                     if x is None:
                         return None
@@ -1876,9 +1888,9 @@ class GraphLowering(torch.fx.Interpreter):
                     elif isinstance(x, FakeTensor):
                         return defake(x)
                     else:
-                        assert isinstance(
-                            x, torch.Tensor
-                        ), "Unknown type when creating real inputs" + str(type(x))
+                        assert isinstance(x, torch.Tensor), (
+                            "Unknown type when creating real inputs" + str(type(x))
+                        )
                         return x
 
                 tracing_context = torch._guards.TracingContext.try_get()
