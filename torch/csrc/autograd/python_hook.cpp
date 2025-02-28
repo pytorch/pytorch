@@ -176,7 +176,7 @@ auto PyFunctionPostHook::operator()(
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
-void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) const {
+void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   Py_BEGIN_CRITICAL_SECTION(dict);
@@ -189,7 +189,7 @@ void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) const {
   Py_END_CRITICAL_SECTION();
 }
 
-void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) const {
+void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   Py_BEGIN_CRITICAL_SECTION(dict);
@@ -200,7 +200,7 @@ void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) const {
   Py_END_CRITICAL_SECTION();
 }
 
-void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) const {
+void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   Py_BEGIN_CRITICAL_SECTION(dict);
@@ -237,7 +237,7 @@ auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
 }
 
 void PyFunctionTensorPostAccGradHooks::compiled_args(
-    torch::dynamo::autograd::CompiledNodeArgs& args) const {
+    torch::dynamo::autograd::CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   Py_BEGIN_CRITICAL_SECTION(dict);
