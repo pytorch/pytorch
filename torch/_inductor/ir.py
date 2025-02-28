@@ -4105,9 +4105,8 @@ class ComputedBuffer(OperationBuffer):
                 stride_lengths = [
                     V.graph.sizevars.stride_hints(expr, indices) for expr in reads
                 ]
-                from .scheduler import pick_loop_order
 
-                return pick_loop_order(stride_lengths, self.get_size())
+                return V.choices.pick_loop_order(stride_lengths, self.get_size())
 
         return None
 
@@ -4278,7 +4277,6 @@ class ComputedBuffer(OperationBuffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        from .scheduler import pick_loop_order
 
         if priority_idx is None:
             priority_idx = []
@@ -4291,7 +4289,9 @@ class ComputedBuffer(OperationBuffer):
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
+            order = list(
+                reversed(V.choices.pick_loop_order(strides, sizes, priority_idx))
+            )
         except Exception:
             if config.debug:
                 log.warning(
