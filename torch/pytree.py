@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
-import torch
 from torch.utils.pytree import (
     register_pytree_node as register_node,
     tree_all as all,
@@ -33,6 +32,7 @@ from torch.utils.pytree import (
     tree_map_only as map_only,
     tree_map_only_ as map_only_,
     tree_structure as structure,
+    tree_unflatten as _tree_unflatten,
 )
 
 
@@ -93,10 +93,18 @@ def unflatten(treespec: PyTreeSpec, leaves: Iterable[_Any]) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    return torch.utils.pytree.tree_unflatten(leaves, treespec)
+    return _tree_unflatten(leaves, treespec)
 
 
 def __getattr__(name: str) -> _Any:
     if name in ("PyTreeSpec", "TreeSpec"):
-        return torch.utils.pytree.PyTreeSpec
+        from torch.utils.pytree import PyTreeSpec
+
+        globals().update(
+            {
+                "PyTreeSpec": PyTreeSpec,
+                "TreeSpec": PyTreeSpec,
+            }
+        )
+        return PyTreeSpec
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
