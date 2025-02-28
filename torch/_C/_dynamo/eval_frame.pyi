@@ -24,9 +24,9 @@ class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
 class _FrameAction(enum.Enum):
-    DEFAULT: Literal[0]
-    SKIP: Literal[1]
-    RUN_ONLY: Literal[2]
+    DEFAULT = 0
+    SKIP = 1
+    RUN_ONLY = 2
 
 class _FrameExecStrategy:
     cur_action: _FrameAction
