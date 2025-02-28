@@ -20,7 +20,7 @@ fi
 source /opt/intel/oneapi/compiler/latest/env/vars.sh
 source /opt/intel/oneapi/pti/latest/env/vars.sh
 source /opt/intel/oneapi/umf/latest/env/vars.sh
-export USE_STATIC_MKL=1
+export USE_STATIC_MKL=0
 
 WHEELHOUSE_DIR="wheelhousexpu"
 LIBTORCH_HOUSE_DIR="libtorch_housexpu"
