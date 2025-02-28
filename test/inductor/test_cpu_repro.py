@@ -4131,7 +4131,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 expected = mod(x)
                 compiled_m = torch.compile(mod)
-                actual, code = run_and_get_cpp_code(compiled_m, x)
+                actual = compiled_m(x)
                 self.assertEqual(expected, actual)
                 # 3 generated kernels (first one for var_mean, last two for result)
                 check_metrics_vec_kernel_count(3)
@@ -4141,7 +4141,7 @@ class CPUReproTests(TestCase):
                     0,
                 )
                 # check for parallel reduction.
-                FileCheck().check("tmp_acc0_vec_arr").run(code)
+                self.assertEqual(metrics.parallel_reduction_count, 1)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):

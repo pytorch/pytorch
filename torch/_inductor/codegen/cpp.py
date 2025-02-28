@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import itertools
 import math
+import operator
 import re
 import sys
 import warnings
@@ -442,6 +443,11 @@ def stride_at_vec_range(
 
 @dataclasses.dataclass
 class ParallelDepth:
+    """
+    A class representing parallel depth.
+    Includes the starting depth of parallelism and the depth of parallelism.
+    """
+
     parallel_depth: int
     start_depth: int
 
@@ -566,11 +572,14 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
 
         for cpp_kernel_proxy in cpp_kernel_proxy_list:
             outer_ranges = functools.reduce(
-                lambda x, y: x * y,
+                operator.mul,
                 cpp_kernel_proxy.ranges[:outer_loop_fusion_depth],
             )
-            # If the range of the first inner loop is much larger than
-            # the range of all outer loops, fallback to standard codegen.
+            # When the range of the first inner loop is much larger than the range of
+            # all outer loops, do not fuse outer loop and fallback to standard loop codegen,
+            # so that the inner loops with larger range have a chance to be parallelized.
+            # We set a conservative threshold here:
+            # First inner loop range / all outer loops range > 300.
             if (
                 len(cpp_kernel_proxy.ranges) > outer_loop_fusion_depth
                 and isinstance(outer_ranges, sympy.Integer)
@@ -5368,12 +5377,11 @@ class LoopNest:
     @cache_on_self
     def max_parallel_depth(self):
         """
-        Maximal allowed depth for parallelism:
-        1) Levels without splitting and
-        2) All reduction or non-reduction levels
-        When the loop is split at the top level, the max depth is 1.
-        When the range of the first inner loop is much larger than the range of all outer loops,
-        change the starting depth of parallelization to the first inner loop.
+        Maximal allowed depth for parallelism: All reduction or non-reduction levels.
+        When the range of the first inner loop beyond the maximum parallel depth is much
+        larger than the range of all outer loops within the maximum parallel depth,
+        change the starting depth of parallelism to the first inner loop and recalculate
+        the maximum parallel depth.
         """
         if self.loops is None:
             return ParallelDepth(parallel_depth=0, start_depth=0)
@@ -5413,6 +5421,8 @@ class LoopNest:
         assert len(self.loops) >= par_depth.parallel_depth
         loop = self.loops[par_depth.start_depth]
         loop.parallel = par_depth.parallel_depth
+        if loop.is_reduction:
+            metrics.parallel_reduction_count += 1
         for i in range(par_depth.start_depth + 1, par_depth.parallel_depth):
             self.loops[i].collapsed = True
 
