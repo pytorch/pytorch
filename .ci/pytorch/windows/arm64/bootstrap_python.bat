@@ -10,24 +10,24 @@ echo PYTHON_VERSION is %PYTHON_VERSION%
 
 if "%PYTHON_VERSION%" == "3.13" (
     echo Python version is set to 3.13
-    set DOWNLOAD_URL="https://www.python.org/ftp/python/3.13.2/python-3.13.2-arm64.exe"
+    set DOWNLOAD_URL=https://www.python.org/ftp/python/3.13.2/python-3.13.2-arm64.exe
 )
-elseif "%PYTHON_VERSION%" == "3.12" (
+else if "%PYTHON_VERSION%" == "3.12" (
     echo Python version is set to 3.12
-    set DOWNLOAD_URL="https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe"
-) elseif "%PYTHON_VERSION%" == "3.11" (
+    set DOWNLOAD_URL=https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe
+) else if "%PYTHON_VERSION%" == "3.11" (
     echo Python version is set to 3.11
-    set DOWNLOAD_URL="https://www.python.org/ftp/python/3.11.9/python-3.11.9-arm64.exe"
+    set DOWNLOAD_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-arm64.exe
 ) else (
     echo PYTHON_VERSION not defined, Python version is set to 3.12
-    set DOWNLOAD_URL="https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe"
+    set DOWNLOAD_URL=https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe
 )
 
 set INSTALLER_FILE=%DOWNLOADS_DIR%\python-installer.exe
 
 :: Download installer
 echo Downloading Python...
-curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
+curl -L -o "%INSTALLER_FILE%" "%DOWNLOAD_URL%"
 
 :: Install Python
 echo Installing Python...
