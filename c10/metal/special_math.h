@@ -531,20 +531,20 @@ inline float xlog1py(T x, T y) {
 }
 
 template <typename T>
-inline float entr(T a) {
+inline T entr(T a) {
   if (a != a) {
     return a;
   }
 
   if (a > 0) {
-    return -a * ::metal::log(a);
+    return static_cast<T>(-a * ::metal::log(a));
   }
 
   if (a == 0) {
     return 0;
   }
 
-  return -INFINITY;
+  return static_cast<T>(-INFINITY);
 }
 
 } // namespace metal
