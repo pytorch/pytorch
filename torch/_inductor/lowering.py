@@ -4311,10 +4311,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+def should_fallback_max_pool2d_with_indices(kernel_size):
     kernel_size = pad_listlike(kernel_size, 2)
     window_size = kernel_size[0] * kernel_size[1]
-    return (window_size > 25) or any(d > 1 for d in dilation)
+    return window_size > 25
 
 
 def max_pool2d_checks(
@@ -4339,7 +4339,7 @@ def max_pool2d_checks(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
-    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size)
     if assert_fallback is not None:
         assert use_fallback == assert_fallback
 
@@ -4368,7 +4368,14 @@ def _max_pool2d_with_offsets(
     )
 
     new_size = list(batch) + [h_out, w_out]
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+    if (
+        padding[0]
+        or padding[1]
+        or ceil_mode1
+        or ceil_mode2
+        or (dilation[0] > 1)
+        or (dilation[1] > 1)
+    ):
         x_loader = constant_boundary_condition(x, min_value, dim=2)
     else:
         x_loader = x.make_loader()
@@ -4378,7 +4385,10 @@ def _max_pool2d_with_offsets(
     def fn_inner(idx, reduction_idx):
         prefix = idx[:-dim]
         bh = idx[-dim:]
-        ih = [bh[i] * stride[i] + reduction_idx[i] - padding[i] for i in range(dim)]
+        ih = [
+            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            for i in range(dim)
+        ]
         return x_loader([*prefix, *ih])
 
     result = Reduction.create(
@@ -4477,12 +4487,6 @@ def _low_memory_max_pool2d_offsets_to_indices(
     return indices
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
-
-
 # Fallback when we do not decompose to the low-memory path.
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
 def max_pool2d_with_indices(
@@ -4496,11 +4500,6 @@ def max_pool2d_with_indices(
     kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
         x, kernel_size, stride, padding, dilation
     )
-
-    if any(d > 1 for d in dilation):
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode=ceil_mode
-        )
 
     out, offsets = _max_pool2d_with_offsets(
         x, kernel_size, stride, padding, dilation, ceil_mode
