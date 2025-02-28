@@ -521,9 +521,9 @@ def jagged_from_tensor_and_lengths(
         )
 
     # Calculate jagged offsets
-    assert (
-        len(tensor.shape) >= 2
-    ), "tensor must at least be 2D for the nested narrow op to work"
+    assert len(tensor.shape) >= 2, (
+        "tensor must at least be 2D for the nested narrow op to work"
+    )
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device
