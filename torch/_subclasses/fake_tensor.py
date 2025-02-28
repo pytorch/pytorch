@@ -8,6 +8,7 @@ import functools
 import logging
 import math
 import os
+import threading
 import traceback
 import typing
 import weakref
@@ -133,6 +134,18 @@ class UnsupportedOperatorException(RuntimeError):
 @dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
+
+
+class FakeTensorTLS(threading.local):
+    # Default to None, otherwise it'll be used to override _all_
+    # `FakeTensorMode.allow_non_fake_inputs` in this thread.
+    allow_non_fake_inputs_override: Optional[bool]
+
+    def __init__(self) -> None:
+        self.allow_non_fake_inputs_override = None
+
+
+fake_tensor_tls = FakeTensorTLS()
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -1820,10 +1833,11 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _maybe_infer_fake(
         self, func: OpOverload, path: KeyPath, fake: object, real: object
-    ) -> Optional[object]:
+    ) -> tuple[Optional[object], bool]:
         """
         Helper to cross-check fake/real output properties & values,
         and create new fake vals if mismatched.
+        Returns tuple of object & boolean, for whether or not it was overwrriten
         """
         import sympy
 
@@ -1876,7 +1890,7 @@ class FakeTensorMode(TorchDispatchMode):
                             "reason": exc.reason,  # noqa: F821
                         },
                     )
-                    return _infer_fake_from_real_tensor(self, func, real)  # type: ignore[arg-type]
+                    return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
                 raise MetadataMismatchError(
                     f"Real tensor propagation found a metadata mismatch between "
                     f"fake tensor {fake} and real tensor {real}, "
@@ -1897,7 +1911,7 @@ class FakeTensorMode(TorchDispatchMode):
                                 "reason": exc.reason,  # noqa: F821
                             },
                         )
-                        return _infer_fake_from_real_tensor(self, func, real)  # type: ignore[arg-type]
+                        return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
                     raise MetadataMismatchError(
                         f"Real tensor propagation found an output size mismatch between "
                         f"fake shape {s_fake} and real shape {s_real}, "
@@ -1912,7 +1926,7 @@ class FakeTensorMode(TorchDispatchMode):
                     f"fake output value {fake} and real output value {real}, "
                     f"at output{keystr(path)}, for func: {func}"
                 ) from exc
-        return fake
+        return fake, False
 
     def _maybe_infer_fake_kernel_from_pytree_out(
         self,
@@ -1928,6 +1942,18 @@ class FakeTensorMode(TorchDispatchMode):
         Means this handles pytree outputs & checks aliasing.
         """
         from torch._subclasses.fake_utils import _check_alias_info
+
+        # we might have to clear pending unbacked symbols, if we override the kernel
+        pending_unbacked = None
+        if self.shape_env:
+            pending_unbacked = list(self.shape_env.pending_fresh_unbacked_symbols)
+
+        def _clear_pending_unbacked() -> None:
+            self.shape_env.pending_fresh_unbacked_symbols = list(  # type: ignore[union-attr]
+                set(self.shape_env.pending_fresh_unbacked_symbols).difference(  # type: ignore[union-attr]
+                    pending_unbacked  # type: ignore[arg-type]
+                )
+            )
 
         fake_paths_leaves, fake_spec = pytree.tree_flatten_with_path(fake_out)
         real_leaves, _ = pytree.tree_flatten(real_out)
@@ -1951,6 +1977,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # if aliasing mismatches are found, it's likely that the fake tensor impl
                 # is incorrectly aliasing, since we don't support aliasing custom ops.
                 # in this case we can default to inferring non-aliasing fake kernels from the real outputs.
+                _clear_pending_unbacked()
                 return tree_map(
                     lambda x: _infer_fake_from_real_tensor(self, func, x), real_out
                 )
@@ -1963,12 +1990,18 @@ class FakeTensorMode(TorchDispatchMode):
 
         # if no errors raised, run cross checks on fake/real tensors,
         # optionally overriding individual fake tensors, if individual meta kernel output is incorrect.
-        fake_leaves = [
-            self._maybe_infer_fake(func, _fake_path, _fake_out, _real_out)
-            for (_fake_path, _fake_out), _real_out in zip(
-                fake_paths_leaves, real_leaves
-            )
-        ]
+        fake_leaves, overrides = zip(
+            *[
+                self._maybe_infer_fake(func, _fake_path, _fake_out, _real_out)
+                for (_fake_path, _fake_out), _real_out in zip(
+                    fake_paths_leaves, real_leaves
+                )
+            ]
+        )
+        if (
+            any(overrides) and pending_unbacked
+        ):  # only keep new pending unbacked symbols
+            _clear_pending_unbacked()
         return pytree.tree_unflatten(fake_leaves, fake_spec)
 
     def _dispatch_impl(
@@ -2238,9 +2271,6 @@ class FakeTensorMode(TorchDispatchMode):
                         real_out,
                     )
                 else:
-                    # the pending unbacked symbols have to be cleared first
-                    if self.shape_env is not None:
-                        self.shape_env.pending_fresh_unbacked_symbols.clear()
                     # this can override the output only when the flag is True
                     fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
                         func,
@@ -2456,7 +2486,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
-                if not self.allow_non_fake_inputs:
+                allow_non_fake_inputs = (
+                    self.allow_non_fake_inputs
+                    if fake_tensor_tls.allow_non_fake_inputs_override is None
+                    else fake_tensor_tls.allow_non_fake_inputs_override
+                )
+                if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)

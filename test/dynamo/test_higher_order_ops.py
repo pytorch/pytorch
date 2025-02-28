@@ -6961,11 +6961,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.cond(x.sum() > 0, true_fn, false_fn)
 
         x = torch.randn(2, 3)
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            output_mismatch_test(x)
+        output_mismatch_test(x)
 
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            torch.compile(output_mismatch_test)(x)
+        torch.compile(output_mismatch_test, backend="eager")(x)
 
     def test_non_aliasing_util(self):
         from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
