@@ -20,9 +20,9 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from .. import variables
+from .. import variables, graph_break_hints
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented, unimplemented_v2
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import cmp_name_to_op_mapping, istype
@@ -88,7 +88,15 @@ class MutationType:
         elif typ is SourceType.New:
             self.scope = current_scope_id()
         else:
-            unimplemented(f"Unsupported SourceType: {typ}")
+            unimplemented_v2(
+                gb_type="Unsupported SourceType",
+                context=f"MutationType.__init__ {self} {typ}",
+                explanation=f"Dynamo does not support the type `{typ}`",
+                hints=[
+                    "This branch is not supposed to be reachable.",
+                    *graph_break_hints.DYNAMO_BUG,
+                ]
+            )
 
 
 class ValueMutationNew(MutationType):
@@ -326,7 +334,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         try:
             return self.as_python_constant()
         except NotImplementedError as e:
-            unimplemented(str(e))
+            unimplemented_v2(
+                gb_type=f"{self} is not a constant",
+                context=f"guard_as_python_constant {self}",
+                explanation=str(e),
+                hints=[],
+            )
 
     def is_python_constant(self):
         try:
@@ -402,12 +415,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return self.has_unpack_var_sequence(tx)
 
     def inspect_parameter_names(self) -> list[str]:
-        unimplemented(f"inspect_parameter_names: {self}")
+        unimplemented_v2(
+            gb_type="Unsupported inspect call",
+            context=f"inspect_parameter_names {self}",
+            explanation="",
+            hints=[],
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        unimplemented(f"hasattr {self.__class__.__name__} {name}")
+        unimplemented_v2(
+            gb_type="Unsupported hasattr call",
+            context=f"call_obj_hasattr {self} {name}",
+            explanation=f"hasattr {self.__class__.__name__} {name}",
+            hints=[
+                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def call_function(
         self,
@@ -458,7 +484,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 not other.is_python_constant()
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
-                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+                unimplemented_v2(
+                    gb_type="",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=f"",
+                    hints=[],
+                )
 
             return variables.ConstantVariable.create(
                 cmp_name_to_op_mapping[name](
@@ -503,7 +534,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return True
 
     def next_variable(self, tx):
-        unimplemented(f"next({self})")
+        unimplemented_v2(
+            gb_type="Non-iterator variable",
+            context=f"next({self})",
+            explanation=f"",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
