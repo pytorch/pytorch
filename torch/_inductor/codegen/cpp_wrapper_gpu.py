@@ -60,13 +60,13 @@ class DeferredGpuKernelLine(DeferredLineBase):
             # MultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
         for key in self.keys:
-            assert (
-                key in params
-            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            assert key in params, (
+                f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            )
             if key == get_cpp_wrapper_cubin_path_name():
                 assert os.path.exists(params[key]), f"{params[key]} does not exist"
                 self.additional_files.append(params[key])
@@ -122,9 +122,9 @@ class DeferredGpuDefaultGrid:
             grid_fn = self.grid_callable(*grid, **self.grid_extra_kwargs)
 
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
         return grid_fn(params["meta"])
 
 
@@ -153,9 +153,9 @@ class DeferredGpuGridLine(DeferredLineBase):
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
 
         if self.autotune_configs is not None:
             # This indicates the Triton kernel is a user-defined one.
@@ -248,13 +248,13 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.aot_mode and V.graph.inputs_to_check:
             for idx in V.graph.inputs_to_check:
                 input_name = V.graph.graph_input_names[idx]
-                assert (
-                    input_name in V.graph.graph_inputs
-                ), f"{input_name} not found in graph inputs"
+                assert input_name in V.graph.graph_inputs, (
+                    f"{input_name} not found in graph inputs"
+                )
                 value = V.graph.graph_inputs[input_name]
-                assert isinstance(
-                    value, TensorBox
-                ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                assert isinstance(value, TensorBox), (
+                    f"{input_name} is expected to be tensor but found as {type(value)}"
+                )
                 warn_msg = (
                     f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
                     "but it is not aligned at run time. Copying to an aligned tensor "
