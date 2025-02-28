@@ -2999,6 +2999,7 @@
     CPU: _fft_r2c_mkl
     CUDA: _fft_r2c_cufft
     MPS: _fft_r2c_mps
+  tags: core
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -13230,7 +13231,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_entr_out
+    CPU, CUDA, MPS: special_entr_out
   tags: pointwise
 
 - func: special_ndtri(Tensor self) -> Tensor
