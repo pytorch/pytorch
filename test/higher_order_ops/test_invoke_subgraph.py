@@ -12,7 +12,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+from torch._higher_order_ops.invoke_subgraph import export_cache, mark_compile_region
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -295,11 +295,11 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '___forward_invoke_subgraph_0', (primals_1, primals_2));  repeated_subgraph0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'repeated_subgraph0', (primals_1, primals_2));  repeated_subgraph0 = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '___forward_invoke_subgraph_0', (getitem, primals_2));  repeated_subgraph0_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'repeated_subgraph0', (getitem, primals_2));  repeated_subgraph0_1 = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_1, primals_1, primals_2, getitem)
 
@@ -677,7 +677,7 @@ class GraphModule(torch.nn.Module):
 )
 class TestInvokeSubgraphExport(TestCase):
     def test_simple_func(self):
-        @mark_compile_region
+        @export_cache("gn")
         def gn(x, y):
             return torch.mul(x, y)
 
@@ -687,36 +687,15 @@ class TestInvokeSubgraphExport(TestCase):
                 x = gn(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
-        self.assertExpectedInline(
-            normalize_gm(ep.graph_module.print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, x: "f32[8]", y: "f32[8]"):
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', (x, y));  repeated_subgraph0 = x = None
-        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
-
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_0', (getitem, y));  repeated_subgraph0_1 = getitem = y = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1,)
-
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
-            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            return (mul,)
-""",
-        )
-
     def test_unbacked(self):
-        @mark_compile_region
+        @export_cache("gn")
         def gn(x, y):
             b = x.item()
             torch._check_is_size(b)
@@ -741,14 +720,14 @@ class GraphModule(torch.nn.Module):
 
     def test_pending_unbacked(self):
         class M(torch.nn.Module):
-            @mark_compile_region
+            @export_cache("gn")
             def gn(self, x):
                 u = x[0].item()
-                return x * u
+                return (x * u,)
 
             def forward(self, x):
                 for _ in range(4):
-                    x = self.gn(x)
+                    x = self.gn(x)[0]
                 return x
 
         ep = torch.export.export(
@@ -773,7 +752,7 @@ class GraphModule(torch.nn.Module):
 
     def test_simple_method(self):
         class M(torch.nn.Module):
-            @mark_compile_region
+            @export_cache("gn")
             def gn(self, x, y):
                 return torch.mul(x, y)
 
@@ -782,8 +761,8 @@ class GraphModule(torch.nn.Module):
                 x = self.gn(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
@@ -797,7 +776,7 @@ class GraphModule(torch.nn.Module):
                 super().__init__()
                 self.register_buffer("buf", b)
 
-            @mark_compile_region
+            @export_cache("n")
             def forward(self, x, y):
                 return x * y + self.buf
 
@@ -811,12 +790,33 @@ class GraphModule(torch.nn.Module):
                     x = m(x, y)
                 return x
 
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
+        x = torch.randn(8)
+        y = torch.randn(8)
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+    def test_different_calls(self):
+        class M(torch.nn.Module):
+            @export_cache("gn")
+            def gn(self, x, y):
+                return torch.mul(x, y)
+
+            def forward(self, a, b, c, d):
+                x = self.gn(a, b)
+                y = self.gn(c, d)
+                return x, y
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(8), torch.randn(8), torch.randn(6), torch.randn(6)),
+            strict=self.strict,
+        )
+        inp = (torch.randn(8), torch.randn(8), torch.randn(6), torch.randn(6))
+        self.assertTrue(torch.allclose(ep.module()(*inp)[0], M()(*inp)[0]))
+        self.assertTrue(torch.allclose(ep.module()(*inp)[1], M()(*inp)[1]))
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 3)
 
 
 if __name__ == "__main__":
