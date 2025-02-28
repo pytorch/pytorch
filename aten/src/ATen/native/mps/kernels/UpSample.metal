@@ -123,8 +123,8 @@ scalar_t upsample_get_value_bounded(
   int access_y = max(min(y, dim.y - 1), 0L);
   int access_x = max(min(x, dim.x - 1), 0L);
   return data
-      [n * strides.w + c * strides.z + access_y * strides.y +
-       access_x * strides.x];
+      [n * strides.x + c * strides.y + access_y * strides.z +
+       access_x * strides.w];
 }
 
 template <typename scalar_t>
@@ -232,8 +232,8 @@ kernel void upsample_bilinear2d(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.x;
-  auto output_y = thread_index / output_sizes.x;
+  auto output_x = thread_index % output_sizes.w;
+  auto output_y = thread_index / output_sizes.w;
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/false);
   auto t_x = fract(real_x);
@@ -241,17 +241,17 @@ kernel void upsample_bilinear2d(
   auto real_y = area_pixel_compute_source_index(
       scales.y, output_y, align_corners, /*cubic=*/false);
   auto t_y = fract(real_y);
-  for (int n = 0; n < output_sizes.w; n++) {
-    for (int c = 0; c < output_sizes.z; c++) {
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
       auto i00 = upsample_get_value_bounded<T>(
-          inputData, input_sizes.xy, input_strides, n, c, real_y, real_x);
+          inputData, input_sizes.wz, input_strides, n, c, real_y, real_x);
       auto i01 = upsample_get_value_bounded<T>(
-          inputData, input_sizes.xy, input_strides, n, c, real_y, real_x + 1);
+          inputData, input_sizes.wz, input_strides, n, c, real_y, real_x + 1);
       auto i10 = upsample_get_value_bounded<T>(
-          inputData, input_sizes.xy, input_strides, n, c, real_y + 1, real_x);
+          inputData, input_sizes.wz, input_strides, n, c, real_y + 1, real_x);
       auto i11 = upsample_get_value_bounded<T>(
           inputData,
-          input_sizes.xy,
+          input_sizes.wz,
           input_strides,
           n,
           c,
@@ -261,8 +261,8 @@ kernel void upsample_bilinear2d(
       auto i1_l = linear_interp(i10, i11, t_x);
       auto res = linear_interp(i0_l, i1_l, t_y);
       outputData
-          [n * output_strides.w + c * output_strides.z +
-           output_x * output_strides.x + output_y * output_strides.y] =
+          [n * output_strides.x + c * output_strides.y +
+           output_y * output_strides.z + output_x * output_strides.w] =
               static_cast<T>(res);
     }
   }
@@ -283,8 +283,8 @@ kernel void upsample_bilinear2d_aa(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.x;
-  auto output_y = thread_index / output_sizes.x;
+  auto output_x = thread_index % output_sizes.w;
+  auto output_y = thread_index / output_sizes.w;
   (void)align_corners; // Align corners is unused for AA algorithm
   auto x_center = area_pixel_compute_source_index(
       scales.x, output_x, /*align_corners=*/false, /*cubic=*/false);
@@ -292,27 +292,27 @@ kernel void upsample_bilinear2d_aa(
       scales.y, output_y, /*align_corners=*/false, /*cubic=*/false);
   auto clamped_scales = max(1.0, scales);
   auto x_min = max(0L, long(floor(x_center - clamped_scales.x + 1)));
-  auto x_max = min(input_sizes.x, long(ceil(x_center + clamped_scales.x)));
+  auto x_max = min(input_sizes.w, long(ceil(x_center + clamped_scales.x)));
   auto y_min = max(0L, long(floor(y_center - clamped_scales.y + 1)));
-  auto y_max = min(input_sizes.y, long(ceil(y_center + clamped_scales.y)));
-  for (int n = 0; n < output_sizes.w; n++) {
-    for (int c = 0; c < output_sizes.z; c++) {
+  auto y_max = min(input_sizes.z, long(ceil(y_center + clamped_scales.y)));
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
       float res = 0.0;
       float ws = 0.0;
       constant auto* input =
-          inputData + n * input_strides.w + c * input_strides.z;
+          inputData + n * input_strides.x + c * input_strides.y;
       for (auto y = y_min; y < y_max; ++y) {
         auto dy = bilinear_functor((y - y_center) / clamped_scales.y);
         for (auto x = x_min; x < x_max; ++x) {
           auto dx = bilinear_functor((x - x_center) / clamped_scales.x);
-          auto val = input[x * input_strides.x + y * input_strides.y];
+          auto val = input[x * input_strides.w + y * input_strides.z];
           res += val * dx * dy;
           ws += dx * dy;
         }
       }
       outputData
-          [n * output_strides.w + c * output_strides.z +
-           output_x * output_strides.x + output_y * output_strides.y] =
+          [n * output_strides.x + c * output_strides.y +
+           output_y * output_strides.z + output_x * output_strides.w] =
               static_cast<T>(res / ws);
     }
   }
@@ -329,8 +329,8 @@ kernel void upsample_bicubic2d(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.x;
-  auto output_y = thread_index / output_sizes.x;
+  auto output_x = thread_index % output_sizes.w;
+  auto output_y = thread_index / output_sizes.w;
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/true);
   int in_x = floor(real_x);
@@ -340,14 +340,14 @@ kernel void upsample_bicubic2d(
       scales.y, output_y, align_corners, /*cubic=*/true);
   int in_y = floor(real_y);
   auto t_y = real_y - in_y;
-  for (int n = 0; n < output_sizes.w; n++) {
-    for (int c = 0; c < output_sizes.z; c++) {
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
       float coefficients[4];
       for (int k = 0; k < 4; k++) {
         coefficients[k] = cubic_interp1d(
             upsample_get_value_bounded<T>(
                 inputData,
-                input_sizes.xy,
+                input_sizes.wz,
                 input_strides,
                 n,
                 c,
@@ -355,7 +355,7 @@ kernel void upsample_bicubic2d(
                 in_x - 1),
             upsample_get_value_bounded<T>(
                 inputData,
-                input_sizes.xy,
+                input_sizes.wz,
                 input_strides,
                 n,
                 c,
@@ -363,7 +363,7 @@ kernel void upsample_bicubic2d(
                 in_x + 0),
             upsample_get_value_bounded<T>(
                 inputData,
-                input_sizes.xy,
+                input_sizes.wz,
                 input_strides,
                 n,
                 c,
@@ -371,7 +371,7 @@ kernel void upsample_bicubic2d(
                 in_x + 1),
             upsample_get_value_bounded<T>(
                 inputData,
-                input_sizes.xy,
+                input_sizes.wz,
                 input_strides,
                 n,
                 c,
@@ -386,8 +386,8 @@ kernel void upsample_bicubic2d(
           coefficients[3],
           t_y));
       outputData
-          [n * output_strides.w + c * output_strides.z +
-           output_x * output_strides.x + output_y * output_strides.y] = inp;
+          [n * output_strides.x + c * output_strides.y +
+           output_y * output_strides.z + output_x * output_strides.w] = inp;
     }
   }
 }

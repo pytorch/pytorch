@@ -269,19 +269,15 @@ static void upsample_kernel_out_template(const Tensor& input,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      std::array<int64_t, 4> output_strides = {output.stride(3), output.stride(2), output.stride(1), output.stride(0)};
-      std::array<int64_t, 4> output_sizes = {output.size(3), output.size(2), output.size(1), output.size(0)};
-      std::array<int64_t, 4> input_sizes = {input.size(3), input.size(2), input.size(1), input.size(0)};
-      std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
       mtl_setArgs(computeEncoder,
                   input,
                   output,
-                  input_strides,
-                  output_strides,
-                  input_sizes,
-                  output_sizes,
+                  input.strides(),
+                  output.strides(),
+                  input.sizes(),
+                  output.sizes(),
                   scales,
                   align_corners);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
