@@ -118,6 +118,8 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
+    xfail("addbmm"),
+    xfail("addmv"),
     xfail("alias_copy"),
     xfail("all"),
     xfail("amax"),
@@ -125,6 +127,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("aminmax"),
     xfail("any"),
     xfail("as_strided_copy"),
+    xfail("baddbmm"),
     xfail("bucketize"),
     xfail("conj_physical"),
     xfail("cross"),
