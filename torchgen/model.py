@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -1499,14 +1499,15 @@ class FunctionSchema:
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert len(
-                    [
-                        arg
-                        for arg in self.arguments.out
-                        if not arg.name.startswith("_scratch_")
-                    ]
-                ) == len(
-                    self.returns
+                assert (
+                    len(
+                        [
+                            arg
+                            for arg in self.arguments.out
+                            if not arg.name.startswith("_scratch_")
+                        ]
+                    )
+                    == len(self.returns)
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
         if self.name.name.inplace:
@@ -2539,7 +2540,7 @@ class BaseOperatorName:
     # as part of the base operator name, for __str__() to consume.
     # The canonical input (from the rest of the infra) will not contain namespace, but
     # we have a usecase in ExecuTorch where we want to support BaseOperatorName with namespace.
-    namespace: str = ""
+    namespace: Optional[str] = None
 
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
@@ -2607,7 +2608,9 @@ class BaseOperatorName:
             i = (
                 "_"
                 if self.inplace
-                else "_functional" if self.functional_overload else ""
+                else "_functional"
+                if self.functional_overload
+                else ""
             )
             return f"{namespace_prefix}{self.base}{i}"
 
@@ -2729,9 +2732,7 @@ class NativeFunctionsViewGroup:
                 )
         if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
             if self.view_inplace is not None:
-                assert (
-                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
-                ), (
+                assert self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel, (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )
