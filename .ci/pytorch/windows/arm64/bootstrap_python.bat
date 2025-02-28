@@ -8,7 +8,7 @@ echo Dependency Python installation started.
 if not exist "%DOWNLOADS_DIR%" mkdir %DOWNLOADS_DIR%
 if not exist "%DEPENDENCIES_DIR%" mkdir %DEPENDENCIES_DIR%
 
-if "PYTHON_VERSION"=="3.13" (
+if "%PYTHON_VERSION%"=="3.13" (
     echo Python version is set to 3.13
     set DOWNLOAD_URL="https://www.python.org/ftp/python/3.13.2/python-3.13.2-arm64.exe"
 )
