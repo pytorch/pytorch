@@ -121,7 +121,7 @@ force_parameter_static_shapes = False
 # This flag ensures that the shapes of a nn module are always assumed to be static
 # If the flag is set to True, then the shapes of a nn.module are assumed to be static
 # If the flag is set to False, then the shapes of a nn.module can be dynamic
-force_nn_module_property_static_shapes = True
+force_nn_module_property_static_shapes = False
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
