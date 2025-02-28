@@ -73,6 +73,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
 
     if torch.compiler.is_compiling():
+        # For non-strict export tracing, we still want to go through Dynamo
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )

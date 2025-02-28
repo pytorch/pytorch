@@ -797,7 +797,7 @@ class GraphModule(torch.nn.Module):
                 super().__init__()
                 self.register_buffer("buf", b)
 
-            @mark_compile_region  # TODO: should this work on toplevel modules?
+            @mark_compile_region
             def forward(self, x, y):
                 return x * y + self.buf
 
