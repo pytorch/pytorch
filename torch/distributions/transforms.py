@@ -664,11 +664,17 @@ class TanhTransform(Transform):
     Transform via the mapping :math:`y = \tanh(x)`.
 
     It is equivalent to
-    ```
-    ComposeTransform(
-        [AffineTransform(0.0, 2.0), SigmoidTransform(), AffineTransform(-1.0, 2.0)]
-    )
-    ```
+
+    .. code-block:: python
+
+        ComposeTransform(
+            [
+                AffineTransform(0.0, 2.0),
+                SigmoidTransform(),
+                AffineTransform(-1.0, 2.0),
+            ]
+        )
+
     However this might not be numerically stable, thus it is recommended to use `TanhTransform`
     instead.
 
@@ -699,9 +705,7 @@ class TanhTransform(Transform):
 
 
 class AbsTransform(Transform):
-    r"""
-    Transform via the mapping :math:`y = |x|`.
-    """
+    r"""Transform via the mapping :math:`y = |x|`."""
 
     domain = constraints.real
     codomain = constraints.positive
