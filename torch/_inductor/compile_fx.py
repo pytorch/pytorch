@@ -1082,7 +1082,7 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_code=const_code,
+                    const_code=const_code.value if const_code else None,
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
@@ -1128,8 +1128,14 @@ class _InProcessFxCompile(FxCompile):
                             assert graph.cpp_wrapper, (
                                 "AOT mode only supports C++ wrapper"
                             )
-                            code, linemap = graph.codegen_with_cpp_wrapper()
-                            output_code_log.debug("Output code: \n%s", code)
+                            wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
+                            output_code_log.debug(
+                                "Output wrapper code: \n%s", wrapper_code.value
+                            )
+                            if kernel_code.value:
+                                output_code_log.debug(
+                                    "Output kernel code:\n%s", kernel_code.value
+                                )
 
                             serialized_extern_kernel_nodes = None
                             if graph.extern_kernel_nodes:
@@ -1151,7 +1157,8 @@ class _InProcessFxCompile(FxCompile):
                                 # Directly return the file path with the compiled code
                                 compiled_fn = AotCodeCompiler.compile(
                                     graph,
-                                    code,
+                                    wrapper_code.value,
+                                    kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
                                     additional_files=additional_files,

@@ -83,6 +83,7 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
+@functools.lru_cache(None)
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
@@ -4342,13 +4343,7 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def reset_kernel_group(self):
-        from .cpp_wrapper_cpu import CppWrapperCpu
-
-        self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
-        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
-            self.kernel_group = CppWrapperKernelGroup()
-        else:
-            self.kernel_group = KernelGroup()
+        self.kernel_group = KernelGroup()
 
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
@@ -5059,6 +5054,12 @@ class CppScheduling(BaseScheduling):
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         src_code = src_code.replace("#pragma CMT", "//")
 
+        # Get the lines in the source code representing the function definition,
+        # excluding the the first line including cpp_prefix.h.
+        first_char = src_code.rfind('extern "C"')
+        last_char = src_code.find(")", first_char)
+        kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
+
         compile_wrapper = IndentedBuffer()
         args = self.kernel_group.args if kernel_args is None else kernel_args
         _, _, arg_types = args.cpp_argdefs()
@@ -5067,7 +5068,12 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
+        wrapper.define_kernel(
+            kernel_name,
+            compile_wrapper.getvalue(),
+            gpu=False,
+            cpp_definition=kernel_definition,
+        )
         return kernel_name
 
     def flush(self):
@@ -5150,10 +5156,6 @@ class KernelGroup:
         wrapper.generate_kernel_call(
             kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
-
-
-class CppWrapperKernelGroup(KernelGroup):
-    pass
 
 
 class WorkSharing:

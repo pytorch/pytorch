@@ -185,6 +185,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
                 self.header.splice(f.read())
+            self.header.splice("\n")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -880,9 +881,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         kernel_name: str,
         kernel_body: str,
         metadata: Optional[str] = None,
-        gpu=False,
+        gpu: bool = False,
+        cpp_definition: Optional[str] = None,
     ):
-        self.header.splice(f"\n{kernel_body}\n")
+        if cpp_definition is not None:
+            self.header.splice(cpp_definition)
+            self.kernel_declarations.splice(f"\n{kernel_body}\n")
+        else:
+            self.header.splice(f"\n{kernel_body}\n")
 
     def codegen_scalar_to_tensor(self, output: str):
         name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -969,6 +975,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
+
+        # Add any kernel definitions into the wrapped code.  We currently only build
+        # them in separate files in AOT mode.
+        result.splice(self.kernel_declarations.getvalue())
+        self.kernel_declarations.clear()
 
         # cpp entry function for JIT with cpp wrapper
         result.splice(
