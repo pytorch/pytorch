@@ -2072,6 +2072,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
 
     @make_test
+    def test_sourceless_build_method_type(a, b):
+        cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
+
+        # The type of `cls._make` is method type
+        if callable(getattr(cls, "_make", None)):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_torch_size_hasattr(x):
         if hasattr(x.shape, "_fields"):
             return x + 1
@@ -4728,6 +4738,20 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_functional_compile(self):
+        def get_torch_functional_functions():
+            s = set()
+            for name in torch.functional.__all__:
+                method = getattr(torch.functional, name)
+                s.add(method)
+            return s
+
+        functions = get_torch_functional_functions()
+        self.assertTrue(len(functions) > 0)
+        for func in functions:
+            compiled_func = torch.compile(func)
+            self.assertTrue(callable(compiled_func))
 
 
 instantiate_parametrized_tests(FunctionTests)

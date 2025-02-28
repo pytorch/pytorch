@@ -1535,12 +1535,6 @@ class CppBuilder:
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "
 
-        if precompiled_header := BuildOption.precompiled_header:
-            if _IS_WINDOWS:
-                self._include_dirs_args = f"/Yu{precompiled_header} "
-            else:
-                self._include_dirs_args = f"-include {precompiled_header} "
-
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
                 self._include_dirs_args += f"/I {inc_dir} "
@@ -1725,8 +1719,8 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(
-            cmake_path
-        ), f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+        assert os.path.exists(cmake_path), (
+            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+        )
         with open(cmake_path, "a") as f:
             f.write(contents)

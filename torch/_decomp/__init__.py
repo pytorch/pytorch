@@ -34,9 +34,9 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: dict[
-    str, dict[torch._ops.OperatorBase, Callable]
-] = defaultdict(dict)
+global_decomposition_table: dict[str, dict[torch._ops.OperatorBase, Callable]] = (
+    defaultdict(dict)
+)
 
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
@@ -124,7 +124,8 @@ def _convert_out_params(f):
         # Drop the out parameter and concatenate the new kwargs in the signature
         params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
         # Drop the out parameter and concatenate the new kwargs in the annotations
         _fn.__annotations__ = {k: v for k, v in f.__annotations__.items() if k != "out"}
@@ -160,7 +161,8 @@ def _convert_out_params(f):
             (v for k, v in sig.parameters.items() if k != "out"), (out_param,)
         )
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
 
         # Drop the out parameter and concatenate the new kwargs in the annotations
@@ -286,9 +288,9 @@ def core_aten_decompositions() -> "CustomDecompTable":
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def _core_aten_decompositions_post_autograd() -> (
-    dict[torch._ops.OperatorBase, Callable]
-):
+def _core_aten_decompositions_post_autograd() -> dict[
+    torch._ops.OperatorBase, Callable
+]:
     aten = torch.ops.aten
     return get_decompositions(
         [

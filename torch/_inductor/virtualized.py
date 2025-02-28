@@ -314,9 +314,9 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler: Callable[
-        [OpsHandler[Any]], AbstractContextManager[None]
-    ] = _ops._set_handler
+    set_ops_handler: Callable[[OpsHandler[Any]], AbstractContextManager[None]] = (
+        _ops._set_handler
+    )
     get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
     set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
