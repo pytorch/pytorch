@@ -18,7 +18,7 @@ import time
 import traceback
 from collections import defaultdict
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils.dlpack
@@ -76,6 +76,9 @@ from .utils import (
     unlift_tokens,
 )
 
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 zip = strict_zip
 
@@ -486,7 +489,7 @@ def run_joint_graph_passes_on_hops(
         out = torch.fx.GraphModule(joint_gm, new_graph)
         return out
 
-    new_hop_graphs: Dict[str, InvokeSubgraphHopGraphs] = defaultdict(
+    new_hop_graphs: dict[str, InvokeSubgraphHopGraphs] = defaultdict(
         lambda: InvokeSubgraphHopGraphs()
     )
 
@@ -830,6 +833,7 @@ def aot_dispatch_autograd(
             fake_mode = detect_fake_mode()
             fx_g = run_joint_graph_passes_on_hops(fx_g, joint_inputs, aot_config)
 
+            # TODO(anijain2305) - Add tensorify_python_scalars to the HOP graph passes.
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
