@@ -4353,7 +4353,6 @@ def _max_pool2d_with_offsets(
     padding,
     dilation,
     ceil_mode=False,
-    int_dtype=torch.int64,
 ):
     x.realize_hint()
     *batch, h, w = x.get_size()
@@ -4439,7 +4438,6 @@ def _low_memory_max_pool2d_with_offsets(
             padding,
             dilation,
             ceil_mode,
-            True,
         )
         return result, to_dtype(offsets, torch.int8)
 
@@ -4505,7 +4503,7 @@ def max_pool2d_with_indices(
         )
 
     out, offsets = _max_pool2d_with_offsets(
-        x, kernel_size, stride, padding, dilation, ceil_mode, True
+        x, kernel_size, stride, padding, dilation, ceil_mode
     )
 
     indices = _low_memory_max_pool2d_offsets_to_indices(
