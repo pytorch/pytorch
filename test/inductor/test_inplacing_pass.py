@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-from typing import List
 
 import torch
 import torch._inductor.config as inductor_config
@@ -362,7 +361,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with inductor_config.patch({"enable_auto_functionalized_v2": True}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 
@@ -389,7 +388,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with inductor_config.patch({"enable_auto_functionalized_v2": False}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 

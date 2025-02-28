@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -14,7 +12,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
@@ -39,6 +37,7 @@ class LogitRelaxedBernoulli(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al., 2017)
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.real
 
@@ -49,10 +48,10 @@ class LogitRelaxedBernoulli(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -128,6 +127,7 @@ class RelaxedBernoulli(TransformedDistribution):
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.unit_interval
     has_rsample = True

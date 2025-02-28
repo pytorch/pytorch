@@ -4,7 +4,7 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 from unittest import mock
 
 import torch
@@ -76,7 +76,7 @@ class TestParityWithDDP(FSDPTest):
     PyTorch DDP vs. FullyShardedDataParallel.
     """
 
-    def _get_device_init_modes(self, cpu_offload: CPUOffload) -> List[DEVICEInitMode]:
+    def _get_device_init_modes(self, cpu_offload: CPUOffload) -> list[DEVICEInitMode]:
         modes = [
             DEVICEInitMode.DEVICE_AFTER,
             DEVICEInitMode.DEVICE_BEFORE,
@@ -89,7 +89,7 @@ class TestParityWithDDP(FSDPTest):
             modes.append(DEVICEInitMode.DEVICE_NEVER)
         return modes
 
-    def _get_subtest_config(self, cpu_offload: CPUOffload) -> Dict[str, List[Any]]:
+    def _get_subtest_config(self, cpu_offload: CPUOffload) -> dict[str, list[Any]]:
         """Returns a subtest configuration that subtests CUDA initialization
         modes and prefetching settings together."""
         return {

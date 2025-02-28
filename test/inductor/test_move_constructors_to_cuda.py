@@ -90,6 +90,7 @@ class TestMoveConstructorsToCuda(TestCase):
         FileCheck().check_not("triton.jit").run(code[0])
 
     @requires_multigpu()
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/139520")
     def test_multi_gpu(self):
         def foo(x):
             return (

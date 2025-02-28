@@ -183,6 +183,8 @@ class ComputeCodegenUnboxedKernels:
 
     use_aten_lib: bool
 
+    add_exception_boundary: bool
+
     @method_with_nested_native_function
     def __call__(
         self,
@@ -264,20 +266,31 @@ class ComputeCodegenUnboxedKernels:
                 f"*stack[{output_id}]);\n"
             )
 
+        exception_boundary_begin = ""
+        exception_boundary_end = ""
+        if self.add_exception_boundary:
+            indent = " " * 8
+            exception_boundary_begin = indent + "try {"
+            exception_boundary_end = f"""{indent}}} catch (const std::exception& ex) {{
+{indent}  ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
+{indent}  context.fail(torch::executor::Error::Internal);
+{indent}}}"""
         newline = "\n    "
         return "\n".join(
             [
                 f"""
 Kernel(
-    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != 'default' else ''}
+    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != "default" else ""}
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
+{exception_boundary_begin}
         internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
         {event_tracer_output_logging}
         {return_assignment}
+{exception_boundary_end}
     }}
 ),
 """
@@ -294,6 +307,7 @@ def gen_unboxing(
     use_aten_lib: bool,
     kernel_index: ETKernelIndex,
     manual_registration: bool,
+    add_exception_boundary: bool = False,
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
@@ -319,7 +333,9 @@ def gen_unboxing(
         key_fn=key_func,
         env_callable=lambda unbox_kernel_entry: {
             "unboxed_kernels": [
-                ComputeCodegenUnboxedKernels(selector, use_aten_lib)(unbox_kernel_entry)
+                ComputeCodegenUnboxedKernels(
+                    selector, use_aten_lib, add_exception_boundary
+                )(unbox_kernel_entry)
             ],
             "fn_header": header
             if unbox_kernel_entry == items[0]
@@ -428,9 +444,9 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert (
-                len(native_function_namespaces) <= 1
-            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces}"
+            assert len(native_function_namespaces) <= 1, (
+                f"Codegen only supports one namespace per operator, got {native_function_namespaces}"
+            )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, kernel_index)
             )
@@ -927,6 +943,13 @@ def main() -> None:
         default=["headers", "sources"],
         help="Generate only a subset of files",
     )
+    parser.add_argument(
+        "--add-exception-boundary",
+        "--add_exception_boundary",
+        action="store_true",
+        help="whether to add a try/catch in the generated kernel wrapper to "
+        "convert exceptions to clean failures.",
+    )
     options = parser.parse_args()
     assert options.tags_path, "tags.yaml is required by codegen yaml parsing."
 
@@ -973,6 +996,7 @@ def main() -> None:
             use_aten_lib=options.use_aten_lib,
             kernel_index=kernel_index,
             manual_registration=options.manual_registration,
+            add_exception_boundary=options.add_exception_boundary,
         )
         if custom_ops_native_functions:
             gen_custom_ops(

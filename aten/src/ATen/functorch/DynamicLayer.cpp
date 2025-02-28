@@ -223,11 +223,6 @@ DynamicLayer popDynamicLayer() {
   dynamicLayerStack.pop_back();
 
   if (dynamicLayerStack.empty()) {
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "DynamicLayer off" << std::endl;
-    }
-#endif
     setDynamicLayerFrontBackKeysIncluded(false);
   }
 
@@ -242,11 +237,6 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 
   if (layerId == 1) {
     setDynamicLayerFrontBackKeysIncluded(true);
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "DynamicLayer on" << std::endl;
-    }
-#endif
   }
 
   return layerId;
@@ -398,14 +388,6 @@ std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int6
   return std::nullopt;
 }
 
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-static void dump_local_tls() {
-  auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
-}
-#endif
-
 struct WithoutTop {
   WithoutTop();
   WithoutTop(WithoutTop&& other) = delete;
@@ -451,12 +433,6 @@ static void dynamicLayerFrontFallback(
     torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(!dynamicLayerStack.empty());
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-  if (c10::show_dispatch_trace_enabled()) {
-    std::cout << dynamicLayerStack << std::endl;
-    dump_local_tls();
-  }
-#endif
   // Save the current LocalDispatchKeySet (to the current DynamicLayer).
   // Upon exiting the current scope, that LocalDispatchKeySet gets restored.
   // When the current DynamicLayer dispatches to the next (inner) DynamicLayer,
