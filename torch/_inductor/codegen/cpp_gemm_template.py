@@ -557,9 +557,9 @@ class CppGemmTemplate(CppTemplate):
             thread_block_m = math.ceil(m_blocks / m_factor)
             return GemmBlocking(thread_block_m, thread_block_n, thread_block_k)
 
-        assert (
-            not self.is_dynamic_M
-        ), "Unable to determine thread blocking for dynamic M."
+        assert not self.is_dynamic_M, (
+            "Unable to determine thread blocking for dynamic M."
+        )
         register_blocking = self.register_blocking
         m_blocks = math.ceil(self.m / register_blocking.block_m)
         n_blocks = math.ceil(self.n / register_blocking.block_n)
@@ -673,17 +673,17 @@ class CppGemmTemplate(CppTemplate):
             L1_cache_size = (
                 torch._C._cpu._L1d_cache_size()
             )  # per core cache size in Bytes
-            assert (
-                L1_cache_size > 0
-            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            assert L1_cache_size > 0, (
+                f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            )
             L1 = L1_cache_size * L1_limit_factor
 
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
-            assert (
-                L2_cache_size > 0
-            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            assert L2_cache_size > 0, (
+                f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            )
             L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
@@ -744,9 +744,9 @@ class CppGemmTemplate(CppTemplate):
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
-        assert (
-            not self.is_dynamic_M
-        ), "Unable to determine cache blocking for dynamic M."
+        assert not self.is_dynamic_M, (
+            "Unable to determine cache blocking for dynamic M."
+        )
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
 
@@ -1114,9 +1114,9 @@ class CppGemmTemplate(CppTemplate):
                     LayoutType.VNNI4,
                 ], f"We only support {layout_str} for now"
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                assert (
-                    k % vnni_size == 0
-                ), f"k should be divisible by vnni_size for {layout_str} layout"
+                assert k % vnni_size == 0, (
+                    f"k should be divisible by vnni_size for {layout_str} layout"
+                )
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)

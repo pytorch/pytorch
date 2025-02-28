@@ -796,9 +796,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().guard_as_python_constant()
 
     def torch_function_check(self):
-        assert has_torch_function(
-            self
-        ), f"calling torch function on object without __torch_function__ {self}"
+        assert has_torch_function(self), (
+            f"calling torch function on object without __torch_function__ {self}"
+        )
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
@@ -1370,6 +1370,34 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             fields = {}
         self.fields = fields
 
+    def as_python_constant(self):
+        # NOTE: this is an intentionally limited version of
+        # `as_python_constant` for `nonstrict_trace` implementation.
+        from dataclasses import fields
+
+        import torch.utils._pytree as pytree
+
+        if not istype(self.value, (pytree.TreeSpec, pytree.LeafSpec)):
+            # TODO loosen this restriction and fix `as_proxy`.
+            raise NotImplementedError(
+                "currently can't reconstruct arbitrary frozen dataclass instances"
+            )
+
+        args = []
+        kwargs = {}
+        for field in fields(self.value):
+            if field.init:
+                data = self.fields[field.name].as_python_constant()
+                if getattr(field, "kw_only", False):
+                    kwargs[field.name] = data
+                else:
+                    args.append(data)
+
+        # This is safe because we know the TreeSpec classes constructors don't
+        # have external side effects.
+        ctor = self.python_type()
+        return ctor(*args, **kwargs)
+
     def as_proxy(self):
         from dataclasses import fields
 
@@ -1382,7 +1410,13 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             else:
                 args.append(proxy)
 
-        return self.python_type()(*args, **kwargs)
+        # TODO this isn't really safe, because
+        # 1. it could invoke a user defined `__post_init__`.
+        # 2. it could invoke a user defined `__init__` if the class _subclasses_
+        #    a frozen dataclass.
+        # Either of the above could end up mutating external state.
+        ctor = self.python_type()
+        return ctor(*args, **kwargs)
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
@@ -1528,9 +1562,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
         if self._dict_vt is None:
-            assert (
-                self.source is None
-            ), "dict_vt must be constructed by builder.py when source is present"
+            assert self.source is None, (
+                "dict_vt must be constructed by builder.py when source is present"
+            )
             self._dict_vt = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
             )
@@ -1575,9 +1609,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
         if self._list_vt is None:
-            assert (
-                self.source is None
-            ), "list_vt must be constructed by builder.py when source is present"
+            assert self.source is None, (
+                "list_vt must be constructed by builder.py when source is present"
+            )
             self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
 
     def call_method(
