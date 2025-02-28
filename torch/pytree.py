@@ -19,13 +19,14 @@ from __future__ import annotations
 from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
 import torch
-from torch.utils.pytree import PyTree as PyTree, register_pytree_node as register_node
+from torch.utils.pytree import register_pytree_node as register_node
 
 
 if _TYPE_CHECKING:
     from collections.abc import Iterable
 
     from torch.utils._cxx_pytree import (
+        PyTree as PyTree,
         PyTreeSpec as PyTreeSpec,
         tree_all as all,
         tree_all_only as all_only,
@@ -55,6 +56,7 @@ else:
         tree_map_only_ as map_only_,
         tree_structure as structure,
     )
+
 
 __all__ = [
     "PyTreeSpec",
