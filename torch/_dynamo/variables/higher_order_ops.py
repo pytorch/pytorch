@@ -1428,6 +1428,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        import functools
+
         from torch._higher_order_ops.scan import (
             _extract_carry_and_out,
             first_slice_copy,
@@ -1468,6 +1470,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         init_vars = init.unpack_var_sequence(tx)
         check_subgraph_args_types(init_vars)
+
+        if args[0].python_type() is not functools.partial:
+            unimplemented(
+                f"Expected args[0], aka, inits to be a FunctoolsPartialVariable but got "
+                f"{args[0].python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        init_treespec = args[0].keywords["spec_init"]
 
         # xs input check
         if not isinstance(xs, (ListVariable, TupleVariable)):
@@ -1533,20 +1543,24 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         results = combine_result.unpack_var_sequence(tx)
         carry_vars, out_vars = _extract_carry_and_out(results, init_len)
 
-        # Try to pack the out_vars back into the tree structure provided by the speculate_subgraph
-        # If this fails, it is an indication that the tree structure of the inits and the carries does not match
-        out_tree_structure = (
-            _combine_treespec.fields["children_specs"].items[1].as_python_constant()
-        )
-        out_tree = pytree.tree_unflatten(out_vars, out_tree_structure)  # noqa: F841
+        # Check whether the combine_fn returns two child trees.
+        # One for the carries and one for the outputs
+        if len(_combine_treespec.fields["children_specs"].items) != 2:
+            unimplemented(
+                "combine_fn needs to produce two pytrees, one for the carries and one for the outputs."
+            )
 
-        # Check whether the carry pytree is the same as the pytree from the init.
-        # If the accidentially have the same tree structure, we will check their meta data below
-        init_spec = _make_inlined(tx, pytree.tree_structure)(init)
-        carry_tree_structure = _combine_treespec.fields["children_specs"].items[0]
-        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(  # noqa: F841
-            init_spec, carry_tree_structure
-        )
+        # Check whether the carries produced by combine_fn has the same treespec as the init
+        carry_treespec = _combine_treespec.fields["children_specs"].items[0]
+        if (
+            _make_inlined(tx, pytree.TreeSpec.__eq__)(
+                init_treespec, carry_treespec
+            ).value
+            is not True
+        ):
+            unimplemented(
+                "The tree structure of the inits and the carries are not identical!"
+            )
 
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
 

@@ -2092,8 +2092,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = pytree.tree_unflatten(init_flat, inp_spec)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            r"ValueError: treespec.unflatten\(leaves\).*",
+            # Should be
+            # torch._dynamo.exc.UncapturedHigherOrderOpError,
+            # r"The tree structure of the inits and the carries are not identical.*",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"scan must be captured completely with.*",
         ):
             scan(fct_wrong_pytree, init, inp, dim=0)
 
@@ -2518,8 +2521,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         )
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            r"ValueError: treespec.unflatten\(leaves\).*",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"scan must be captured completely with.*",
         ):
             scan_fct(add_one_carry, init, x, dim=dim)
 
@@ -2538,8 +2541,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            r"ValueError: treespec.unflatten\(leaves\).*",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # The tree structure of the inits and the carries are not identical!
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"scan must be captured completely with.*",
         ):
             scan_fct(add_one_carry, init, x, dim=dim)
 
@@ -2560,6 +2566,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected init and carry to have same metadata.*",
+        ):
+            scan_fct(add_one_carry, init, x, dim=dim)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_one_return(self):
+        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
+            return x + 3
+
+        scan_fct = compile_mode_helper(scan, "none")
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2)
+        dim = 1
+
+        # Init wrong pytree
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # combine_fn needs to produce two pytrees, one for the carries and one for the outputs.
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with.*",
         ):
             scan_fct(add_one_carry, init, x, dim=dim)
 
