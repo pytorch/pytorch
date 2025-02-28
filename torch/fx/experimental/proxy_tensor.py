@@ -1324,6 +1324,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
         self.emulate_precision_casts = config.emulate_precision_casts
 
+        from torch._guards import HopDispatchSetCache
+
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
+
     @count
     def __torch_dispatch__(
         self,
