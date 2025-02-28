@@ -602,7 +602,12 @@ class CKGemmTemplate(CKTemplate):
             operation_name=operation_name
         )
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGemmOperation",
+        **kwargs,
+    ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
         """
@@ -706,7 +711,7 @@ class CKGemmTemplate(CKTemplate):
 * Template instance {op}
 *
 * {torch.__version__=}
-* torch.version.git_version={getattr(torch.version, 'git_version', 'None')}
+* torch.version.git_version={getattr(torch.version, "git_version", "None")}
 */
 """
         epilogue = None
