@@ -199,9 +199,9 @@ def split_by_tags(
         mx = max((c.order for c in upstream_components), default=0)
 
         # Expect the component for `node` has higher order then its upstream components.
-        assert (
-            comp.order >= mx
-        ), f"Component {comp.name} order must be >= max of its upstream components, order={comp.order} and max={mx}"
+        assert comp.order >= mx, (
+            f"Component {comp.name} order must be >= max of its upstream components, order={comp.order} and max={mx}"
+        )
 
         # Map a input of `node` to nodes in the component's graph.
         def remap_func(x):

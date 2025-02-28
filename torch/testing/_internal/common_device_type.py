@@ -749,9 +749,9 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     intersect = set(except_for if except_for else []) & set(
         only_for if only_for else []
     )
-    assert (
-        not intersect
-    ), f"device ({intersect}) appeared in both except_for and only_for"
+    assert not intersect, (
+        f"device ({intersect}) appeared in both except_for and only_for"
+    )
 
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
@@ -931,9 +931,9 @@ def instantiate_device_type_tests(
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
-                assert (
-                    name not in device_type_test_class.__dict__
-                ), f"Redefinition of directly defined member {name}"
+                assert name not in device_type_test_class.__dict__, (
+                    f"Redefinition of directly defined member {name}"
+                )
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
@@ -1431,9 +1431,9 @@ class deviceCountAtLeast:
         self.num_required_devices = num_required_devices
 
     def __call__(self, fn):
-        assert not hasattr(
-            fn, "num_required_devices"
-        ), f"deviceCountAtLeast redefinition for {fn.__name__}"
+        assert not hasattr(fn, "num_required_devices"), (
+            f"deviceCountAtLeast redefinition for {fn.__name__}"
+        )
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
@@ -1498,13 +1498,13 @@ def onlyNativeDeviceTypesAnd(devices=None):
 # self.precision *2, max(1, self.precision)).
 class precisionOverride:
     def __init__(self, d):
-        assert isinstance(
-            d, dict
-        ), "precisionOverride not given a dtype : precision dict!"
+        assert isinstance(d, dict), (
+            "precisionOverride not given a dtype : precision dict!"
+        )
         for dtype in d.keys():
-            assert isinstance(
-                dtype, torch.dtype
-            ), f"precisionOverride given unknown dtype {dtype}"
+            assert isinstance(dtype, torch.dtype), (
+                f"precisionOverride given unknown dtype {dtype}"
+            )
 
         self.d = d
 
@@ -1537,12 +1537,12 @@ class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
-            assert isinstance(
-                dtype, torch.dtype
-            ), f"toleranceOverride given unknown dtype {dtype}"
-            assert isinstance(
-                prec, tol
-            ), "toleranceOverride not given a dtype : tol dict!"
+            assert isinstance(dtype, torch.dtype), (
+                f"toleranceOverride given unknown dtype {dtype}"
+            )
+            assert isinstance(prec, tol), (
+                "toleranceOverride not given a dtype : tol dict!"
+            )
 
         self.d = d
 
@@ -1570,13 +1570,13 @@ class dtypes:
                     "all dtype variants must be. "
                     f"Received non-list non-tuple dtype {str(arg)}"
                 )
-                assert all(
-                    isinstance(dtype, torch.dtype) for dtype in arg
-                ), f"Unknown dtype in {str(arg)}"
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), (
+                    f"Unknown dtype in {str(arg)}"
+                )
         else:
-            assert all(
-                isinstance(arg, torch.dtype) for arg in args
-            ), f"Unknown dtype in {str(args)}"
+            assert all(isinstance(arg, torch.dtype) for arg in args), (
+                f"Unknown dtype in {str(args)}"
+            )
 
         self.args = args
         self.device_type = device_type

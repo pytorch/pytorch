@@ -239,10 +239,12 @@ class SchemaMatcher:
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
-            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            TensorKey.from_tensor(i)
+            if isinstance(i, _TensorMetadata)
             #
             # TensorList
-            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            else [TensorKey.from_tensor(j) for j in i]
+            if isinstance(i, list)
             #
             # Scalar and uncaptured inputs.
             else i

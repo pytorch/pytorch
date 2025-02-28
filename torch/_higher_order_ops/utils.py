@@ -86,9 +86,9 @@ def reenter_make_fx(fn):
 
     @functools.wraps(fn)
     def wrapped(*args):
-        assert (
-            _CURRENT_MAKE_FX_TRACER is not None
-        ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        assert _CURRENT_MAKE_FX_TRACER is not None, (
+            "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        )
         return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
@@ -320,9 +320,9 @@ def prepare_fw_with_masks(fn):
 # replaced with an all-zero tensor for better optimization
 def unmask_none_gradients(grads, operands):
     allowed_types = (torch.Tensor, int, torch.SymInt)
-    assert all(
-        isinstance(o, allowed_types) for o in operands
-    ), f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    assert all(isinstance(o, allowed_types) for o in operands), (
+        f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    )
 
     unmasked_grads = []
     for g, o in zip(grads, operands):
@@ -560,7 +560,9 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
-    ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    ), (
+        f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    )
 
 
 def check_input_alias_and_mutation(

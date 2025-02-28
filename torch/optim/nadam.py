@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the NAdam algorithm."""
+
 from typing import cast, Optional, Union
 
 import torch
@@ -404,7 +405,11 @@ def _multi_tensor_nadam(
             p.device.type == mp.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, mp, step in zip(params, mu_products, state_steps)
-        ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            "If capturable=True, "
+            "params, mu_products, and state_steps must be on supported devices: "
+            f"{capturable_supported_devices}."
+        )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]  # type: ignore[list-item]
@@ -570,10 +575,16 @@ def _multi_tensor_nadam(
             )
 
             torch._foreach_addcdiv_(
-                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads  # type: ignore[arg-type]
+                grouped_params,
+                grouped_grads,
+                exp_avg_sq_sqrt,
+                step_size_grads,  # type: ignore[arg-type]
             )
             torch._foreach_addcdiv_(
-                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg  # type: ignore[arg-type]
+                grouped_params,
+                grouped_exp_avgs,
+                exp_avg_sq_sqrt,
+                step_size_expavg,  # type: ignore[arg-type]
             )
 
 

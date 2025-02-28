@@ -416,9 +416,9 @@ def register_dataclass_as_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
-    assert dataclasses.is_dataclass(
-        cls
-    ), f"Only dataclasses can be registered with this function: {cls}"
+    assert dataclasses.is_dataclass(cls), (
+        f"Only dataclasses can be registered with this function: {cls}"
+    )
 
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
@@ -1233,6 +1233,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
         import torch
 
+
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1241,11 +1242,14 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             def forward(self, x):
                 return self.linear(x)
 
+
         torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x, m):
                 return m(x) + x
+
 
         ep = torch.export.export(Mod(), (torch.randn(3), Module()))
         print(ep)

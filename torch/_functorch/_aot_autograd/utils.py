@@ -140,9 +140,9 @@ def call_func_at_runtime_with_args(
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple: Optional[
-        bool
-    ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_simple: Optional[bool] = (
+        None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    )
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
@@ -335,12 +335,12 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
 
         num_erased_inputs = len(input_token_nodes)
 
-        assert (
-            num_erased_inputs == expected_num_erased
-        ), f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
-        assert (
-            num_erased_outs == expected_num_erased
-        ), f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
+        assert num_erased_inputs == expected_num_erased, (
+            f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
+        )
+        assert num_erased_outs == expected_num_erased, (
+            f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
+        )
 
         module.recompile()
 
