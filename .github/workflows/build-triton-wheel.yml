@@ -126,13 +126,18 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
-          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm" || "${{ matrix.device }}" == "xpu") ]]; then
+          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
-          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+          if [[ "${BUILD_DEVICE}" == xpu ]]; then
+            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
+            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+          else
+            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
+          fi
+          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
           else
             docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
