@@ -390,9 +390,9 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert (
-            compute_mesh is not None
-        ), f"found no DeviceMesh from dtensor args for {op_call}!"
+        assert compute_mesh is not None, (
+            f"found no DeviceMesh from dtensor args for {op_call}!"
+        )
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
