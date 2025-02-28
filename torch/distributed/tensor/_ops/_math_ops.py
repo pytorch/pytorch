@@ -21,7 +21,6 @@ from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
-    get_mesh_from_args,
     is_tensor_evenly_shardable,
     normalize_dim,
     normalize_dims,
@@ -561,7 +560,7 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     schema_info=RuntimeSchemaInfo(3),
 )
 def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
 
     assert len(op_schema.args_schema) == 5
 
@@ -686,7 +685,7 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
 )
 def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     # backward op does not need to validate the mesh since forward op has already done it
-    mesh = get_mesh_from_args(op_schema, validate=False)
+    mesh = op_schema.get_mesh_from_args(validate=False)
 
     assert len(op_schema.args_schema) == 7
     (
@@ -800,7 +799,7 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     schema_info=RuntimeSchemaInfo(1),
 )
 def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
 
     # args must be: input, normalized_shape, weight, bias, eps
     # for None weight and bias, their corresponding objects will
@@ -898,7 +897,7 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
 )
 def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     # backward op does not need to validate the mesh since forward op has already done it
-    mesh = get_mesh_from_args(op_schema, validate=False)
+    mesh = op_schema.get_mesh_from_args(validate=False)
 
     # args must be: grad_out, input, normalized_shape, mean, rstd,
     # weight, bias, output_mask. For None weight and bias, their

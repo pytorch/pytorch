@@ -27,6 +27,7 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
+from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 
 
@@ -356,6 +357,9 @@ class OpDispatcher:
                     # record the first compute device mesh from args
                     compute_mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
+                compute_mesh = compute_mesh or try_find_mesh_from_args(
+                    op_call, args_list
+                )
                 args_schema.append(
                     self._try_replicate_spec_for_scalar_tensor(
                         op_call, arg, compute_mesh
@@ -372,6 +376,9 @@ class OpDispatcher:
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
             elif isinstance(v, torch.Tensor):
+                compute_mesh = compute_mesh or try_find_mesh_from_args(
+                    op_call, args_list
+                )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call, v, compute_mesh
                 )
@@ -433,7 +440,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         tensor_arg: torch.Tensor,
-        compute_mesh: Optional[DeviceMesh],
+        compute_mesh: DeviceMesh,
     ) -> DTensorSpec:
         # util function to produce a replicate spec for a scalar tensor arg/kwarg
         if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
@@ -446,7 +453,6 @@ class OpDispatcher:
 
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:
             # scalar tensor can be safely treated as replicated
-            assert compute_mesh is not None, "compute mesh should not be None"
             replication_spec = DTensorSpec(
                 compute_mesh,
                 (Replicate(),) * compute_mesh.ndim,

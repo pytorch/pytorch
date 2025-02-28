@@ -338,6 +338,37 @@ class OpSchema:
         # return types, so this check is enough for tensor like types
         return isinstance(return_types[0].type, torch.TensorType)
 
+    def get_mesh_from_args(self, validate: bool = True) -> DeviceMesh:
+        """
+        This util can be used to get a mesh from the OpSchema that contains multiple
+        DTensors as arguments. When `validate` is True, it will try to validate that all the
+        arguments have the same mesh to avoid unexpected cross mesh errors.
+        """
+        first_arg = self.args_schema[0]
+        if isinstance(first_arg, (DTensorSpec, OpStrategy)):
+            mesh = first_arg.mesh
+        elif isinstance(first_arg, (list, tuple, TupleStrategy)):
+            first_elem = (
+                first_arg.childs[0]
+                if isinstance(first_arg, TupleStrategy)
+                else first_arg[0]
+            )
+            assert isinstance(first_elem, (DTensorSpec, OpStrategy))
+            mesh = first_elem.mesh
+        else:
+            raise ValueError(f"Cannot find device mesh from args for op : {self.op}.")
+
+        if validate:
+            for arg in self.args_schema[1:]:
+                if isinstance(arg, (DTensorSpec, OpStrategy)) and arg.mesh != mesh:
+                    raise RuntimeError(
+                        f"DTensor does not support cross-mesh operation on {self.op}! "
+                        f"Got meshes: {mesh} {arg.mesh}. "
+                        f"Please make sure all the arguments have the same DeviceMesh."
+                    )
+
+        return mesh
+
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
         if not self.schema_info:

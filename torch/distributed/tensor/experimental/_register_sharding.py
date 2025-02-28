@@ -16,10 +16,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.utils import (
-    expand_to_full_mesh_op_strategy,
-    get_mesh_from_args,
-)
+from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
 
 __all__ = ["register_sharding"]
@@ -85,7 +82,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
             else:
                 return strategy
 
-        mesh = get_mesh_from_args(op_schema)
+        mesh = op_schema.get_mesh_from_args()
 
         args_schema = tuple(strategy_to_spec(i) for i in op_schema.args_schema)
         kwargs_schema = {

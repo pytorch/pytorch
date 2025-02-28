@@ -16,7 +16,6 @@ from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
-    get_mesh_from_args,
     infer_broadcast_dims_map,
     is_tensor_shardable,
     map_placements_after_broadcast,
@@ -204,31 +203,31 @@ def _scaled_mm_like_strategy(
 
 @register_op_strategy(aten.mm.default)
 def mm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_op_strategy(aten.addmm.default)
 def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_op_strategy(aten.bmm.default)
 def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_op_strategy(aten.baddbmm.default)
 def baddmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_op_strategy(aten._scaled_mm.default)
 def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     return _scaled_mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
@@ -240,7 +239,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
     # TODO: sdpa might be a good candidate for us to explore decomposed sharding propagation
     # as it involves: matmul, pointwise, reduction ops together.
 
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
 
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     q_input_strategy = op_schema.args_schema[0]
@@ -322,7 +321,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     # backward op does not need to validate the mesh since forward op has already done it
-    mesh = get_mesh_from_args(op_schema, validate=False)
+    mesh = op_schema.get_mesh_from_args(validate=False)
 
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
@@ -394,7 +393,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
 
 @register_op_strategy(aten.constant_pad_nd.default)
 def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = get_mesh_from_args(op_schema, validate=False)
+    mesh = op_schema.get_mesh_from_args(validate=False)
 
     # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
     return OpStrategy(
@@ -417,7 +416,7 @@ def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
 )
 def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpStrategy:
     # NOTE: currently we only support some simple strategies to support tensor parallelism
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
@@ -493,7 +492,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     # backward op does not need to validate the mesh since forward op has already done it
-    mesh = get_mesh_from_args(op_schema, validate=False)
+    mesh = op_schema.get_mesh_from_args(validate=False)
 
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)

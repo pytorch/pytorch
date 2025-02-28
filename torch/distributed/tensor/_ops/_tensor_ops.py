@@ -20,7 +20,6 @@ from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
-    get_mesh_from_args,
     is_tensor_dim_sharded,
     is_tensor_evenly_shardable,
     is_tensor_partial,
@@ -85,7 +84,7 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     # sharding layout the same with two operands, we choose to follow the arg with max
     # num of shards, still keep is_same_size here for completeness as they share the
     # same strategy in theory.
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     self_strategy, other_strategy = op_schema.args_schema
     assert isinstance(self_strategy, OpStrategy)
     assert isinstance(other_strategy, OpStrategy)
@@ -221,7 +220,7 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     """Just propagate input sharding, but expect replicated for boundaries input."""
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     input_strategy = op_schema.args_schema[0]
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
@@ -318,7 +317,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # - We suggest for src to follow the sharding of input, except on the scatter dimension,
     #   where our best bet for now is to make them replicated as a fall-back.
     #   TODO: Ideally we'd like to make sure the output is re-sharded afterwards to keep input sharding.
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
     input_ndim = input_strategy.ndim
@@ -369,7 +368,7 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(op_schema: OpSchema) -> StrategyType:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [output, input, index, src]
@@ -392,7 +391,7 @@ def scatter_strategy(op_schema: OpSchema) -> StrategyType:
 
 @register_op_strategy(aten.gather.default)
 def gather_strategy(op_schema: OpSchema) -> StrategyType:
-    mesh = get_mesh_from_args(op_schema)
+    mesh = op_schema.get_mesh_from_args()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     dim = cast(int, op_schema.args_schema[1])
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
