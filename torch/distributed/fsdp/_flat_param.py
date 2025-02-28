@@ -273,7 +273,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             shard parameter info; see :class:`_ShardParamInfo` for details.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo` for details.
-        _modules (Set[nn.Module]): Modules that contain some original parameter
+        _modules (set[nn.Module]): Modules that contain some original parameter
             that is flattened into the flat parameter.
 
         _shard_numel_padded (int): Numel padded for this rank's sharded flat

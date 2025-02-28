@@ -179,7 +179,7 @@ class _WeakRefInfo:
             t (torch.Tensor): The tensor to extract storages from.
 
         Returns:
-            Set[torch.UntypedStorage]: A set of untyped storages.
+            set[torch.UntypedStorage]: A set of untyped storages.
         """
         unflattened_tensors = [t]
         flattened_tensor_storages = set()
