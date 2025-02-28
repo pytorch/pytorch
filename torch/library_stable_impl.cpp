@@ -17,17 +17,6 @@
 
 
 class StableLibrary::TorchLibraryOpaque {
-Member
-@kimishpatel kimishpatel 3 weeks ago
-I am guessing that, from design perspective, this is the interface layer with registration API that is shipped with different versions of libtorch? But the user code, for custom ops, never relies on at::Tensor?
-
-Member
-Author
-@janeyx99 janeyx99 3 weeks ago
-Yea, this is to allow for registering libtorch-agnostic custom ops which cannot use at::Tensor or IValue, etc. in their schema
-
-Reply...
-public:
     // TODO: support other Kinds lol, you'll need to translate between StableLibrary::Kind and Library::Kind
     TorchLibraryOpaque(StableLibrary::Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
         : library_(torch::Library::Kind::IMPL, std::move(ns), k, file, line) {}
