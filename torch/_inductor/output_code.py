@@ -485,63 +485,66 @@ class CompiledFxGraph(OutputCode):
         self.boxed_forward_device_index = None
 
         cudagraph_info = None
-        if cudagraphs:
+
+        def _init_cudagraph() -> Optional[CudagraphCachedInfo]:
             if config.graph_partition:
-                cudagraph_info = get_cudagraph_info(gm)
-            else:
-                # check cudagraph disabling reasons from inductor lowering
-                if self.disabled_cudagraphs_reason:
-                    if "cuda" in self.device_types:
-                        log_cudagraph_skip_and_bump_counter(
-                            f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
-                    BoxedBool.disable(cudagraphs)
+                return get_cudagraph_info(gm)
+
+            # check cudagraph disabling reasons from inductor lowering
+            if self.disabled_cudagraphs_reason:
+                if "cuda" in self.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
+                    )
                 else:
-                    complex_memory_overlap_inputs = any(
-                        complex_memory_overlap(t)
-                        for t in example_inputs
-                        if isinstance(t, torch.Tensor)
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+                return None
+            else:
+                complex_memory_overlap_inputs = any(
+                    complex_memory_overlap(t)
+                    for t in example_inputs
+                    if isinstance(t, torch.Tensor)
+                )
+
+                if not config.triton.cudagraph_support_input_mutation:
+                    # Skip supports for cudagraph-managed tensors
+                    from torch._inductor.cudagraph_utils import (
+                        check_for_mutation_ignore_cuda_graph_managed_tensor,
                     )
 
-                    if not config.triton.cudagraph_support_input_mutation:
-                        # Skip supports for cudagraph-managed tensors
-                        from torch._inductor.cudagraph_utils import (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor,
+                    has_mutation_str = (
+                        check_for_mutation_ignore_cuda_graph_managed_tensor(
+                            gm,
+                            self.mutated_inputs,
+                            self.mutated_input_idxs,
+                            static_input_idxs,
                         )
+                    )
+                    has_mutation = has_mutation_str is not None
 
-                        has_mutation_str = (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor(
-                                gm,
-                                self.mutated_inputs,
-                                self.mutated_input_idxs,
-                                static_input_idxs,
-                            )
-                        )
-                        has_mutation = has_mutation_str is not None
+                    if has_mutation:
+                        self.disabled_cudagraphs_reason = has_mutation_str
+                else:
+                    # Check mutation later to support cudagraph-managed tensors
+                    has_mutation = None
 
-                        if has_mutation:
-                            self.disabled_cudagraphs_reason = has_mutation_str
-                    else:
-                        # Check mutation later to support cudagraph-managed tensors
-                        has_mutation = None
-
-                    cudagraph_tests = [
-                        (not has_mutation, "mutated inputs"),
-                        (not complex_memory_overlap_inputs, "complex memory overlap"),
-                        (
-                            all(
-                                isinstance(
-                                    t, (torch.Tensor, torch.SymInt, torch.Generator)
-                                )
-                                for t in example_inputs
-                            ),
-                            "non-Tensor inputs",
+                cudagraph_tests = [
+                    (not has_mutation, "mutated inputs"),
+                    (not complex_memory_overlap_inputs, "complex memory overlap"),
+                    (
+                        all(
+                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
+                            for t in example_inputs
                         ),
-                    ]
-                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                    cudagraph_info = get_cudagraph_info(gm, cudagraph_fail_reasons)
+                        "non-Tensor inputs",
+                    ),
+                ]
+                cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+                return get_cudagraph_info(gm, cudagraph_fail_reasons)
+
+        if cudagraphs:
+            cudagraph_info = _init_cudagraph()
 
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
