@@ -62,6 +62,7 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
+      # TODO: We need to get rid of this when we remove builds that rely on the base manylinux-builder image
       PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
     steps:
       - name: Setup SSH (Click me for login details)
