@@ -759,16 +759,21 @@ def slice_forward(
         return self.as_strided(sizes, strides, storage_offset)
 
 
-@register_decomposition(aten.slice_copy.Tensor)
+@register_decomposition([aten.slice_copy.Tensor, aten.slice_copy.Tensor_out])
 def slice_copy(
     self: Tensor,
     dim: int = 0,
     start: Optional[int] = None,
     end: Optional[int] = None,
     step: int = 1,
+    out: Optional[Tensor] = None,
 ):
     _slice = slice_forward(self, dim, start, end, step)
-    return _slice.clone(memory_format=torch.contiguous_format)
+    slice_clone = _slice.clone(memory_format=torch.contiguous_format)
+    if out is None:
+        return slice_clone
+    else:
+        return _safe_copy_out(copy_from=slice_clone, copy_to=out, exact_dtype=True)
 
 
 def _normalize_start_end(
