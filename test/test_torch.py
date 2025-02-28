@@ -36,7 +36,7 @@ from torch.testing._internal.common_optimizers import (
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
-    IS_FILESYSTEM_UTF8_ENCODING,
+    IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -9603,6 +9603,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: port to a distributed test suite
     @slowTest
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                        don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs(self):
         def _spawn_method(self, method, arg):
             try:
