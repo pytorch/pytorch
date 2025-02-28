@@ -1120,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy==1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
@@ -1454,8 +1454,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",
