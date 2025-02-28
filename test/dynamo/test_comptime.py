@@ -64,7 +64,7 @@ FakeTensor(..., size=(s0,))
 {'foo': FakeTensor(..., size=(s0,))}
 range(1, 3, 1)
 Employee(name='foo', id=2)
-[1, 2]
+UserDefinedListVariable(mylist)
 defaultdict(NestedUserFunctionVariable(), {})
 set()
 {'a','b'}

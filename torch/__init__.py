@@ -343,6 +343,7 @@ def _load_global_deps() -> None:
             "cufft": "libcufft.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
+            "cufile": "libcufile.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
@@ -1482,7 +1483,7 @@ def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
         _C._set_deterministic_algorithms(True)
     else:
         raise RuntimeError(
-            "invalid value of debug_mode, expected 0, 1, or 2, " f"but got {debug_mode}"
+            f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
         )
 
 

@@ -128,6 +128,18 @@ scalar_t upsample_get_value_bounded(
 }
 
 template <typename scalar_t>
+scalar_t upsample_get_value_bounded(
+    constant scalar_t* data,
+    long dim,
+    ulong3 strides,
+    long n,
+    long c,
+    long x) {
+  int access_x = max(min(x, dim - 1), 0L);
+  return data[n * strides.z + c * strides.y + access_x * strides.x];
+}
+
+template <typename scalar_t>
 void upsample_increment_value_bounded(
     device AtomicType_t<scalar_t>* data,
     long2 dim,
@@ -181,6 +193,35 @@ inline uchar linear_interp(uchar v0, uchar v1, float x) {
 }
 
 template <typename T>
+kernel void upsample_linear1d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong3& input_strides [[buffer(2)]],
+    constant ulong3& output_strides [[buffer(3)]],
+    constant long3& input_sizes [[buffer(4)]],
+    constant long3& output_sizes [[buffer(5)]],
+    constant float& scale [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  auto output_x = thread_index;
+  auto real_x = area_pixel_compute_source_index(
+      scale, output_x, align_corners, /*cubic=*/false);
+  auto t_x = fract(real_x);
+
+  for (int n = 0; n < output_sizes.z; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      auto i00 = upsample_get_value_bounded<T>(
+          inputData, input_sizes.x, input_strides, n, c, real_x);
+      auto i01 = upsample_get_value_bounded<T>(
+          inputData, input_sizes.x, input_strides, n, c, real_x + 1);
+      auto res = linear_interp(i00, i01, t_x);
+      outputData
+          [n * output_strides.z + c * output_strides.y +
+           output_x * output_strides.x] = static_cast<T>(res);
+    }
+  }
+}
+template <typename T>
 kernel void upsample_bilinear2d(
     constant T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
@@ -223,6 +264,56 @@ kernel void upsample_bilinear2d(
           [n * output_strides.w + c * output_strides.z +
            output_x * output_strides.x + output_y * output_strides.y] =
               static_cast<T>(res);
+    }
+  }
+}
+
+inline float bilinear_functor(float x) {
+  return abs(x) < 1.0 ? 1.0 - abs(x) : abs(x);
+}
+
+template <typename T>
+kernel void upsample_bilinear2d_aa(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  auto output_x = thread_index % output_sizes.x;
+  auto output_y = thread_index / output_sizes.x;
+  (void)align_corners; // Align corners is unused for AA algorithm
+  auto x_center = area_pixel_compute_source_index(
+      scales.x, output_x, /*align_corners=*/false, /*cubic=*/false);
+  auto y_center = area_pixel_compute_source_index(
+      scales.y, output_y, /*align_corners=*/false, /*cubic=*/false);
+  auto clamped_scales = max(1.0, scales);
+  auto x_min = max(0L, long(floor(x_center - clamped_scales.x + 1)));
+  auto x_max = min(input_sizes.x, long(ceil(x_center + clamped_scales.x)));
+  auto y_min = max(0L, long(floor(y_center - clamped_scales.y + 1)));
+  auto y_max = min(input_sizes.y, long(ceil(y_center + clamped_scales.y)));
+  for (int n = 0; n < output_sizes.w; n++) {
+    for (int c = 0; c < output_sizes.z; c++) {
+      float res = 0.0;
+      float ws = 0.0;
+      constant auto* input =
+          inputData + n * input_strides.w + c * input_strides.z;
+      for (auto y = y_min; y < y_max; ++y) {
+        auto dy = bilinear_functor((y - y_center) / clamped_scales.y);
+        for (auto x = x_min; x < x_max; ++x) {
+          auto dx = bilinear_functor((x - x_center) / clamped_scales.x);
+          auto val = input[x * input_strides.x + y * input_strides.y];
+          res += val * dx * dy;
+          ws += dx * dy;
+        }
+      }
+      outputData
+          [n * output_strides.w + c * output_strides.z +
+           output_x * output_strides.x + output_y * output_strides.y] =
+              static_cast<T>(res / ws);
     }
   }
 }
@@ -352,54 +443,55 @@ kernel void upsample_bicubic2d_backward(
   }
 }
 
-#define INSTANTIATE_UPSAMPLE_BICUBIC(DTYPE)                        \
-  template [[host_name("upsample_bicubic2d_" #DTYPE)]] kernel void \
-  upsample_bicubic2d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong4 & input_strides [[buffer(2)]],               \
-      constant ulong4 & output_strides [[buffer(3)]],              \
-      constant long4 & input_sizes [[buffer(4)]],                  \
-      constant long4 & output_sizes [[buffer(5)]],                 \
-      constant float2 & scales [[buffer(6)]],                      \
-      constant bool& align_corners [[buffer(7)]],                  \
+#define INSTANTIATE_UPSAMPLE_2D(NAME, DTYPE)                       \
+  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
+      upsample_##NAME<DTYPE>(                                      \
+          constant DTYPE * inputData [[buffer(0)]],                \
+          device DTYPE * outputData [[buffer(1)]],                 \
+          constant ulong4 & input_strides [[buffer(2)]],           \
+          constant ulong4 & output_strides [[buffer(3)]],          \
+          constant long4 & input_sizes [[buffer(4)]],              \
+          constant long4 & output_sizes [[buffer(5)]],             \
+          constant float2 & scales [[buffer(6)]],                  \
+          constant bool& align_corners [[buffer(7)]],              \
+          uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+      upsample_##NAME##_backward<DTYPE>(                                    \
+          device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],         \
+          constant DTYPE * gradOutputData [[buffer(1)]],                    \
+          constant ulong4 & input_strides [[buffer(2)]],                    \
+          constant ulong4 & output_strides [[buffer(3)]],                   \
+          constant long4 & input_sizes [[buffer(4)]],                       \
+          constant long4 & output_sizes [[buffer(5)]],                      \
+          constant float2 & scales [[buffer(6)]],                           \
+          constant bool& align_corners [[buffer(7)]],                       \
+          uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_LINEAR(DTYPE)                        \
+  template [[host_name("upsample_linear1d_" #DTYPE)]] kernel void \
+  upsample_linear1d<DTYPE>(                                       \
+      constant DTYPE * inputData [[buffer(0)]],                   \
+      device DTYPE * outputData [[buffer(1)]],                    \
+      constant ulong3 & input_strides [[buffer(2)]],              \
+      constant ulong3 & output_strides [[buffer(3)]],             \
+      constant long3 & input_sizes [[buffer(4)]],                 \
+      constant long3 & output_sizes [[buffer(5)]],                \
+      constant float& scale [[buffer(6)]],                        \
+      constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)                        \
-  template [[host_name("upsample_bilinear2d_" #DTYPE)]] kernel void \
-  upsample_bilinear2d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                     \
-      device DTYPE * outputData [[buffer(1)]],                      \
-      constant ulong4 & input_strides [[buffer(2)]],                \
-      constant ulong4 & output_strides [[buffer(3)]],               \
-      constant long4 & input_sizes [[buffer(4)]],                   \
-      constant long4 & output_sizes [[buffer(5)]],                  \
-      constant float2 & scales [[buffer(6)]],                       \
-      constant bool& align_corners [[buffer(7)]],                   \
-      uint thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)               \
+  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);          \
+  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE); \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);         \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d_aa, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);
 
-#define INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(DTYPE)                        \
-  template [[host_name("upsample_bicubic2d_backward_" #DTYPE)]] kernel void \
-  upsample_bicubic2d_backward<DTYPE>(                                       \
-      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],             \
-      constant DTYPE * gradOutputData [[buffer(1)]],                        \
-      constant ulong4 & input_strides [[buffer(2)]],                        \
-      constant ulong4 & output_strides [[buffer(3)]],                       \
-      constant long4 & input_sizes [[buffer(4)]],                           \
-      constant long4 & output_sizes [[buffer(5)]],                          \
-      constant float2 & scales [[buffer(6)]],                               \
-      constant bool& align_corners [[buffer(7)]],                           \
-      uint thread_index [[thread_position_in_grid]])
-
-INSTANTIATE_UPSAMPLE_BILINEAR(uchar);
-INSTANTIATE_UPSAMPLE_BICUBIC(float);
-INSTANTIATE_UPSAMPLE_BILINEAR(float);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(float);
-INSTANTIATE_UPSAMPLE_BICUBIC(half);
-INSTANTIATE_UPSAMPLE_BILINEAR(half);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(half);
+INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
+INSTANTIATE_UPSAMPLE_ALL(float);
+INSTANTIATE_UPSAMPLE_ALL(half);
 #if __METAL_VERSION__ >= 310
-INSTANTIATE_UPSAMPLE_BICUBIC(bfloat);
-INSTANTIATE_UPSAMPLE_BILINEAR(bfloat);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(bfloat);
+INSTANTIATE_UPSAMPLE_ALL(bfloat);
 #endif

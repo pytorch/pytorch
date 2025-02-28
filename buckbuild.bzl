@@ -997,6 +997,7 @@ def define_buck_targets(
             "Config.h": ":generate_aten_config[Config.h]",
         },
         labels = labels,
+        visibility = ["PUBLIC"],
     )
 
     fb_xplat_cxx_library(

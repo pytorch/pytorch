@@ -9,17 +9,7 @@ import warnings
 import zipfile
 from collections.abc import Iterator
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -64,6 +54,8 @@ __all__ = [
     "UnflattenedModule",
 ]
 
+# To make sure export specific custom ops are loaded
+import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
