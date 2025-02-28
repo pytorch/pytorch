@@ -1105,6 +1105,14 @@
     "Any",
     "to_dlpack"
   ],
+  "torch.utils.pytree": [
+    "FlattenFunc",
+    "FlattenWithKeysFunc",
+    "FromDumpableContextFunc",
+    "PyTree",
+    "ToDumpableContextFunc",
+    "UnflattenFunc"
+  ],
   "torch": [
     "BFloat16Storage",
     "BFloat16Tensor",

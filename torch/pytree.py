@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
 from torch.utils.pytree import (
+    PyTree as PyTree,
     register_pytree_node as register_node,
     tree_all as all,
     tree_all_only as all_only,
@@ -39,7 +40,7 @@ from torch.utils.pytree import (
 if _TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from torch.utils._cxx_pytree import PyTree as PyTree, PyTreeSpec as PyTreeSpec
+    from torch.utils._cxx_pytree import PyTreeSpec as PyTreeSpec
 
 
 __all__ = [
