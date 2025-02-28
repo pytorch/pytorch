@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Callable
 
 from torch._inductor.utils import fresh_inductor_cache
 
@@ -14,18 +15,33 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 TIMEOUT: int = 2000
 
-MODELS: list[str] = ["nanogpt", "BERT_pytorch", "resnet50"]
+
+# Keep in sync with .ci/pytorch/test.sh
+TORCHBENCH_MODELS: list[str] = [
+    "nanogpt",
+    "BERT_pytorch",
+    "resnet50",
+    "moco",
+    "llama",
+    "hf_T5",
+]
+HUGGINGFACE_MODELS: list[str] = [
+    "AllenaiLongformerBase",
+    "BertForMaskedLM",
+    "GPT2ForSequenceClassification",
+]
 
 
 @dataclasses.dataclass
 class RunResult:
     model: str
     mode: str  # inference or training
+    benchmark: str
     dynamic: bool
     device: str  # cuda or cpu
-    cold_compile_s: float
-    warm_compile_s: float
-    speedup: float
+    cold_compile_s: list[float]
+    warm_compile_s: list[float]
+    speedup_pct: float
 
 
 def get_compile_time(file: tempfile._TemporaryFileWrapper) -> float:
@@ -37,84 +53,117 @@ def get_compile_time(file: tempfile._TemporaryFileWrapper) -> float:
     return float(compilation_time)
 
 
-def _run_torchbench_from_args(model: str, args: list[str]) -> tuple[float, float]:
-    with fresh_inductor_cache():
-        env = os.environ.copy()
-        with tempfile.NamedTemporaryFile(suffix=".csv") as file:
-            args.append("--output=" + file.name)
-            logger.info(f"Performing cold-start run for {model}")  # noqa: G004
-            subprocess.check_call(args, timeout=TIMEOUT, env=env)
-            cold_compile_time = get_compile_time(file)
+def _run_torchbench_from_args(
+    cmd_args: argparse.Namespace,
+    model: str,
+    args: list[str],
+) -> tuple[list[float], list[float]]:
+    cold_compile_time: list[float] = []
+    warm_compile_time: list[float] = []
 
-        args.pop()
-        with tempfile.NamedTemporaryFile(suffix=".csv") as file:
-            args.append("--output=" + file.name)
-            logger.info(f"Performing warm-start run for {model}")  # noqa: G004
-            subprocess.check_call(args, timeout=TIMEOUT, env=env)
-            warm_compile_time = get_compile_time(file)
+    for _ in range(cmd_args.repeat):
+        with fresh_inductor_cache():
+            env = os.environ.copy()
+            with tempfile.NamedTemporaryFile(suffix=".csv") as file:
+                args.append("--output=" + file.name)
+                logger.info(f"Performing cold-start run for {model}")  # noqa: G004
+                subprocess.check_call(args, timeout=TIMEOUT, env=env)
+                cold_compile_time.append(get_compile_time(file))
 
-        return cold_compile_time, warm_compile_time
+            args.pop()
+            with tempfile.NamedTemporaryFile(suffix=".csv") as file:
+                args.append("--output=" + file.name)
+                logger.info(f"Performing warm-start run for {model}")  # noqa: G004
+                subprocess.check_call(args, timeout=TIMEOUT, env=env)
+                warm_compile_time.append(get_compile_time(file))
+
+    return cold_compile_time, warm_compile_time
 
 
-def _run_torchbench_model(results: list[RunResult], model: str, device: str) -> None:
+MODE_ARGS_DICT = {
+    "inference": ["--inference", "--bfloat16"],
+    "training": ["--training", "--amp"],
+}
+
+
+BENCHMARK_FILE = {
+    "torchbench": "torchbench.py",
+    "huggingface": "huggingface.py",
+}
+
+
+def _run_torchbench_model(
+    cmd_args: argparse.Namespace,
+    results: list[RunResult],
+    model: str,
+) -> None:
     cur_file = os.path.abspath(__file__)
-    torchbench_file = os.path.join(os.path.dirname(cur_file), "torchbench.py")
-    assert os.path.exists(
-        torchbench_file
-    ), f"Torchbench does not exist at {torchbench_file}"
+    torchbench_file = os.path.join(
+        os.path.dirname(cur_file), BENCHMARK_FILE[cmd_args.benchmark]
+    )
+    assert os.path.exists(torchbench_file), (
+        f"Torchbench does not exist at {torchbench_file}"
+    )
 
-    base_args = [
-        sys.executable,
-        torchbench_file,
-        f"--only={model}",
-        "--repeat=1",
-        "--performance",
-        "--backend=inductor",
-        f"--device={device}",
-    ]
-    for mode, mode_args in [
-        ("inference", ["--inference", "--bfloat16"]),
-        ("training", ["--training", "--amp"]),
-    ]:
-        for dynamic, dynamic_args in [
-            (False, []),
-            (True, ["--dynamic-shapes", "--dynamic-batch-only"]),
-        ]:
-            args = list(base_args)
-            args.extend(mode_args)
-            args.extend(dynamic_args)
+    dynamic = cmd_args.dynamic
+    dynamic_args = ["--dynamic-shapes", "--dynamic-batch-only"] if dynamic else []
 
-            logger.info(f"Command: {args}")  # noqa: G004
-            try:
-                cold_compile_t, warm_compile_t = _run_torchbench_from_args(model, args)
-                results.append(
-                    RunResult(
-                        "model",
-                        mode,
-                        dynamic,
-                        device,
-                        cold_compile_t,
-                        warm_compile_t,
-                        cold_compile_t / warm_compile_t,
-                    )
-                )
-            except Exception as e:
-                print(e)
-                return None
+    args = (
+        [
+            sys.executable,
+            torchbench_file,
+            f"--only={model}",
+            "--repeat=1",
+            "--performance",
+            "--backend=inductor",
+            f"--device={cmd_args.device}",
+        ]
+        + MODE_ARGS_DICT[cmd_args.mode]
+        + dynamic_args
+    )
+
+    logger.info(f"Command: {args}")  # noqa: G004
+    try:
+        cold_compile_t, warm_compile_t = _run_torchbench_from_args(
+            cmd_args, model, args
+        )
+        speedup_pct = (1 - (sum(warm_compile_t) / sum(cold_compile_t))) * 100
+        results.append(
+            RunResult(
+                model=model,
+                mode=cmd_args.mode,
+                benchmark=cmd_args.benchmark,
+                dynamic=dynamic,
+                device=cmd_args.device,
+                cold_compile_s=cold_compile_t,
+                warm_compile_s=warm_compile_t,
+                speedup_pct=speedup_pct,
+            )
+        )
+    except Exception:
+        logger.info("fail", exc_info=True)
+        return None
 
 
-def _write_results_to_json(results: list[RunResult], output_filename: str) -> None:
+def _write_results_to_json(
+    cmd_args: argparse.Namespace,
+    results: list[RunResult],
+) -> None:
+    if len(results) == 0:
+        # do not write empty results
+        return
+
     records = []
     for result in results:
         for metric_name, value in [
-            ("cold_compile_time(s)", result.cold_compile_s),
-            ("warm_compile_time(s)", result.warm_compile_s),
-            ("speedup", result.speedup),
+            ("Cold compile time (s)", result.cold_compile_s),
+            ("Warm compile time (s)", result.warm_compile_s),
+            ("Speedup (%)", [result.speedup_pct]),
         ]:
             records.append(
                 {
                     "benchmark": {
-                        "name": "cache_benchmarks",
+                        "name": "TorchCache Benchmark",
                         "mode": result.mode,
                         "extra_info": {
                             "is_dynamic": result.dynamic,
@@ -124,48 +173,82 @@ def _write_results_to_json(results: list[RunResult], output_filename: str) -> No
                     "model": {
                         "name": result.model,
                         "backend": "inductor",
+                        "origins": [result.benchmark],
                     },
                     "metric": {
                         "name": metric_name,
                         "type": "OSS model",
-                        "benchmark_values": [value],
+                        "benchmark_values": value,
                     },
                 }
             )
-    with open(output_filename, "w") as f:
+    with open(cmd_args.output, "w") as f:
         json.dump(records, f)
 
 
 def parse_cmd_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run a TorchBench ServiceLab benchmark."
-    )
+    parser = argparse.ArgumentParser(description="Run a TorchCache benchmark.")
     parser.add_argument(
         "-m",
         "--model",
         help="Name of the model to run",
     )
-    parser.add_argument("-d", "--device", default="cuda", help="cpu or cuda")
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Whether to run with dynamic enabled",
+    )
+    parser.add_argument(
+        "--benchmark",
+        choices=("torchbench", "huggingface"),
+        required=True,
+        help="Name of benchmark suite to run",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("inference", "training"),
+        default="training",
+    )
+    parser.add_argument(
+        "--device",
+        default="cuda",
+        choices=("cuda", "cpu"),
+    )
     parser.add_argument(
         "--output",
         required=True,
         help="The output filename (json)",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        choices=range(1, 10),
+        help="Number of times to repeat the compilation (reduce noise)",
+    )
     args, _ = parser.parse_known_args()
     return args
 
 
+Dispatch_fn_t = Callable[[argparse.Namespace, list[RunResult], str], None]
+
+
 def main() -> None:
-    args = parse_cmd_args()
+    cmd_args = parse_cmd_args()
+
+    dispatcher: dict[str, tuple[Dispatch_fn_t, list[str]]] = {
+        "torchbench": (_run_torchbench_model, TORCHBENCH_MODELS),
+        "huggingface": (_run_torchbench_model, HUGGINGFACE_MODELS),
+    }
+    fn, models = dispatcher[cmd_args.benchmark]
+    if cmd_args.model is not None:
+        models = [cmd_args.model]
 
     results: list[RunResult] = []
+    for model in models:
+        fn(cmd_args, results, model)
 
-    if args.model is not None:
-        _run_torchbench_model(results, args.model, args.device)
-    else:
-        for model in MODELS:
-            _run_torchbench_model(results, model, args.device)
-    _write_results_to_json(results, args.output)
+    _write_results_to_json(cmd_args, results)
 
 
 if __name__ == "__main__":

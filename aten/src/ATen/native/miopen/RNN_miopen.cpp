@@ -57,10 +57,6 @@ namespace at::native {
 
 #include <ATen/TensorUtils.h>
 
-#include <c10/hip/HIPCachingAllocator.h>
-
-#include <rocrand/rocrand_xorwow.h>
-
 #include <functional>
 #include <iterator>
 #include <sstream>
@@ -72,36 +68,10 @@ namespace at::native {
 
 namespace at { namespace native {
 
-// Workspace copied from Conv_miopen.cpp but is put here inside anonymous namespace
-// to avoid duplicate symbols and to avoid the need to expose as a public struct.
-
-namespace {
-
-struct Workspace {
-  Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
-  }
-  Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
-  ~Workspace() {
-    if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(data);
-    }
-  }
-
-  size_t size;
-  void* data;
-};
-
-} // anonymous
-
 //RNNDescriptor.
 struct RNNDescriptorParams {
     int64_t hidden_size;
     int64_t num_layers;
-    double dropout_rate;
-    uint64_t dropout_seed;
     miopenRNNDirectionMode_t direction;
     miopenRNNMode_t rnn_mode;
     miopenDataType_t datatype;
@@ -144,16 +114,6 @@ struct RNNDescriptorParams {
         }
     }
 
-    void set_dropout(double dropout_rate, uint64_t dropout_seed = 0) {
-        this->dropout_rate = dropout_rate;
-        if (dropout_seed == 0) {
-            // rand() returns 32 bit values so we combine two of them
-            this->dropout_seed = rand() << 32 | rand();
-        } else {
-            this->dropout_seed = dropout_seed;
-        }
-    }
-
     void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype, miopenRNNBiasMode_t bias_mode) {
         this->set_mode(mode);
         this->hidden_size = hidden_size;
@@ -166,12 +126,6 @@ struct RNNDescriptorParams {
     RNNDescriptor descriptor() const {
         RNNDescriptor rnn_desc;
         rnn_desc.set(hidden_size, num_layers, input_mode, direction, rnn_mode, bias_mode, algo, datatype);
-        return rnn_desc;
-    }
-
-    RNNDescriptor descriptorWithDropout(DropoutDescriptor& dropout_desc) const {
-        RNNDescriptor rnn_desc;
-        rnn_desc.setWithDropout(dropout_desc, hidden_size, num_layers, input_mode, direction, rnn_mode, bias_mode, algo, datatype);
         return rnn_desc;
     }
 };
@@ -250,8 +204,6 @@ struct RNNParams {
 
 struct RNNDescriptors {
     RNNDescriptor rnn_desc;
-    DropoutDescriptor dropout_desc;
-    std::unique_ptr<Workspace> dropout_states;
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
     TensorDescriptor hx_desc;
@@ -260,25 +212,7 @@ struct RNNDescriptors {
     TensorDescriptor cy_desc;
 
     RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx) {
-        if (fn.rnn.dropout_rate == 0.0) {
-            rnn_desc = fn.rnn.descriptor();
-        } else {
-            size_t statesSizeInBytes = 0;
-            miopenDropoutGetStatesSize(handle, &statesSizeInBytes);
-            size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
-
-            dropout_states = std::unique_ptr<Workspace>(new Workspace(states_size * sizeof(rocrand_state_xorwow)));
-            dropout_desc.set(handle,
-                             fn.rnn.dropout_rate,
-                             dropout_states->data,
-                             dropout_states->size,
-                             fn.rnn.dropout_seed,
-                             false,
-                             false,
-                             miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
-            rnn_desc = fn.rnn.descriptorWithDropout(dropout_desc);
-        }
-
+        rnn_desc = fn.rnn.descriptor();
         x_descs = fn.tensors.descriptors(x);
         y_descs = fn.tensors.descriptors(y);
         hx_desc.set(hx, 5);
@@ -558,7 +492,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto handle = getMiopenHandle();
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
+
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
     FilterDescriptor w_desc;
@@ -617,6 +551,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     }
 
     return std::make_tuple(output, hy, cy, reserve, weight_buf);
+
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
@@ -691,7 +626,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
     FilterDescriptor w_desc;
@@ -786,7 +720,6 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
     FilterDescriptor w_desc;
@@ -976,6 +909,6 @@ REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
-}} // namespace native
+}} //namespace native.
 
 #endif
