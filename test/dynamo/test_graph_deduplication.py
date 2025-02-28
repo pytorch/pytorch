@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa: B950
 import torch
 import torch.fx
 from torch._dynamo.graph_deduplication import _flatten_args_kwargs
