@@ -240,7 +240,7 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: dict[str, str]
+    node_name_to_buf_name: dict[str, str],
 ) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
