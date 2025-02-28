@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1866,6 +1867,21 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                name == "assertRaisesRegex"
+                and isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj.value, unittest.TestCase)
+            ):
+                unimplemented_v2(
+                    gb_type="Failed to trace builtin operator",
+                    context="ctx manager unittest.TestCase.assertRaisesRegex",
+                    explanation="Dynamo does not know how to trace builtin operator `assertRaisesRegex` ",
+                    hints=[
+                        "Avoid calling builtin `assertRaisesRegex` "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
