@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -9,15 +9,12 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
     context_add_using_tf32,
-    get_mixedmm_precondition,
-    mixed_mm_operations,
     mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config, ir
-from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
@@ -43,12 +40,17 @@ from ..utils import (
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
+    extra_mm_configs,
+    int8_mm_configs,
     mm_args,
-    mm_config_kwargs,
+    mm_configs,
     mm_grid,
     mm_options,
+    persistent_mm_configs,
     persistent_mm_grid,
     persistent_mm_options,
+    should_fallback_to_aten,
+    triton_config,
 )
 
 
@@ -111,9 +113,6 @@ mm_template = TritonTemplate(
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        {% if B_PROLOGUE_CAST_TYPE %} # TODO - replace with prologue fusion
-        b = b.to(B_PROLOGUE_CAST_TYPE)
-        {% endif %}
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
 
     # rematerialize rm and rn to save registers
@@ -183,9 +182,6 @@ mm_template = TritonTemplate(
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
-        {% if B_PROLOGUE_CAST_TYPE %} # TODO - replace with prologue fusion
-        b = b.to(B_PROLOGUE_CAST_TYPE)
-        {% endif %}
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
 
     # rematerialize rm and rn to save registers
@@ -282,8 +278,6 @@ persistent_tma_mm_template = TritonTemplate(
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
         )
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(
             a if A_ROW_MAJOR else a.T,
             b if B_ROW_MAJOR else b.T,
@@ -335,6 +329,15 @@ def _is_large_block_for_cpu(m, n, k):
     return m * n > 2**13
 
 
+def mm_config_kwargs(device):
+    if device == "cpu":
+        return {
+            "scale": 0.5,
+            "exclude": _is_large_block_for_cpu,
+        }
+    return {}
+
+
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
     Giving torch.addmm a 1D tensor calls a different (faster) cublasLt
@@ -352,7 +355,6 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
-    device_type = ir.get_device_type(mat1)
     name = "mm"
 
     aten_layout = layout
@@ -366,15 +368,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
     static_shape, is_nonzero = _is_static_problem(layout)
-
-    mm_configs = V.choices.get_base_mm_configs(device_type)
-    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
-    extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
-
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m, n, k, *mm_config_kwargs(device_type, _is_large_block_for_cpu)
-        ):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -383,7 +378,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -422,7 +417,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -457,12 +452,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for GEMM, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     for k in inductor_config.external_matmul:
@@ -482,7 +472,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    device_type = ir.get_device_type(mat1)
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
@@ -498,12 +487,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
-
-    int8_mm_configs = V.choices.get_int8_mm_configs(device_type)
-
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -511,10 +497,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    if len(choices) == 0:
-        log.warning(
-            "No choices for integer GEMM avaialbe using configured backends, using ATen backend as fallback"
-        )
+
+    if should_fallback_to_aten(choices):
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
 
     try:
@@ -530,7 +514,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
-    device_type = ir.get_device_type(mat1)
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
     if (not is_nonzero) or (not use_max_autotune()):
@@ -583,13 +566,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    mm_configs = V.choices.get_base_mm_configs(device_type)
-    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
-
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
-        ):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -601,7 +579,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -656,12 +634,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    add_aten_fallback = False
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
-        add_aten_fallback = True
-
-    if add_aten_fallback:
+    if should_fallback_to_aten(choices):
         choices.append(
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
@@ -747,13 +720,6 @@ def tuned_sparse_semi_structured_mm(
     )
 
 
-def fallback_mixed_mm(mat1, mat2, *, out):
-    return torch.mm(mat1, mat2.to(mat1.dtype), out=out)
-
-
-aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
-
-
 @functools.lru_cache(None)
 def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     props = torch.cuda.get_device_properties(index or 0)
@@ -764,7 +730,7 @@ def dims_are_int(dims):
     return all(isinstance(dim, int) for dim in dims)
 
 
-def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout, mm_heuristic):
+def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
         return None
@@ -779,10 +745,35 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout, mm_heuristic
         not torch.cuda.get_device_capability() >= (8, 0)
     ) or get_gpu_shared_memory() != 166912:
         return None
-    elif m == 1 and (n % 16 != 0 or k % 16 != 0):
+
+    if m == 1 and (n % 16 != 0 or k % 16 != 0):
         return None
-    else:
-        return mm_heuristic.generate_mixed_mm_config()
+
+    if m <= 16 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=16,
+            BLOCK_N=64,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=32,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=64,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    return None
 
 
 def mm_autoheuristic(
@@ -875,134 +866,3 @@ def get_size_hints_strides(mat1, mat2):
             )
         strides_hints.append(stride)
     return strides_hints[0], strides_hints[1]
-
-
-def tuned_mixed_mm(mat1, mat2, mat2_dtype):
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    device_type = ir.get_device_type(mat1)
-    static_shape, is_nonzero = _is_static_problem(layout)
-
-    fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
-
-    choices = [fallback]
-
-    # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
-    skip_triton = (
-        (
-            mat1.layout.dtype != torch.float32
-            and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
-        )
-        or _is_sm7x_or_older_gpu(layout.device.index)
-        or inductor_config.mixed_mm_choice == "aten"
-        or not V.graph.has_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
-        or (
-            mat1.layout.dtype == torch.float32 and torch.backends.cuda.matmul.allow_tf32
-        )
-        or (mat1.layout.dtype == torch.bfloat16 and mat2.layout.dtype == torch.uint8)
-    )
-
-    if inductor_config.mixed_mm_choice == "triton":
-        choices = []
-
-    if not skip_triton:
-        mm_heuristic = V.choices.get_config_heuristics(device_type)
-        mixed_mm_configs = V.choices.get_mixed_mm_configs(device_type)
-
-        b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-        if static_shape and inductor_config.mixed_mm_choice == "heuristic":
-            choices = []
-            config = try_heuristic(
-                m, n, k, choices, mat1, mat2, mat2_dtype, layout, mm_heuristic
-            )
-            if config is not None:
-                mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2),
-                    layout=layout,
-                    **mm_options(config, m, n, k, layout, b_prologue_cast_type),
-                )
-            choices.append(fallback)
-
-        has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-
-        for config in mixed_mm_configs(
-            m,
-            n,
-            k,
-            has_int8_tensor=has_int8_tensor,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout, b_prologue_cast_type),
-            )
-
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
-        )
-        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
-        )
-
-    if skip_triton and not choices:
-        choices = [fallback]
-
-    name = "mixed_mm"
-    input_nodes = [mat1, mat2]
-    if torch._inductor.config.run_autoheuristic(name):
-        choice = mm_autoheuristic(
-            mat1,
-            mat2,
-            m,
-            n,
-            k,
-            choices,
-            name,
-            input_nodes,
-            mixed_mm_operations(),
-            get_mixedmm_precondition,
-        )
-        if (
-            not skip_triton
-            and inductor_config.mixed_mm_choice == "heuristic"
-            and choice is not None
-        ):
-            choices.insert(0, choice)
-    return autotune_select_algorithm(name, choices, input_nodes, layout)
-
-
-# This op is a special case of the int_mm op which we use based on the pattern
-# _int_mm -> mul (defined in ../fx_passes/post_grad.py) in order to prevent
-# realization of the int32 _int_mm output by forcing fusion with the mul op.
-# This is only used when config.force_fuse_int_mm_with_mul = True
-def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
-    out_dtype = (
-        torch.promote_types(mat3.get_dtype(), torch.int32)
-        if out_dtype is None
-        else out_dtype
-    )
-    m, n, k, layout, mat1, mat2, mat3 = mm_args(
-        mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
-    )
-    device_type = ir.get_device_type(mat1)
-
-    def mul_epilogue(v1, v2):
-        return V.ops.mul(v1, v2)
-
-    choices: list[dict[Any, Any]] = []
-    int8_mm_configs = V.choices.get_int8_mm_configs(device_type)
-    for config in int8_mm_configs(
-        m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
-    ):
-        mm_template.maybe_append_choice(
-            choices,
-            input_nodes=(mat1, mat2, mat3),
-            layout=layout,
-            **dict(mm_options(config, m, n, k, layout), ACC_TYPE="tl.int32"),
-            suffix_args=1,
-            epilogue_fn=mul_epilogue,
-        )
-    return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)

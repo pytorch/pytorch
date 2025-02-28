@@ -295,7 +295,7 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
-# value or a string. There are 4 modes.
+# value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
@@ -303,10 +303,7 @@ allow_unspec_int_on_nn_module = False
 # of compiled_autograd. With "python_reducer", DDP will disable the C++ reducer
 # and use the Python reducer to allow compiled_autograd to trace the
 # communication and allow comm/compute overlap without graph-breaks.
-# 3. "python_reducer_without_compiled_forward" (experimental): this mode is
-# similar to "python_reducer". One should only use this optimization mode
-# when compiled_autograd is used but the DDP module is not compiled.
-# 4. "no_optimization" (or False): Dynamo won't split the model graph, nor
+# 3. "no_optimization" (or False): Dynamo won't split the model graph, nor
 # will Python reducer be used. With this mode, there will be no graph-breaks
 # and the original DDP C++ reducer will be used. There will no comm/compute
 # overlap. This mode CANNOT be used with compiled_autograd.
@@ -323,30 +320,6 @@ optimize_ddp: Union[bool, str] = True
 do_not_emit_runtime_asserts: bool = (
     os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
 )
-
-_ddp_optimization_mode = [
-    "ddp_optimizer",
-    "python_reducer",  # experimental mode
-    "python_reducer_without_compiled_forward",  # experimental mode
-    "no_optimization",
-]
-
-
-def _get_optimize_ddp_mode():
-    m = sys.modules[__name__]
-    if isinstance(m.optimize_ddp, bool):
-        if m.optimize_ddp:
-            mode = "ddp_optimizer"
-        else:
-            mode = "no_optimization"
-    elif isinstance(m.optimize_ddp, str):
-        mode = m.optimize_ddp
-    else:
-        raise ValueError(f"Invalid type, {type(optimize_ddp)=}")
-
-    assert mode in m._ddp_optimization_mode, f"Invalid mode {mode=}"
-    return mode
-
 
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True

@@ -3703,6 +3703,20 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (tensor,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_gather,
+            relevant_args,
+            tensor_list,
+            tensor,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     _ensure_all_tensors_same_dtype(tensor_list, tensor)
@@ -3779,6 +3793,20 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         The Gloo backend does not support this API.
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input_tensor,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_gather_into_tensor,
+            relevant_args,
+            output_tensor,
+            input_tensor,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
     if _rank_not_in_group(group):
@@ -4224,6 +4252,21 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         The Gloo backend does not support this API.
 
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            reduce_scatter_tensor,
+            relevant_args,
+            output,
+            input,
+            op=op,
+            group=group,
+            async_op=async_op,
+        )
+
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
 
@@ -4382,6 +4425,22 @@ def all_to_all_single(
         tensor([3+3j, 7+7j, 11+11j, 15+15j])                            # Rank 2
         tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
+    # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
+    # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
+    # (e.g., non-strict export implements such a torch function mode).
+    relevant_args = (input,)
+    if has_torch_function(relevant_args):
+        return handle_torch_function(
+            all_to_all_single,
+            relevant_args,
+            output,
+            input,
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+            group=group,
+            async_op=async_op,
+        )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("all_to_all_single")
         return
@@ -4677,7 +4736,7 @@ def _hash_ranks_to_str(ranks: list[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
     # In case there is already a PG with the same rank composition
     unique_str = "_".join([rank_join, str(len(_world.pg_names))])
-    return hashlib.sha1(bytes(unique_str, "utf-8")).hexdigest()
+    return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
 # Takes a list of ranks and computes an integer color
