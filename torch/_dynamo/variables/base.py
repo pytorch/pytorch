@@ -485,7 +485,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
                 unimplemented_v2(
-                    gb_type=f"Unsupported method call",
+                    gb_type="Unsupported method call",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation=f"{other} is not a python constant or it has pending mutation",
                     hints=[],
