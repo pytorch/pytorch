@@ -3402,8 +3402,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        x = torch.randn(4, 4, 2, 2, device="cuda")
-        other = torch.randn(4, 4, 2, 2, device="cuda")
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
 
         def f(x, other):
             y = x.transpose(2, 3).contiguous().transpose(2, 3)

@@ -575,9 +575,9 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert (
-                packed_weight.get_dtype() is torch.int8
-            ), "Only int8 weights are supported by oneDNN qlinear."
+            assert packed_weight.get_dtype() is torch.int8, (
+                "Only int8 weights are supported by oneDNN qlinear."
+            )
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
@@ -928,9 +928,9 @@ def register_onednn_fusion_ops():
                         # we will do accum dtype convertion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:
-                    assert (
-                        x2.get_dtype() == output_dtype
-                    ), "dtype of accum for qlinear post op sum should be the same as output"
+                    assert x2.get_dtype() == output_dtype, (
+                        "dtype of accum for qlinear post op sum should be the same as output"
+                    )
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
