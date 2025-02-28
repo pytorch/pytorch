@@ -9,7 +9,7 @@ import sys
 import unittest
 import warnings
 from collections import defaultdict
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import torch
 import torch._dynamo.config as dynamo_config

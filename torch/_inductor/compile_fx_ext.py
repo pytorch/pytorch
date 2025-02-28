@@ -93,8 +93,7 @@ class _VirtualizedSerializerContextManager(contextlib.ExitStack):
             if not set_name.startswith("set_"):
                 continue
             name = set_name[4:]
-            if name.endswith("_handler"):
-                name = name[:-8]
+            name = name.removesuffix("_handler")
             set_handler = getattr(V, set_name)
             if hasattr(self.virtualized, name):
                 value = getattr(self.virtualized, name)
