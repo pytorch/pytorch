@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-# Python 3.12 and up have two new token tyoes, FSTRING_START and FSTRING_END
+# Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
 NO_TOKEN = -1
 FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)
 FSTRING_END: int = getattr(token, "FSTRING_END", NO_TOKEN)
@@ -33,7 +33,9 @@ BRACKETS = {"{": "}", "(": ")", "[": "]"}
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
 
 ROOT = Path(__file__).absolute().parents[3]
-assert ROOT.name == "pytorch"
+assert ROOT.name == "pytorch", (
+    f"{sys.argv[0]} must be called from the root directory of pytorch"
+)
 
 
 def is_name(t: TokenInfo, *names: str) -> bool:
@@ -205,9 +207,9 @@ class OmittedLines:
         self.omitted = {i + 1 for i, s in omitted if s.endswith(suffix)}
 
     def __call__(
-        self, tokens: Sequence[TokenInfo], begin: int = 0, end: int = -1
+        self, tokens: Sequence[TokenInfo], begin: int = 0, end: int = NO_TOKEN
     ) -> bool:
-        if end == -1:
+        if end == NO_TOKEN:
             end = len(tokens)
         # A token_line might span multiple physical lines
         start = min((tokens[i].start[0] for i in range(begin, end)), default=0)
@@ -287,11 +289,7 @@ class PythonFile:
 
     @cached_property
     def opening_comment_lines(self) -> int:
-        """
-        The number of comments, lines starting with #, at the top of the file.
-        If you need to insert an import and there are no other imports yet, you
-        can insert it after this line.
-        """
+        """The number of comments at the very top of the file."""
         it = (i for i, s in enumerate(self.lines) if not s.startswith("#"))
         return next(it, 0)
 
@@ -347,11 +345,6 @@ class FileLinter(Generic[PythonFileT], ABC):
     is_fixer: bool = True
     report_column_numbers: bool = False
 
-    @classmethod
-    def python_file_class(cls) -> Type[PythonFileT]:
-        c = cls.__orig_bases__[0]  # type: ignore[attr-defined]
-        return get_args(c)[0]  # type: ignore[no-any-return]
-
     @abstractmethod
     def _lint(self, python_file: PythonFileT) -> Iterator[LintResult]:
         raise NotImplementedError
@@ -380,7 +373,10 @@ class FileLinter(Generic[PythonFileT], ABC):
 
     @classmethod
     def make_file(cls, pc: Path | str | None = None) -> PythonFileT:
-        return cls.python_file_class().make(cls.linter_name, pc)
+        c = cls.__orig_bases__[0]  # type: ignore[attr-defined]
+        actual_python_file_type = get_args(c)[0]  # type: ignore[no-any-return]
+
+        return actual_python_file_type.make(cls.linter_name, pc)
 
     @cached_property
     def args(self) -> Namespace:
@@ -407,7 +403,7 @@ class FileLinter(Generic[PythonFileT], ABC):
         if self.args.verbose:
             print(p, "Reading", file=sys.stderr)
 
-        pf = self.python_file_class()(self.linter_name, p)
+        pf = self.make_file(p)
         replacement, results = self._replace(pf)
 
         if display := list(self._display(pf, results)):
@@ -473,9 +469,6 @@ class FileLinter(Generic[PythonFileT], ABC):
 
     def _display(self, pf: PythonFileT, results: list[LintResult]) -> Iterator[str]:
         """Emit a series of human-readable strings representing the results"""
-        if self.args.fix and not self.args.verbose:
-            results = [r for r in results if r.is_edit]
-
         for r in results:
             if self.args.lintrunner:
                 msg = r.as_message(code=self.code, path=str(pf.path))
