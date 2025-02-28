@@ -4004,7 +4004,6 @@ class Scheduler:
 
     def compute_graph_partition_maps(
         self,
-        partitions: list[PartitionType],
         signatures: list[GraphPartitionSignature],
     ) -> None:
         """
@@ -4020,11 +4019,10 @@ class Scheduler:
 
         V.graph.partition_maps = []
 
-        for partition_id, (partition, signature) in enumerate(
-            zip(partitions, signatures)
-        ):
+        for partition_id, signature in enumerate(signatures):
             if signature.skip_cudagraph:
-                # number of partition info should be the same as the number of generated
+                # Note: [Graph Partition Map for CUDAGraph]
+                # number of partition map should be the same as the number of generated
                 # partition functions. This assumption will be used when cudagraphify
                 # each partition function.
                 continue
@@ -4201,6 +4199,13 @@ class Scheduler:
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
+
+        # See [Note: Graph Partition Map for CUDAGraph]
+        if num_partitions > 0:
+            assert V.graph.partition_maps is not None
+            assert num_partitions == len(
+                V.graph.partition_maps
+            ), f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:

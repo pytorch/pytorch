@@ -243,9 +243,16 @@ def cudagraph_partition_post_compile(
     compiled_graph: CompiledFxGraph,
     constants: dict[str, torch.Tensor],
 ) -> None:
-    if (  # TODO: Double check this is correct. Write down the assumption clearly. Add doc.
-        compiled_graph.partition_maps is None or len(compiled_graph.partition_maps) == 0
-    ):
+    """
+    Cudagraphify each partition functions, which first prepares the necessary
+    metadata and then applies the cudagraphify function to each partition.
+    
+    Assuming all partition functions are cudagraphified and share the same order
+    as `compiled_graph.partition_maps`. See [Note: Graph Partition Map for CUDAGraph].
+    """
+
+    if compiled_graph.partition_maps is None or len(compiled_graph.partition_maps) == 0:
+        # cudagraphify is not called if there are no partitions
         try_handle_backward_generation(compiled_graph)
         return
 
@@ -556,6 +563,7 @@ class CompiledFxGraph(OutputCode):
         set_tracing_context_output_strides(example_inputs, self)
 
         if config.graph_partition:
+            # bypass cudagraph checks at graph level and cudagraphify each partition
             cudagraph_partition_post_compile(
                 example_inputs,
                 self,

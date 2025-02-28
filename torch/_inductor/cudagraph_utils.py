@@ -339,7 +339,7 @@ class CudagraphCachedInfo:
 @dataclasses.dataclass(frozen=True)
 class CudagraphMetadata:
     """
-    Metadata needed to record a CUDA graph.
+    Metadata for recording a CUDA graph.
     """
 
     placeholders: Sequence[PlaceholderInfo]
