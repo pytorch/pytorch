@@ -1498,6 +1498,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
