@@ -1,8 +1,9 @@
 #include <ATen/Context.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
-#include <dnnl.hpp>
-#include <dnnl_common.hpp>
+
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_common.hpp>
 
 namespace at::native::onednn {
 
@@ -257,14 +258,30 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
                      {tensor.stride(dim_m), tensor.stride(dim_n)})
                  .unsqueeze(dim_b);
   }
+}
+
+void undo_broadcast(at::Tensor& tensor) {
+  // pytorch use stride = 0 for the dim to be broadcasted, but oneDNN only
+  // support shape(dim) = 1 to implicitly indicate the broadcast dim.
+  std::vector<int64_t> new_shape;
+  std::vector<int64_t> new_strides;
+  std::vector<int64_t> unsqueeze_dims;
+  for (int i = 0; i < tensor.dim(); i++) {
+    if (tensor.stride(i) == 0) {
+      unsqueeze_dims.push_back(i);
+    } else {
+      new_shape.push_back(tensor.size(i));
+      new_strides.push_back(tensor.stride(i));
+    }
+  }
+  tensor = tensor.as_strided(new_shape, new_strides);
+  for (size_t i = 0; i < unsqueeze_dims.size(); i++) {
+    tensor = tensor.unsqueeze(unsqueeze_dims[i]);
+  }
   return;
 }
 
-bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
-  // TODO: We always call contiguous on dst.
-  // delete it after fix the case that dst is transposed on batch and m dim.
-  if (is_dst)
-    return false;
+bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -289,17 +306,10 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
   if (is_broadcast(tensor)) {
     return false;
   }
-  if (is_dst) {
-    // The memory format of the destination tensor should always be plain
-    // with n axis contiguous
-    if (strides[tensor_dim - 1] != 1)
-      return false;
-  } else {
-    // the src and weight must have at least one of the axes
-    // m or k and n or k contiguous (i.e., stride=1) respectively.
-    if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
-      return false;
-  }
+  // the src and weight must have at least one of the axes
+  // m or k and n or k contiguous (i.e., stride=1) respectively.
+  if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
+    return false;
 
   if (!onednn_strides_check(tensor))
     return false;
