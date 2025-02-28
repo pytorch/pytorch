@@ -2064,7 +2064,7 @@ def forward(self, l_x_):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Dynamic slicing on data-dependent value is not supported",
+            "Dynamic slicing with Tensor arguments",
         ):
             torch._dynamo.export(
                 g,

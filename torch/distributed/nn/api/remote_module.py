@@ -39,7 +39,10 @@ _REMOTE_MODULE_PICKLED_ATTRIBUTES = (
     "module_rref",
 )
 
-_SerializedRemoteModule = collections.namedtuple("_SerializedRemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES)  # type: ignore[misc]
+_SerializedRemoteModule = collections.namedtuple(  # type: ignore[misc]
+    "_SerializedRemoteModule",
+    _REMOTE_MODULE_PICKLED_ATTRIBUTES,
+)
 
 # These attributes are mostly from RemoteModule's parent class and are intentionally not pickled.
 # A new attribute of RemoteModule should be either in _REMOTE_MODULE_PICKLED_ATTRIBUTES
