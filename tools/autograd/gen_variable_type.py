@@ -1075,7 +1075,9 @@ def emit_body(
             assert (
                 base_name_and_overload_name
                 in _foreach_ops_without_differentiability_info
-            ), f"{'.'.join(base_name_and_overload_name)} should have a differentiability info"
+            ), (
+                f"{'.'.join(base_name_and_overload_name)} should have a differentiability info"
+            )
         else:
             assert (
                 len(f.func.arguments.flat_non_out)
@@ -1634,9 +1636,9 @@ def emit_body(
                 noref_cpp_type = cpp.return_type(ret, symint=True).remove_const_ref()
                 if noref_cpp_type == BaseCType(tensorT):
                     if aliased_arg_name is not None:
-                        assert (
-                            i == 0
-                        ), "Expect non-CompositeImplicitAutograd view function {base} to return single output"
+                        assert i == 0, (
+                            "Expect non-CompositeImplicitAutograd view function {base} to return single output"
+                        )
                         stmts_after_call += [
                             ENFORCE_SAME_TENSOR_STORAGE.substitute(
                                 tensor_name=aliased_arg_name, out_tensor_name=ret_name
@@ -1873,9 +1875,9 @@ def emit_body(
         for derivative in fw_derivatives:
             res = derivative.var_names
             if f.func.name.name.inplace:
-                assert (
-                    len(res) == 1
-                ), "Expected number of outputs to be 1 if function is inplace"
+                assert len(res) == 1, (
+                    "Expected number of outputs to be 1 if function is inplace"
+                )
                 # TODO update this when inplace namings are unified
                 res = ("self",)
 
@@ -1973,9 +1975,9 @@ def emit_body(
                 isinstance(derivative.var_types[0], ListType)
                 and derivative.var_types[0].is_tensor_like()
             ):
-                assert (
-                    len(derivative.var_types) == 1
-                ), "Expected number of outputs to be 1 if function returns ListType"
+                assert len(derivative.var_types) == 1, (
+                    "Expected number of outputs to be 1 if function returns ListType"
+                )
                 if not is_foreach:
                     opt_res_grad_type = OptionalCType(
                         VectorCType(BaseCType(tensorT))
