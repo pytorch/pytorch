@@ -2020,6 +2020,8 @@ coverage_ignore_functions = [
     "to_mkldnn",
     # torch.utils.mobile_optimizer
     "generate_mobile_module_lints",
+    # torch.utils.pytree
+    "register_pytree_node",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",
