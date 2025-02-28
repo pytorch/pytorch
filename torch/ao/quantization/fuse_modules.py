@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import List, Optional
+from typing import Optional
 
 import torch.nn as nn
 
@@ -59,7 +59,7 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     fuser_method = get_fuser_method(types, additional_fuser_method_mapping)
     if fuser_method is None:
         raise NotImplementedError(f"Cannot fuse modules: {types}")
-    new_mod: List[Optional[nn.Module]] = [None] * len(mod_list)
+    new_mod: list[Optional[nn.Module]] = [None] * len(mod_list)
     fused = fuser_method(is_qat, *mod_list)
     # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
     # Move pre forward hooks of the base module to resulting fused module

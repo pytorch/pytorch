@@ -3,17 +3,8 @@
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Mapping,
-    Optional,
-    Protocol,
-    runtime_checkable,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING, Union
 
 import numpy
 
@@ -245,7 +236,7 @@ BaseArgumentTypes = Union[
 ]
 Argument = Optional[
     Union[
-        Tuple["Argument", ...],
+        tuple["Argument", ...],
         Sequence["Argument"],
         Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing

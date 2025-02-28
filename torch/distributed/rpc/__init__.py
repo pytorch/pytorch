@@ -3,8 +3,8 @@ import logging
 import os
 import threading
 import warnings
+from collections.abc import Generator
 from datetime import timedelta
-from typing import Generator, Tuple
 from urllib.parse import urlparse
 
 import torch

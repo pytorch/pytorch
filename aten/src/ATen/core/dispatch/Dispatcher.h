@@ -763,7 +763,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
   auto dispatchKeySet =
       op.operatorDef_->op.dispatchKeyExtractor()
           .template getDispatchKeySetUnboxed<Args...>(args...);
-#ifndef NDEBUG
+#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
@@ -816,7 +816,7 @@ inline Return Dispatcher::redispatch(
     DispatchKeySet currentDispatchKeySet,
     Args... args) const {
   // do not use RecordFunction on redispatch
-#ifndef NDEBUG
+#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
@@ -836,7 +836,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet =
       entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
-#ifndef NDEBUG
+#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
@@ -904,7 +904,7 @@ inline void Dispatcher::redispatchBoxed(
   // note: this doesn't need the mutex because write operations on the list keep
   // iterators intact.
   const auto& entry = op.operatorDef_->op;
-#ifndef NDEBUG
+#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(

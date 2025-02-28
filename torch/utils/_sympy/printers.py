@@ -119,7 +119,20 @@ class ExprPrinter(StrPrinter):
 class PythonPrinter(ExprPrinter):
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
+        # NB: We use sym_float here because the printer is used for cache
+        # serialization, and cache guards get evaluated with SymInt to
+        # propagate guards to the parent ShapeEnv.  However, this comes at a
+        # runtime cost for guards involving float.  If this is unacceptable
+        # overhead, what you want to do is have two separate printers for
+        # SymInt, one for when the inputs are guaranteed to be int, and
+        # another for when they could be SymInt.
+        #
+        # NB: sym_min/sym_max also have this problem, but I chose not to fix
+        # those.
+        #
+        # See https://github.com/pytorch/pytorch/issues/142507 for more
+        # context.
+        return f"torch.sym_float({self._print(expr.args[0])})"
 
     def _print_And(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " and ", precedence(expr))
@@ -306,12 +319,11 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"static_cast<double>({self._print(expr.args[0])})"
 
-    # TODO: This is wrong if one of the inputs is negative.  This is hard to
-    # tickle though, as the inputs are typically positive (and if we can prove
-    # they are positive, we will have used Mod instead, for which this codegen
-    # is right).
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        return f"c10::div_mod({x}, {div})"
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
@@ -457,3 +469,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_BooleanFalse(self, expr: sympy.Expr) -> str:
         return "false"
+
+    def _print_Infinity(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::infinity()"
+
+    def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
+        return f"-{self._print_Infinity(expr)}"

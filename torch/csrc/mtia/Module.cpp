@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
-#include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
@@ -28,8 +27,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_child);
 #endif
 }
 
@@ -100,6 +99,14 @@ void initModule(PyObject* module) {
   m.def("_mtia_memorySnapshot", []() {
     PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
     return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceCount", []() {
+    return at::detail::getMTIAHooks().deviceCount();
+  });
+
+  m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
+    at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
   });
 }
 

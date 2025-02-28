@@ -28,7 +28,7 @@ TORCH_PYTHON_API void py_set_default_dtype(PyObject* dtype_obj);
 // change.  Probably only store ScalarType, as that's the only flex point
 // we support.
 TORCH_API c10::DispatchKey get_default_dispatch_key();
-at::Device get_default_device();
+TORCH_PYTHON_API at::Device get_default_device();
 
 // Gets the ScalarType for the default tensor type.
 at::ScalarType get_default_scalar_type();

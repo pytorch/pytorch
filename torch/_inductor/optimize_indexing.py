@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, List
+from typing import Any
 
 import sympy
 
@@ -40,10 +40,10 @@ def range_expressable_in_32_bits(range: ValueRanges[sympy.Expr]) -> bool:
 
 def try_to_reduce_precision(
     node: Any,
-    bounds: Dict[Any, Any],
-    indirect_vars: List[Any],
-    indices: Dict[Any, sympy.Expr],
-    replacement_vals: Dict[Any, ValueRanges[sympy.Expr]],
+    bounds: dict[Any, Any],
+    indirect_vars: list[Any],
+    indices: dict[Any, sympy.Expr],
+    replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
 ) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
     # then it's precision is set for that chain of uses, and we don't need to consider those

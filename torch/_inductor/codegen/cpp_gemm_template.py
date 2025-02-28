@@ -3,7 +3,7 @@ import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -299,9 +299,10 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
-def transpose_w(
-    W: Union[ir.IRNode, torch.Tensor], trans_w: bool
-) -> Union[ir.IRNode, torch.Tensor]:
+_T = TypeVar("_T", ir.IRNode, torch.Tensor)
+
+
+def transpose_w(W: _T, trans_w: bool) -> _T:
     """
     Transpose W based on the trans_w flag.
     """
@@ -317,9 +318,7 @@ def transpose_w(
     return W
 
 
-def expand_bias(
-    B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
-) -> Optional[Union[ir.IRNode, torch.Tensor]]:
+def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     """
     Expand Bias to the same size of X.
     """
@@ -336,7 +335,7 @@ def expand_bias(
     return B
 
 
-def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
+def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]):
     """
     Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
     """
@@ -384,9 +383,9 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
             # Case may happen when the candidate tensor is used by more than 1 get_attr node
             # https://github.com/pytorch/pytorch/issues/134998
             if node.op == "get_attr" and hasattr(
-                V.graph.module, node.name
+                V.graph.module, node.target
             ):  # candidate tensor might already be deleted
-                comp_tensor = getattr(V.graph.module, node.name)
+                comp_tensor = getattr(V.graph.module, node.target)
                 if isinstance(comp_tensor, torch.Tensor) and share_storage(
                     candidate_tensor, comp_tensor
                 ):
@@ -396,24 +395,26 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
             # The get_attr node has only 1 user fx node
             # The candidate tensor has been used by only 1 get_attr node
             if (
-                node.name == candidate_node.get_name()
+                node.op == "get_attr"
+                and node.target == candidate_node.get_name()
                 and len(node.users) == 1
                 and candidate_tensor_users == 1
             ):
-                del V.graph.constants[node.name]
-                delattr(V.graph.module, node.name)
-                delattr(V.graph.graph.owning_module, node.name)
+                del V.graph.constants[node.target]
+                delattr(V.graph.module, node.target)
+                delattr(V.graph.graph.owning_module, node.target)
+                counters["inductor"]["select_algorithm_weight_prune"] += 1
 
 
 def gen_2d_view_of_epilogue_buf(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
-    epilogue_nodes: List[ir.IRNode],
-    reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-    default_reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+    epilogue_nodes: list[ir.IRNode],
+    reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+    default_reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
 ) -> tuple[
     Union[ir.Buffer, ir.ReinterpretView],
-    List[Optional[Callable[[List[Any]], List[Any]]]],
+    list[Optional[Callable[[list[Any]], list[Any]]]],
 ]:
     """
     The dimension and the indexing could be different between the GEMM output, i.e. `template_buffer`, which is
@@ -798,6 +799,7 @@ class CppGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -894,7 +896,8 @@ class CppGemmTemplate(CppTemplate):
             num_threads=num_threads,
         )
         assert micro_gemm is not None
-        block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
+        pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
+        micro_gemm.use_local_vnni_blocking(not pre_block_weights)
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
@@ -902,7 +905,9 @@ class CppGemmTemplate(CppTemplate):
             )
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
-            return cls.prep_weight(new_inputs, new_layout, micro_gemm, block_weights)
+            return cls.prep_weight(
+                new_inputs, new_layout, micro_gemm, pre_block_weights
+            )
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -920,7 +925,7 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes, new_layout, micro_gemm, block_weights
+                    new_input_nodes, new_layout, micro_gemm, pre_block_weights
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -946,7 +951,7 @@ class CppGemmTemplate(CppTemplate):
             alpha=alpha,
             has_bias=has_bias,
             epilogue_creator=epilogue_creator,
-            should_block_weights=block_weights,
+            should_block_weights=pre_block_weights,
         )
         template.maybe_append_choice(choices)
         return template
@@ -999,16 +1004,17 @@ class CppGemmTemplate(CppTemplate):
 
         if should_block_weight:
             blocked_w = cls.block_weight(W, new_size, padding)
+            new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
         else:
             blocked_w = W
-        new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
 
         def _is_int8_gemm(inputs):
             return (
                 isinstance(inputs[0], ir.IRNode)
-                and inputs[0].get_dtype() == torch.uint8
+                and inputs[0].get_dtype() in [torch.uint8, torch.int8]
             ) or (
-                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor)
+                and inputs[0].dtype in [torch.uint8, torch.int8]
             )
 
         if _is_int8_gemm(new_inputs):
@@ -1131,11 +1137,11 @@ class CppGemmTemplate(CppTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-    ) -> Dict[str, Any]:
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+    ) -> dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
-        int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
+        int8_gemm = self.input_nodes[0].get_dtype() in [torch.uint8, torch.int8]
         x_scale = None
         x_zp = None
         w_scale = None
@@ -1167,10 +1173,10 @@ class CppGemmTemplate(CppTemplate):
         template_buffer = Y
         gemm_output_buffer = template_buffer
 
-        epilogues: List[ir.IRNode] = []
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-        epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
-        fake_buffers: List[ir.Buffer] = []
+        epilogues: list[ir.IRNode] = []
+        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
+        epilogue_creators: list[Callable[[ir.Buffer], ir.Pointwise]] = []
+        fake_buffers: list[ir.Buffer] = []
         Y_aliases = OrderedSet[str]()
 
         use_local_acc = (
@@ -1179,6 +1185,7 @@ class CppGemmTemplate(CppTemplate):
             or int8_gemm
             or self.padded_n != self.n
             or self.maybe_k_slicing()
+            or (epilogue_nodes and epilogue_nodes[-1].get_dtype() != self.layout.dtype)
         )
 
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
@@ -1251,6 +1258,7 @@ class CppGemmTemplate(CppTemplate):
         #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
         #   Y
         if epilogue_creators:
+            assert isinstance(template_buffer, ir.IRNode)
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
             gemm_output_buffer = ir.Buffer(
                 name=gemm_output_name, layout=template_buffer.layout
@@ -1276,14 +1284,17 @@ class CppGemmTemplate(CppTemplate):
                         name=buffer_name, layout=template_buffer.layout
                     )
 
+        assert isinstance(Y, (ir.Buffer, ir.ReinterpretView))
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
 
         if epilogue_nodes:
             if not template_buffer_has_other_users:
+                assert isinstance(template_buffer, ir.IRNode)
                 Y_aliases.add(template_buffer.get_name())
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
+            assert isinstance(template_buffer, ir.Buffer)
             Y_2d, reindexers = gen_2d_view_of_epilogue_buf(
                 Y,
                 template_buffer,
@@ -1308,6 +1319,7 @@ class CppGemmTemplate(CppTemplate):
             num_threads=self.num_threads,
         )
         assert micro_gemm is not None
+        micro_gemm.use_local_vnni_blocking(not self.should_block_weights)
         assert self.register_blocking == micro_gemm.register_blocking
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
@@ -1362,7 +1374,7 @@ class CppGemmTemplate(CppTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         options = self.get_options(

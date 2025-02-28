@@ -214,11 +214,14 @@ class ExperimentalConfigWrapper {
 } // namespace
 
 bool collectivesProfilerExists() {
-#if defined(KINETO_HAS_NCCL_PROFILER) || defined(KINETO_HAS_HCCL_PROFILER)
+#if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
-#else
-  return false;
 #endif
+  const char* val = std::getenv("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
+  if (val == nullptr) {
+    return false;
+  }
+  return std::strcmp(val, "1") == 0;
 }
 
 #ifdef USE_KINETO

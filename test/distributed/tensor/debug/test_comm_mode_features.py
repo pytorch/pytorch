@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.distributed._tensor import DeviceMesh
@@ -57,8 +57,8 @@ class TestCommModeFeatures(DTensorTestBase):
         Used to generate the ground-truth parameter and sharding info for a given distributed model to
         verify comm_mode correctness
         """
-        module_parameters_dict: Dict[str, Any] = {}
-        module_sharding_dict: Dict[str, Any] = {}
+        module_parameters_dict: dict[str, Any] = {}
+        module_sharding_dict: dict[str, Any] = {}
 
         for name, parameters in model.named_parameters():
             # splits name into module name to create FQN and parameter name
