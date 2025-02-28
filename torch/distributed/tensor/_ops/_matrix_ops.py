@@ -155,9 +155,9 @@ def _scaled_mm_like_strategy(
     assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
     assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
-    assert (
-        scale_result_strategy is None
-    ), "_scaled_mm on DTensors doesn't support scale_result"
+    assert scale_result_strategy is None, (
+        "_scaled_mm on DTensors doesn't support scale_result"
+    )
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
@@ -258,8 +258,8 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         Replicate(),
         Replicate(),
         Replicate(),
@@ -285,8 +285,8 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        None,  # philox_seed
-        None,  # philox_offset
+        Replicate(),  # rng_state
+        None,  # unused
         debug_attn_mask_sharding,
         qkv_sharding,
         qkv_sharding,
@@ -303,8 +303,8 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
             None,  # cum_seq_k
             None,  # max_q
             None,  # max_k
-            None,  # philox_seed
-            None,  # philox_offset
+            Replicate(),  # rng_state
+            None,  # unused
             Shard(2),  # debugattn
             Shard(2),  # q
             Shard(2),  # k

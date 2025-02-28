@@ -193,18 +193,26 @@ class Attr {
   }
 
   // append binary post op
+  template <bool is_matmul = false>
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
     bool binary_is_channels_last =
         (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
          binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
 
-    binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
+    if constexpr (!is_matmul) {
+      binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
+    }
     dnnl::memory::desc md = get_onednn_md(binary_);
     auto expected_md = dnnl::memory::desc(
         md.get_dims(), md.get_data_type(), dnnl::memory::format_tag::any);
-    ops_params_.push_back(
-        PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
+    if constexpr (is_matmul) {
+      ops_params_.push_back(PostOpParam(binary_, md, md, algo, kind_t::binary));
+    } else {
+      ops_params_.push_back(
+          PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
+    }
+
     return *this;
   }
 

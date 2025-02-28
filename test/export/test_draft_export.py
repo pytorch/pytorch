@@ -17,6 +17,7 @@ from torch.utils._pytree import tree_leaves
 
 class TestDraftExport(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")

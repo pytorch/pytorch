@@ -82,7 +82,7 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 // Return a dummy value to satisfy linker.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
-  return static_cast<hipDataType>(100000);
+  return static_cast<hipDataType>(500);
 }
 
 template <typename T>
@@ -631,7 +631,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%d", algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 
