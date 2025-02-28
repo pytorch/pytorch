@@ -210,6 +210,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     Expr,
                     int,
                     EffectfulKernel,
+                    ShapeAsConstantBuffer,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -5165,7 +5166,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, (NonTensorObj)):
+        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer)):
             return x
         return cls.copy_input(x)
 
@@ -7068,7 +7069,7 @@ class TensorBox(MutableBox):
     @staticmethod
     def create(data):  # type: ignore[no-untyped-def]
         if isinstance(data, ShapeAsConstantBuffer):
-            return data.expr
+            return data
         return TensorBox(StorageBox(data))
 
 
