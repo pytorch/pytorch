@@ -28,6 +28,7 @@ ModelType = Callable[[list[InputType]], OutputType]
 @dataclasses.dataclass(frozen=True)
 class FunctionID:
     "Unique counter of a function wrapped in cudagraphify_impl"
+
     id: int
 
 
@@ -164,7 +165,7 @@ def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
@@ -184,7 +185,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
@@ -276,9 +277,9 @@ def log_data_ptr_mismatch(
     Logs the mismatch between input data pointers and recorded data pointers.
     This checks only idxs in target_idxs.
     """
-    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(
-        placeholders
-    ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(placeholders), (
+        "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    )
 
     t_tensors = [inputs[i] for i in target_idxs]
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]

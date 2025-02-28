@@ -301,9 +301,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(
-        denom, int
-    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(numer, int) and isinstance(denom, int), (
+        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    )
     return runtime_ceildiv(numer, denom)
 
 
@@ -343,7 +343,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
 
 
 def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]]
+    lst: Iterable[Union[int, torch.SymInt]],
 ) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
@@ -520,11 +520,9 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(cache: Any) -> None:
-        ...
+    def clear_cache(cache: Any) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -1377,9 +1375,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> (
-    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
-):
+def try_import_ck_lib() -> tuple[
+    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
+]:
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1628,9 +1626,12 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
 
         return DummyModule()
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+    with (
+        mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ),
+        mock.patch.object(GraphLowering, "save_output_code", save_output_code),
+    ):
         torch._dynamo.reset()
         # Note the return here is None
         _ = fn(*args, **kwargs)
@@ -1641,18 +1642,18 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
 def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
 def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -1778,9 +1779,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(
-        val, sympy.Expr
-    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    assert isinstance(val, sympy.Expr), (
+        "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    )
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -1950,7 +1951,7 @@ def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> 
 
 
 def is_output_of_multi_outputs_template(
-    input_buf: Optional[Union[Buffer, Operation]]
+    input_buf: Optional[Union[Buffer, Operation]],
 ) -> bool:
     """
     Check if input buffer is a output of multi-outputs template buffer
@@ -2103,12 +2104,6 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     # AOT won't lift any parameters if we're inlining NN Modules
     # however desugaring subclasses will still add arguments
     # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
-    if (
-        torch._dynamo.config.inline_inbuilt_nn_modules
-        and not torch._dynamo.utils.is_parameter_freezing()
-    ):
-        return 0
-
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
@@ -2122,6 +2117,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
             "tangents" not in x.name
             and "bwd_seed" not in x.name
             and "bwd_base_offset" not in x.name
+            and "bwd_rng_state" not in x.name
         )
 
     arg_count = 0
@@ -2656,7 +2652,8 @@ def set_kernel_post_grad_provenance_tracing(
         if node not in (EnableReduction, DisableReduction):
             if node.node is not None:
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
-                    origin.name for origin in node.node.origins  # type: ignore[attr-defined]
+                    origin.name
+                    for origin in node.node.origins  # type: ignore[attr-defined]
                 ]
 
 
