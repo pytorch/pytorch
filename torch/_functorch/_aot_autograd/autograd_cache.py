@@ -550,19 +550,22 @@ class AOTAutogradCacheEntry:
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="autograd"
             )
+            # Now that we've loaded forward and backward, call post compile on both
+            # This avoids setting things like BoxedBools in fx_config until
+            # after both forward and backward cache hit
+            compiled_fw_func = self.compiled_fw.post_compile(
+                compiled_fw_func, fx_config
+            )
+            compiled_bw_func = self.compiled_bw.post_compile(
+                compiled_bw_func, fx_config
+            )
         else:
             needs_autograd = False
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="inference"
             )
-
-        # Now that we've loaded forward and backward, call post compile on both
-        # This avoids setting things like BoxedBools in fx_config until
-        # after both forward and backward cache hit
-        compiled_fw_func = self.compiled_fw.post_compile(compiled_fw_func, fx_config)
-        if compiled_bw_func is not None:
-            compiled_bw_func = self.compiled_bw.post_compile(
-                compiled_bw_func, fx_config
+            compiled_fw_func = self.compiled_fw.post_compile(
+                compiled_fw_func, fx_config
             )
 
         # Wrap the forward function in post compile wrappers
