@@ -11,16 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Iterator,
-    no_type_check,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -72,7 +63,7 @@ from .simd_kernel_features import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 log = logging.getLogger(__name__)
@@ -1323,7 +1314,8 @@ class SIMDScheduling(BaseScheduling):
 
     @staticmethod
     def can_use_32bit_indexing(
-        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+        numel: sympy.Expr,
+        buffers: Iterable[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 

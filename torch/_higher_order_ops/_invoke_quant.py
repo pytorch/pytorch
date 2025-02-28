@@ -12,10 +12,10 @@ class InvokeQuantTracer(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant_packed")
 
-    def __call__(self, subgraph, operands, *, scheme=None, quant_options=None):
+    def __call__(self, subgraph, *operands, scheme=None, quant_options=None):
         subgraph = FunctionWithNoFreeVars(subgraph)
         return super().__call__(
-            subgraph, operands, scheme=scheme, quant_options=quant_options
+            subgraph, *operands, scheme=scheme, quant_options=quant_options
         )
 
 
@@ -27,14 +27,7 @@ class InvokeQuantUnpacked(BaseHOP):
         super().__init__("invoke_quant")
 
     def __call__(self, subgraph, *operands, scheme=None):
-        return super().__call__(subgraph, operands, scheme=scheme)
-
-    def _call_FakeTensorMode(
-        self, mode, subgraph, operands, scheme: Optional[str] = None, **kwargs
-    ):
-        # TODO: this should probably route through FakeTensorMode to reuse caching
-        with mode:
-            return subgraph(*operands[0], **kwargs)
+        return super().__call__(subgraph, *operands, scheme=scheme)
 
 
 invoke_quant = InvokeQuantUnpacked()
@@ -64,7 +57,7 @@ class InvokeQuant:
         **kwargs,
     ):
         if not torch.compiler.is_compiling():
-            return args[0](*args[1], **kwargs)
+            return args[0](*args[1:], **kwargs)
 
         if scheme is not None:
             kwargs["scheme"] = scheme
