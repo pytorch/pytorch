@@ -66,12 +66,12 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   return variable_list();
 }
 
-void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
+void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
   if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
     args.collect(variable.grad());
   }
-  auto& hook = tensor_post_acc_grad_hooks();
+  const auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->compiled_args(args);
   }

@@ -300,6 +300,7 @@ class UnflattenedModule(torch.nn.Module):
         self.flat_args_adapter = flat_args_adapter
 
         self.meta = export_module.graph_module.meta
+        self.meta["unflattened_module"] = self
 
         # Flag to indicate whether args have been adapted.
         self.adapted = False
