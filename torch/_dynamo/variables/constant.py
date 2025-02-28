@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
-from .. import variables
-from ..exc import raise_observed_exception, unimplemented
+from .. import graph_break_hints, variables
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
 from .base import VariableTracker
 
@@ -234,7 +234,12 @@ class EnumVariable(VariableTracker):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented("Enum variable is constructed with non constant values")
+        unimplemented_v2(
+            gb_type="Failed to trace enum variable",
+            context="",
+            explanation="Enum variable is constructed with non constant values",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
 
     def as_proxy(self):
         if isinstance(self.value, int):
