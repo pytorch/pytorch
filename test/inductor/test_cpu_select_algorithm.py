@@ -1498,7 +1498,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        if torch._C._cpu._is_amx_tile_supported():
+            # Only AMX ISA based micro-kernel is currently supported for da8w8
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
