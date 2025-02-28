@@ -133,13 +133,17 @@ def register_woq_mm_ops() -> None:
             if use_aten_gemm_kernels()
             else []
         )
-        if use_max_autotune() and use_cpp_gemm_template(
-            aten_layout,
-            mat1,
-            mat2,
-            mat2_transposed=True,
-            is_woq_int4=True,
-            q_group_size=qGroupSize,
+        if (
+            use_max_autotune()
+            and use_cpp_gemm_template(
+                aten_layout,
+                mat1,
+                mat2,
+                mat2_transposed=True,
+                is_woq_int4=True,
+                q_group_size=qGroupSize,
+            )
+            and mat2.get_layout().is_contiguous()
         ):
             CppWoqInt4GemmTemplate[qGroupSize].add_choices(
                 choices,
