@@ -1090,10 +1090,6 @@
     "Any",
     "to_dlpack"
   ],
-  "torch.utils.pytree": [
-    "python",
-    "cxx"
-  ],
   "torch": [
     "BFloat16Storage",
     "BFloat16Tensor",
