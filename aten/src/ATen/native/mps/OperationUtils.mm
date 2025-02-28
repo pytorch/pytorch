@@ -960,6 +960,53 @@ class BundledShaderLibary : public MetalShaderLibrary {
   }
 };
 
+void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
+                                           const std::string& name,
+                                           std::optional<int64_t> extra) {
+  auto inputTensor = iter.input(0).contiguous();
+  auto outputTensor = iter.output(0);
+  bool needs_output_copy = false;
+  uint32_t length = outputTensor.numel();
+  if (length == 0) {
+    return;
+  }
+  using namespace mps;
+  @autoreleasepool {
+    id<MTLComputePipelineState> cplState = nil;
+    if (c10::isComplexType(inputTensor.scalar_type())) {
+      auto scalarStr = inputTensor.scalar_type() == kComplexFloat ? "float" : "half";
+      cplState = getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
+    } else {
+      cplState = getPipelineStateForFunc(
+          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
+    }
+
+    if (!outputTensor.is_contiguous()) {
+      outputTensor = outputTensor.contiguous();
+      needs_output_copy = true;
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+
+      [computeEncoder setComputePipelineState:cplState];
+      mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+      if (extra) {
+        mtl_setBytes(computeEncoder, *extra, 2);
+      }
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
+
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+  if (needs_output_copy) {
+    iter.output(0).copy_(outputTensor);
+  }
+}
+
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   static BundledShaderLibary l;
   return l;
