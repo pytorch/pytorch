@@ -219,6 +219,13 @@ def main():
             f"There was some failures you can use the new reference expected result stored at path:"
             f"{reference_expected_results_path} and printed above\n"
         )
+        print(
+            "To reproduce locally follow the following instructions, note that absolute instructions count are going "
+            "to be different than on the CI, hence you might want to run locally with and without your change:\n"
+            "cd benchmarks/dynamo/pr_time_benchmarks/ \n"
+            "python benchmarks/BENCHMARK.py result.csv \n"
+            "note that BENCHMARK.py is the name of the file containing the failing benchmark."
+        )
         sys.exit(1)
     else:
         print("All benchmarks passed")

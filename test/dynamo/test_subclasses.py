@@ -1822,7 +1822,7 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
-        from typing import Any, Callable, List, Optional
+        from typing import Any, Callable, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -1835,9 +1835,9 @@ class GraphModule(torch.nn.Module):
 
         def inner_compile(
             gm: torch.fx.GraphModule,
-            example_inputs: List[torch.Tensor],
+            example_inputs: list[torch.Tensor],
             cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[List[int]] = None,
+            static_input_idxs: Optional[list[int]] = None,
             is_backward: bool = False,
             graph_id: Optional[int] = None,
             cpp_wrapper: bool = False,
@@ -1845,12 +1845,12 @@ class GraphModule(torch.nn.Module):
             is_inference: bool = False,
             boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
             layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
+            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
         ):
             if dynamic:
-                self.assertEqual(static_input_idxs, [2, 3, 4])
+                self.assertEqual(static_input_idxs, [0, 1, 2, 3, 4])
             else:
-                self.assertEqual(static_input_idxs, [1, 2])
+                self.assertEqual(static_input_idxs, [0, 1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)

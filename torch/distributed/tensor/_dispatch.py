@@ -4,7 +4,8 @@ import functools
 import logging
 import operator
 import warnings
-from typing import cast, Dict, List, Optional, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import cast, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 def decompose_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     """
     Decomposes a op to core ATen op, this handler is mostly here
@@ -60,7 +61,7 @@ def decompose_handler(
 def is_same_size_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> bool:
     lhs = cast(torch.Tensor, args[0])
     rhs = cast(torch.Tensor, args[1])
@@ -70,11 +71,12 @@ def is_same_size_handler(
 def found_inf_reduce_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(List[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
+        cast(list[object], op_info.local_args),
+        op_info.args_tree_spec,  # type: ignore[arg-type]
     )
     local_tensor_args = cast(tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -154,7 +156,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
-        kwargs: Dict[str, object],
+        kwargs: dict[str, object],
     ) -> object:
         """
         Main dispatching logic
@@ -185,7 +187,7 @@ class OpDispatcher:
 
             local_tensor_args = (
                 pytree.tree_unflatten(
-                    cast(List[object], op_info.local_args), op_info.args_tree_spec
+                    cast(list[object], op_info.local_args), op_info.args_tree_spec
                 )
                 if op_info.args_tree_spec
                 else op_info.local_args
@@ -197,10 +199,11 @@ class OpDispatcher:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
 
-                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
-                    torch.Tensor, local_tensor_args[0]
+                first_arg, first_local_arg = (
+                    cast(dtensor.DTensor, args[0]),
+                    cast(torch.Tensor, local_tensor_args[0]),
                 )
                 rng_context = (
                     random._rng_tracker._distribute_region(first_arg._spec)
@@ -251,7 +254,7 @@ class OpDispatcher:
                     local_results = [
                         default_tensor(s) if s is not None else None for s in spec
                     ]
-                    assert isinstance(local_results, List)
+                    assert isinstance(local_results, list)
                     if None in local_results:
                         ret_type = str(ret_list[0].type)
                         raise NotImplementedError(
@@ -309,7 +312,7 @@ class OpDispatcher:
         else:
             flatten_args_schema_to_reshard = suggested_input_schema.args_schema
 
-        new_local_args: List[object] = []
+        new_local_args: list[object] = []
         for i, arg_spec in enumerate(op_info.flat_args_schema):
             reshard_arg_spec = flatten_args_schema_to_reshard[i]
             if isinstance(arg_spec, DTensorSpec):
@@ -330,7 +333,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
-        kwargs: Dict[str, object],
+        kwargs: dict[str, object],
     ) -> OpInfo:
         # get runtime schema info to determine whether to use pytree to flatten inputs
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
@@ -344,10 +347,10 @@ class OpDispatcher:
         else:
             args_list, args_spec = args, None
 
-        args_schema: List[object] = []
-        kwargs_schema: Dict[str, object] = {}
-        local_args: List[object] = []
-        local_kwargs: Dict[str, object] = {}
+        args_schema: list[object] = []
+        kwargs_schema: dict[str, object] = {}
+        local_args: list[object] = []
+        local_kwargs: dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 
         for arg in args_list:
@@ -421,18 +424,18 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(
-                    spec, DTensorSpec
-                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                assert isinstance(spec, DTensorSpec), (
+                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                )
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(
-                spec, (list, tuple)
-            ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+            assert spec is not None and isinstance(spec, (list, tuple)), (
+                f"output spec does not match with output! Expected list/tuple, got {spec}."
+            )
             res_list = []
             for e, s in zip(res, spec):
                 res_list.append(OpDispatcher.wrap(e, s))
