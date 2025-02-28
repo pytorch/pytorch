@@ -81,12 +81,14 @@ class DTypeContainer:
 
 
 class RecordLowPrecisionOps(DefaultHandler):
-    def __init__(self) -> None:
+    def __init__(self, disallow_fp32_ops: bool = False) -> None:
+        self.disallow_fp32_ops = disallow_fp32_ops
         self.low_precision_numeric_op = False
         self.dtype_prop = DtypePropagationOpsHandler()
         self.non_numeric_ops = (
             "to_dtype",
             "constant",
+            "where",
         )
 
     def load(self, name: str, index: sympy.Expr) -> DTypeContainer:
@@ -98,6 +100,11 @@ class RecordLowPrecisionOps(DefaultHandler):
     ) -> None:
         pass
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        pass
+
     @staticmethod
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
@@ -106,14 +113,23 @@ class RecordLowPrecisionOps(DefaultHandler):
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
         out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
         if name == "constant":
-            out = DTypeContainer(torch.float, is_scalar=True)
+            return DTypeContainer(torch.float, is_scalar=True)
 
         uses_low_prec = any(
-            isinstance(dtype_cont, DTypeContainer) and low_prec_float(dtype_cont.dtype)
+            isinstance(dtype_cont, DTypeContainer)
+            and dtype_cont.dtype is not None
+            and low_prec_float(dtype_cont.dtype)
             for dtype_cont in itertools.chain((out,), args, kwargs.values())
         )
 
         if uses_low_prec and name not in self.non_numeric_ops:
+            self.low_precision_numeric_op = True
+
+        if (
+            self.disallow_fp32_ops
+            and out.dtype in (torch.float32, torch.float64)
+            and not out.is_scalar
+        ):
             self.low_precision_numeric_op = True
 
         return out
@@ -125,16 +141,19 @@ def low_prec_float(dtype: torch.dtype) -> bool:
 
 def can_codegen_without_upcasts(
     prologue: "SchedulerNode",
+    disallow_fp32_ops: bool = False,
 ) -> bool:
     """
     Can this prologue be run without `upcast_to_fp32` while preserving numerics.
 
     This is only true if the node only contains dtype conversions, indexing, and other non-arithmetic operators.
+
+    If disallow_fp32_ops is True, then we also disallow ops that are explicitly computed in fp32 or fp64.
     """
     if prologue.get_operation_names() <= V.graph.low_precision_codegen_ops:
         return True
 
-    low_prec_analysis = RecordLowPrecisionOps()
+    low_prec_analysis = RecordLowPrecisionOps(disallow_fp32_ops)
 
     # Need to turn off upcasting to do analysis of whether we can turn it off
     with config.patch("triton.codegen_upcast_to_fp32", False), V.set_ops_handler(

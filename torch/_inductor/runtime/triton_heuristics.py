@@ -66,6 +66,10 @@ from .triton_compat import (
 )
 
 
+class NoTritonConfigsError(RuntimeError):
+    pass
+
+
 if TYPE_CHECKING:
     from collections.abc import Container, Hashable
 
@@ -145,8 +149,9 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
             call_kwargs[k] = v
         else:
             call_kwargs[k] = v
-    for k, v in launcher.config.kwargs.items():
-        call_kwargs[k] = v
+    if not triton_version_uses_attrs_dict():
+        for k, v in launcher.config.kwargs.items():
+            call_kwargs[k] = v
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
     args_str = ""
@@ -282,7 +287,7 @@ class CachingAutotuner(KernelInterface):
             return
         assert not self.launchers
         if not self.configs:
-            raise RuntimeError("No triton configs are available")
+            raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
         exc = None
@@ -292,7 +297,9 @@ class CachingAutotuner(KernelInterface):
             except (OutOfResources, PTXASError) as e:
                 exc = e
         if len(compile_results) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            raise NoTritonConfigsError(
+                f"No valid triton configs. {type(exc).__name__}: {exc}"
+            )
         self.compile_results = compile_results
         self.configs = None
 
