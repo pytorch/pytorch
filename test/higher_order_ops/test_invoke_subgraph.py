@@ -229,6 +229,11 @@ class TestInvokeSubgraphCompile(TestCase):
         res.sum().backward()
 
     def test_dropout(self):
+        # `dropout` tests that joint graph passes (not just partitioner) is ran
+        # on the hop graphs. Inductor rng functionalization happens in the joint
+        # graph passes. Without running joint graph passes, we would get an
+        # error like AssertionError: should have been handled in
+        # replace_random.py
         @mark_compile_region
         def gn(x):
             return torch.nn.functional.dropout(torch.sin(x), p=0.5)
