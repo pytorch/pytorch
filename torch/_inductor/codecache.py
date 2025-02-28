@@ -417,9 +417,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(
-        content, (str, bytes)
-    ), "Only strings and byte arrays can be saved in the cache"
+    assert isinstance(content, (str, bytes)), (
+        "Only strings and byte arrays can be saved in the cache"
+    )
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -975,9 +975,9 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> (
-            Generator[tuple[CompiledFxGraph, bytes], None, None]
-        ):
+        def iterate_over_candidates() -> Generator[
+            tuple[CompiledFxGraph, bytes], None, None
+        ]:
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
@@ -1052,7 +1052,7 @@ class FxGraphCache:
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles", 1)
+                    CompileEventLogger.increment_toplevel("num_triton_bundles")
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1123,9 +1123,9 @@ class FxGraphCache:
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(
-            compiled_graph, CompiledFxGraph
-        ), f"serialization for {type(compiled_graph)} NYI"
+        assert isinstance(compiled_graph, CompiledFxGraph), (
+            f"serialization for {type(compiled_graph)} NYI"
+        )
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -1303,7 +1303,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache hit stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count", 1
+                    "inductor_fx_remote_cache_hit_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_hit_keys", key
@@ -1315,16 +1315,15 @@ class FxGraphCache:
                     "distributed_ephemeral_timeout_us", time_saved_ns // 1000
                 )
                 if (
-                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                        time_saved_ns
-                    )
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
             if remote_cache:
                 # Count remote cache miss stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count", 1
+                    "inductor_fx_remote_cache_miss_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_miss_keys", key
@@ -1423,12 +1422,6 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
-        # Meta internal AOTInductor CPU
-        fbcode_aot_cpu_re = (
-            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
-        )
-        use_relative_path = fbcode_aot_cpu_re
-
         (
             specified_output_path,
             specified_artifact_name,
@@ -1512,7 +1505,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_relative_path=config.is_fbcode(),
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1521,13 +1514,7 @@ class AotCodeCompiler:
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            if fbcode_aot_cpu_re:
-                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
-                consts_o = str(consts_s.with_suffix(".o"))
-                object_builder.build_fbcode(str(consts_s), consts_o)
-                os.chmod(consts_o, 0o644)
-            else:
-                object_builder.build()
+            object_builder.build()
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1568,9 +1555,9 @@ class AotCodeCompiler:
                 cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(
-                    v, (str)
-                ), "Metadata must only contain strings"
+                assert isinstance(k, str) and isinstance(v, (str)), (
+                    "Metadata must only contain strings"
+                )
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
@@ -1640,7 +1627,7 @@ class AotCodeCompiler:
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=use_relative_path,
+                use_relative_path=config.is_fbcode(),
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
@@ -1666,12 +1653,7 @@ class AotCodeCompiler:
                 object_builder.save_src_to_cmake(cmake_path, cpp_path)
                 generated_files.append(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_o = str(cpp_path_operator.with_suffix(".o"))
-                    object_builder.build_fbcode(cpp_path, output_o)
-                    os.chmod(output_o, 0o644)
-                else:
-                    object_builder.build()
+                object_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1698,12 +1680,14 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_relative_path=use_relative_path,
+                use_relative_path=config.is_fbcode(),
             )
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o, kernels_o],
+                sources=[output_o, consts_o, kernels_o]
+                if kernels_o
+                else [output_o, consts_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1750,16 +1734,7 @@ class AotCodeCompiler:
                     so_builder.save_src_to_cmake(cmake_path, kernel_o)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_so = (
-                        config.aot_inductor.output_path
-                        if specified_artifact_name
-                        else str(cpp_path_operator.with_suffix(".so"))
-                    )
-                    so_builder.build_fbcode([output_o, consts_o], output_so)
-                    os.chmod(output_so, 0o755)
-                else:
-                    so_builder.build()
+                so_builder.build()
 
                 for o_file in [
                     output_o,
@@ -1938,35 +1913,24 @@ class CppCodeCache:
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            """
-            If `fb_code` env, it need to be dispatched to original `compile_file` function.
-            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
-            """
-            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(**compile_command)
+            cpp_build_option = CppTorchDeviceOptions(
+                **compile_command, use_relative_path=config.is_fbcode()
+            )
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
                 output_dir=output_dir,
                 BuildOption=cpp_build_option,
             )
-
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
                 cpp_builder,
-                input_path,
-                fb_output_path,
             )
-
-            binary_path = normalize_path_separator(
-                fb_output_path
-                if config.is_fbcode()
-                else cpp_builder.get_target_file_path()
-            )
+            binary_path = normalize_path_separator(cpp_builder.get_target_file_path())
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -1996,23 +1960,12 @@ class CppCodeCache:
 def _worker_compile_cpp(
     lock_path: str,
     cpp_builder: CppBuilder,
-    fb_input_path: str,
-    fb_output_path: str,
 ) -> None:
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        binary_path = (
-            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
-        )
-        if not os.path.exists(binary_path):
-            if config.is_fbcode():
-                cpp_builder.build_fbcode(
-                    fb_input_path,
-                    fb_output_path,
-                )
-            else:
-                cpp_builder.build()
+        if not os.path.exists(cpp_builder.get_target_file_path()):
+            cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels

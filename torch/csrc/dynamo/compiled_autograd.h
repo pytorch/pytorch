@@ -78,9 +78,15 @@ struct TORCH_API PyCompilerInterface {
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
-TORCH_API void setPyCompilerInterface(
-    std::unique_ptr<PyCompilerInterface>&& impl);
-TORCH_API void resetPyCompilerInterface();
+struct TORCH_API PyCompilerGuard {
+  explicit PyCompilerGuard(std::unique_ptr<PyCompilerInterface>&& impl);
+  PyCompilerGuard(const PyCompilerGuard&) = delete;
+  PyCompilerGuard& operator=(const PyCompilerGuard&) = delete;
+  PyCompilerGuard(PyCompilerGuard&&) = delete;
+  PyCompilerGuard& operator=(PyCompilerGuard&&) = delete;
+
+  ~PyCompilerGuard();
+};
 
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
@@ -343,9 +349,6 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
-      pynode_objs;
 };
 
 class CompiledNodeArgs {
@@ -616,17 +619,12 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  void collect_pynode_objs(
-      const Node* pynode,
-      c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
-    size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
-    std::optional<size_t> bwd_state_idx;
-    if (auto state = std::move(bwd_state); state.has_value()) {
-      bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
-    }
-    _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+  size_t add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
+  size_t add_backward_state(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -745,13 +743,6 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
-    auto it = compiler.pynode_objs.find(pynode);
-    TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
-    return it->second;
-  }
-
   void before(at::Tensor& t) {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_tensors.save(&t, std::move(t));
@@ -957,7 +948,7 @@ class SwapSavedVariables {
       const NodeCall& n)
       : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
 
-  PyObject* get_py_compiler() const {
+  PyObject* get_py_compiler() {
     return py_compiler;
   }
 
