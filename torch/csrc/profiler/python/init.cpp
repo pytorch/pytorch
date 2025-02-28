@@ -326,6 +326,7 @@ void initPythonBindings(PyObject* module) {
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA)
+      .value("HPU", ActivityType::HPU)
       .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")

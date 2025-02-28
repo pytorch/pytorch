@@ -164,6 +164,8 @@ class _KinetoProfile:
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
             self.use_device = "mtia"
+        elif ProfilerActivity.HPU in self.activities:
+            self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
