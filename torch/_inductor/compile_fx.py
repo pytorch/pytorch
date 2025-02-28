@@ -1045,7 +1045,8 @@ class _InProcessFxCompile(FxCompile):
             ):
                 const_output_index = None
                 const_graph = None
-                const_code = None
+                const_wrapper_code = None
+                const_kernel_code = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     const_gm, const_output_index = split_const_gm(gm)
@@ -1065,8 +1066,9 @@ class _InProcessFxCompile(FxCompile):
                     with V.set_graph_handler(const_graph):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                         const_graph.run()
-
-                        const_code, _ = const_graph.codegen_with_cpp_wrapper()
+                        const_wrapper_code, const_kernel_code = (
+                            const_graph.codegen_with_cpp_wrapper()
+                        )
 
                 graph = GraphLowering(
                     gm,
@@ -1082,7 +1084,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_code=const_code.value if const_code else None,
+                    const_wrapper_code=const_wrapper_code.value
+                    if const_wrapper_code
+                    else None,
+                    const_kernel_code=const_kernel_code.value
+                    if const_kernel_code
+                    else None,
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )

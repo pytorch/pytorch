@@ -282,7 +282,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_backward: bool = False,
         is_const_graph: bool = False,
         const_output_index: Optional[dict[str, int]] = None,
-        const_code: Optional[str] = None,
+        const_wrapper_code: Optional[str] = None,
+        const_kernel_code: Optional[str] = None,
         const_module: Optional[GraphLowering] = None,
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
@@ -298,7 +299,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_backward = is_backward
         self.is_const_graph = is_const_graph
-        self.const_code = const_code
+        self.const_wrapper_code = const_wrapper_code
+        self.const_kernel_code = const_kernel_code
         self.const_module = const_module
         self.inputs_to_check = inputs_to_check
 
