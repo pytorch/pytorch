@@ -107,6 +107,10 @@ jobs:
           ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
@@ -178,6 +182,10 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
