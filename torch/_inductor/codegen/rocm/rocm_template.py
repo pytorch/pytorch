@@ -70,13 +70,14 @@ class ROCmTemplate(KernelTemplate):
         """
         kernel_name = f"rocm_{self.name}"
         kernel_hash_name = f"rocm_{self.name}_{next(self.index_counter)}"
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), ROCmTemplateKernel(
-            kernel_name=kernel_name,
-            runtime_arg_info=self.get_runtime_arg_info(),
-            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
+            ROCmTemplateKernel(
+                kernel_name=kernel_name,
+                runtime_arg_info=self.get_runtime_arg_info(),
+                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+            ) as kernel,
+        ):
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Autotune key: %s, Generated Code:\n%s", kernel_hash_name, code)
