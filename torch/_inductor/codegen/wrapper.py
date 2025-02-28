@@ -2627,7 +2627,7 @@ class PythonWrapperCodegen(CodeGen):
                     # Call the codegen of subgraph recursively
                     subgraph_code, _ = subgraph.graph.codegen()
             self.already_codegened_subgraphs.add(subgraph.graph.name)
-            self.define_subgraph_launcher_fn(subgraph_code)
+            self.define_subgraph_launcher_fn(subgraph_code.value)
 
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
 

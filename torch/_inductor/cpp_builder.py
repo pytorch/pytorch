@@ -572,14 +572,11 @@ def _get_optimization_cflags(
             if config.aot_inductor.debug_compile
             else ["O3" if max_optimize else "O1", "DNDEBUG"]
         )
-        if max_optimize:
-            cflags += _get_ffast_math_flags()
-            cflags.append("fno-finite-math-only")
-            if not config.cpp.enable_unsafe_math_opt_flag:
-                cflags.append("fno-unsafe-math-optimizations")
-            cflags.append(
-                f"ffp-contract={config.cpp.enable_floating_point_contract_flag}"
-            )
+        cflags += _get_ffast_math_flags()
+        cflags.append("fno-finite-math-only")
+        if not config.cpp.enable_unsafe_math_opt_flag:
+            cflags.append("fno-unsafe-math-optimizations")
+        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if sys.platform != "darwin":
             # on macos, unknown argument: '-fno-tree-loop-vectorize'
@@ -1417,15 +1414,23 @@ class CppBuilder:
     """
 
     @staticmethod
-    def __get_python_module_flags() -> tuple[str, str]:
+    def __get_lto_flags() -> str:
+        if is_gcc():
+            return "-flto -fno-fat-lto-objects"
+        if is_clang():
+            return "-flto=thin"
+        return ""
+
+    @classmethod
+    def __get_python_module_flags(cls) -> tuple[str, str]:
         extension = ".pyd" if _IS_WINDOWS else ".so"
-        output_flags = "/Fe" if _IS_WINDOWS else "-o"
+        output_flags = "/Fe" if _IS_WINDOWS else f"{cls.__get_lto_flags()} -o"
         return extension, output_flags
 
-    @staticmethod
-    def __get_object_flags() -> tuple[str, str]:
+    @classmethod
+    def __get_object_flags(cls) -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else f"{cls.__get_lto_flags()} -c -o"
         return extension, output_flags
 
     @staticmethod
