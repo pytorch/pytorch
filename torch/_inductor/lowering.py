@@ -4311,10 +4311,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+def should_fallback_max_pool2d_with_indices(kernel_size):
     kernel_size = pad_listlike(kernel_size, 2)
     window_size = kernel_size[0] * kernel_size[1]
-    return (window_size > 25) or any(d > 1 for d in dilation)
+    return window_size > 25
 
 
 def max_pool2d_checks(
@@ -4339,15 +4339,14 @@ def max_pool2d_checks(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
-    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size)
     if assert_fallback is not None:
         assert use_fallback == assert_fallback
 
     return kernel_size, stride, padding, dilation, use_fallback
 
 
-@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
-def _low_memory_max_pool2d_with_offsets(
+def _max_pool2d_with_offsets(
     x,
     kernel_size,
     stride,
@@ -4355,11 +4354,6 @@ def _low_memory_max_pool2d_with_offsets(
     dilation,
     ceil_mode=False,
 ):
-    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
-    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
-        x, kernel_size, stride, padding, dilation, assert_fallback=False
-    )
-
     x.realize_hint()
     *batch, h, w = x.get_size()
 
@@ -4374,49 +4368,88 @@ def _low_memory_max_pool2d_with_offsets(
     )
 
     new_size = list(batch) + [h_out, w_out]
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+    if (
+        padding[0]
+        or padding[1]
+        or ceil_mode1
+        or ceil_mode2
+        or (dilation[0] > 1)
+        or (dilation[1] > 1)
+    ):
         x_loader = constant_boundary_condition(x, min_value, dim=2)
     else:
         x_loader = x.make_loader()
 
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-        maxval = None
-        maxindex = None
-        for h_inc, w_inc in itertools.product(
-            range(kernel_size[0]), range(kernel_size[1])
-        ):
-            ih = bh * stride[0] + h_inc - padding[0]
-            iw = bw * stride[1] + w_inc - padding[1]
-            val = x_loader([*prefix, ih, iw])
-            if return_index:
-                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
+    dim = 2
 
-    out = Pointwise.create(
+    def fn_inner(idx, reduction_idx):
+        prefix = idx[:-dim]
+        bh = idx[-dim:]
+        ih = [
+            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            for i in range(dim)
+        ]
+        return x_loader([*prefix, *ih])
+
+    result = Reduction.create(
+        reduction_type="max",
+        input_node=x,
         device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
+        dst_dtype=dtype,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
         ranges=new_size,
+        reduction_ranges=kernel_size,
     )
-    offsets = Pointwise.create(
+    offsets = Reduction.create(
+        reduction_type="argmax",
+        input_node=x,
         device=x.get_device(),
-        dtype=torch.int8,
-        inner_fn=functools.partial(fn, return_index=True),
+        dst_dtype=torch.int64,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
         ranges=new_size,
+        reduction_ranges=kernel_size,
     )
-    return out, offsets
+    if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        result.realize()
+    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+        # Only realize if reduction isn't unrolled
+        offsets.realize()
+
+    return result, offsets
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        assert_fallback=False,
+    )
+
+    with config.patch(unroll_reductions_threshold=25):
+        result, offsets = _max_pool2d_with_offsets(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
+        return result, to_dtype(offsets, torch.int8)
 
 
 @register_lowering(
@@ -4454,8 +4487,29 @@ def _low_memory_max_pool2d_offsets_to_indices(
     return indices
 
 
-# Fallback selected when we do not decompose to the low-memory path.
-make_fallback(aten.max_pool2d_with_indices)
+# Fallback when we do not decompose to the low-memory path.
+@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
+def max_pool2d_with_indices(
+    x,
+    kernel_size,
+    stride=None,
+    padding=0,
+    dilation=1,
+    ceil_mode=False,
+):
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation
+    )
+
+    out, offsets = _max_pool2d_with_offsets(
+        x, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    indices = _low_memory_max_pool2d_offsets_to_indices(
+        offsets, kernel_size[-1], x.shape[-1], stride, padding
+    )
+
+    return out, indices
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
