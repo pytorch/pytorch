@@ -2315,7 +2315,7 @@ void verify_params_across_processes(
     }
   }
 
-  auto metadata_dev = metadata.clone().to(params[0].device());
+  auto metadata_dev = metadata.to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
   process_group->broadcast(vec)->wait();
 
