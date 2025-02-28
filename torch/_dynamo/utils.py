@@ -371,7 +371,12 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+    def add_data(
+        event_name: str,
+        log_level: CompileEventLogLevel,
+        overwrite: bool = False,
+        **metadata: object,
+    ):
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -408,11 +413,13 @@ class CompileEventLogger:
                 )
 
             # TODO: should we assert that the keys of metadata are in CompilationMetrics?
-            metrics_context.update(metadata)
+            metrics_context.update(metadata, overwrite)
             chromium_log.add_event_data(event_name, **metadata)
 
     @staticmethod
-    def add_toplevel(log_level: CompileEventLogLevel, **metadata: object):
+    def add_toplevel(
+        log_level: CompileEventLogLevel, overwrite: bool = False, **metadata: object
+    ):
         """
         Syntactic sugar for logging to the toplevel event
         """
@@ -421,7 +428,7 @@ class CompileEventLogger:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
             )
-        CompileEventLogger.add_data(top_event, log_level, **metadata)
+        CompileEventLogger.add_data(top_event, log_level, overwrite, **metadata)
 
     @staticmethod
     def increment(
@@ -457,7 +464,7 @@ class CompileEventLogger:
     @staticmethod
     def increment_toplevel(
         key: str,
-        value: int,
+        value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ):
         """
@@ -529,7 +536,7 @@ class CompileEventLogger:
         <event_name> should be the name of a timed event span passed to `dynamo_timed`.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.CHROMIUM, **metadata
+            event_name, CompileEventLogLevel.CHROMIUM, overwrite=False, **metadata
         )
 
     @staticmethod
@@ -542,11 +549,11 @@ class CompileEventLogger:
         with log_to_pt2_compile_events=True.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
+            event_name, CompileEventLogLevel.PT2_COMPILE, overwrite=False, **metadata
         )
 
     @staticmethod
-    def compilation_metric(**metadata: object):
+    def compilation_metric(overwrite: bool = False, **metadata: object):
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
         and chromium.
@@ -554,7 +561,7 @@ class CompileEventLogger:
         a column in PT2 Compile Events and Dynamo Compile, with the corresponding kwarg value.
         """
         CompileEventLogger.add_toplevel(
-            CompileEventLogLevel.COMPILATION_METRIC, **metadata
+            CompileEventLogLevel.COMPILATION_METRIC, overwrite, **metadata
         )
 
     @staticmethod
@@ -707,15 +714,13 @@ def dynamo_timed(
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
-    ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> tuple[list[str], list[object]]:
-    ...
+) -> tuple[list[str], list[object]]: ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -915,20 +920,17 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]:
-    ...
+def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]:
-    ...
+) -> TypeIs[T]: ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool:
-    ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
 def istype(obj, allowed_types):
@@ -1216,6 +1218,7 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
+    num_graph_breaks: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -2458,8 +2461,11 @@ def set_example_value(node, example_value):
     # the program was traced).
     node.meta["example_value"] = example_value
     shape_env = TracingContext.get().fake_mode.shape_env
-    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-        shape_env, example_value
+    if (
+        symbol_to_path
+        := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            shape_env, example_value
+        )
     ):
         node.meta["unbacked_bindings"] = symbol_to_path
 
@@ -2583,6 +2589,29 @@ def get_safe_global_name(tx, root, obj):
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
+def is_in(item: Any, *containers) -> bool:
+    for container in containers:
+        if item in container:
+            return True
+    return False
+
+
+def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
+    """
+    Return a name that starts with `prefix` and is not in any of the
+    `containers` (e.g., map, set).
+    """
+    if not requires_suffix and not is_in(prefix, *containers):
+        return prefix
+
+    for i in itertools.count():
+        candidate = f"{prefix}_{i}"
+        if not is_in(candidate, *containers):
+            return candidate
+
+    raise AssertionError("unreachable")
+
+
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -2632,9 +2661,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(
-            res, (list, tuple, collections.deque)
-        ), f"type mismatch {type(ref)} {type(res)}"
+        assert isinstance(res, (list, tuple, collections.deque)), (
+            f"type mismatch {type(ref)} {type(res)}"
+        )
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2675,9 +2704,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(
-            res.keys()
-        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        assert set(ref.keys()) == set(res.keys()), (
+            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        )
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -3219,7 +3248,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return (
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                + repr(e)
+            )
 
         from .exc import Unsupported
 
@@ -3250,11 +3282,17 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented_v2
 
+            hints = []
+            if isinstance(e, NotImplementedError):
+                hints = [
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+
             unimplemented_v2(
-                gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
-                context=str(e),
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
+                context="",
                 explanation=make_error_message(e),
-                hints=[],
+                hints=hints,
                 from_exc=e,
             )
         except Unsupported:
@@ -3318,13 +3356,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(
-            buffer
-        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        assert not is_fake(buffer), (
+            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        )
     for name, param in gm.named_parameters():
-        assert not is_fake(
-            param
-        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
+        assert not is_fake(param), (
+            f"Unexpected fake param {name} {stack_or_hint(param)}"
+        )
 
 
 def fqn(obj: Any):
@@ -4407,7 +4445,7 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert (
-        mode in _ddp_optimization_mode
-    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    assert mode in _ddp_optimization_mode, (
+        f"Invalid dynamo config optimize_ddp value {mode=}"
+    )
     return mode
