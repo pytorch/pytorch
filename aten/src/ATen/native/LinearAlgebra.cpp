@@ -3485,6 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(K % qGroupSize == 0,
+      __func__, ": expect K to be divisible by qGroupSize, got K:", K, ", qGroupSize:", qGroupSize);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
       && qScaleAndZeros.size(2) == 2,
@@ -3570,11 +3572,10 @@ Tensor _weight_int8pack_mm_cpu(
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be contiguous on the last dimension.");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),

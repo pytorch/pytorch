@@ -4,12 +4,12 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 from types import ModuleType
 
 import torch
 
-_TAGS: Dict[str, Dict[str, Any]] = {
+_TAGS: dict[str, dict[str, Any]] = {
     "torch": {
         "cond": {},
         "dynamic-shape": {},
@@ -79,12 +79,12 @@ class ExportCase:
     description: str  # A description of the use case.
     model: torch.nn.Module
     name: str
-    example_kwargs: Dict[str, Any] = field(default_factory=dict)
+    example_kwargs: dict[str, Any] = field(default_factory=dict)
     extra_args: Optional[ArgsType] = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
-    tags: Set[str] = field(default_factory=set)
+    tags: set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
-    dynamic_shapes: Optional[Dict[str, Any]] = None
+    dynamic_shapes: Optional[dict[str, Any]] = None
 
     def __post_init__(self):
         check_inputs_type(self.example_args, self.example_kwargs)
@@ -98,10 +98,10 @@ class ExportCase:
             raise ValueError(f'Invalid description: "{self.description}"')
 
 
-_EXAMPLE_CASES: Dict[str, ExportCase] = {}
-_MODULES: Set[ModuleType] = set()
-_EXAMPLE_CONFLICT_CASES: Dict[str, List[ExportCase]] = {}
-_EXAMPLE_REWRITE_CASES: Dict[str, List[ExportCase]] = {}
+_EXAMPLE_CASES: dict[str, ExportCase] = {}
+_MODULES: set[ModuleType] = set()
+_EXAMPLE_CONFLICT_CASES: dict[str, list[ExportCase]] = {}
+_EXAMPLE_REWRITE_CASES: dict[str, list[ExportCase]] = {}
 
 
 def register_db_case(case: ExportCase) -> None:

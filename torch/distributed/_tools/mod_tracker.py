@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional, Set
+from typing import Callable, Optional
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -42,13 +42,14 @@ class ModTracker:
             def my_linear(m1, m2, bias):
                 print(f"Current modules: {tracker.parents}")
                 return torch.mm(m1, m2.t()) + bias
+
             torch.nn.functional.linear = my_linear
 
             mod(torch.rand(2, 2))
 
     """
 
-    parents: Set[str]
+    parents: set[str]
     """
     A Set containing the fqn for each module currently running their forward
     """
