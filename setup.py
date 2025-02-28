@@ -1397,6 +1397,7 @@ def main():
                 "lib/*.dylib*",
                 "lib/*.dll",
                 "lib/*.lib",
+                "lib/*.pdb",
             ]
         )
         aotriton_image_path = os.path.join(lib_path, "aotriton.images")
