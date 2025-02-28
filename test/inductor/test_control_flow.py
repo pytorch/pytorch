@@ -947,6 +947,7 @@ class WhileLoopModels:
                 return loop_idx + a.sum(), a + b, a - b
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
     class Conv(torch.nn.Module):
         def __init__(self, device):
             super().__init__()
