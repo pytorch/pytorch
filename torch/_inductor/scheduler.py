@@ -3152,63 +3152,6 @@ class Scheduler:
             WhyNoFuse(node1, node2)("will create cycle")
         return cycle
 
-    def can_fusion_increase_peak_memory(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        """
-        Return true if fusing the two nodes can potentially increasing peak memory.
-
-        The implementation is more like a heuristic since we don't really know if we are at peak
-        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
-        peak memory estimation hard.
-
-        Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
-        1. find all buffers read by each node with a single user. These buffers are supposed to
-           be reused if we don't fuses these 2 nodes
-        2. find the intersection of these buffers for the two node and sum the total buffer size.
-           If we don't fuse these two nodes, we can at lease avoid this much memory allocation.
-           Note that the extra memory allocation is not necessarily causing peak memory increase.
-           This is just a heuristic.
-
-        We return true only if the saving for fusion can not trade off the extra memory allocation.
-        """
-
-        from .codegen.wrapper import buffer_reuse_key
-
-        def _find_single_user_inputs(
-            node: BaseSchedulerNode,
-        ) -> list[ir.Buffer]:
-            output = []
-            for rd in node.read_writes.reads:
-                buf = self.name_to_buf.get(rd.name)
-                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
-                    output.append(buf.node)
-            return output
-
-        # Check inputs that can be potentially reused
-        lhs_dep_nodes = _find_single_user_inputs(node1)
-        rhs_dep_nodes = _find_single_user_inputs(node2)
-
-        lhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in lhs_dep_nodes)
-        rhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in rhs_dep_nodes)
-
-        common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
-
-        memory_overhead = 0
-        for key in common_reuse_keys:
-            try:
-                memory_overhead += int(key[2])
-            except ValueError:
-                # not an interger. Fallback is to fuse
-                return False
-
-        bw_saving = self.score_fusion_memory(node1, node2)
-
-        # The factor 32 here is quite arbitrary.
-        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
-            return True
-        return False
-
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
