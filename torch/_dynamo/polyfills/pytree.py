@@ -105,6 +105,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     __all__ += ["tree_leaves"]
 
     class _Asterisk(str):
+        __slots__ = ()
+
         def __new__(cls) -> Self:
             return super().__new__(cls, "*")
 

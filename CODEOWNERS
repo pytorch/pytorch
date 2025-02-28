@@ -79,7 +79,7 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk
+/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
 # code
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
@@ -101,6 +101,9 @@ test/test_type_promotion.py @mruberry
 # Useful for e.g. auditing xfails that other folks add to tests
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
+
+# This is the file where people can add new argument types to torch.fx.
+torch/fx/proxy.py @zou3519
 
 # HOPs
 torch/_higher_order_ops/*.py @zou3519
@@ -180,3 +183,9 @@ torch/cuda/ @eqy @syed-ahmed
 torch/csrc/cuda/ @eqy @syed-ahmed
 torch/backends/cuda/ @eqy @syed-ahmed
 torch/backends/cudnn/ @eqy @syed-ahmed
+
+# PyTree utilities
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/utils/pytree/ @XuehaiPan
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan

@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, IO, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch._inductor
@@ -28,7 +29,7 @@ class PT2ArchiveWriter:
         self.archive_path: FileLike = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveWriter":
+    def __enter__(self) -> Self:
         assert self.archive_file is None
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "w", compression=zipfile.ZIP_STORED
@@ -63,7 +64,7 @@ class PT2ArchiveReader:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveReader":
+    def __enter__(self) -> Self:
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "r", compression=zipfile.ZIP_STORED
         )
@@ -187,7 +188,9 @@ def package_aoti(
     ) or (
         isinstance(archive_file, (str, os.PathLike))
         and os.fspath(archive_file).endswith(".pt2")
-    ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+    ), (
+        f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+    )
 
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
@@ -284,9 +287,9 @@ class AOTICompiledModel:
 def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
-    ) or (
-        isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")
-    ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+    ) or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")), (
+        f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+    )
 
     if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:

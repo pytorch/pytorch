@@ -8,14 +8,12 @@ import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch.utils._triton import has_triton_tma_device
 
-from .. import config as inductor_config
 from ..config import triton as triton_config
 from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
@@ -34,6 +32,7 @@ from .mm_common import (
     persistent_mm_grid,
     scaled_mm_configs,
     scaled_persistent_mm_configs,
+    should_fallback_to_aten,
 )
 
 
@@ -258,8 +257,6 @@ scaled_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -340,8 +337,6 @@ scaled_mm_bias_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -428,7 +423,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
 ) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
@@ -443,7 +437,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -464,7 +457,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
 ) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
@@ -479,7 +471,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -575,20 +566,7 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for scaled_mm, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_choice.output_node()
 
-    try:
-        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning(
-            "All choices for scaled_mm were invalid, using ATen backend as fallback"
-        )
-        return aten_choice.output_node()
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
