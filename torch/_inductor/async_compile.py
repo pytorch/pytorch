@@ -245,8 +245,7 @@ class AsyncCompile:
 
     def use_process_pool(self):
         return (
-            get_compile_threads() > 1
-            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+            get_compile_threads() > 1 and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):

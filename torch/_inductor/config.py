@@ -80,9 +80,9 @@ fx_graph_cache: bool = Config(
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # should we bundle triton caching into fx graph cache
-bundle_triton_into_fx_graph_cache: Optional[
-    bool
-] = bundle_triton_into_fx_graph_cache_default()
+bundle_triton_into_fx_graph_cache: Optional[bool] = (
+    bundle_triton_into_fx_graph_cache_default()
+)
 
 # Enable autotune local cache.
 #
@@ -1390,12 +1390,12 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda: Literal[
-        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
-    ] = "Anderson2021"
-    scheduler_cpu: Literal[
-        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
-    ] = "Adams2019"
+    scheduler_cuda: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
+        "Anderson2021"
+    )
+    scheduler_cpu: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
+        "Adams2019"
+    )
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False
@@ -1516,6 +1516,8 @@ class test_configs:
     # choices (aka configs) by name and / or description
     autotune_choice_name_regex: Optional[str] = None
     autotune_choice_desc_regex: Optional[str] = None
+
+    graphsafe_rng_func_ignores_fallback_random = False
 
 
 if TYPE_CHECKING:
