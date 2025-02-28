@@ -1476,7 +1476,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.8.4',  # sync with RUFF
+    'ruff==0.9.2',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1561,7 +1561,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.8.4',  # sync with PYFMT
+    'ruff==0.9.2',  # sync with PYFMT
 ]
 is_formatter = true
 
