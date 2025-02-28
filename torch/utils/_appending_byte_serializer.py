@@ -19,8 +19,7 @@ class BytesWriter:
         self._data = bytearray()
 
     def write_int(self, i: int) -> None:
-        # Note: We are not doing anything about byteorder (big or little endian)
-        self._data.extend(i.to_bytes(8, signed=False))
+        self._data.extend(i.to_bytes(8, byteorder="big", signed=False))
 
     def write_str(self, s: str) -> None:
         payload = s.encode("utf-8")
@@ -43,8 +42,9 @@ class BytesReader:
         return len(self._data) == self._i
 
     def read_int(self) -> int:
-        # Note: We are not doing anything about byteorder (big or little endian)
-        result = int.from_bytes(self._data[self._i : self._i + 8], signed=False)
+        result = int.from_bytes(
+            self._data[self._i : self._i + 8], byteorder="big", signed=False
+        )
         self._i += 8
         return result
 
