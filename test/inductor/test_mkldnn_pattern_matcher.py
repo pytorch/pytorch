@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    IS_X86,
     MI300_ARCH,
     parametrize,
     skipIfNoXPU,
@@ -153,8 +154,6 @@ class TestPatternMatcherBase(TestCase):
         is_dynamic=False,
         quantizer=None,
         compile_options={},  # noqa: B006
-        include_ops=(),
-        exclude_ops=(),
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -191,17 +190,7 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
-                if len(include_ops) == 0 and len(exclude_ops) == 0:
-                    actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                else:
-                    actual, (source_code,) = run_and_get_code(
-                        torch.compile(mod, fullgraph=True, **compile_options),
-                        *clone_inputs,
-                    )
-                    for op in include_ops:
-                        self.assertIn(op, source_code)
-                    for op in exclude_ops:
-                        self.assertNotIn(op, source_code)
+                actual = torch.compile(mod, **compile_options)(*clone_inputs)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
 
@@ -4064,7 +4053,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             and not has_bias
             else False
         )
-
+        unittest.skipIf(
+            test_for_pointwise_binary and not IS_X86,
+            "Some UTs are only supported on x86_64 CPUs",
+        )
         class Mod(torch.nn.Module):
             def __init__(self, dtype: torch.dtype, has_bias: bool):
                 super().__init__()
@@ -4114,12 +4106,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod,
             (a,),
             matcher_check_fn,
-            include_ops=("qlinear_pointwise.binary_tensor",)
-            if test_for_pointwise_binary
-            else (),
             check_autocast=dtype,
             compile_options={"dynamic": dynamic},
         )
+        if test_for_pointwise_binary:
+            self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
