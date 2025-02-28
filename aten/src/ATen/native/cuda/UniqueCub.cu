@@ -262,7 +262,7 @@ struct UniqueCub<bool> {
     thrust::transform_iterator<MapNumberOfTrueValues, const uint8_t*, int>
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
-                          NO_ROCM(at_cuda_detail)::cub::Sum{}, 0);
+                          ::cuda::std::plus<>{}, 0);
 
     auto options = self.options();
     output = at::empty({2}, self.options());

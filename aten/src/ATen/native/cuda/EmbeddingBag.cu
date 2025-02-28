@@ -222,7 +222,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
+        ::cuda::maximum<>{},
         num_indices
       );
     });

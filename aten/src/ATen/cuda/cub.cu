@@ -15,8 +15,7 @@ struct SumOp {
 
 template <typename input_t, typename output_t>
 void inclusive_sum_truncating(const input_t *input, output_t *output, int64_t num_items) {
-  using NO_ROCM(at_cuda_detail)::cub::Sum;
-  inclusive_scan(input, output, Sum{}, num_items);
+  inclusive_scan(input, output, ::cuda::std::plus<>{}, num_items);
 }
 
 template void inclusive_sum_truncating(const int32_t *input, int32_t *output, int64_t num_items);
