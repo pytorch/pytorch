@@ -560,8 +560,8 @@ class AOTAutogradCacheEntry:
         # This avoids setting things like BoxedBools in fx_config until
         # after both forward and backward cache hit
         compiled_fw_func = self.compiled_fw.post_compile(compiled_fw_func, fx_config)
-        if needs_autograd:
-            compiled_bw_func = self.compiled_fw.post_compile(
+        if compiled_bw_func is not None:
+            compiled_bw_func = self.compiled_bw.post_compile(
                 compiled_bw_func, fx_config
             )
 
