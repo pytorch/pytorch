@@ -694,6 +694,21 @@
     "kineto_available",
     "record_function"
   ],
+  "torch.pytree": [
+    "register_node",
+    "all",
+    "all_only",
+    "any",
+    "any_only",
+    "flatten",
+    "iter",
+    "leaves",
+    "map",
+    "map_",
+    "map_only",
+    "map_only_",
+    "structure"
+  ],
   "torch.quantization": [
     "ABC",
     "DeQuantStub",
