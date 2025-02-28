@@ -467,6 +467,79 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, s)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_pre_existing_register_constant_type_guard_default_eq(self):
+        class State:
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return 42
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(fullgraph=True, backend=cnts)
+        def fn(x, s):
+            res = trace_me(x, s)
+            return res
+
+        x, s = torch.ones(10), State()
+        # Make sure recompilation didn't happen.
+        self.assertEqual(cnts.frame_count, 0)
+        fn(x, s)
+        fn(x, s)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Make sure recompilation did happen.
+        fn(x, State())
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_pre_existing_register_constant_type_guard_custom_eq(self):
+        class State:
+            def __init__(self, n):
+                self.n = n
+
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(fullgraph=True, backend=cnts)
+        def fn(x, s):
+            res = trace_me(x, s)
+            return res
+
+        x = torch.ones(10)
+        # Make sure recompilation didn't happen.
+        self.assertEqual(cnts.frame_count, 0)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Make sure recompilation did happen.
+        fn(x, State(41))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_nonstrict_trace_tuple_and_sym_int_output(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x):
@@ -986,13 +1059,8 @@ If the above doesn't work, please subtmit an issue to GitHub.
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.
-        # On 1st compile, we expect the input to be marked as static, with guarded
-        # set depending on the `guarded` flag.
-        # On 2nd compile, we expect the input to be unmarked
-        # if inlining NN modules, we expect metadata to be present on the tensor, indicating
-        # the static address type of the input
-        # if not inlining NN modules, we expect the tensor to be present in the buffers attribute
-        # of the graph.
+        # For both inline_inbuilt_nn_modules True and False, we expect the
+        # tensor to be present in the buffers attribute of the graph.
 
         compiles_with_buffers = 0
         compiles = 0
@@ -1000,27 +1068,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
             nonlocal compiles
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                input_node = [
-                    n
-                    for n in gm.graph.nodes
-                    if n.op == "placeholder" and n.name == "l_x_"
-                ]
-                self.assertEqual(len(input_node), 1)
-                input_node = input_node[0]
-                if compiles == 0:
-                    self.assertEqual(
-                        input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
-                        "guarded" if guarded else "unguarded",
-                    )
-                elif compiles == 1:
-                    self.assertFalse(
-                        "_dynamo_static_input_type" in input_node.meta["tensor_dict"]
-                    )
-                else:
-                    raise RuntimeError(f"Unexpected number of compiles: {compiles}")
-            else:
-                compiles_with_buffers += len(gm._buffers) > 0
+            compiles_with_buffers += len(gm._buffers) > 0
             compiles += 1
             return gm
 
@@ -1033,7 +1081,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+        if guarded:
             self.assertEqual(compiles_with_buffers, 1)
 
         inp2 = torch.ones(2)
@@ -1043,7 +1091,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         # should not be incremented
         fn(inp2)
 
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+        if guarded:
             self.assertEqual(compiles_with_buffers, 1)
 
         self.assertEqual(compiles, 2 if guarded else 1)

@@ -650,9 +650,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             assert not extra, "Expect 1 input to cudnn.is_acceptable"
-            assert isinstance(
-                tensor, TensorVariable
-            ), "Expect input to cudnn.is_acceptable to be a tensor"
+            assert isinstance(tensor, TensorVariable), (
+                "Expect input to cudnn.is_acceptable to be a tensor"
+            )
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
@@ -995,7 +995,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from torch.utils._pytree import tree_flatten
 
             from .base import AsPythonConstantNotImplementedError
-            from .user_defined import SourcelessPytreeConstantError
 
             # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
             #
@@ -1039,19 +1038,22 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             # fx graph.
             try:
                 input_spec = input_spec_vt.as_python_constant()
-            except SourcelessPytreeConstantError as e:
-                type_name = e.vt.python_type().__qualname__
-                unimplemented(
-                    f"""
+            except AsPythonConstantNotImplementedError as e:
+                typ = e.vt.python_type()
+                type_name = typ.__qualname__
+                import torch.utils._pytree as pytree
+
+                if pytree.is_constant_class(typ):
+                    unimplemented(
+                        f"""
 You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
 
 Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
-"""  # NOQA: B950
-                )
-            except AsPythonConstantNotImplementedError as e:
-                type_name = e.vt.python_type().__qualname__
-                unimplemented(
-                    f"""
+    """  # NOQA: B950
+                    )
+                else:
+                    unimplemented(
+                        f"""
 You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <{type_name}> into the context.
 
 Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <{type_name}>
@@ -1061,7 +1063,7 @@ Please consider modifying that `pytree_flatten` to avoid putting the object into
 
 If the above doesn't work, please subtmit an issue to GitHub.
 """  # NOQA: B950
-                )
+                    )
 
             fn = self.value
 

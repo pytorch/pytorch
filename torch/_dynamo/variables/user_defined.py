@@ -82,12 +82,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    AttributeMutationExisting,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -716,11 +711,6 @@ def call_random_fn(tx, fn, args, kwargs):
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
-class SourcelessPytreeConstantError(AsPythonConstantNotImplementedError):
-    def __init__(self, vt: "UserDefinedObjectVariable"):
-        super().__init__(vt)
-
-
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -778,12 +768,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         import torch.utils._pytree as pytree
 
         if pytree.is_constant_class(self.value_type):
-            # TODO figure out the exact mutability expectation here.
-            if self.source is None:
-                raise SourcelessPytreeConstantError(self)
-            else:
-                # TODO emit equals match guard?
+            if self.source is not None:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
                 return self.value
+            # TODO else try reconstructing the object by, e.g., leveraging side
+            # effects and `as_python_constant`.
         return super().as_python_constant()
 
     def guard_as_python_constant(self):
@@ -793,9 +782,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().guard_as_python_constant()
 
     def torch_function_check(self):
-        assert has_torch_function(
-            self
-        ), f"calling torch function on object without __torch_function__ {self}"
+        assert has_torch_function(self), (
+            f"calling torch function on object without __torch_function__ {self}"
+        )
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
@@ -1534,9 +1523,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
         if self._dict_vt is None:
-            assert (
-                self.source is None
-            ), "dict_vt must be constructed by builder.py when source is present"
+            assert self.source is None, (
+                "dict_vt must be constructed by builder.py when source is present"
+            )
             self._dict_vt = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
             )
@@ -1581,9 +1570,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
         if self._list_vt is None:
-            assert (
-                self.source is None
-            ), "list_vt must be constructed by builder.py when source is present"
+            assert self.source is None, (
+                "list_vt must be constructed by builder.py when source is present"
+            )
             self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
 
     def call_method(
