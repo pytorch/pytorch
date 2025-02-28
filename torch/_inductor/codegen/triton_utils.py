@@ -184,7 +184,8 @@ def config_of(
         if isinstance(x, TensorArg):
             if include_tensor:
                 offset_aligned = V.graph.sizevars.statically_known_multiple_of(
-                    x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
+                    x.offset * x.dtype.itemsize,
+                    alignment,  # type: ignore[arg-type]
                 )
                 return offset_aligned and not is_unaligned_buffer(x)
             else:
