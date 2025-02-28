@@ -3339,9 +3339,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             l = torch.randint(0, T, (B,), device="cuda")
             model(x, l)
 
-        assert (
-            counter.frame_count == 1
-        ), f"Expected 1 graph, but got {counter.frame_count} graphs"
+        assert counter.frame_count == 1, (
+            f"Expected 1 graph, but got {counter.frame_count} graphs"
+        )
 
     @supported_platform
     def test_dynamic_shapes_with_custom_kernel_options(self):

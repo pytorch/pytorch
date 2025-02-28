@@ -255,9 +255,10 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
     def test_auto_functionalize_on_view(self):
         for value in [True, False]:
-            with torch.library._scoped_library(
-                "mylib", "FRAGMENT"
-            ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": value}):
+            with (
+                torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+                inductor_config.patch({"enable_auto_functionalized_v2": value}),
+            ):
                 torch.library.define(
                     "mylib::foo",
                     "(Tensor(a!) x) -> ()",
