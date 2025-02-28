@@ -127,8 +127,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dtensor_basic_export(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
 
         param = torch.randn(4, 4)
         param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
@@ -149,12 +150,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         torch.utils._pytree.register_constant(DeviceMesh)
 
-        ep = torch.export.export_for_training(Foo(), (torch.randn(4, 4),), strict=False)
+        ep = torch.export.export_for_training(
+            Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
+        )
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, b_buffer, x):
-    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float32, layout = torch.strided, device = device(type='cuda'));  x = None
+    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0;  dtensor___init__0 = None
     dtensor___init__1 = self.dtensor___init__1
@@ -170,7 +173,7 @@ def forward(self, b_buffer, x):
             str(ep.run_decompositions({}).graph_module.code).strip(),
             """\
 def forward(self, b_parametrizations_buffer_original0, x):
-    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float32, layout = torch.strided, device = device(type='cuda'));  x = None
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None

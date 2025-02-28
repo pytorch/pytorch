@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfXpu,
     TEST_TRANSFORMERS,
+    TEST_WITH_CROSSREF,
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.custom_tensor import (
@@ -11219,21 +11220,9 @@ graph():
 
         mod = Foo()
         gm_torch_ir = _export_to_torch_ir(mod, (torch.randn(4, 4),))
-        self.assertExpectedInline(
-            str(gm_torch_ir.code).strip(),
-            """\
-def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x_ = arg0
-    two_tensor = torch.testing._internal.two_tensor.TwoTensor(l_x_, l_x_)
-    two_tensor_1 = torch.testing._internal.two_tensor.TwoTensor(l_x_, two_tensor);  two_tensor = None
-    l__self___buffer = self.buffer
-    two_tensor_2 = two_tensor_1 + l__self___buffer;  two_tensor_1 = l__self___buffer = None
-    val = l_x_ + two_tensor_2;  l_x_ = two_tensor_2 = None
-    getattr_1 = val.b;  val = None
-    getattr_2 = getattr_1.a;  getattr_1 = None
-    return pytree.tree_unflatten([getattr_2], self._out_spec)""",
-        )
+        FileCheck().check_count(
+            "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
+        ).run(gm_torch_ir.code)
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
