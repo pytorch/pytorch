@@ -428,9 +428,7 @@ class OpDispatcher:
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
-                # assert res.ndim == 0, "output tensor should be scalar!"
-                if res.ndim != 0:
-                    print(f"output tensor {res} should be scalar! spec: {spec}")
+                assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
             assert spec is not None and isinstance(
@@ -473,7 +471,6 @@ class OpDispatcher:
                 ),
             )
         else:
-            print(f"try replicate: {tensor_arg}")
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
