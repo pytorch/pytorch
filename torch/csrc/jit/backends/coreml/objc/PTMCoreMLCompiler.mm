@@ -93,7 +93,14 @@ static NSString *gVersionExtension = @"version";
 + (BOOL)_compileModel:(NSString *)modelName atPath:(NSString *)modelPath {
   NSError *error;
   NSURL *modelURL = [NSURL fileURLWithPath:modelPath];
-  NSURL *temporaryURL = [MLModel compileModelAtURL:modelURL error:&error];
+
+  NSURL *temporaryURL;
+  try {
+    temporaryURL = [MLModel compileModelAtURL:modelURL error:&error];
+  } catch (std::runtime_error &e) {
+    // Could not compile.
+    return NO;
+  }
 
   // After the compiled model has been created, the original specs can be cleared to save cache space.
   [[NSFileManager defaultManager] removeItemAtPath:modelPath error:nil];

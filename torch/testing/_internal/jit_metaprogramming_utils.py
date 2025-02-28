@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import is_iterable_of_tensors, noncont
 
 import collections
 from copy import deepcopy
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 import math  # noqa: F401
 
 # Testing utils
@@ -33,7 +33,7 @@ def unpack_variables(args):
         return args
 
 class dont_convert(tuple):
-    pass
+    __slots__ = ()
 
 non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
@@ -361,9 +361,9 @@ def get_constant(x):
     return x
 
 def get_script_args(args):
-    formals: List[str] = []
-    tensors: List[Union[torch.Tensor, List[torch.Tensor]]] = []
-    actuals: List[str] = []
+    formals: list[str] = []
+    tensors: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+    actuals: list[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
             name = f'i{len(formals)}'
@@ -405,14 +405,14 @@ def create_script_fn(self, method_name, func_type):
     return script_fn
 
 class SplitInputs:
-    all_tensors: List[Any]
-    tensor_args: List[Any]
-    nontensor_args: List[Any]
-    arg_types: List[str]
-    tensor_kwargs: Dict[str, Any]
-    kwarg_order: List[str]
-    nontensor_kwargs: Dict[str, Any]
-    kwarg_types: Dict[str, Any]
+    all_tensors: list[Any]
+    tensor_args: list[Any]
+    nontensor_args: list[Any]
+    arg_types: list[str]
+    tensor_kwargs: dict[str, Any]
+    kwarg_order: list[str]
+    nontensor_kwargs: dict[str, Any]
+    kwarg_types: dict[str, Any]
 
     @staticmethod
     def _is_tensor_input(arg):

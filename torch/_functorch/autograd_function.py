@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -580,7 +580,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # Wraps a ctx object. Forwards all attr accesses to the underlying object
 # except for the attrs in _pt_attrs
 class WrappedCtx:
-    _pt_reserved_attrs: Tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
+    _pt_reserved_attrs: tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
 
     def __init__(self, ctx):
         if not isinstance(ctx, WrappedCtx):

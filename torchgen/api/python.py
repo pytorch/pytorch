@@ -429,7 +429,7 @@ class PythonSignature:
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
 
-        return f'{self.name}({", ".join(schema_formals)})'
+        return f"{self.name}({', '.join(schema_formals)})"
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
@@ -1505,11 +1505,11 @@ def dispatch_lambda_exprs(
         inits.append(
             f"""\
 const auto options = TensorOptions()
-    .dtype({arg_parser_outputs['dtype'].expr})
-    .device({arg_parser_outputs['device'].expr})
-    .layout({arg_parser_outputs['layout'].expr})
-    .requires_grad({arg_parser_outputs['requires_grad'].expr})
-    .pinned_memory({arg_parser_outputs['pin_memory'].expr});
+    .dtype({arg_parser_outputs["dtype"].expr})
+    .device({arg_parser_outputs["device"].expr})
+    .layout({arg_parser_outputs["layout"].expr})
+    .requires_grad({arg_parser_outputs["requires_grad"].expr})
+    .pinned_memory({arg_parser_outputs["pin_memory"].expr});
 torch::utils::maybe_initialize_device(options);
 """
         )
@@ -1531,9 +1531,9 @@ torch::utils::maybe_initialize_device(options);
 
             inits.append(
                 f"""\
-check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dtype'].expr},
-                       {arg_parser_outputs['dtype'].is_none_expr}, {arg_parser_outputs['layout'].expr},
-                       {arg_parser_outputs['device'].expr}, {arg_parser_outputs['device'].is_none_expr});
+check_out_type_matches({arg_parser_outputs["out"].expr}, {arg_parser_outputs["dtype"].expr},
+                       {arg_parser_outputs["dtype"].is_none_expr}, {arg_parser_outputs["layout"].expr},
+                       {arg_parser_outputs["device"].expr}, {arg_parser_outputs["device"].is_none_expr});
 """
             )
         # we'll set requires_grad on outgoing tensor

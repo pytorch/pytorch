@@ -10,12 +10,10 @@ namespace {
 class GroupRegistry {
  public:
   void register_group(
-      std::string group_name,
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      const std::string& group_name,
       c10::intrusive_ptr<c10d::ProcessGroup> group) {
     std::unique_lock write_lock(lock_);
-    auto [_, inserted] =
-        registry_.try_emplace(std::move(group_name), std::move(group));
+    auto [_, inserted] = registry_.try_emplace(group_name, std::move(group));
     TORCH_CHECK(
         inserted,
         "A process group is already registered under the name",

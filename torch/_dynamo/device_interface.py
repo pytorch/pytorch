@@ -1,7 +1,26 @@
 # mypy: allow-untyped-defs
+
+"""
+Device abstraction layer for TorchDynamo and Inductor backends.
+
+This module provides a unified interface for different hardware backends (CUDA, XPU,
+CPU, MPS) through a common device interface. Key components include:
+
+- DeviceInterface: Base class defining the common API for all device types
+- Device-specific implementations: CudaInterface, XpuInterface, CpuInterface, MpsInterface
+- Device registration system for managing available backends
+- Worker APIs for multi-processing scenarios
+- Stream and event management across different devices
+- Device property caching for worker processes
+
+The abstraction layer enables device-agnostic code in TorchDynamo while allowing
+specialized implementations for each hardware backend's unique features.
+"""
+
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 
@@ -15,8 +34,8 @@ else:
 _device_t = Union[torch.device, str, int, None]
 
 # Recording the device properties in the main process but used in worker process.
-caching_worker_device_properties: Dict[str, Any] = {}
-caching_worker_current_devices: Dict[str, int] = {}
+caching_worker_device_properties: dict[str, Any] = {}
+caching_worker_current_devices: dict[str, int] = {}
 
 
 class DeviceInterface:
@@ -143,7 +162,7 @@ class DeviceGuard:
     """
 
     def __init__(
-        self, device_interface: Type[DeviceInterface], index: Optional[int]
+        self, device_interface: type[DeviceInterface], index: Optional[int]
     ) -> None:
         self.device_interface = device_interface
         self.idx = index
@@ -320,6 +339,10 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return True
+
+    @staticmethod
     def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
@@ -366,6 +389,10 @@ class MpsInterface(DeviceInterface):
         return 0
 
     @staticmethod
+    def get_compute_capability(device: _device_t = None) -> str:
+        return ""
+
+    @staticmethod
     def synchronize(device: _device_t = None):
         torch.mps.synchronize()
 
@@ -374,20 +401,24 @@ class MpsInterface(DeviceInterface):
         def get_device_properties(device: _device_t = None):
             return {}
 
+        @staticmethod
+        def current_device():
+            return 0
 
-device_interfaces: Dict[str, Type[DeviceInterface]] = {}
+
+device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
 def register_interface_for_device(
-    device: Union[str, torch.device], device_interface: Type[DeviceInterface]
+    device: Union[str, torch.device], device_interface: type[DeviceInterface]
 ):
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
+def get_interface_for_device(device: Union[str, torch.device]) -> type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_initialized:
@@ -397,7 +428,7 @@ def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInt
     raise NotImplementedError(f"No interface for device {device}")
 
 
-def get_registered_device_interfaces() -> Iterable[tuple[str, Type[DeviceInterface]]]:
+def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterface]]]:
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
