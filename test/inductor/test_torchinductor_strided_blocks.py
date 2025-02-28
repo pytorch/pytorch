@@ -933,6 +933,8 @@ class CommonTemplate:
     # in this case the bernoulli operation is fused with the following sum
     # so an output buffer is not needed to store the immediate result of the
     # bernoulli operation
+    # TODO: fails for triton CPU "Failed to convert to LLVM IR"
+    @test_torchinductor.xfail_if_triton_cpu
     def test_removed_buffers(self):
         from torch.ops import aten
 
@@ -958,7 +960,12 @@ class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
 
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
