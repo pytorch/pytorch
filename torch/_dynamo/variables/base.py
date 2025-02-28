@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from .. import variables, graph_break_hints
+from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
@@ -95,7 +95,7 @@ class MutationType:
                 hints=[
                     "This branch is not supposed to be reachable.",
                     *graph_break_hints.DYNAMO_BUG,
-                ]
+                ],
             )
 
 
@@ -487,7 +487,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 unimplemented_v2(
                     gb_type="",
                     context=f"call_method {self} {name} {args} {kwargs}",
-                    explanation=f"",
+                    explanation="",
                     hints=[],
                 )
 
@@ -537,7 +537,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         unimplemented_v2(
             gb_type="Non-iterator variable",
             context=f"next({self})",
-            explanation=f"",
+            explanation="",
             hints=[*graph_break_hints.USER_ERROR],
         )
 
