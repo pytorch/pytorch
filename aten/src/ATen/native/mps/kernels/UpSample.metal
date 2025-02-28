@@ -443,57 +443,31 @@ kernel void upsample_bicubic2d_backward(
   }
 }
 
-#define INSTANTIATE_UPSAMPLE_BICUBIC(DTYPE)                        \
-  template [[host_name("upsample_bicubic2d_" #DTYPE)]] kernel void \
-  upsample_bicubic2d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong4 & input_strides [[buffer(2)]],               \
-      constant ulong4 & output_strides [[buffer(3)]],              \
-      constant long4 & input_sizes [[buffer(4)]],                  \
-      constant long4 & output_sizes [[buffer(5)]],                 \
-      constant float2 & scales [[buffer(6)]],                      \
-      constant bool& align_corners [[buffer(7)]],                  \
-      uint thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_UPSAMPLE_2D(NAME, DTYPE)                       \
+  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
+      upsample_##NAME<DTYPE>(                                      \
+          constant DTYPE * inputData [[buffer(0)]],                \
+          device DTYPE * outputData [[buffer(1)]],                 \
+          constant ulong4 & input_strides [[buffer(2)]],           \
+          constant ulong4 & output_strides [[buffer(3)]],          \
+          constant long4 & input_sizes [[buffer(4)]],              \
+          constant long4 & output_sizes [[buffer(5)]],             \
+          constant float2 & scales [[buffer(6)]],                  \
+          constant bool& align_corners [[buffer(7)]],              \
+          uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)                        \
-  template [[host_name("upsample_bilinear2d_" #DTYPE)]] kernel void \
-  upsample_bilinear2d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                     \
-      device DTYPE * outputData [[buffer(1)]],                      \
-      constant ulong4 & input_strides [[buffer(2)]],                \
-      constant ulong4 & output_strides [[buffer(3)]],               \
-      constant long4 & input_sizes [[buffer(4)]],                   \
-      constant long4 & output_sizes [[buffer(5)]],                  \
-      constant float2 & scales [[buffer(6)]],                       \
-      constant bool& align_corners [[buffer(7)]],                   \
-      uint thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_UPSAMPLE_BILINEAR_AA(DTYPE)                        \
-  template [[host_name("upsample_bilinear2d_aa_" #DTYPE)]] kernel void \
-  upsample_bilinear2d_aa<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                        \
-      device DTYPE * outputData [[buffer(1)]],                         \
-      constant ulong4 & input_strides [[buffer(2)]],                   \
-      constant ulong4 & output_strides [[buffer(3)]],                  \
-      constant long4 & input_sizes [[buffer(4)]],                      \
-      constant long4 & output_sizes [[buffer(5)]],                     \
-      constant float2 & scales [[buffer(6)]],                          \
-      constant bool& align_corners [[buffer(7)]],                      \
-      uint thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(DTYPE)                        \
-  template [[host_name("upsample_bicubic2d_backward_" #DTYPE)]] kernel void \
-  upsample_bicubic2d_backward<DTYPE>(                                       \
-      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],             \
-      constant DTYPE * gradOutputData [[buffer(1)]],                        \
-      constant ulong4 & input_strides [[buffer(2)]],                        \
-      constant ulong4 & output_strides [[buffer(3)]],                       \
-      constant long4 & input_sizes [[buffer(4)]],                           \
-      constant long4 & output_sizes [[buffer(5)]],                          \
-      constant float2 & scales [[buffer(6)]],                               \
-      constant bool& align_corners [[buffer(7)]],                           \
-      uint thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+      upsample_##NAME##_backward<DTYPE>(                                    \
+          device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],         \
+          constant DTYPE * gradOutputData [[buffer(1)]],                    \
+          constant ulong4 & input_strides [[buffer(2)]],                    \
+          constant ulong4 & output_strides [[buffer(3)]],                   \
+          constant long4 & input_sizes [[buffer(4)]],                       \
+          constant long4 & output_sizes [[buffer(5)]],                      \
+          constant float2 & scales [[buffer(6)]],                           \
+          constant bool& align_corners [[buffer(7)]],                       \
+          uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_LINEAR(DTYPE)                        \
   template [[host_name("upsample_linear1d_" #DTYPE)]] kernel void \
@@ -508,21 +482,16 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
-INSTANTIATE_UPSAMPLE_BILINEAR(uchar);
-INSTANTIATE_UPSAMPLE_BICUBIC(float);
-INSTANTIATE_UPSAMPLE_BILINEAR(float);
-INSTANTIATE_UPSAMPLE_BILINEAR_AA(float);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(float);
-INSTANTIATE_UPSAMPLE_BICUBIC(half);
-INSTANTIATE_UPSAMPLE_BILINEAR(half);
-INSTANTIATE_UPSAMPLE_BILINEAR_AA(half);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(half);
-INSTANTIATE_UPSAMPLE_LINEAR(float);
-INSTANTIATE_UPSAMPLE_LINEAR(half);
+#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)               \
+  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);          \
+  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE); \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);         \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d_aa, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);
+
+INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
+INSTANTIATE_UPSAMPLE_ALL(float);
+INSTANTIATE_UPSAMPLE_ALL(half);
 #if __METAL_VERSION__ >= 310
-INSTANTIATE_UPSAMPLE_BICUBIC(bfloat);
-INSTANTIATE_UPSAMPLE_BILINEAR(bfloat);
-INSTANTIATE_UPSAMPLE_BILINEAR_AA(bfloat);
-INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(bfloat);
-INSTANTIATE_UPSAMPLE_LINEAR(bfloat);
+INSTANTIATE_UPSAMPLE_ALL(bfloat);
 #endif
