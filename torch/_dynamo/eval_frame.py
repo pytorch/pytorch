@@ -186,6 +186,7 @@ def _callback_from_stance(callback):
         return callback
     elif _stance.stance == "eager_then_compile":
         if callback not in (False, None):
+
             def eager_then_compile(*args, **kwargs):
                 frame = args[0]
                 key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
