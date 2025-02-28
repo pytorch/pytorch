@@ -1260,6 +1260,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.logic.boolalg.Boolean,
                     int,
                     ir.EffectfulKernel,
+                    ir.ShapeAsConstantBuffer,
                 ),
             )
             for x in result
