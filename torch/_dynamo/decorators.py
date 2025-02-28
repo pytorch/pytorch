@@ -512,6 +512,26 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
+def _mark_oblivious(t, index):
+    """
+    Mark a tensor as having a size-oblivious dim. This follows unbacked semantics for 0/1 specialization,
+    but allows guards on the symbol (the symbol has a hint, so is technically backed).
+    More specifically, a [0, inf] range is allocated, and size-oblivious semantics will apply.
+    """
+    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_oblivious_indices"):
+            t._dynamo_oblivious_indices = set()
+        t._dynamo_oblivious_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        _mark_oblivious(t, i)
+
+
+@forbid_in_graph
 def mark_dynamic(t, index, *, min=None, max=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.

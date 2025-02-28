@@ -846,26 +846,45 @@ def has_free_symbols(val: IterateExprs) -> bool:
     return not all(e.is_number for e in _iterate_exprs(val))
 
 
-def has_free_unbacked_symbols(x: IterateExprs) -> bool:
+def has_free_unbacked_symbols(x: IterateExprs, exclude_oblivious: bool = False, shape_env: Optional[ShapeEnv] = None) -> bool:
     """Faster version of bool(free_unbacked_symbols(val))"""
     from sympy.core.traversal import iterargs
 
+    if exclude_oblivious:
+        assert shape_env is not None
+
     for s in _iterate_exprs(x):
         for arg in iterargs(s):
-            if arg.is_Symbol and symbol_is_type(
-                arg, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+            if (
+                arg.is_Symbol
+                and symbol_is_type(
+                    arg, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                )
+                and not (
+                    exclude_oblivious and arg in shape_env.oblivious_var_to_val
+                )
             ):
                 return True
     return False
 
 
 # Like free_symbols, but filtered to only report unbacked symbols
-def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
+# exclude_oblivious: if set to True, excludes OBLIVIOUS_SIZE symbols:
+# these are backed; they just follow unbacked semantics around 0/1 specialization.
+def free_unbacked_symbols(x: IterateExprs, exclude_oblivious: bool = False, shape_env: Optional[ShapeEnv] = None) -> OrderedSet[sympy.Symbol]:
+    if exclude_oblivious:
+        assert shape_env is not None
+    
     # NB: keep synced with is_unbacked_symint
     return OrderedSet(
         s
         for s in free_symbols(x)
-        if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+        if (
+            symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+            and not (
+                exclude_oblivious and arg in shape_env.oblivious_var_to_val
+            )
+        )
     )
 
 
@@ -4419,7 +4438,13 @@ class ShapeEnv:
             ]
 
         if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
-            out = self.create_unbacked_symint(source).node.expr
+            if dynamic_dim == DimDynamic.OBLIVIOUS_SIZE:
+                with self.ignore_fresh_unbacked_symbols():
+                    # technically this is a backed size symbol, so we don't need runtime asserts for it
+                    # also simplifies logic for detecting unbound unbacked symbols
+                    out = self.create_unbacked_symint(source).node.expr
+            else:
+                out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
@@ -6318,7 +6343,7 @@ class ShapeEnv:
                         t.is_integer for t in sympy.preorder_traversal(r[1])
                     ):
                         new_var = self._find(r[1])
-                        ok = len(free_unbacked_symbols(new_var)) == 0
+                        ok = not has_free_unbacked_symbols(new_var, exclude_oblivious=True, shape_env=self)
                         if ok:
                             self._set_replacement(free[0], new_var, "solve")
             except NotImplementedError:

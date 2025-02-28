@@ -113,6 +113,8 @@ def fakify(
             # are raised when specializing.
             dynamic_sizes.append(DimDynamic.DYNAMIC)
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+        elif i in getattr(t, "_dynamo_oblivious_indices", {}):
+            dynamic_sizes.append(DimDynamic.OBLIVIOUS_SIZE)
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(

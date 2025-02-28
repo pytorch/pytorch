@@ -2845,6 +2845,7 @@ def _automatic_dynamic(
             e, "_dynamo_strict_unbacked_indices", set()
         )
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
+        marked_oblivious = i in getattr(e, "_dynamo_oblivious_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
@@ -2926,6 +2927,8 @@ def _automatic_dynamic(
 
         if marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+        elif marked_oblivious:
+            dynamic_size = DimDynamic.OBLIVIOUS_SIZE
         elif (
             constraint_size is not None
             or marked_dynamic
