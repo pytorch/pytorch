@@ -467,6 +467,7 @@ S390X_TESTLIST = [
     "test_tensorexpr_pybind",
     "test_torch",
     "test_transformers",
+    "test_transformers_privateuse1",
     "test_type_hints",
     "test_type_info",
     "test_type_promotion",
@@ -1483,7 +1484,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_transformers": run_test_with_openreg,
+    "test_transformers_privateuse1": run_test_with_openreg,
 }
 
 
