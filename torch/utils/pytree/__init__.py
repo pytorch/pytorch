@@ -58,6 +58,8 @@ __all__ = [
 ]
 
 
+# NB: Once this variable is read from the environment, the underlying pytree
+#     implementation is frozen. It cannot be swapped to another at runtime.
 PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
     "0",
     "",
@@ -77,7 +79,76 @@ if PYTORCH_USE_CXX_PYTREE:
 _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
 
-def register_pytree_node(
+if not PYTORCH_USE_CXX_PYTREE:
+    from torch.utils._pytree import (
+        PyTreeSpec as PyTreeSpec,
+        register_pytree_node as _register_pytree_node,
+        tree_all as tree_all,
+        tree_all_only as tree_all_only,
+        tree_any as tree_any,
+        tree_any_only as tree_any_only,
+        tree_flatten as tree_flatten,
+        tree_iter as tree_iter,
+        tree_leaves as tree_leaves,
+        tree_map as tree_map,
+        tree_map_ as tree_map_,
+        tree_map_only as tree_map_only,
+        tree_map_only_ as tree_map_only_,
+        tree_structure as tree_structure,
+        tree_unflatten as tree_unflatten,
+        treespec_pprint as treespec_pprint,
+    )
+else:
+    from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
+        PyTreeSpec as PyTreeSpec,
+        register_pytree_node as _register_pytree_node,
+        tree_all as tree_all,
+        tree_all_only as tree_all_only,
+        tree_any as tree_any,
+        tree_any_only as tree_any_only,
+        tree_flatten as tree_flatten,
+        tree_iter as tree_iter,
+        tree_leaves as tree_leaves,
+        tree_map as tree_map,
+        tree_map_ as tree_map_,
+        tree_map_only as tree_map_only,
+        tree_map_only_ as tree_map_only_,
+        tree_structure as tree_structure,
+        tree_unflatten as tree_unflatten,
+        treespec_pprint as treespec_pprint,
+    )
+
+
+# Change `__module__` of reexported public APIs to 'torch.utils.pytree'
+__func_names = frozenset(
+    {
+        "tree_all",
+        "tree_all_only",
+        "tree_any",
+        "tree_any_only",
+        "tree_flatten",
+        "tree_iter",
+        "tree_leaves",
+        "tree_map",
+        "tree_map_",
+        "tree_map_only",
+        "tree_map_only_",
+        "tree_structure",
+        "tree_unflatten",
+        "treespec_pprint",
+    }
+)
+globals().update(
+    {
+        name: _exposed_in(__name__)(member)
+        for name, member in globals().items()
+        if name in __func_names
+    }
+)
+del __func_names, _exposed_in
+
+
+def register_pytree_node(  # type: ignore[no-any-unimported]
     cls: type[_Any],
     /,
     # intentionally use `*_func` over `*_fn` to match annotations
@@ -134,79 +205,10 @@ def register_pytree_node(
     )
 
 
-if PYTORCH_USE_CXX_PYTREE:
-    from torch.utils._cxx_pytree import (
-        PyTreeSpec as PyTreeSpec,
-        register_pytree_node as _register_pytree_node,
-        tree_all as tree_all,
-        tree_all_only as tree_all_only,
-        tree_any as tree_any,
-        tree_any_only as tree_any_only,
-        tree_flatten as tree_flatten,
-        tree_iter as tree_iter,
-        tree_leaves as tree_leaves,
-        tree_map as tree_map,
-        tree_map_ as tree_map_,
-        tree_map_only as tree_map_only,
-        tree_map_only_ as tree_map_only_,
-        tree_structure as tree_structure,
-        tree_unflatten as tree_unflatten,
-        treespec_pprint as treespec_pprint,
-    )
-else:
-    from torch.utils._pytree import (
-        PyTreeSpec as PyTreeSpec,
-        register_pytree_node as _register_pytree_node,
-        tree_all as tree_all,
-        tree_all_only as tree_all_only,
-        tree_any as tree_any,
-        tree_any_only as tree_any_only,
-        tree_flatten as tree_flatten,
-        tree_iter as tree_iter,
-        tree_leaves as tree_leaves,
-        tree_map as tree_map,
-        tree_map_ as tree_map_,
-        tree_map_only as tree_map_only,
-        tree_map_only_ as tree_map_only_,
-        tree_structure as tree_structure,
-        tree_unflatten as tree_unflatten,
-        treespec_pprint as treespec_pprint,
-    )
-
-
-# Change `__module__` of reexported public APIs to 'torch.utils.pytree'
-__func_names = frozenset(
-    {
-        "tree_all",
-        "tree_all_only",
-        "tree_any",
-        "tree_any_only",
-        "tree_flatten",
-        "tree_iter",
-        "tree_leaves",
-        "tree_map",
-        "tree_map_",
-        "tree_map_only",
-        "tree_map_only_",
-        "tree_structure",
-        "tree_unflatten",
-        "treespec_pprint",
-    }
-)
-globals().update(
-    {
-        name: _exposed_in(__name__)(func)
-        for name, func in globals().items()
-        if name in __func_names
-    }
-)
-del __func_names, _exposed_in
-
-
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
         # Lazy import
-        import torch.utils._cxx_pytree as cxx
+        import torch.utils._cxx_pytree as cxx  # noqa: F811
 
         globals()["cxx"] = cxx
         _sys.modules[f"{__name__}.cxx"] = cxx
