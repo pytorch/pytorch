@@ -30,6 +30,7 @@ class LinearReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
@@ -70,6 +71,7 @@ class LinearLeakyReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     _FLOAT_MODULE = nni.LinearLeakyReLU  # type: ignore[assignment]
 
     def __init__(
@@ -92,9 +94,9 @@ class LinearLeakyReLU(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert (
-            type(mod) == nni.LinearLeakyReLU
-        ), "Input float module should be LinearLeakyReLU"
+        assert type(mod) == nni.LinearLeakyReLU, (
+            "Input float module should be LinearLeakyReLU"
+        )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         activation_post_process = mod.activation_post_process
         leaky_relu = mod[1]
@@ -145,6 +147,7 @@ class LinearTanh(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     _FLOAT_MODULE = nni.LinearTanh  # type: ignore[assignment]
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
