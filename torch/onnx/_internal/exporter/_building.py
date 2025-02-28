@@ -98,9 +98,9 @@ def _construct_named_inputs_and_attrs(
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
-            assert isinstance(
-                param, _schemas.AttributeParameter
-            ), f"Expected AttributeParameter, got {type(param)}"
+            assert isinstance(param, _schemas.AttributeParameter), (
+                f"Expected AttributeParameter, got {type(param)}"
+            )
             if reversed_args_stack:
                 # First exhaust the positional arguments
                 attribute = reversed_args_stack.pop()  # type: ignore[assignment]
@@ -166,9 +166,9 @@ def _resolve_parameter_dtypes(
     type_binding = {}
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
         if isinstance(arg, (int, float, bool, str, Sequence, torch.Tensor)):
             # Skip the Python constants because we do not know what dtype they should take yet
             continue
@@ -318,9 +318,9 @@ def _process_python_constants(
     #       - Otherwise, set named_inputs[param.name] = Constant(value)
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
 
         if isinstance(arg, ir.Value):
             # TODO(justinchuby): Cast the ir.Value here if needed
@@ -384,9 +384,9 @@ def _process_python_sequences(
     """
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
 
         if not isinstance(arg, (tuple, list)):
             continue
@@ -447,9 +447,9 @@ def _process_python_sequences(
                     )
                 else:
                     # Turn the Python constant into 1D tensor for the constant
-                    assert isinstance(
-                        val, (bool, int, float)
-                    ), f"Expected int or float, got {type(val)}"
+                    assert isinstance(val, (bool, int, float)), (
+                        f"Expected int or float, got {type(val)}"
+                    )
                     new_args.append(
                         _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type]
                     )

@@ -1052,7 +1052,7 @@ class FxGraphCache:
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles", 1)
+                    CompileEventLogger.increment_toplevel("num_triton_bundles")
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1303,7 +1303,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache hit stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count", 1
+                    "inductor_fx_remote_cache_hit_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_hit_keys", key
@@ -1324,7 +1324,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache miss stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count", 1
+                    "inductor_fx_remote_cache_miss_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_miss_keys", key
