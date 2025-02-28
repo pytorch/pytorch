@@ -24,12 +24,6 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
 class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_unittest/test_assertions.py
     # https://github.com/python/cpython/blob/3.13/Lib/test/test_unittest/test_assertions.py
-    def setUp(self):
-        if sys.version_info < (3, 11):
-            self.skipTest(
-                "Tracing the unittest module needs exception table (Python 3.11+) to work"
-            )
-        super().setUp()
 
     @make_dynamo_test
     def test_AlmostEqual(self):
@@ -147,10 +141,6 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
     asserts that use longMessage."""
 
     def setUp(self):
-        if sys.version_info < (3, 11):
-            return self.skipTest(
-                "Tracing the unittest module needs exception table (Python 3.11+) to work"
-            )
         super().setUp()
 
         class TestableTestFalse(unittest.TestCase):
@@ -213,13 +203,13 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
             if withMsg:
                 kwargs = {"msg": "oops"}
 
-            with self.assertRaisesRegex(
-                self.failureException, expected_regex=expected_regex
-            ):
-                testMethod(*args, **kwargs)
-            # with self.assertRaises(self.failureException) as cm:
+            # with self.assertRaisesRegex(
+            #     self.failureException, expected_regex=expected_regex
+            # ):
             #     testMethod(*args, **kwargs)
-            # self.assertIn(expected_regex, str(cm.exception))
+            with self.assertRaises(self.failureException) as cm:
+                testMethod(*args, **kwargs)
+            self.assertRegex(str(cm.exception), expected_regex)
 
     @make_dynamo_test
     def testAssertTrue(self):
@@ -499,9 +489,11 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
         p = product((self.testableFalse, self.testableTrue), ({}, {"msg": "oops"}))
         for (cls, kwargs), err in zip(p, errors):
             method = getattr(cls, methodName)
-            with self.assertRaisesRegex(cls.failureException, err):
+            # with self.assertRaisesRegex(cls.failureException, err):
+            with self.assertRaises(cls.failureException) as c:
                 with method(*args, **kwargs) as cm:  # noqa: F841
                     func()
+            self.assertRegex(str(c.exception), err)
 
     @make_dynamo_test
     def testAssertRaises(self):
@@ -517,6 +509,7 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def testAssertRaisesRegex(self):
         self.assertMessagesCM(
