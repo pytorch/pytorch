@@ -2619,8 +2619,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # mask
                 self.compute.splice(
                     f"""
-                    {accumulator_max} = {where_cond(f'{accumulator_max}_next', accumulator_max)}
-                    {accumulator_sum} = {where_cond(f'{accumulator_sum}_next', accumulator_sum)}
+                    {accumulator_max} = {where_cond(f"{accumulator_max}_next", accumulator_max)}
+                    {accumulator_sum} = {where_cond(f"{accumulator_sum}_next", accumulator_sum)}
                     """
                 )
 
@@ -2775,8 +2775,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
                 {accumulator_max}, {accumulator_sum}, {dim})
-            {result_max} = {self.reduction_resize(f'{result_max}')}
-            {result_sum} = {self.reduction_resize(f'{result_sum}')}
+            {result_max} = {self.reduction_resize(f"{result_max}")}
+            {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """
         )
 
