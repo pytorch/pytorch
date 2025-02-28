@@ -3248,7 +3248,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return (
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                + repr(e)
+            )
 
         from .exc import Unsupported
 
@@ -3279,11 +3282,17 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented_v2
 
+            hints = []
+            if isinstance(e, NotImplementedError):
+                hints = [
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+
             unimplemented_v2(
-                gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
-                context=str(e),
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
+                context="",
                 explanation=make_error_message(e),
-                hints=[],
+                hints=hints,
                 from_exc=e,
             )
         except Unsupported:
