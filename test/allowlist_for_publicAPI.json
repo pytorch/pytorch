@@ -695,6 +695,7 @@
     "record_function"
   ],
   "torch.pytree": [
+    "PyTreeSpec",
     "register_node",
     "all",
     "all_only",
