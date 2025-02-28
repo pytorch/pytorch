@@ -4131,7 +4131,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 expected = mod(x)
                 compiled_m = torch.compile(mod)
-                actual, code = run_and_get_cpp_code(compiled_m, x)
+                actual = compiled_m(x)
                 self.assertEqual(expected, actual, atol=1e-4, rtol=1e-5)
                 # 3 generated kernels (first one for var_mean, last two for result)
                 check_metrics_vec_kernel_count(3)
