@@ -75,8 +75,7 @@ log = logging.getLogger(__name__)
 
 
 class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        ...
+    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]: ...
 
 
 CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]

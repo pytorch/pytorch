@@ -138,12 +138,12 @@ class MetricTable:
             return
 
         row_dict = row_fn()
-        assert len(self.column_names) == len(
-            row_dict
-        ), f"{len(self.column_names)} v.s. {len(row_dict)}"
-        assert OrderedSet(self.column_names) == OrderedSet(
-            row_dict.keys()
-        ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
+        assert len(self.column_names) == len(row_dict), (
+            f"{len(self.column_names)} v.s. {len(row_dict)}"
+        )
+        assert OrderedSet(self.column_names) == OrderedSet(row_dict.keys()), (
+            f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
+        )
 
         bn = get_benchmark_name()
         # assert bn is not None
@@ -433,9 +433,9 @@ def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
         name = name.strip()
         if not name:
             continue
-        assert (
-            name in REGISTERED_METRIC_TABLES
-        ), f"Metric table name {name} is not registered"
+        assert name in REGISTERED_METRIC_TABLES, (
+            f"Metric table name {name} is not registered"
+        )
         enabled.add(name)
     return enabled
 
