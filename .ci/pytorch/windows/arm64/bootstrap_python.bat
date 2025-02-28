@@ -1,21 +1,19 @@
 @echo off
 
-source "${BINARY_ENV_FILE:-/c/w/env}"
-
 echo Dependency Python installation started.
 
 :: Pre-check for downloads and dependencies folders
 if not exist "%DOWNLOADS_DIR%" mkdir %DOWNLOADS_DIR%
 if not exist "%DEPENDENCIES_DIR%" mkdir %DEPENDENCIES_DIR%
 
-if "%PYTHON_VERSION%"=="3.13" (
+if "%PYTHON_VERSION%" == "3.13" (
     echo Python version is set to 3.13
     set DOWNLOAD_URL="https://www.python.org/ftp/python/3.13.2/python-3.13.2-arm64.exe"
 )
-else if "%PYTHON_VERSION%"=="3.12" (
+elseif "%PYTHON_VERSION%" == "3.12" (
     echo Python version is set to 3.12
     set DOWNLOAD_URL="https://www.python.org/ftp/python/3.12.7/python-3.12.7-arm64.exe"
-) else if "%PYTHON_VERSION%"=="3.11" (
+) elseif "%PYTHON_VERSION%" == "3.11" (
     echo Python version is set to 3.11
     set DOWNLOAD_URL="https://www.python.org/ftp/python/3.11.9/python-3.11.9-arm64.exe"
 ) else (
