@@ -226,9 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -1246,8 +1246,8 @@ class SkipFunctionVariable(VariableTracker):
                 ):
                     explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
                     hints = [
-                        " Consider using torch.utils.pytree - "
-                        "https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py"
+                        " Consider using torch.utils._pytree - "
+                        "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
@@ -1677,8 +1677,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs):
-        ...
+    def call_function(self, tx, args, kwargs): ...
 
 
 class SysFunctionVariable(VariableTracker):
