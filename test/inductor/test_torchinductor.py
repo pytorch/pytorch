@@ -816,10 +816,10 @@ def skip_if_triton(fn):
 
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_triton_backend(self.device):
             raise unittest.SkipTest(f"triton backend is required for {self.device}")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -9614,7 +9614,11 @@ class CommonTemplate:
             ],
         )
 
-    def test_tmp_not_defined_issue1(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_tmp_not_defined_issue1(self, use_block_ptr):
         def forward(
             primals_3,
             primals_4,
@@ -9651,7 +9655,8 @@ class CommonTemplate:
             (torch.Size([1, 512, 1]), torch.float32),
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
-        self.common(forward, inps, atol=1e-05, rtol=2e-05)
+        with config.patch("triton.use_block_ptr", use_block_ptr):
+            self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
         os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
