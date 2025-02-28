@@ -7861,11 +7861,16 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     @torch._dynamo.config.patch(force_parameter_static_shapes=True)
     @torch._dynamo.config.patch(force_nn_module_property_static_shapes=True)
-    @torch.compiler.config.patch(dynamic_sources="L['x'],L['y'],L['self']._modules['y'].x,L['self']._modules['y']._modules['c']._parameters['weight'],L['self']._modules['y']._modules['c']._parameters['bias']")
-    def test_dynamic_sources_force_parameter_static_shapes_and_property_static_shapes_override(self):
+    @torch.compiler.config.patch(
+        dynamic_sources="L['x'],L['y'],L['self']._modules['y'].x,L['self']._modules['y']._modules['c']._parameters['weight'],L['self']._modules['y']._modules['c']._parameters['bias']"
+    )
+    def test_dynamic_sources_force_parameter_static_shapes_and_property_static_shapes_override(
+        self,
+    ):
         builder._DYNAMIC_SOURCES = None
 
         counter = CompileCounter()
+
         class Y(torch.nn.Module):
             def __init__(self, n_input, n_output):
                 super().__init__()
@@ -7943,7 +7948,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         # 2 since graph break produces 2 graphs. NB: there are no recompiles
         self.assertEqual(counter.frame_count, 2)
 
-
     @torch.compiler.config.patch(dynamic_sources="L['x'], L['y']")
     def test_dynamic_sources_dynamic_override(self):
         counter = CompileCounter()
@@ -7957,7 +7961,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         fn(4, torch.randn(4))
 
         self.assertEqual(counter.frame_count, 1)
-
 
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])
