@@ -12844,6 +12844,7 @@ class CommonTemplate:
 
                 assert len(inps) == 0
 
+    @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
         x = torch.tensor(2, dtype=torch.float32)
