@@ -3487,6 +3487,22 @@ class TestRandomTensorCreation(TestCase):
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
 
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=0 >= to=0",
+                               lambda: torch.randint(0, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=-1 >= to=-2",
+                               lambda: torch.randint(-1, -2, size=size))
+        self.assertRaisesRegex(TypeError,
+                               r"randint\(\): argument 'high' \(position 1\) must be int, not float",
+                               lambda: torch.randint(.5, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-32769, 0, size=size, dtype=torch.int16))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-1, 1, size=size, dtype=torch.uint32))
+
     # TODO: this test should be updated
     @onlyCPU
     def test_randint(self, device):
