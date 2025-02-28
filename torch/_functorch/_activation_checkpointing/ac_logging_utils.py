@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from torch._logging import trace_structured
 from torch.fx import Graph, Node
@@ -11,9 +11,9 @@ log: logging.Logger = logging.getLogger(__name__)
 
 def create_joint_graph_node_information(
     joint_graph: Graph,
-    recomputable_node_info: Dict[str, int],
-) -> Dict[str, Any]:
-    joint_graph_node_information: Dict[str, Any] = {}
+    recomputable_node_info: dict[str, int],
+) -> dict[str, Any]:
+    joint_graph_node_information: dict[str, Any] = {}
 
     for i, joint_graph_node in enumerate(joint_graph.nodes):
         is_recomputable_candidate: bool = (
@@ -22,7 +22,7 @@ def create_joint_graph_node_information(
         tensor_meta = joint_graph_node.meta.get("tensor_meta")
         shape = getattr(tensor_meta, "shape", []) if tensor_meta else []
 
-        node_info: Dict[str, Any] = {
+        node_info: dict[str, Any] = {
             "index": i,
             "name": joint_graph_node.name,
             "is_recomputable_candidate": is_recomputable_candidate,
@@ -43,8 +43,8 @@ def create_joint_graph_node_information(
     return joint_graph_node_information
 
 
-def create_joint_graph_edges(joint_graph: Graph) -> List[Tuple[str, str]]:
-    joint_graph_edges: List[Tuple[str, str]] = [
+def create_joint_graph_edges(joint_graph: Graph) -> list[tuple[str, str]]:
+    joint_graph_edges: list[tuple[str, str]] = [
         (inp.name, node.name)
         for node in joint_graph.nodes
         for inp in node.all_input_nodes
@@ -54,17 +54,17 @@ def create_joint_graph_edges(joint_graph: Graph) -> List[Tuple[str, str]]:
 
 def create_activation_checkpointing_logging_structure_payload(
     joint_graph: Graph,
-    joint_graph_node_information: Dict[str, Any],
-    joint_graph_edges: List[Tuple[str, str]],
-    all_recomputable_banned_nodes: List[Node],
+    joint_graph_node_information: dict[str, Any],
+    joint_graph_edges: list[tuple[str, str]],
+    all_recomputable_banned_nodes: list[Node],
     expected_runtime: float,
-    saved_node_idxs: List[int],
-    recomputable_node_idxs: List[int],
-    memories_banned_nodes: List[float],
-    runtimes_banned_nodes: List[float],
-    min_cut_saved_values: List[Node],
-) -> Dict[str, Any]:
-    activation_checkpointing_logging_structure_payload: Dict[str, Any] = {
+    saved_node_idxs: list[int],
+    recomputable_node_idxs: list[int],
+    memories_banned_nodes: list[float],
+    runtimes_banned_nodes: list[float],
+    min_cut_saved_values: list[Node],
+) -> dict[str, Any]:
+    activation_checkpointing_logging_structure_payload: dict[str, Any] = {
         "Joint Graph Size": len(joint_graph.nodes),
         "Joint Graph Edges": {
             "Total": len(joint_graph_edges),
@@ -86,15 +86,15 @@ def create_activation_checkpointing_logging_structure_payload(
 
 def create_structured_trace_for_min_cut_info(
     joint_graph: Graph,
-    all_recomputable_banned_nodes: List[Node],
-    saved_node_idxs: List[int],
-    recomputable_node_idxs: List[int],
+    all_recomputable_banned_nodes: list[Node],
+    saved_node_idxs: list[int],
+    recomputable_node_idxs: list[int],
     expected_runtime: float,
-    memories_banned_nodes: List[float],
-    runtimes_banned_nodes: List[float],
-    min_cut_saved_values: List[Node],
+    memories_banned_nodes: list[float],
+    runtimes_banned_nodes: list[float],
+    min_cut_saved_values: list[Node],
 ) -> None:
-    recomputable_node_info: Dict[str, int] = {
+    recomputable_node_info: dict[str, int] = {
         node.name: idx for idx, node in enumerate(all_recomputable_banned_nodes)
     }
     joint_graph_node_information = create_joint_graph_node_information(
