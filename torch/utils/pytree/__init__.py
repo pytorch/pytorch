@@ -212,22 +212,39 @@ def _reexport(func: _Callable[_P, _R]) -> _Callable[_P, _R]:
     return exported
 
 
-# flake8: noqa: F811
-tree_flatten = _reexport(implementation.module.tree_flatten)
-tree_unflatten = _reexport(implementation.module.tree_unflatten)
-tree_iter = _reexport(implementation.module.tree_iter)
-tree_leaves = _reexport(implementation.module.tree_leaves)
-tree_structure = _reexport(implementation.module.tree_structure)
-tree_map = _reexport(implementation.module.tree_map)
-tree_map_ = _reexport(implementation.module.tree_map_)
-tree_map_only = _reexport(implementation.module.tree_map_only)
-tree_map_only_ = _reexport(implementation.module.tree_map_only_)
-tree_all = _reexport(implementation.module.tree_all)
-tree_any = _reexport(implementation.module.tree_any)
-tree_all_only = _reexport(implementation.module.tree_all_only)
-tree_any_only = _reexport(implementation.module.tree_any_only)
-treespec_pprint = _reexport(implementation.module.treespec_pprint)
-
+if not _TYPE_CHECKING:
+    # flake8: noqa: F811
+    tree_all = _reexport(python.tree_all)
+    tree_all_only = _reexport(python.tree_all_only)
+    tree_any = _reexport(python.tree_any)
+    tree_any_only = _reexport(python.tree_any_only)
+    tree_flatten = _reexport(python.tree_flatten)  # type: ignore[arg-type]
+    tree_iter = _reexport(python.tree_iter)
+    tree_leaves = _reexport(python.tree_leaves)
+    tree_map = _reexport(python.tree_map)
+    tree_map_ = _reexport(python.tree_map_)
+    tree_map_only = _reexport(python.tree_map_only)
+    tree_map_only_ = _reexport(python.tree_map_only_)
+    tree_structure = _reexport(python.tree_structure)  # type: ignore[arg-type]
+    tree_unflatten = _reexport(python.tree_unflatten)  # type: ignore[arg-type]
+    treespec_pprint = _reexport(python.treespec_pprint)  # type: ignore[arg-type]
+else:
+    from torch.utils._cxx_pytree import (
+        tree_all as tree_all,
+        tree_all_only as tree_all_only,
+        tree_any as tree_any,
+        tree_any_only as tree_any_only,
+        tree_flatten as tree_flatten,
+        tree_iter as tree_iter,
+        tree_leaves as tree_leaves,
+        tree_map as tree_map,
+        tree_map_ as tree_map_,
+        tree_map_only as tree_map_only,
+        tree_map_only_ as tree_map_only_,
+        tree_structure as tree_structure,
+        tree_unflatten as tree_unflatten,
+        treespec_pprint as treespec_pprint,
+    )
 
 del _reexport
 del PyTreeImplementation
@@ -236,7 +253,7 @@ del PyTreeImplementation
 # Use the __getattr__ function allowing us to change the underlying `implementation` at runtime.
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
-        import torch.utils._cxx_pytree as cxx
+        import torch.utils._cxx_pytree as cxx  # noqa: F811
 
         globals()["cxx"] = cxx
         _sys.modules[f"{__name__}.cxx"] = cxx
