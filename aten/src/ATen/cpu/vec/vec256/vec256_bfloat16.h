@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/vec16bit_float.h>
+#include <ATen/cpu/vec/vec256/vec256_16bit_float.h>
 #include <c10/util/irange.h>
 
 namespace at::vec {
