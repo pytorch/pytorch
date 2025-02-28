@@ -1140,6 +1140,10 @@ def _should_save_arg_kwarg_vals(
         args = args_kwargs[0]
         if isinstance(args[0], torch._ops.OpOverload):
             return _should_save_arg_kwarg_vals(args[0], None)
+    if isinstance(target, torch.ops.higher_order.with_effects):
+        # TODO: inductor lowering for with_effects needs to be updated to propagate
+        # the arg_kwarg_vals
+        return False
     if isinstance(target, torch._ops.HigherOrderOperator):
         if pytree.tree_any(_should_save_arg_kwarg_vals, args_kwargs):
             raise RuntimeError(
