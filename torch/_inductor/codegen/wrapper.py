@@ -104,8 +104,7 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(input_size)
-        == sympy_str(output_size)
+        sympy_str(input_size) == sympy_str(output_size)
     ) or (
         # statically known that 0.95 * input_size <= output_size <= input_size
         V.graph.sizevars.statically_known_geq(output_size, 0.95 * input_size)
@@ -138,9 +137,9 @@ def convert_arg_type(arg: torch.Argument) -> str:
         container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
         if len(container_match) == 1:
             contained_type = container_match[0]
-            assert (
-                contained_type in PYTHON_TO_CPP
-            ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
+            assert contained_type in PYTHON_TO_CPP, (
+                f"unsupported {py_container} type in convert_arg_type: {contained_type}"
+            )
             cpp_contained_type = PYTHON_TO_CPP[contained_type]
             return f"{cpp_container}<{cpp_contained_type}>"
 
@@ -367,9 +366,9 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: dict[
-            ReuseKey, list[FreeIfNotReusedLine]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: dict[ReuseKey, list[FreeIfNotReusedLine]] = (
+            collections.defaultdict(list)
+        )
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -431,9 +430,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                         f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                     )
                 else:
-                    assert (
-                        self.last_seen_device_guard_index == self.device_idx
-                    ), "AOTInductor only supports running on one CUDA device"
+                    assert self.last_seen_device_guard_index == self.device_idx, (
+                        "AOTInductor only supports running on one CUDA device"
+                    )
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
@@ -1794,7 +1793,8 @@ class PythonWrapperCodegen(CodeGen):
                     equals_1 = isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
-                        arg, 1  # type: ignore[arg-type]
+                        arg,
+                        1,  # type: ignore[arg-type]
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -2052,9 +2052,9 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
-                assert (
-                    raw_arg is not None
-                ), "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
+                assert raw_arg is not None, (
+                    "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
+                )
                 buf_name = f"tmp_arg_{index}"
                 buf = raw_arg
 
@@ -2181,9 +2181,9 @@ class PythonWrapperCodegen(CodeGen):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Create example args for autotune in a separate epilogue
-            assert arg_types is not None and len(call_args) == len(
-                arg_types
-            ), "call_args and arg_types do not match"
+            assert arg_types is not None and len(call_args) == len(arg_types), (
+                "call_args and arg_types do not match"
+            )
 
             tensor_args = {}
             all_args = []
@@ -2191,9 +2191,9 @@ class PythonWrapperCodegen(CodeGen):
                 # create a dummy raw_args for uniform behavior in the following loop
                 raw_args = [None] * len(call_args)
             else:
-                assert len(raw_args) == len(
-                    call_args
-                ), "call_args and raw_args do not match"
+                assert len(raw_args) == len(call_args), (
+                    "call_args and raw_args do not match"
+                )
 
             for i, (arg, arg_type, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_args)
@@ -2411,9 +2411,9 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(layout, ir.NoneLayout):
             return
         if isinstance(layout, ir.NonOwningLayout):
-            assert isinstance(
-                layout.view, ir.ReinterpretView
-            ), f"unexpected {type(layout.view)}: {layout.view}"
+            assert isinstance(layout.view, ir.ReinterpretView), (
+                f"unexpected {type(layout.view)}: {layout.view}"
+            )
             assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
@@ -2535,9 +2535,9 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
         # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
-        assert len(outer_inputs) == len(
-            subgraph.graph.graph_input_names
-        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
+        assert len(outer_inputs) == len(subgraph.graph.graph_input_names), (
+            f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
+        )
         for inner_input, outer_input in zip(
             subgraph.graph.graph_input_names, outer_inputs
         ):
