@@ -45,6 +45,7 @@ from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
+    GraphPartitionMap,
     InputType,
     output_node,
     set_tracing_context_output_strides,
@@ -163,17 +164,16 @@ def try_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
 
 def prepare_cudagraph_post_compile(
     compiled_graph: CompiledFxGraph, example_inputs: Sequence[InputType]
-):
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
-    is_inference = compiled_graph.fx_kwargs["is_inference"]
-    is_backward = compiled_graph.fx_kwargs["is_backward"]
-
+) -> None:
     if not config.triton.cudagraph_trees:
         # Force specialize all inputs so that CUDA graphs will work
         for t in example_inputs:
             if isinstance(t, torch.SymInt):
                 int(t)  # guard
 
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
         boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
