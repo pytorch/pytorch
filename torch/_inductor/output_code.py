@@ -189,6 +189,7 @@ def cudagraph_post_compile(
     runs it on compiled_graph.
     Mutates the `compiled_graph.current_callable` and `cudagraphs`
     """
+    assert not config.graph_partition
     assert compiled_graph.current_callable is not None
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
@@ -241,18 +242,20 @@ def cudagraph_post_compile(
 def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
     constants: dict[str, torch.Tensor],
 ) -> None:
     """
     Cudagraphify each partition functions, which first prepares the necessary
     metadata and then applies the cudagraphify function to each partition.
-    
+
     Assuming all partition functions are cudagraphified and share the same order
     as `compiled_graph.partition_maps`. See [Note: Graph Partition Map for CUDAGraph].
     """
 
     if compiled_graph.partition_maps is None or len(compiled_graph.partition_maps) == 0:
         # cudagraphify is not called if there are no partitions
+        BoxedBool.disable(cudagraphs)
         try_handle_backward_generation(compiled_graph)
         return
 
@@ -334,10 +337,7 @@ def get_cudagraph_info(
     ]
     placeholders = tuple(get_placeholder_info(gm.graph))
 
-    return CudagraphCachedInfo(
-        placeholders, stack_traces, cudagraph_fail_reasons
-    )
-
+    return CudagraphCachedInfo(placeholders, stack_traces, cudagraph_fail_reasons)
 
 
 class CompiledFxGraphConstants:
@@ -486,60 +486,62 @@ class CompiledFxGraph(OutputCode):
 
         cudagraph_info = None
         if cudagraphs:
-            # check cudagraph disabling reasons from inductor lowering
-            if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
+            if config.graph_partition:
+                cudagraph_info = get_cudagraph_info(gm)
             else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
-                if not config.triton.cudagraph_support_input_mutation:
-                    # Skip supports for cudagraph-managed tensors
-                    from torch._inductor.cudagraph_utils import (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor,
-                    )
-
-                    has_mutation_str = (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor(
-                            gm,
-                            self.mutated_inputs,
-                            self.mutated_input_idxs,
-                            static_input_idxs,
+                # check cudagraph disabling reasons from inductor lowering
+                if self.disabled_cudagraphs_reason:
+                    if "cuda" in self.device_types:
+                        log_cudagraph_skip_and_bump_counter(
+                            f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
                         )
-                    )
-                    has_mutation = has_mutation_str is not None
-
-                    if has_mutation:
-                        self.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        counters["inductor"]["cudagraph_skips"] += 1
+                    BoxedBool.disable(cudagraphs)
                 else:
-                    # Check mutation later to support cudagraph-managed tensors
-                    has_mutation = None
+                    complex_memory_overlap_inputs = any(
+                        complex_memory_overlap(t)
+                        for t in example_inputs
+                        if isinstance(t, torch.Tensor)
+                    )
 
-                cudagraph_tests = [
-                    (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
-                    (
-                        all(
-                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
-                            for t in example_inputs
+                    if not config.triton.cudagraph_support_input_mutation:
+                        # Skip supports for cudagraph-managed tensors
+                        from torch._inductor.cudagraph_utils import (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor,
+                        )
+
+                        has_mutation_str = (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor(
+                                gm,
+                                self.mutated_inputs,
+                                self.mutated_input_idxs,
+                                static_input_idxs,
+                            )
+                        )
+                        has_mutation = has_mutation_str is not None
+
+                        if has_mutation:
+                            self.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        # Check mutation later to support cudagraph-managed tensors
+                        has_mutation = None
+
+                    cudagraph_tests = [
+                        (not has_mutation, "mutated inputs"),
+                        (not complex_memory_overlap_inputs, "complex memory overlap"),
+                        (
+                            all(
+                                isinstance(
+                                    t, (torch.Tensor, torch.SymInt, torch.Generator)
+                                )
+                                for t in example_inputs
+                            ),
+                            "non-Tensor inputs",
                         ),
-                        "non-Tensor inputs",
-                    ),
-                ]
-                cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                cudagraph_info = get_cudagraph_info(gm, cudagraph_fail_reasons)
-
-        if config.graph_partition: # TODO: How to control enable cudagraph or not? i.e., pass from mode=reduce-overhead
-            cudagraph_info = get_cudagraph_info(gm)
+                    ]
+                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+                    cudagraph_info = get_cudagraph_info(gm, cudagraph_fail_reasons)
 
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
@@ -575,19 +577,21 @@ class CompiledFxGraph(OutputCode):
         """
         set_tracing_context_output_strides(example_inputs, self)
 
-        if config.graph_partition:
-            # bypass cudagraph checks at graph level and cudagraphify each partition
-            cudagraph_partition_post_compile(
-                example_inputs,
-                self,
-                constants.unwrap(self),
-            )
-        else:
-            if cudagraphs:
-                # It's possible that cudagraphs is enabled, but was disabled
-                # during a previous compilation we're loading from the cache.
-                # If so, we need to disable it on this new process too.
+        if cudagraphs:
+            if config.graph_partition:
+                # bypass cudagraph checks at graph level and cudagraphify each partition
+                cudagraph_partition_post_compile(
+                    example_inputs,
+                    self,
+                    cudagraphs,
+                    constants.unwrap(self),
+                )
+            else:
                 if self.disabled_cudagraphs_reason:
+                    # It's possible that cudagraphs is enabled, but was disabled
+                    # during a previous compilation we're loading from the cache.
+                    # If so, we need to disable it on this new process too.
+
                     if "cuda" in self.device_types:
                         log_cudagraph_skip_and_bump_counter(
                             f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
