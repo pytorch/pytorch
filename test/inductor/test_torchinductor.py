@@ -4279,7 +4279,7 @@ class CommonTemplate:
             dilation = [1, 1]
             ceil_mode = False
 
-            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+            vals, offsets = prims._low_memory_max_pool_with_offsets(
                 x,
                 kernel_size,
                 stride,
@@ -4287,7 +4287,7 @@ class CommonTemplate:
                 dilation,
                 ceil_mode,
             )
-            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+            indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
                 kernel_size[1],
                 x.size(-1),
