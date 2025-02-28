@@ -593,9 +593,9 @@ class CppWrapperGpu(CppWrapperCpu):
                         for arg_type, arg_name in zip(arg_types, signatures)
                         if signatures[arg_name] != "constexpr"
                     ]
-                    assert len(call_args) == len(
-                        arg_signatures
-                    ), f"len of the following lists do not match: {call_args=} {arg_signatures=}"
+                    assert len(call_args) == len(arg_signatures), (
+                        f"len of the following lists do not match: {call_args=} {arg_signatures=}"
+                    )
                 else:
                     # args with value 1 are added into equal_to_1 and constants
                     # in triton_meta (in the Python codegen) which makes them
