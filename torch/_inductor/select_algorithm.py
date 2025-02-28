@@ -27,6 +27,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -1640,6 +1641,12 @@ class AlgorithmSelectorCache(PersistentCache):
             ]
         ] = []
 
+        clear_on_fresh_inductor_cache(self)
+
+    def cache_clear(self) -> None:
+        self.precompile_cache.clear()
+        self.feedback_saver_fns.clear()
+
     def __call__(
         self,
         name,
@@ -1716,6 +1723,8 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs_key = create_inputs_key(input_nodes)
 
         def precompile(choices) -> Callable[[], None]:
+            log.debug("Starting precompilation")
+
             def no_op(*args, **kwargs):
                 return
 
@@ -1723,6 +1732,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompilation_timeout_seconds is None
                 or precompilation_timeout_seconds <= 0
             ):
+                log.debug("Precompilation timeout is None or <= 0, returning no_op")
                 return no_op
 
             num_workers = min(get_num_workers(), len(choices))
@@ -1747,6 +1757,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
+                log.debug("Timings found in cache, returning no_op")
                 return no_op
 
             if config.search_autotune_cache and not (
@@ -1756,6 +1767,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
+                log.debug("Precompile function found in cache, returning it")
                 return precompile_func
 
             log.info(
@@ -1770,12 +1782,18 @@ class AlgorithmSelectorCache(PersistentCache):
             # here to avoid this issue.
 
             def precompile_with_captured_stdout(choice):
+                log.debug("Precompiling choice with captured stdout: %s", choice)
                 with restore_stdout_stderr():
                     choice.precompile()
 
             def on_complete(future):
                 assert future in start_times
                 elapsed_times[future] = time.time() - start_times[future]
+                log.debug(
+                    "Precompilation complete for future: %s, elapsed time: %.02fs",
+                    future,
+                    elapsed_times[future],
+                )
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
@@ -1790,6 +1808,7 @@ class AlgorithmSelectorCache(PersistentCache):
             for c in choices:
                 # Skip choices which we have already issued a precompile
                 if c.hash_key() in seen_choices:
+                    log.debug("Skipping already seen choice: %s", c)
                     continue
                 else:
                     seen_choices.add(c.hash_key())
@@ -1804,8 +1823,10 @@ class AlgorithmSelectorCache(PersistentCache):
                         future = async_compile.triton(
                             kernel_name=c.bmreq.kernel_name, source_code=source_code
                         ).future
+                        log.debug("Submitted triton async compile for choice: %s", c)
                     else:
                         future = executor.submit(precompile_with_captured_stdout, c)
+                        log.debug("Submitted precompile for choice: %s", c)
 
                     start_times[future] = time.time()
                     future.add_done_callback(on_complete)
@@ -1814,6 +1835,7 @@ class AlgorithmSelectorCache(PersistentCache):
             @functools.lru_cache(None)
             @restore_stdout_stderr()
             def wait_on_futures():
+                log.debug("Waiting on futures")
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 for future in as_completed(
                     futures,
@@ -1838,6 +1860,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
+            log.debug("Starting autotuning")
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
@@ -1860,6 +1883,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
+            log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
             autotune_start_ts = time.time()
             timings = self.lookup(
@@ -1869,6 +1893,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
+            log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
             if timings and all(
                 not math.isfinite(timing) for timing in timings.values()
