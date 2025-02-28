@@ -46,13 +46,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
-        assert identifier is None or isinstance(
-            identifier, str
-        ), "identifier must be a None or a string"
+        assert identifier is None or isinstance(identifier, str), (
+            "identifier must be a None or a string"
+        )
 
-        assert isinstance(
-            operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
+        assert isinstance(operands, (list, tuple)), (
+            f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
+        )
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
         ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"

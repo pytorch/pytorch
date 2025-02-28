@@ -230,9 +230,17 @@ class WeightedRandomSampler(Sampler[int]):
 
     Example:
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
+        >>> list(
+        ...     WeightedRandomSampler(
+        ...         [0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True
+        ...     )
+        ... )
         [4, 4, 1, 4, 5]
-        >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
+        >>> list(
+        ...     WeightedRandomSampler(
+        ...         [0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False
+        ...     )
+        ... )
         [0, 1, 4, 3, 2]
     """
 
@@ -292,9 +300,15 @@ class BatchSampler(Sampler[list[int]]):
             its size would be less than ``batch_size``
 
     Example:
-        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=False))
+        >>> list(
+        ...     BatchSampler(
+        ...         SequentialSampler(range(10)), batch_size=3, drop_last=False
+        ...     )
+        ... )
         [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
-        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=True))
+        >>> list(
+        ...     BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=True)
+        ... )
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 

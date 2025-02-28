@@ -209,13 +209,11 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         ...
         ...     def __len__(self):
         ...         return self.end - self.start
-        ...
         >>> ds = MyIterDataPipe(start=3, end=7)
         >>> print(list(ds))
         [3, 4, 5, 6]
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
-        ...
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]

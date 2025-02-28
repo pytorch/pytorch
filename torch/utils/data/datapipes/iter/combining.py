@@ -116,16 +116,13 @@ class _ContainerTemplate(ABC):
     r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
 
     @abstractmethod
-    def get_next_element_by_instance(self, instance_id: int):
-        ...
+    def get_next_element_by_instance(self, instance_id: int): ...
 
     @abstractmethod
-    def is_every_instance_exhausted(self) -> bool:
-        ...
+    def is_every_instance_exhausted(self) -> bool: ...
 
     @abstractmethod
-    def reset(self) -> None:
-        ...
+    def reset(self) -> None: ...
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):
@@ -403,7 +400,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         >>> # It can also filter out any element that gets `None` from the `classifier_fn`
         >>> def odd_or_even_no_zero(n):
         ...     return n % 2 if n != 0 else None
-        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True)
+        >>> dp1, dp2 = source_dp.demux(
+        ...     num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True
+        ... )
         >>> list(dp1)
         [2, 4]
         >>> list(dp2)
@@ -428,7 +427,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
         # like throwing Error when classification result is out of o range
-        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)  # type: ignore[abstract]
+        container = _DemultiplexerIterDataPipe(
+            datapipe, num_instances, classifier_fn, drop_none, buffer_size
+        )  # type: ignore[abstract]
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
@@ -602,16 +603,18 @@ class MultiplexerIterDataPipe(IterDataPipe):
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = (
+        ...     IterableWrapper(range(3)),
+        ...     IterableWrapper(range(10, 15)),
+        ...     IterableWrapper(range(20, 25)),
+        ... )
         >>> list(dp1.mux(dp2, dp3))
         [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
 
     def __init__(self, *datapipes):
         self.datapipes = datapipes
-        self.buffer: list = (
-            []
-        )  # Store values to be yielded only when every iterator provides one
+        self.buffer: list = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
@@ -670,7 +673,11 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = (
+        ...     IterableWrapper(range(5)),
+        ...     IterableWrapper(range(10, 15)),
+        ...     IterableWrapper(range(20, 25)),
+        ... )
         >>> list(dp1.zip(dp2, dp3))
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """

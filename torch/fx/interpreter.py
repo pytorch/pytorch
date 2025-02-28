@@ -51,7 +51,9 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
+                def call_function(
+                    self, target: Target, args: Tuple, kwargs: Dict
+                ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
@@ -405,7 +407,7 @@ class Interpreter:
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
                 raise RuntimeError(
-                    f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}"
+                    f"Node referenced nonexistent target {'.'.join(target_atoms[: i + 1])}"
                 )
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
@@ -468,14 +470,20 @@ class Transformer(Interpreter):
 
             class NegSigmSwapXformer(Transformer):
                 def call_function(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
                 def call_method(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args

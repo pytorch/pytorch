@@ -605,9 +605,9 @@ class PackageExporter:
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
 
-        assert (pickle_protocol == 4) or (
-            pickle_protocol == 3
-        ), "torch.package only supports pickle protocols 3 and 4"
+        assert (pickle_protocol == 4) or (pickle_protocol == 3), (
+            "torch.package only supports pickle protocols 3 and 4"
+        )
 
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`

@@ -78,7 +78,9 @@ def pin_memory(data, device=None):
                 )
                 return clone
             else:
-                return type(data)({k: pin_memory(sample, device) for k, sample in data.items()})  # type: ignore[call-arg]
+                return type(data)(
+                    {k: pin_memory(sample, device) for k, sample in data.items()}
+                )  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
