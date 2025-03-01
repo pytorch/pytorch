@@ -8,7 +8,7 @@
 
 namespace {
 
-typedef c10::SmallVector<int64_t, 4> NodeSortKey;
+typedef c10::SmallVector<int64_t, 2> NodeSortKey;
 struct NodeBase;
 
 // Thrown to exit out of a C++ function and return an error to Python.
