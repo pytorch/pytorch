@@ -138,7 +138,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9+ and MI300+ devices",
     )
     def test_scaled_mm(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -154,7 +154,6 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         t1 = torch.randn(m, k, device=self.device_type, dtype=torch.bfloat16)
         t2 = torch.randn(n, k, device=self.device_type, dtype=torch.bfloat16)
-
         for (
             output_spec,
             t1_spec,
