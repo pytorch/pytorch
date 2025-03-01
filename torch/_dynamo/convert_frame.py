@@ -1278,7 +1278,7 @@ class ConvertFrame:
             elif isinstance(e, RecompileLimitExceeded):
                 return ConvertFrameReturn(
                     frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.RUN_ONLY, FrameAction.SKIP
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
                     )
                 )
 
