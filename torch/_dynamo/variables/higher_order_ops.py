@@ -950,15 +950,45 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_lifted_freevars,
             "false_branch",
         )
+        
+        true_gm = torch.fx.GraphModule(true_nn_modules, true_graph)
+        true_gm_name = "cond_true"
+        false_gm = torch.fx.GraphModule(false_nn_modules, false_graph)
+        false_gm_name = "cond_false"
 
         true_name = tx.output.install_subgraph(
-            "cond_true",
-            torch.fx.GraphModule(true_nn_modules, true_graph),
+            true_gm_name,
+            true_gm,
         )
         false_name = tx.output.install_subgraph(
-            "cond_false",
-            torch.fx.GraphModule(false_nn_modules, false_graph),
+            false_gm_name,
+            false_gm,
         )
+
+        from torch._higher_order_ops.utils import (
+            has_potential_input_mutation_or_alias
+        )
+        
+        for gm, vars, gm_name in [(true_gm, true_shared + unique_true + unique_false, true_gm_name), 
+                                  (false_gm, true_shared + unique_true + unique_false, false_gm_name)]:
+            with tx.fake_mode:
+                operands_fake = [
+                    leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
+                    for leaf in vars
+                ]
+                sub_args_fake = operands_fake
+                pre_dispatch = False
+
+                inp_mutation, aliases = has_potential_input_mutation_or_alias(gm, sub_args_fake, pre_dispatch=pre_dispatch)
+
+                if inp_mutation:
+                    raise RuntimeError(
+                        f"{gm_name} might be modifying the input!"
+                    )  # noqa: F541
+                if aliases:
+                    raise RuntimeError(
+                        f"{gm_name} might be aliasing the input or the output!"
+                    )  # noqa: F541
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
@@ -1324,6 +1354,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         from torch._higher_order_ops.utils import (
             _maybe_fake_tracing,
@@ -1340,7 +1371,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 leaf.proxy.node.meta["example_value"].clone()
                 for leaf in additional_inputs.items
             ]
-            sub_args_fake = xs_fake + additional_fake
+            additional_freevar_fake = [
+                leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
+                for leaf in combine_freevars_proxy
+            ]
+            sub_args_fake = xs_fake + additional_fake + additional_freevar_fake
             pre_dispatch = False
 
             fx = _maybe_fake_tracing(
@@ -1366,8 +1401,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 raise RuntimeError(
                     "Combine_fn might be aliasing the input or the output!"
                 )  # noqa: F541
-
-        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
             unimplemented(

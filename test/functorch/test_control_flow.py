@@ -938,6 +938,8 @@ def forward(self, pred_1):
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
+    # TODO: There is an error that the output-output alias is also detected across branches
+    # It is correct to check for output-output alias within a branch, but not across branches
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
