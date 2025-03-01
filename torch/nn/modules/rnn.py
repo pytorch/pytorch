@@ -253,8 +253,7 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
-            for p in self._flat_weights
+            p.data_ptr() for p in self._flat_weights  # type: ignore[union-attr]
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
@@ -609,10 +608,12 @@ class RNN(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None: ...
+    ) -> None:
+        ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs):
+        ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -965,10 +966,12 @@ class LSTM(RNNBase):
         proj_size: int = 0,
         device=None,
         dtype=None,
-    ) -> None: ...
+    ) -> None:
+        ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs):
+        ...
 
     def __init__(self, *args, **kwargs):
         super().__init__("LSTM", *args, **kwargs)
@@ -1298,10 +1301,12 @@ class GRU(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None: ...
+    ) -> None:
+        ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs):
+        ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
