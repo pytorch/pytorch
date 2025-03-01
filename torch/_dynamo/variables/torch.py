@@ -1117,10 +1117,13 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
         if isinstance(
             self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ) and any(not isinstance(x, (variables.ConstantVariable)) for x in args):
-            from torch._higher_order_ops.flat_apply import _ConstantFunction, flat_apply
+            from torch._higher_order_ops.flat_apply import flat_apply
 
-            # fn = self.value.op
-            fn = self.value.py_kernels[torch._C.DispatchKey.CompositeExplicitAutograd]
+            if isinstance(self.value, torch._ops.OpOverload):
+                opoverload = self.value
+            else:
+                assert isinstance(self.value, torch._ops.OpOverloadPacket)
+                opoverload = self.value.default
             packed_input_vt = TupleVariable.build(
                 tx,
                 (
@@ -1133,22 +1136,17 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
             ).call_function(tx, [packed_input_vt], {})
 
             flat_args_vt, in_spec_vt = flat_args_and_spec.items
-            _, func_spec = pytree.tree_flatten(_ConstantFunction(fn))
             in_spec = in_spec_vt.as_python_constant()
-            func_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                f"{fn.__name__}_spec", func_spec
-            )
             in_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                fn.__name__ + "_input_spec", in_spec
+                f"{opoverload._namespace}_{opoverload._opname}_input_spec", in_spec
             )
 
             proxified_flat_args = [
                 flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vt.items
             ]
 
-            func_spec_proxy.node.type = type(func_spec)
             in_spec_proxy.node.type = type(in_spec)
-            all_args = (func_spec_proxy, in_spec_proxy, *proxified_flat_args)
+            all_args = (opoverload, in_spec_proxy, *proxified_flat_args)
 
             out_vt = wrap_fx_proxy(
                 tx=tx,

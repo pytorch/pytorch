@@ -47,6 +47,23 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
+class Kernel:
+    """
+    A kernel is a callable that is registered to a particular operator.
+    It is the thing that is called when you call the operator.
+    """
+
+    def __init__(self, func, with_keyset=False):
+        self.func = func
+        self.with_keyset = with_keyset
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def __repr__(self):
+        return f"Kernel(func={self.func})"
+
+
 class OperatorBase:
     """
     Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator
@@ -80,7 +97,7 @@ class OperatorBase:
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
         # API.
-        self.py_kernels: dict[DispatchKey, Callable[..., Any]] = {}
+        self.py_kernels: dict[DispatchKey, Kernel] = {}
 
         # This table allows you to override the behavior of a particular
         # operator for a particular TorchDispatchMode.  In practice,
@@ -122,14 +139,12 @@ class OperatorBase:
         with_keyset: bool = False,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-            if with_keyset:
-                self.needs_keyset.add(k)
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
-                assert k not in self.python_key_table
+                # assert k not in self.python_key_table
                 # TODO(voz): Should we replace setting DispatchKey.Python entirely with setting mode keys?
-                self.python_key_table[k] = fn
+                self.python_key_table[k] = Kernel(fn, False)
                 self._dispatch_cache.clear()
                 return fn
 
@@ -147,7 +162,7 @@ class OperatorBase:
                 raise RuntimeError(
                     f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
-            self.py_kernels[k] = fn
+            self.py_kernels[k] = Kernel(fn, with_keyset=with_keyset)
             self._dispatch_cache.clear()
             return fn
 
@@ -945,9 +960,6 @@ class CustomOpOverload(OpOverload):
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
         _DEFAULT_FALLTHROUGH_KEYS = [
-            DispatchKey.Autograd,
-            DispatchKey.AutogradCPU,
-            DispatchKey.AutogradCUDA,
             DispatchKey.ADInplaceOrView,
             DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
@@ -972,6 +984,9 @@ class CustomOpOverload(OpOverload):
         ]
 
     def __call__(self, /, *args, **kwargs):
+        return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+
+    def redispatch(self, /, keyset, *args, **kwargs):
         return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
 
     def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
@@ -1005,7 +1020,10 @@ class CustomOpOverload(OpOverload):
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
-        return handler(*args, **kwargs)
+        if isinstance(handler, Kernel) and handler.with_keyset:
+            return handler(dispatch_key_set, *args, **kwargs)
+        else:
+            return handler(*args, **kwargs)
 
 
 def _has_pytree_object_arg(schema: torch.FunctionSchema) -> bool:

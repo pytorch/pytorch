@@ -636,7 +636,7 @@ class CustomOpDef:
                     f"fake impl."
                 )
             if need_python_dispatch:
-                args = args[1:]
+                args = args[1:]  # Remove the dispatch key under fake tensor mode.
             return self._abstract_fn(*args, **kwargs)
 
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
