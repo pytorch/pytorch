@@ -497,11 +497,23 @@ class TestCutlassBackend(TestCase):
         Main test for bmm.
         """
 
-        B, M, N, K = 10, 4096, 2048, 25728
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.bmm(a, b)
 
-        a = torch.randn(B, M, K).cuda().to(dtype)
-        b = torch.randn(B, K, N).cuda().to(dtype)
+        model = MyModel().cuda()
+        # B, M, N, K
+        shapes = [
+            (10, 4096, 2048, 25728),
+        ]
 
+        inputs = [
+            (
+                torch.randn(B, M, K).cuda().to(dtype),
+                torch.randn(B, K, N).cuda().to(dtype),
+            )
+            for B, M, N, K in shapes
+        ]
         with config.patch(
             {
                 "max_autotune": True,
@@ -510,12 +522,10 @@ class TestCutlassBackend(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ):
-            op = torch.bmm
-            compiled_op = torch.compile(torch.bmm, dynamic=dynamic)
-
-            Y_compiled = compiled_op(a, b)
-            Y = op(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
+            expected = [model(*input) for input in inputs]
+            compiled_model = torch.compile(model, dynamic=dynamic)
+            actual = [compiled_model(*input) for input in inputs]
+            torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
