@@ -12,7 +12,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
-    check_input_mutation_and_alias,
+    # check_input_mutation_and_alias,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,

@@ -9,7 +9,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
     autograd_not_implemented,
-    check_input_mutation,
+    # check_input_mutation,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,

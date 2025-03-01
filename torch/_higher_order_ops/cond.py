@@ -20,7 +20,7 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
-    check_input_mutation_and_alias,
+    has_potential_input_mutation_or_alias
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,

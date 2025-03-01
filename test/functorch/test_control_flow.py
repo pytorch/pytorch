@@ -2699,7 +2699,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"] + 1,
                     {
                         "o": x["i"] * y["i"],
                         "j": (
@@ -2715,13 +2715,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 {
                     "i": x["i"] * y["i"],
                     "j": (
-                        x["i"],
+                        x["i"] + 1,
                         [x["j"][1][0] * y["j"][0][0]],
                         [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"] + 1,
                     {
                         "o": x["i"] * y["i"] + x["j"][0][0],
                         "j": (
@@ -2830,7 +2830,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             b_hh = torch.ones((7), device=device)
             c_new = y @ W_ih + b_ih
             h_new = torch.tanh(c_new + x @ W_hh + b_hh)
-            return h_new, h_new
+            return h_new, h_new.clone()
 
         expected_result = rnn(
             torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
@@ -2916,6 +2916,108 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
         )
+        
+    @requires_cuda
+    def test_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be modifying the input!",
+        ):
+            scan(fct_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_input_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device),
+                torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+            
+    @requires_cuda
+    def test_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device),
+                torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_carry_alias(x, y):
+            c = x[0] + y[1]
+            return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device),
+                torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be:
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_carry_carry_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_output_alias(x, y):
+            c = x[0] + y[1]
+            return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device),
+                torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be:
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_carry_output_alias, init, inp, dim=0)
 
 
 class AssociativeScanModels:
@@ -4210,7 +4312,7 @@ class AssociativeScanTests(TestCase):
         with self.assertRaisesRegex(
             # Should be
             RuntimeError,
-            "Combine_fn might be aliasing the input!",
+            "Combine_fn might be aliasing the input.*",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
@@ -4229,9 +4331,8 @@ class AssociativeScanTests(TestCase):
 
         with self.assertRaisesRegex(
             # Should be:
-            # UnsupportedAliasMutationException,
-            torch._dynamo.exc.BackendCompilerFailed,
-            "Aliasing within branch or combine_fn might be occuring!.*",
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
@@ -5059,7 +5160,7 @@ def forward(self, x_1):
         # is a SymBool.
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "One of torch.cond branch",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5101,7 +5202,7 @@ def forward(self, x_1):
         # is a SymBool.
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "One of torch.cond branch",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5136,7 +5237,7 @@ def forward(self, x_1):
         # is a SymBool.
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "Aliasing within branch or combine_fn might be occuring!.*",
+            "One of torch.cond branch",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5165,7 +5266,7 @@ def forward(self, x_1):
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "One of torch.cond branch",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5199,7 +5300,7 @@ def forward(self, x_1):
 
             with self.assertRaisesRegex(
                 UnsupportedAliasMutationException,
-                "A branch or combine_fn might be modifying the input!.*",
+                "One of torch.cond branch",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5218,7 +5319,7 @@ def forward(self, x_1):
 
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "One of torch.cond branch",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5240,7 +5341,7 @@ def forward(self, x_1):
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
                 UnsupportedAliasMutationException,
-                "Aliasing within branch or combine_fn might be occuring!.*",
+                "One of torch.cond branch might be aliasing",
             ):
                 f(example_input_func)
         finally:
@@ -5271,7 +5372,7 @@ def forward(self, x_1):
 
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "Aliasing within branch or combine_fn might be occuring!.*",
+            "One of torch.cond branch might be aliasing",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5866,7 +5967,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "torch.map is mutating the input!",
         ):
             functional_f(*example_inputs)
 
@@ -5884,7 +5985,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            "torch.map is mutating the input!",
         ):
             functional_f(*example_inputs)
 
@@ -5925,7 +6026,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "Aliasing within branch or combine_fn might be occuring!.*",
+            "torch.map is aliasing the input!",
         ):
             functional_f(*example_inputs)
 
@@ -7366,8 +7467,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed,
-                ".*Aliasing within branch or combine_fn might be occuring!.*",
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
             ):
                 torch.compile(fn)(f, x)
 
@@ -7383,8 +7483,7 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed,
-                ".*Aliasing within branch or combine_fn might be occuring!.*",
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
             ):
                 torch.compile(fn)(view_f, x)
 

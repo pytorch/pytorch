@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch.fx
-from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+from torch._higher_order_ops.utils import potential_input_mutation_or_alias
 from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
@@ -129,11 +129,17 @@ def _replace_region_with_subgraph(
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
-    # TODO: We don't care here about any output-output aliasing?
-    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+    input_mutations, aliases = potential_input_mutation_or_alias(sub_gm, fake_inputs)
+    if len(input_mutations) > 0:
         log.debug(
-            "NYI: Failed to substitute region %s due to input alias or mutation",
-            region,
+            f"NYI: Failed to substitute region {region} due to input mutations."
+            + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations.items()]}."
+        )
+        return
+    if len(aliases) > 0:
+        log.debug(
+            f"NYI: Failed to substitute region {region} due to aliases."
+            + f"In particular, these nodes are aliasing the inputs {[el for el in aliases.items()]}."
         )
         return
 

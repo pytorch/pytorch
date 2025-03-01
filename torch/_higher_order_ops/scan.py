@@ -11,7 +11,6 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _set_compilation_env,
     autograd_not_implemented,
-    check_input_mutation_and_alias,
     reenter_make_fx,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -443,20 +442,6 @@ def scan_functionalize(ctx, combine_fn, init, xs, reverse, additional_inputs):
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(combine_fn)
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
-        sample_inputs = list(
-            itertools.chain(
-                unwrapped_init,
-                sample_unwrapped_xs_sliced,
-                unwrapped_additional_inputs,
-            )
-        )
-
-        check_input_mutation_and_alias(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        )
-
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,

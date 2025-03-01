@@ -6,7 +6,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    check_input_mutation_and_alias,
+    # check_input_mutation_and_alias,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator

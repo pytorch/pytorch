@@ -4,7 +4,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     autograd_not_implemented,
-    check_input_mutation_and_alias,
+    # check_input_mutation_and_alias,
     reenter_make_fx,
     unique_graph_id,
 )
