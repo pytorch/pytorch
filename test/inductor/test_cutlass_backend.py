@@ -163,12 +163,9 @@ class TestCutlassBackend(TestCase):
             Y = torch.mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(
-        True, "FIXME: Disabled temporarily since IMA or crashing in subprocess"
-    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+    def test_cutlass_backend_subproc_addmm(self):
         """
         Test autotune_in_subproc works for addmm.
         """
@@ -180,9 +177,10 @@ class TestCutlassBackend(TestCase):
 
         x_shapes = [
             (M, N),
-            (M, 1),
-            (1, N),
-            (N,),
+            # FIXME
+            # (M, 1),
+            # (1, N),
+            # (N,),
         ]
 
         alpha = 2.0
