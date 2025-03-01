@@ -4500,7 +4500,9 @@ class AOTInductorTestsTemplate:
             "y": {0: dim_k, 1: dim_n},
             "m": {0: 1},
         }
-        self.code_check_count(Model(), (x, y, m), "Grid(1023L, 1L, 1L)", 1)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            self.code_check_count(Model(), (x, y, m), "Grid(1023L, 1L, 1L)", 1)
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
@@ -4551,7 +4553,8 @@ class AOTInductorTestsTemplate:
             "y": {0: dim_k, 1: dim_n},
             "m": {0: 1},
         }
-        self.code_check_count(Model(), (x, y, m), "Grid(1023L, 1L, 1L)", 1)
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            self.code_check_count(Model(), (x, y, m), "Grid(1023L, 1L, 1L)", 1)
 
     def test_composed_dynamic_size(self):
         class Model(torch.nn.Module):

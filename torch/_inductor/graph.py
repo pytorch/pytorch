@@ -1851,6 +1851,7 @@ class GraphLowering(torch.fx.Interpreter):
         import copy
 
         cloned_gm = copy.deepcopy(self.orig_gm)
+        example_inputs = copy.deepcopy(example_inputs)
         triton_nodes = []
         for node in cloned_gm.graph.nodes:
             if (
@@ -2020,7 +2021,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if isinstance(op, ir.UserDefinedTritonKernel):
                         user_defined_kernels = True
                         break
-                if user_defined_kernels:
+                if config.triton.autotune_with_sample_inputs and user_defined_kernels:
                     real_inputs = extract_real_inputs()
                     self.extract_autotune_inputs(real_inputs)
                 return self.codegen()

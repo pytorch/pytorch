@@ -99,6 +99,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        original_triton_name: Optional[str] = None,
+        original_triton_kwargs: Optional[list[str]] = None,
     ):
         """
         Generates kernel call code.
@@ -110,6 +112,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 Only valid when cuda == True.
         """
         assert not gpu, "CppWrapperCpu.generate_kernel_call does not support GPU"
+        assert (
+            not original_triton_name
+        ), "CppWrapperCpu.generate_kernel_call does not support Triton with GPU autotuning"
         assert arg_types is not None and len(call_args) == len(
             arg_types
         ), "Mismatch call_args and arg_types in generate_kernel_call"
