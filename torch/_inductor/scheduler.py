@@ -3963,6 +3963,9 @@ class Scheduler:
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+        if isinstance(node, FusedSchedulerNode):
+            return any(self.should_partition(snode) for snode in node.snodes)
+
         if not node.is_gpu():
             return True
 
@@ -4203,9 +4206,9 @@ class Scheduler:
         # See [Note: Graph Partition Map for CUDAGraph]
         if num_partitions > 0:
             assert V.graph.partition_maps is not None
-            assert num_partitions == len(
-                V.graph.partition_maps
-            ), f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
+            assert num_partitions == len(V.graph.partition_maps), (
+                f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
+            )
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
