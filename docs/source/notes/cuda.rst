@@ -234,7 +234,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 Asynchronous execution
 ----------------------
 
-By default, GPU operations are asynchronous.  When you call a function that
+By default, GPU operations are asynchronous. When you call a function that
 uses the GPU, the operations are *enqueued* to the particular device, but not
 necessarily executed until later.  This allows us to execute more computations
 in parallel, including operations on CPU or other GPUs.
@@ -739,10 +739,7 @@ have a flag that can be used to disable CUDA, in combination with
     :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
 
     If NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard CUDA Runtime
-    API assessment and the aforementioned fork constraint will apply.
-
-    Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
-    Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
+    API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
     may succeed while later CUDA initialization fails.
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
@@ -1081,7 +1078,7 @@ If your entire network is capturable, you can capture and replay an entire itera
         optimizer.step()
 
     real_inputs = [torch.rand_like(static_input) for _ in range(10)]
-    real_targets = [torch.rand_like(static_target) for _ in range(10)]
+    real_targets = [torch.randn(N, D_out, device="cuda") for _ in range(10)]
 
     for data, target in zip(real_inputs, real_targets):
         # Fills the graph's input memory with new data to compute on
