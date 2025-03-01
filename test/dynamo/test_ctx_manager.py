@@ -1244,13 +1244,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             def f(x, y):
                 return x + y
 
-            x, y = (
-                torch.ones(
-                    1,
-                ),
-                torch.zeros(
-                    1,
-                ),
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
             )
             return f(x, y)
 
@@ -1284,13 +1281,10 @@ class GraphModule(torch.nn.Module):
             def f(x, y):
                 return x + y
 
-            x, y = (
-                torch.ones(
-                    1,
-                ),
-                torch.zeros(
-                    1,
-                ),
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
             )
             return f(x, y)
 
@@ -1333,13 +1327,10 @@ class GraphModule(torch.nn.Module):
 
                 return inner_fn(x, y) + x
 
-            x, y = (
-                torch.ones(
-                    1,
-                ),
-                torch.zeros(
-                    1,
-                ),
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
             )
             return f(x, y)
 
