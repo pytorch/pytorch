@@ -158,6 +158,9 @@ class Op:
     ret: Intermediate = dataclasses.field(repr=False)
     # used for scf.yield: see [Note: scf.yield fix-up]
     sub_idx: Optional[int] = None
+    # used for tt.elementwise_inline_asm
+    # `is_pure = True` assumes the asm block has no side-effects
+    is_pure: bool = False
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -572,14 +575,22 @@ def ttir_to_functions(
                 Intermediate(operand) for operand in operand_ids
             ]
             block_ops = op_stack[parent_block_id]
+
+            is_pure = False
+            # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
+            if name == "tt.elementwise_inline_asm":
+                is_pure = op.get_bool_attr("pure")
+
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res))
+                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+                block_ops[fake_res].append(
+                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                )
 
     ttir_module.walk(mlir_to_functions)
 
@@ -640,7 +651,14 @@ def analyze_kernel_mutations(
     ops = functions[fn_name]
     for op_list in ops.values():
         for op in op_list:
+            # If we encounter an operation with effects that cannot be reliably analyzed
+            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
+                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+                    log.warning(
+                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
+                    )
+                    continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
