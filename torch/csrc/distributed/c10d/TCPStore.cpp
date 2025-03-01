@@ -248,7 +248,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   if (opts.useLibUV) {
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
-        "use_libuv was requested but PyTorch was build without libuv support");
+        "use_libuv was requested but PyTorch was built without libuv support");
 
     if (opts.masterListenFd.has_value()) {
       // TODO(xilunwu): support this init method after testing
