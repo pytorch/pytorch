@@ -1401,9 +1401,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "combine_fn_output",
         )
 
-        # Check for device mismatches. This currently has to be a separate check
-        # because the device field is not part of the TensorMetadata
-
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
 
         from torch._higher_order_ops.utils import (
@@ -1471,13 +1468,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = tuple(
                 inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
-        # return wrap_fx_proxy(
-        #     tx=tx,
-        #     proxy=tx.output.create_proxy(
-        #         "call_function", torch.ops.higher_order.associative_scan, p_args, {}
-        #     ),
-        #     example_value=out_meta,
-        # )
+        
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.associative_scan,
