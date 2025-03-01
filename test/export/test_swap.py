@@ -246,11 +246,11 @@ def forward(self, x, y):
     _spec_0 = self._spec_0
     _spec_1 = self._spec_1
     _spec_4 = self._spec_4
-    tree_flatten = torch.utils._pytree.tree_flatten((x_1, y_1));  x_1 = y_1 = None
+    tree_flatten = torch.utils.pytree.tree_flatten((x_1, y_1));  x_1 = y_1 = None
     getitem = tree_flatten[0];  tree_flatten = None
     x = getitem[0]
     y = getitem[1];  getitem = None
-    tree_unflatten_1 = torch.utils._pytree.tree_unflatten([x, y], _spec_1);  x = y = _spec_1 = None
+    tree_unflatten_1 = torch.utils.pytree.tree_unflatten([x, y], _spec_1);  x = y = _spec_1 = None
     getitem_1 = tree_unflatten_1[0];  tree_unflatten_1 = None
     getitem_2 = getitem_1[0]
     getitem_3 = getitem_1[1];  getitem_1 = None
@@ -258,7 +258,7 @@ def forward(self, x, y):
     bar = self.bar(foo);  foo = None
     tree_flatten_spec_1 = torch.fx._pytree.tree_flatten_spec(bar, _spec_4);  bar = _spec_4 = None
     getitem_10 = tree_flatten_spec_1[0];  tree_flatten_spec_1 = None
-    tree_unflatten = torch.utils._pytree.tree_unflatten((getitem_10,), _spec_0);  getitem_10 = _spec_0 = None
+    tree_unflatten = torch.utils.pytree.tree_unflatten((getitem_10,), _spec_0);  getitem_10 = _spec_0 = None
     return tree_unflatten""",
         )
 
