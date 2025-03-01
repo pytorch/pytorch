@@ -1362,6 +1362,33 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_mismatched_branch_output(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dynamic_shapes = None
+        if dynamic:
+            # Note the minimum has to be 4 because the model
+            # is slicing over the first dim with [2:], if first
+            # dim is 2 or 3, the slicing will be 0/1 specialized,
+            # causing a constraint violation eror.
+            dim0_a = Dim("s0", min=4, max=1024)
+            dim0_b = Dim("s1", min=4, max=1024)
+            dynamic_shapes = {
+                "p": {},
+                "x": {0: dim0_a, 1: None},
+                "y": {0: dim0_b, 1: None},
+                "z": {0: dim0_a, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.MismatchedOutputSize(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_cond_symint_input(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1512,6 +1539,26 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_mixed_device(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.MixedDevice(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -3999,9 +4046,9 @@ class AOTInductorTestsTemplate:
         # it gets explicitly declared using its data types in the cpp wrapper codegen code.
         expected_scalar_args = [
             "int64_t var_1 = u0;",
-            "int64_t var_3 = u0;",
-            "int64_t var_5 = u0;",
-            "int64_t var_9 = u0;",
+            "int64_t var_4 = u0;",
+            "int64_t var_7 = u0;",
+            "int64_t var_12 = u0;",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4526,7 +4573,7 @@ GPU_TEST_FAILURES = {
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
-    "test_fft_c2c": fail_gpu(("xpu",)),
+    "test_fft_c2c": fail_gpu(("xpu",), is_skip=True),
     "test_stft": fail_gpu(("xpu",)),
 }
 

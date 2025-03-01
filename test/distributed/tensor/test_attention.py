@@ -42,7 +42,6 @@ if PLATFORM_SUPPORTS_FLASH_ATTENTION:
 if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
-
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
@@ -360,6 +359,9 @@ class RingAttentionTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, self.world_size),
         )
+        # early init DTensor RNG tracker to avoid broadcast be captuured in comm_mode
+        torch.distributed.tensor._random.manual_seed(10, device_mesh)
+
         dtype = torch.bfloat16
         bs = 2
         args = ModelArgs()
