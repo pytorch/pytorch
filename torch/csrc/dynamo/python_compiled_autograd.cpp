@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "c10/core/impl/TorchDispatchModeTLS.h"
 
 /*
 [Note: Compiled Autograd]
@@ -844,6 +845,7 @@ static CacheNode* _compiled_autograd_impl(
       }
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
+        std::cout << "collecting " << fn->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
@@ -963,6 +965,7 @@ static CacheNode* _compiled_autograd_impl(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
+      std::cout << "apply_with_saved " << call.node->name() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -1097,9 +1100,17 @@ static variable_list compiled_autograd(
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd")
+  // std::cout << "called compiled autograd" << std::endl;
+  // std::vector<std::optional<std::shared_ptr<c10::impl::PyObject_TorchDispatchMode>>> infra_modes;
+
+  // infra_modes.emplace_back(c10::impl::TorchDispatchModeTLS::unset_mode(c10::impl::TorchDispatchModeKey::FAKE));
+  // infra_modes.emplace_back(c10::impl::TorchDispatchModeTLS::unset_mode(c10::impl::TorchDispatchModeKey::PROXY));
+  // infra_modes.emplace_back(c10::impl::TorchDispatchModeTLS::unset_mode(c10::impl::TorchDispatchModeKey::FUNCTIONAL));
+
+  // TORCH_INTERNAL_ASSERT(c10::impl::TorchDispatchModeTLS::stack_len() == 0);
+  // TORCH_CHECK(
+  //     c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+  //     "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex mtx;
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
@@ -1132,6 +1143,20 @@ static variable_list compiled_autograd(
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+
+  
+  // if (infra_modes[0].has_value()) {
+  //   std::cout << "setting FAKE" << std::endl;
+  //   c10::impl::TorchDispatchModeTLS::set_mode(infra_modes[0].value(), c10::impl::TorchDispatchModeKey::FAKE);
+  // }
+  // if (infra_modes[1].has_value()) {
+  //   std::cout << "setting PROXY" << std::endl;
+  //   c10::impl::TorchDispatchModeTLS::set_mode(infra_modes[1].value(), c10::impl::TorchDispatchModeKey::PROXY);
+  // }
+  // if (infra_modes[2].has_value()) {
+  //   std::cout << "setting FUNCTIONAL" << std::endl;
+  //   c10::impl::TorchDispatchModeTLS::set_mode(infra_modes[2].value(), c10::impl::TorchDispatchModeKey::FUNCTIONAL);
+  // }
   return outputs;
 }
 

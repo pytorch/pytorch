@@ -2417,7 +2417,9 @@ def _wrap_fx_proxy(
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
+        # breakpoint()
         example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        # breakpoint()
 
     return handle_traced_output(
         example_value, tx, proxy, options, subclass_type, target_cls
@@ -2426,6 +2428,7 @@ def _wrap_fx_proxy(
 
 # This handles wrapping of the output of an op traced into the graph
 def handle_traced_output(example_value, tx, proxy, options, subclass_type, target_cls):
+    # HERE
     import torch._functorch.vmap
     import torch._subclasses.fake_tensor
     import torch._utils
@@ -2509,6 +2512,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                     options_i = options
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
+                breakpoint()
+                # I think we need to create a new Variable to properly model the output of the functional CA call
+                # it's wrong that we even end up here, target_cls is TensorVariable
                 unpacked.append(
                     wrap_fx_proxy_cls(
                         target_cls=target_cls,

@@ -164,12 +164,16 @@ class AutogradCompilerInstance:
         self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
-        self.shape_env = ShapeEnv()
-        self.fake_tensor_mode = FakeTensorMode(
-            allow_fallback_kernels=True,
-            allow_non_fake_inputs=True,
-            shape_env=self.shape_env,
-        )
+        if ctx := torch._guards.TracingContext.try_get():
+            self.shape_env = ctx.fake_mode.shape_env
+            self.fake_tensor_mode = ctx.fake_mode
+        else:
+            self.shape_env = ShapeEnv()
+            self.fake_tensor_mode = FakeTensorMode(
+                allow_fallback_kernels=True,
+                allow_non_fake_inputs=True,
+                shape_env=self.shape_env,
+            )
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
@@ -808,16 +812,19 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, packed_inputs):
-            global in_compiled_autograd_region
-            try:
-                in_compiled_autograd_region = True
-                for i in runtime_inputs_to_move:
-                    inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
+            # prior = torch._C._dynamo.eval_frame.set_eval_frame(None)
+            return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
+            # torch._C._dynamo.eval_frame.set_eval_frame(prior)
+            # global in_compiled_autograd_region
+            # try:
+            #     in_compiled_autograd_region = True
+            #     for i in runtime_inputs_to_move:
+            #         inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with _disable(), make_compile_context(self.id):
-                    return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
-            finally:
-                in_compiled_autograd_region = False
+            #     with _disable(), make_compile_context(self.id):
+            #         return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
+            # finally:
+            #     in_compiled_autograd_region = False
 
         get_chromium_event_logger().log_event_end(
             "compiled_autograd",

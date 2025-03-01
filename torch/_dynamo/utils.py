@@ -466,6 +466,7 @@ class CompileEventLogger:
         chromium_log = get_chromium_event_logger()
         top_event = chromium_log.get_outermost_event()
         if top_event is None:
+            return
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
             )

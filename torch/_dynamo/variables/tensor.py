@@ -577,6 +577,9 @@ class TensorVariable(VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
+        # if name == "backward":
+        #     breakpoint()
+
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
 
