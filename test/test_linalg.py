@@ -4655,12 +4655,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
-        import tempfile
         import os
-
-        # Pointing to temp files. The test cannot remove them on Windows because
-        # they are in use and locked
-        tmp_dir = tempfile.mkdtemp()
 
         ordinal = torch.cuda.current_device()
 
@@ -4670,8 +4665,8 @@ class TestLinalg(TestCase):
             set_tunableop_defaults()
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
-            result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
-            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+            result_filename = f"tunableop_results{ordinal}.csv"
+            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", "tunableop_untuned.csv")
             torch.cuda.tunable.set_filename(result_filename)
 
             torch.cuda.tunable.enable()
@@ -4689,7 +4684,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
+            untuned_filename = f"tunableop_untuned{ordinal}.csv"
             self.assertTrue(os.path.exists(untuned_filename))
 
             # tuning the untuned GEMMs in file
