@@ -676,37 +676,6 @@ class TestCutlassBackend(TestCase):
         )
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "FIXME: Disabled temporarily since crashing in subprocess")
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
-    ):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        def mm(a, b, bias):
-            return torch.nn.functional.linear(a, b, bias)
-
-        a = torch.randn(2048, 4096).cuda().half()
-        bias = torch.randn(2048).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            Y = mm(a, a, bias)
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
