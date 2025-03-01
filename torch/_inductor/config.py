@@ -395,6 +395,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+# NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
@@ -1299,7 +1300,9 @@ class cuda:
 
     # Keep only Cutlass op configs which contain this regular expression pattern
     # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
-    cutlass_op_allowlist_regex: Optional[str] = None
+    cutlass_op_allowlist_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ALLOWLIST"
+    )
 
     # Note: Names of Cutlass ops names can be obtained by calling
     # op.configuration_name() on a Cutlass op instance, for example those
@@ -1310,7 +1313,9 @@ class cuda:
     # Set this to "pingpong" to avoid numerical issues
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
-    cutlass_op_denylist_regex: Optional[str] = None
+    cutlass_op_denylist_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_DENYLIST"
+    )
 
     # Non-negative integer which determines how many kernels are instantiated.
     # 0 = 0000 generates the fewest kernels, 9999 generates all possible combinations.
