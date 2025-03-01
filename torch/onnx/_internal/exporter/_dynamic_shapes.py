@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from typing import Any, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.export.dynamic_shapes import _Dim, _DimHint
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.utils import _pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def from_dynamic_axes_to_dynamic_shapes(
@@ -156,7 +160,12 @@ def _any_str_or_dim_in_dynamic_shapes(
 ) -> bool:
     """Check if there is any string or _Dim in the dynamic_shapes."""
     flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
-    if any(not isinstance(axes, (dict, list, tuple)) for axes in flat_dynamic_shapes):
+    # This indicates the dynamic_shapes includes something we don't support in axes, and it's flattened
+    # to itself. Otherwise, flat_dynamic_shapes should be a list of dict/list/tuple (or None).
+    if any(
+        not isinstance(axes, (dict, list, tuple)) and axes is not None
+        for axes in flat_dynamic_shapes
+    ):
         return False
     # both str and _Dim can provide custom names
     for axes in flat_dynamic_shapes:

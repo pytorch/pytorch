@@ -135,12 +135,12 @@ def _get_state_dict_2d_layout(
     for key, value in state_dict.items():
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
-            assert (
-                len(value.local_shards()) == 1
-            ), "Cannot handle ST with multiple shards"
-            assert isinstance(
-                value, ShardedTensor
-            ), "Can only handle nested ShardedTensor"
+            assert len(value.local_shards()) == 1, (
+                "Cannot handle ST with multiple shards"
+            )
+            assert isinstance(value, ShardedTensor), (
+                "Can only handle nested ShardedTensor"
+            )
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
