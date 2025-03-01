@@ -125,13 +125,12 @@ def _propagate_tensor_meta(
 # NOTE: The implementation follows torch._decomp.decomposition._log_softmax,
 # with all_reduce manually inserted to perform distributed computation.
 def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
-    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    x = x.to(computation_dtype)
+    x = x.to(dtype=computation_dtype, memory_format=torch.contiguous_format)
     if x.numel() == 0:
         shifted = x
     else:

@@ -63,5 +63,16 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
+dynamic_sources: str = Config(
+    env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
+)
+"""
+Comma delimited list of sources that should be marked as dynamic. Primarily useful for large
+models with graph breaks where you need intermediate tensors and ints to be marked dynamic.
+
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
+"""
+
 
 install_config_module(sys.modules[__name__])
