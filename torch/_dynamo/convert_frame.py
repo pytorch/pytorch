@@ -945,7 +945,7 @@ def _compile(
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
             recompile_reason = (
-                "Unable to find recompilation reasons" if not reasons else reasons[-1]
+                "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
