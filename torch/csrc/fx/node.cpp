@@ -3,8 +3,11 @@
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <algorithm>
 
 namespace {
+
+struct NodeBase;
 
 // Thrown to exit out of a C++ function and return an error to Python.
 class PythonError : public std::exception {};
@@ -144,6 +147,52 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   }
 }
 
+template <typename F>
+inline static void visit_nodes(PyObject* a, F fn) {
+  // Like map_aggregate, but does not return anything and skips non-NodeBase's
+  // Case 1: a is a tuple.
+  if (PyTuple_Check(a)) {
+    Py_ssize_t n = PyTuple_GET_SIZE(a);
+    for (Py_ssize_t i = 0; i < n; i++) {
+      PyObject* elem = PyTuple_GET_ITEM(a, i); // Borrowed reference.
+      visit_nodes(elem, fn);
+    }
+  }
+  // Case 2: a is a list.
+  else if (PyList_Check(a)) {
+    Py_ssize_t n = PyList_GET_SIZE(a);
+    for (Py_ssize_t i = 0; i < n; i++) {
+      PyObject* elem = PyList_GET_ITEM(a, i); // borrowed ref
+      visit_nodes(elem, fn);
+    }
+  }
+  // Case 3: a is a dict.
+  else if (PyDict_Check(a)) {
+    PyObject *key = nullptr, *value = nullptr; // borrowed
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(a, &pos, &key, &value)) {
+      visit_nodes(value, fn);
+    }
+  }
+  // Case 4: a is a slice.
+  else if (PySlice_Check(a)) {
+    // Get start, stop, and step attributes.
+    THPObjectPtr start(PyObject_GetAttrString(a, "start"));
+    THPObjectPtr stop(PyObject_GetAttrString(a, "stop"));
+    THPObjectPtr step(PyObject_GetAttrString(a, "step"));
+    if (!start || !stop || !step) {
+      throw PythonError();
+    }
+    visit_nodes(start, fn);
+    visit_nodes(stop, fn);
+    visit_nodes(step, fn);
+  }
+  // Default case: call fn(a).
+  else if (is_node(a)) {
+    fn(reinterpret_cast<NodeBase*>(a));
+  }
+}
+
 ////////////////////////////////
 // NodeBase
 ///////////////////////////////
@@ -153,6 +202,18 @@ struct NodeBase {
   bool _erased;
   NodeBase* _prev;
   NodeBase* _next;
+  PyObject* graph;
+  PyObject* name;
+  PyObject* op;
+  PyObject* target;
+  PyObject* type;
+  PyObject* _input_nodes;
+  PyObject* _args;
+  PyObject* _kwargs;
+  PyObject* users;
+  PyObject* _repr_fn;
+  PyObject* meta;
+  PyObject* _sort_key;
 };
 
 static PyObject* NodeBase_new(
@@ -166,11 +227,31 @@ static PyObject* NodeBase_new(
 }
 
 static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
+  PyObject* graph = nullptr;
+  PyObject* name = nullptr;
+  PyObject* op = nullptr;
+  PyObject* target = nullptr;
+  PyObject* type = nullptr;
+  if (!PyArg_ParseTuple(args, "OOOOO", &graph, &name, &op, &target, &type)) {
+    return -1;
+  }
   self->_erased = false;
   Py_INCREF(self);
   self->_prev = self;
   Py_INCREF(self);
   self->_next = self;
+  self->graph = Py_NewRef(graph);
+  self->name = Py_NewRef(name);
+  self->op = Py_NewRef(op);
+  self->target = Py_NewRef(target);
+  self->type = Py_NewRef(type);
+  self->_input_nodes = PyDict_New();
+  self->_args = nullptr; // set with _update_args_kwargs
+  self->_kwargs = nullptr; // set with _update_args_kwargs
+  self->users = PyDict_New();
+  self->_repr_fn = Py_NewRef(Py_None);
+  self->meta = PyDict_New();
+  self->_sort_key = PyTuple_New(0);
   return 0;
 }
 
@@ -179,18 +260,54 @@ static struct PyMemberDef NodeBase_members[] = {
     {"_erased", T_BOOL, offsetof(NodeBase, _erased), 0, nullptr},
     {"_prev", T_OBJECT_EX, offsetof(NodeBase, _prev), 0, nullptr},
     {"_next", T_OBJECT_EX, offsetof(NodeBase, _next), 0, nullptr},
+    {"graph", T_OBJECT_EX, offsetof(NodeBase, graph), 0, nullptr},
+    {"name", T_OBJECT_EX, offsetof(NodeBase, name), 0, nullptr},
+    {"op", T_OBJECT_EX, offsetof(NodeBase, op), 0, nullptr},
+    {"target", T_OBJECT_EX, offsetof(NodeBase, target), 0, nullptr},
+    {"type", T_OBJECT_EX, offsetof(NodeBase, type), 0, nullptr},
+    {"_input_nodes", T_OBJECT_EX, offsetof(NodeBase, _input_nodes), 0, nullptr},
+    {"_args", T_OBJECT_EX, offsetof(NodeBase, _args), 0, nullptr},
+    {"_kwargs", T_OBJECT_EX, offsetof(NodeBase, _kwargs), 0, nullptr},
+    {"users", T_OBJECT_EX, offsetof(NodeBase, users), 0, nullptr},
+    {"_repr_fn", T_OBJECT_EX, offsetof(NodeBase, _repr_fn), 0, nullptr},
+    {"meta", T_OBJECT_EX, offsetof(NodeBase, meta), 0, nullptr},
+    {"_sort_key", T_OBJECT_EX, offsetof(NodeBase, _sort_key), 0, nullptr},
     {nullptr} /* Sentinel */
 };
 
 static int NodeBase_traverse(NodeBase* self, visitproc visit, void* arg) {
   Py_VISIT(self->_prev);
   Py_VISIT(self->_next);
+  Py_VISIT(self->graph);
+  Py_VISIT(self->name);
+  Py_VISIT(self->op);
+  Py_VISIT(self->target);
+  Py_VISIT(self->type);
+  Py_VISIT(self->_input_nodes);
+  Py_VISIT(self->_args);
+  Py_VISIT(self->_kwargs);
+  Py_VISIT(self->users);
+  Py_VISIT(self->_repr_fn);
+  Py_VISIT(self->meta);
+  Py_VISIT(self->_sort_key);
   return 0;
 }
 
 static int NodeBase_clear(NodeBase* self) {
   Py_CLEAR(self->_prev);
   Py_CLEAR(self->_next);
+  Py_CLEAR(self->graph);
+  Py_CLEAR(self->name);
+  Py_CLEAR(self->op);
+  Py_CLEAR(self->target);
+  Py_CLEAR(self->type);
+  Py_CLEAR(self->_input_nodes);
+  Py_CLEAR(self->_args);
+  Py_CLEAR(self->_kwargs);
+  Py_CLEAR(self->users);
+  Py_CLEAR(self->_repr_fn);
+  Py_CLEAR(self->meta);
+  Py_CLEAR(self->_sort_key);
   return 0;
 }
 
@@ -199,6 +316,76 @@ static void NodeBase_dealloc(PyObject* self) {
   (void)NodeBase_clear((NodeBase*)self);
   Py_TYPE(self)->tp_free(self);
 }
+
+static PyObject* NodeBase__update_args_kwargs(
+    PyObject* self_,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  // Verify argument count
+  if (nargs != 2) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "_update_args_kwargs() requires exactly 2 arguments (new_args, new_kwargs)");
+    return nullptr;
+  }
+  NodeBase* self = reinterpret_cast<NodeBase*>(self_);
+  PyObject* new_args = args[0]; // expected to be a tuple
+  PyObject* new_kwargs = args[1]; // expected to be a dict
+
+  // For each old_use in self._input_nodes.keys(), do old_use.users.pop(self)
+  // We assume node->_input_nodes is a dict of {NodeObject: None}.
+  // We want to remove 'self' from each old_use->users.
+  PyObject *key = nullptr, *value = nullptr; // borrowed
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(self->_input_nodes, &pos, &key, &value)) {
+    // Remove (self) from old_use->users
+    NodeBase* old_node = reinterpret_cast<NodeBase*>(key);
+    // old_node->users.pop(self)
+    if (PyDict_DelItem(old_node->users, self_) < 0) {
+      PyErr_Clear();
+    }
+  }
+  PyDict_Clear(self->_input_nodes);
+
+  auto visit_fn = [self](NodeBase* x) {
+    // self._input_nodes.setdefault(x)
+    if (!PyDict_SetDefault(
+            self->_input_nodes, reinterpret_cast<PyObject*>(x), Py_None)) {
+      throw PythonError();
+    }
+    // x.users.setdefault(self)
+    if (!PyDict_SetDefault(
+            x->users, reinterpret_cast<PyObject*>(self), Py_None)) {
+      throw PythonError();
+    }
+  };
+
+  try {
+    visit_nodes(new_args, visit_fn);
+    visit_nodes(new_kwargs, visit_fn);
+  } catch (const PythonError& e) {
+    return nullptr;
+  }
+
+  Py_INCREF(new_args);
+  Py_CLEAR(self->_args);
+  self->_args = new_args;
+
+  Py_INCREF(new_kwargs);
+  Py_CLEAR(self->_kwargs);
+  self->_kwargs = new_kwargs;
+
+  Py_RETURN_NONE;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static PyMethodDef NodeBase_methods[] = {
+    {"_update_args_kwargs",
+     (PyCFunction)(void*)(NodeBase__update_args_kwargs),
+     METH_FASTCALL,
+     "Internal method: do not call directly."},
+    {nullptr, nullptr, 0, nullptr} // Sentinel
+};
 
 PyTypeObject NodeBaseType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
@@ -229,7 +416,7 @@ PyTypeObject NodeBaseType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
+    NodeBase_methods, /* tp_methods */
     NodeBase_members, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */
