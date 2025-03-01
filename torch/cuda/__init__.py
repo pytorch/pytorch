@@ -419,7 +419,7 @@ def cudart():
         >>> from torch.cuda import cudart, check_error
         >>> import os
         >>>
-        >>> os.environ["CUDA_PROFILE"] = "1"
+        >>> os.environ['CUDA_PROFILE'] = '1'
         >>>
         >>> def perform_cuda_operations_with_streams():
         >>>     stream = torch.cuda.Stream()
@@ -607,7 +607,6 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
-
     cur_stream: Optional["torch.cuda.Stream"]
 
     def __init__(self, stream: Optional["torch.cuda.Stream"]):
@@ -1761,6 +1760,8 @@ __all__ = [
     "graphs",
     "has_half",
     "has_magma",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
     "init",
     "initial_seed",
     "ipc_collect",
@@ -1797,9 +1798,11 @@ __all__ = [
     "nvtx",
     "profiler",
     "random",
+    "reset_accumulated_host_memory_stats",
     "reset_accumulated_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
+    "reset_peak_host_memory_stats",
     "reset_peak_memory_stats",
     "seed",
     "seed_all",

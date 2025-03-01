@@ -112,7 +112,6 @@ environment variables take precedence over any setting you manipulate using the
 C++ or Python APIs.
 
 """
-
 import concurrent.futures
 import glob
 import multiprocessing as mp
