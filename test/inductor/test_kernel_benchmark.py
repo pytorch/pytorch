@@ -136,7 +136,6 @@ class TestKernelBenchmark(TestCase):
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
-    @expectedFailureXPU
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
