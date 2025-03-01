@@ -114,8 +114,6 @@ class OperatorBase:
         # HigherOrderOperator
         self.functorch_table = {}
 
-        self.needs_keyset = set()
-
     def __call__(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -142,7 +140,7 @@ class OperatorBase:
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
-                # assert k not in self.python_key_table
+                assert k not in self.python_key_table
                 # TODO(voz): Should we replace setting DispatchKey.Python entirely with setting mode keys?
                 self.python_key_table[k] = Kernel(fn, False)
                 self._dispatch_cache.clear()
@@ -470,14 +468,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         if dispatch_key != DispatchKey.PreDispatch:
             self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
-        if final_key in self.needs_keyset:
-            key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return kernel(key_set, *args, **kwargs)
-        else:
-            # It's illegal to register DispatchKey to py_kernels, since there's no
-            # C++ kernel to call into
-            assert not isinstance(kernel, DispatchKey)
-            return kernel(*args, **kwargs)
+        # It's illegal to register DispatchKey to py_kernels, since there's no
+        # C++ kernel to call into
+        assert not isinstance(kernel, DispatchKey)
+        return kernel(*args, **kwargs)
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
