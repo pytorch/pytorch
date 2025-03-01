@@ -74,7 +74,6 @@ from .common import (
     DeferredLine,
     IndentedBuffer,
     InplacedBuffer,
-    is_buffer_removed,
     OpOverrides,
     PythonPrinter,
     RemovedArg,
@@ -3142,8 +3141,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for block_ptr, advancement in self.pointer_advancements[
                         tree.symt
                     ].items():
-                        if is_buffer_removed(self.block_ptr_to_buffer[block_ptr]):
-                            continue
                         # Subtract any advancements made in the previous loop level.
                         if level < len(loop_trees) - 1:
                             prev_tree = loop_trees[level + 1]
@@ -3158,7 +3155,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             ]
 
                         self.body.writeline(
-                            f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})"
+                            DeferredLine(
+                                self.block_ptr_to_buffer[block_ptr],
+                                f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})",
+                            )
                         )
 
                 # Invalidate any cache entries that came from inside the loop.

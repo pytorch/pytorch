@@ -1,7 +1,6 @@
 """
 Contains utility functions to check if a pattern is in the graph and return the matching nodes
 """
-
 from typing import Any, Optional, Union
 
 import torch
