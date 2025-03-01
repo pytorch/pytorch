@@ -56,9 +56,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.allow_stack_allocation: Optional[
-            bool
-        ] = config.aot_inductor.allow_stack_allocation
+        self.allow_stack_allocation: Optional[bool] = (
+            config.aot_inductor.allow_stack_allocation
+        )
         self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
@@ -126,12 +126,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        assert (
-            not gpu
-        ), "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
-        assert arg_types is not None and len(call_args) == len(
-            arg_types
-        ), "Mismatch call_args and arg_types in generate_kernel_call"
+        assert not gpu, (
+            "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+        )
+        assert arg_types is not None and len(call_args) == len(arg_types), (
+            "Mismatch call_args and arg_types in generate_kernel_call"
+        )
         new_args = []
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
@@ -328,9 +328,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
-                        assert (
-                            dtype is not None
-                        ), "Fails to get the dtype of the sympy.Expr"
+                        assert dtype is not None, (
+                            "Fails to get the dtype of the sympy.Expr"
+                        )
                         self.codegen_tensor_item(
                             dtype, f"inputs[{idx}]", input_key, self.prefix
                         )
@@ -724,9 +724,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
-                assert (
-                    reduce is None
-                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+                assert reduce is None, (
+                    "Expect reduce to be None for aten.scatter_ with scalar src"
+                )
         line += ");"
         self.writeline(line)
 

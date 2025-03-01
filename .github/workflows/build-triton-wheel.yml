@@ -48,7 +48,11 @@ jobs:
         device: ["cuda", "rocm", "xpu"]
         docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
         exclude:
+          # TODO: Remove this for rocm when manylinux2_28 migration for xpu is done
           - device: "rocm"
+            docker-image: "pytorch/manylinux-builder:cpu"
+          # TODO: Remove this for cuda when manylinux2_28 migration for xpu is done
+          - device: "cuda"
             docker-image: "pytorch/manylinux-builder:cpu"
           - device: "xpu"
             docker-image: "pytorch/manylinux2_28-builder:cpu"
@@ -57,13 +61,15 @@ jobs:
             rocm_version: "6.3"
           - device: "cuda"
             rocm_version: ""
+          # TODO: Remove this for xpu when manylinux2_28 migration for xpu is done
+          - device: "xpu"
+            docker-image: "pytorch/manylinux-builder:cpu"
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
-      # TODO: We need to get rid of this when we remove builds that rely on the base manylinux-builder image
-      PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
+      PLATFORM: 'manylinux_2_28_x86_64'
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -132,11 +138,12 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
-          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") && "${PLATFORM}" == "manylinux_2_28_x86_64" ]]; then
+          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
+          # TODO: Remove this conditional block when manylinux2_28 migration for xpu is done
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
             docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
