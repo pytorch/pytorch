@@ -9795,6 +9795,8 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp32(self):
         self._test_sdpa_mask(torch.float32)
+        # Test twice to catch https://github.com/pytorch/pytorch/issues/148194
+        self._test_sdpa_mask(torch.float32)
 
     def test_sdpa_mask_fp16(self):
         self._test_sdpa_mask(torch.float16)
