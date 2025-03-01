@@ -884,7 +884,7 @@ def register_onednn_fusion_ops():
             x_size = x.get_size()
             x2_size = x2.get_size()
             assert len(x_size) == len(x2_size)
-            if len(x_size) > 2 and binary_attr == "add":
+            if len(x_size) > 2 and (binary_attr == "add" or binary_attr == "sum"):
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
                 x2 = view(x2, [-1, x2_size[-1]])
@@ -1159,7 +1159,7 @@ def register_onednn_fusion_ops():
                 layout,
                 input_gen_fns=input_gen_fns,
             )
-            if len(x_size) > 2 and binary_attr == "add":
+            if len(x_size) > 2 and (binary_attr == "add" or binary_attr == "sum"):
                 result = view(result, (*x_size[:-1], result.get_size()[-1]))
             return result
 
