@@ -1973,7 +1973,10 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            if (
+            if self.source.name() in get_dynamic_sources():
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                dynamic_dim = DimDynamic.DYNAMIC
+            elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
@@ -2664,6 +2667,21 @@ def get_automatic_dynamic_shapes_mark_as():
         )
 
 
+_DYNAMIC_SOURCES: Optional[set[str]] = None
+
+
+def get_dynamic_sources() -> set[str]:
+    global _DYNAMIC_SOURCES
+    if _DYNAMIC_SOURCES is not None:
+        return _DYNAMIC_SOURCES
+
+    _DYNAMIC_SOURCES = set(
+        torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
+    )
+
+    return _DYNAMIC_SOURCES
+
+
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
 @dataclasses.dataclass
@@ -2694,6 +2712,7 @@ def _automatic_dynamic(
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
+    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2732,7 +2751,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes:
+    if static_shapes and name not in dynamic_sources:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -2852,6 +2871,11 @@ def _automatic_dynamic(
         automatic_dynamic_stride = (
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
+
+        if name in dynamic_sources:
+            log.debug("%s marked dynamic via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 

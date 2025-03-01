@@ -93,7 +93,6 @@ class GroupNorm(torch.nn.GroupNorm):
         * **zero_point** - quantization zero point of the output, type: long.
 
     """
-
     __constants__ = ["num_groups", "num_channels", "eps", "affine"]
 
     def __init__(

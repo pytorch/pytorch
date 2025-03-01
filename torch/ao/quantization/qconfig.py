@@ -98,8 +98,7 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
 
       my_qconfig = QConfig(
           activation=MinMaxObserver.with_args(dtype=torch.qint8),
-          weight=default_observer.with_args(dtype=torch.qint8),
-      )
+          weight=default_observer.with_args(dtype=torch.qint8))
 
     """
 
@@ -562,9 +561,9 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
                 torch.ao.quantization.MovingAveragePerChannelMinMaxObserver,
             ),
         )
-        assert not is_per_channel, (
-            "Per channel weight observer is not supported yet for ConvTranspose{n}d."
-        )
+        assert (
+            not is_per_channel
+        ), "Per channel weight observer is not supported yet for ConvTranspose{n}d."
 
 
 QConfigAny = Optional[QConfig]

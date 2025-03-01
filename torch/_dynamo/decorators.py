@@ -26,6 +26,7 @@ from .eval_frame import (
     DynamoStance,
     innermost_fn,
     RunOnlyContext,
+    skip_code,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        skip_code,
         unsupported,
     )
 
