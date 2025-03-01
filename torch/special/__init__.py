@@ -133,7 +133,9 @@ Example::
     >>> torch.special.digamma(a)
     tensor([-0.5772, -1.9635])
 
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 gammaln = _add_docstr(
@@ -159,7 +161,9 @@ Example::
     >>> torch.special.gammaln(a)
     tensor([ 0.5724,  0.0000, -0.1208])
 
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 polygamma = _add_docstr(
@@ -194,7 +198,9 @@ Example::
     tensor([ 6.4939, 97.4091])
     >>> torch.special.polygamma(4, a)
     tensor([ -24.8863, -771.4742])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 erf = _add_docstr(
@@ -218,7 +224,9 @@ Example::
 
     >>> torch.special.erf(torch.tensor([0, -1., 10.]))
     tensor([ 0.0000, -0.8427,  1.0000])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 erfc = _add_docstr(
@@ -243,7 +251,9 @@ Example::
 
     >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 erfcx = _add_docstr(
@@ -271,7 +281,9 @@ Example::
 
     >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 5.0090, 0.0561])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 erfinv = _add_docstr(
@@ -297,7 +309,9 @@ Example::
 
     >>> torch.special.erfinv(torch.tensor([0, 0.5, -1.]))
     tensor([ 0.0000,  0.4769,    -inf])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 logit = _add_docstr(
@@ -335,7 +349,9 @@ Example::
     tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
     >>> torch.special.logit(a, eps=1e-6)
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 logsumexp = _add_docstr(
@@ -344,7 +360,9 @@ logsumexp = _add_docstr(
 logsumexp(input, dim, keepdim=False, *, out=None)
 
 Alias for :func:`torch.logsumexp`.
-""".format(**multi_dim_common),
+""".format(
+        **multi_dim_common
+    ),
 )
 
 expit = _add_docstr(
@@ -371,7 +389,9 @@ Example::
     tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
     >>> torch.special.expit(t)
     tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 exp2 = _add_docstr(
@@ -396,7 +416,9 @@ Example::
 
     >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
     tensor([ 1.,  2.,  8., 16.])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 expm1 = _add_docstr(
@@ -424,7 +446,9 @@ Example::
 
     >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 xlog1py = _add_docstr(
@@ -469,7 +493,9 @@ Example::
     tensor([1.6094, 3.2189, 4.8283])
     >>> torch.special.xlog1py(2, y)
     tensor([2.7726, 2.1972, 1.3863])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 xlogy = _add_docstr(
@@ -514,7 +540,9 @@ Example::
     tensor([1.3863, 2.7726, 4.1589])
     >>> torch.special.xlogy(2, y)
     tensor([2.1972, 1.3863, 0.0000])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 i0 = _add_docstr(
@@ -540,7 +568,9 @@ Example::
     >>> torch.i0(torch.arange(5, dtype=torch.float32))
     tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
 
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 i0e = _add_docstr(
@@ -564,7 +594,9 @@ Keyword args:
 Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 i1 = _add_docstr(
@@ -588,7 +620,9 @@ Keyword args:
 Example::
     >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 i1e = _add_docstr(
@@ -613,7 +647,9 @@ Keyword args:
 Example::
     >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 ndtr = _add_docstr(
@@ -637,7 +673,9 @@ Keyword args:
 Example::
     >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 ndtri = _add_docstr(
@@ -664,7 +702,9 @@ Keyword args:
 Example::
     >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 log_ndtr = _add_docstr(
@@ -688,7 +728,9 @@ Keyword args:
 Example::
     >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 log1p = _add_docstr(
@@ -728,7 +770,9 @@ Example::
     tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
     >>> torch.special.sinc(t)
     tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 round = _add_docstr(
@@ -831,7 +875,9 @@ Example::
     tensor([1.6449, 0.0823])
     >>> torch.special.zeta(2, torch.tensor([1., 2.]))
     tensor([1.6449, 0.6449])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 multigammaln = _add_docstr(
@@ -868,7 +914,9 @@ Example::
     >>> torch.special.multigammaln(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 gammainc = _add_docstr(
@@ -917,7 +965,9 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 gammaincc = _add_docstr(
@@ -965,7 +1015,9 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 airy_ai = _add_docstr(
@@ -982,7 +1034,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 bessel_j0 = _add_docstr(
@@ -999,7 +1053,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 bessel_j1 = _add_docstr(
@@ -1016,7 +1072,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 bessel_y0 = _add_docstr(
@@ -1033,7 +1091,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 bessel_y1 = _add_docstr(
@@ -1050,7 +1110,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 chebyshev_polynomial_t = _add_docstr(
@@ -1081,7 +1143,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 chebyshev_polynomial_u = _add_docstr(
@@ -1113,7 +1177,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 chebyshev_polynomial_v = _add_docstr(
@@ -1131,7 +1197,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 chebyshev_polynomial_w = _add_docstr(
@@ -1149,7 +1217,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 hermite_polynomial_h = _add_docstr(
@@ -1175,7 +1245,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 hermite_polynomial_he = _add_docstr(
@@ -1201,7 +1273,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 laguerre_polynomial_l = _add_docstr(
@@ -1227,7 +1301,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 legendre_polynomial_p = _add_docstr(
@@ -1253,7 +1329,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 modified_bessel_i0 = _add_docstr(
@@ -1270,7 +1348,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 modified_bessel_i1 = _add_docstr(
@@ -1287,7 +1367,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 modified_bessel_k0 = _add_docstr(
@@ -1304,7 +1386,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 modified_bessel_k1 = _add_docstr(
@@ -1321,7 +1405,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 scaled_modified_bessel_k0 = _add_docstr(
@@ -1338,7 +1424,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 scaled_modified_bessel_k1 = _add_docstr(
@@ -1355,7 +1443,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 shifted_chebyshev_polynomial_t = _add_docstr(
@@ -1373,7 +1463,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 shifted_chebyshev_polynomial_u = _add_docstr(
@@ -1391,7 +1483,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 shifted_chebyshev_polynomial_v = _add_docstr(
@@ -1409,7 +1503,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 shifted_chebyshev_polynomial_w = _add_docstr(
@@ -1427,7 +1523,9 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )
 
 spherical_bessel_j0 = _add_docstr(
@@ -1444,5 +1542,7 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args),
+""".format(
+        **common_args
+    ),
 )

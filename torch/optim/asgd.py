@@ -299,9 +299,7 @@ def _multi_tensor_asgd(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ), (
-            f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]
