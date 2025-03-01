@@ -584,7 +584,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
     {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
-
+    const auto buf_size = K * {{block_n}};
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
