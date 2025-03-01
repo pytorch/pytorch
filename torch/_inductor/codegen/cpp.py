@@ -5416,9 +5416,9 @@ class LoopNest:
         return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
     def mark_parallel(self, par_depth):
-        assert (
-            par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth
-        ), "Parallel depth cannot exceed the maximal allowed parallel depth"
+        assert par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth, (
+            "Parallel depth cannot exceed the maximal allowed parallel depth"
+        )
         assert self.loops is not None
         assert len(self.loops) >= par_depth.parallel_depth
         loop = self.loops[par_depth.start_depth]
