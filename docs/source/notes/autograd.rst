@@ -569,7 +569,81 @@ have access to :math:`\frac{\partial L}{\partial s}`.  If you want
 to skip this derivation, look at the last equation in this section
 and then skip to the next section.
 
-Let’s continue working with :math:`f(z = x + yj) = c * z = c * (x+yj)` as an example, where :math:`c \in ℝ`.
+Let’s continue working with :math:`f: ℂ → ℂ` defined as
+:math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above,
+autograd’s gradient convention is centered around optimization for real
+valued loss functions, so let’s assume :math:`f` is a part of larger
+real valued loss function :math:`g`. Using chain rule, we can write:
+
+    .. math::
+        \frac{\partial L}{\partial z^*} = \frac{\partial L}{\partial u} * \frac{\partial u}{\partial z^*} + \frac{\partial L}{\partial v} * \frac{\partial v}{\partial z^*}
+        :label: [1]
+
+Now using Wirtinger derivative definition, we can write:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial L}{\partial s} = 1/2 * \left(\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j\right) \\
+            \frac{\partial L}{\partial s^*} = 1/2 * \left(\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j\right)
+        \end{aligned}
+
+It should be noted here that since :math:`u` and :math:`v` are real
+functions, and :math:`L` is real by our assumption that :math:`f` is a
+part of a real valued function, we have:
+
+    .. math::
+        \left( \frac{\partial L}{\partial s} \right)^* = \frac{\partial L}{\partial s^*}
+        :label: [2]
+
+i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
+
+Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:`\frac{\partial L}{\partial v}`, we get:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
+            \frac{\partial L}{\partial v} = 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
+        \end{aligned}
+        :label: [3]
+
+Substituting :eq:`[3]` in :eq:`[1]`, we get:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} + 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
+                                            &= \frac{\partial L}{\partial s} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
+        \end{aligned}
+
+Using :eq:`[2]`, we get:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s^*}\right)^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \left(\frac{\partial s}{\partial z}\right)^*  \\
+                                            &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * \left(\frac{\partial s}{\partial z}\right)^* }       \\
+        \end{aligned}
+        :label: [4]
+
+This last equation is the important one for writing your own gradients,
+as it decomposes our derivative formula into a simpler one that is easy
+to compute by hand.
+
+How can I write my own derivative formula for a complex function?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The above boxed equation gives us the general formula for all
+derivatives on complex functions.  However, we still need to
+compute :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}`.
+There are two ways you could do this:
+
+    - The first way is to just use the definition of Wirtinger derivatives directly and calculate :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}` by
+      using :math:`\frac{\partial s}{\partial x}` and :math:`\frac{\partial s}{\partial y}`
+      (which you can compute in the normal way).
+    - The second way is to use the change of variables trick and rewrite :math:`f(z)` as a two variable function :math:`f(z, z^*)`, and compute
+      the conjugate Wirtinger derivatives by treating :math:`z` and :math:`z^*` as independent variables. This is often easier; for example, if the function in question is holomorphic, only :math:`z` will be used (and :math:`\frac{\partial s}{\partial z^*}` will be zero).
+
+Let's consider the function :math:`f(z = x + yj) = c * z = c * (x+yj)` as an example, where :math:`c \in ℝ`.
 
 Using the first way to compute the Wirtinger derivatives, we have.
 
@@ -648,16 +722,12 @@ An example of such pair is:
             os.remove(self.name)
 
     def pack_hook(tensor):
-        if tensor.numel() < SAVE_ON_DISK_THRESHOLD:
-            return tensor
         temp_file = SelfDeletingTempFile()
         torch.save(tensor, temp_file.name)
         return temp_file
 
-    def unpack_hook(tensor_or_sctf):
-        if isinstance(tensor_or_sctf, torch.Tensor):
-            return tensor_or_sctf
-        return torch.load(tensor_or_sctf.name)
+    def unpack_hook(temp_file):
+        return torch.load(temp_file.name)
 
 Notice that the ``unpack_hook`` should not delete the temporary file because it
 might be called multiple times: the temporary file should be alive for as long
@@ -721,9 +791,9 @@ Example:
     # Only save on disk tensors that have size >= 1000
     SAVE_ON_DISK_THRESHOLD = 1000
 
-    def pack_hook(tensor):
-        if tensor.numel() < SAVE_ON_DISK_THRESHOLD:
-            return tensor
+    def pack_hook(x):
+        if x.numel() < SAVE_ON_DISK_THRESHOLD:
+            return x
         temp_file = SelfDeletingTempFile()
         torch.save(tensor, temp_file.name)
         return temp_file
