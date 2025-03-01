@@ -1536,7 +1536,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in additional_inputs.items
             ]
             additional_freevar_fake = [
-                # leaf.node.meta["example_value"].clone() if TensorVariable
                 leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
                 for leaf in combine_freevars_proxy
             ]
