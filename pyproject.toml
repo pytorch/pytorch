@@ -40,7 +40,7 @@ standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
@@ -85,7 +85,6 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
-    "UP006", # keep-runtime-typing
     "UP007", # keep-runtime-typing
 ]
 select = [
@@ -150,6 +149,7 @@ select = [
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "S324", # for hashlib FIPS compliance
     "SLOT",
     "TCH",
     "TRY002", # ban vanilla raise (todo fix NOQAs)

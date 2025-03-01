@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+"""Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+
 from typing import Any
 
 import sympy
@@ -367,9 +368,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -481,7 +482,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             max(
                 next_power_of_2(
                     V.graph.sizevars.size_hint(
-                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
                     )
                     * gqa_shared_heads
                 ),

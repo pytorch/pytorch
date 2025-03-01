@@ -557,9 +557,9 @@ class CppGemmTemplate(CppTemplate):
             thread_block_m = math.ceil(m_blocks / m_factor)
             return GemmBlocking(thread_block_m, thread_block_n, thread_block_k)
 
-        assert (
-            not self.is_dynamic_M
-        ), "Unable to determine thread blocking for dynamic M."
+        assert not self.is_dynamic_M, (
+            "Unable to determine thread blocking for dynamic M."
+        )
         register_blocking = self.register_blocking
         m_blocks = math.ceil(self.m / register_blocking.block_m)
         n_blocks = math.ceil(self.n / register_blocking.block_n)
@@ -673,17 +673,17 @@ class CppGemmTemplate(CppTemplate):
             L1_cache_size = (
                 torch._C._cpu._L1d_cache_size()
             )  # per core cache size in Bytes
-            assert (
-                L1_cache_size > 0
-            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            assert L1_cache_size > 0, (
+                f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            )
             L1 = L1_cache_size * L1_limit_factor
 
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
-            assert (
-                L2_cache_size > 0
-            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            assert L2_cache_size > 0, (
+                f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            )
             L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
@@ -744,9 +744,9 @@ class CppGemmTemplate(CppTemplate):
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
-        assert (
-            not self.is_dynamic_M
-        ), "Unable to determine cache blocking for dynamic M."
+        assert not self.is_dynamic_M, (
+            "Unable to determine cache blocking for dynamic M."
+        )
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
 
@@ -896,7 +896,8 @@ class CppGemmTemplate(CppTemplate):
             num_threads=num_threads,
         )
         assert micro_gemm is not None
-        block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
+        pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
+        micro_gemm.use_local_vnni_blocking(not pre_block_weights)
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
@@ -904,7 +905,9 @@ class CppGemmTemplate(CppTemplate):
             )
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
-            return cls.prep_weight(new_inputs, new_layout, micro_gemm, block_weights)
+            return cls.prep_weight(
+                new_inputs, new_layout, micro_gemm, pre_block_weights
+            )
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -922,7 +925,7 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes, new_layout, micro_gemm, block_weights
+                    new_input_nodes, new_layout, micro_gemm, pre_block_weights
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -948,7 +951,7 @@ class CppGemmTemplate(CppTemplate):
             alpha=alpha,
             has_bias=has_bias,
             epilogue_creator=epilogue_creator,
-            should_block_weights=block_weights,
+            should_block_weights=pre_block_weights,
         )
         template.maybe_append_choice(choices)
         return template
@@ -1001,9 +1004,9 @@ class CppGemmTemplate(CppTemplate):
 
         if should_block_weight:
             blocked_w = cls.block_weight(W, new_size, padding)
+            new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
         else:
             blocked_w = W
-        new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
 
         def _is_int8_gemm(inputs):
             return (
@@ -1111,9 +1114,9 @@ class CppGemmTemplate(CppTemplate):
                     LayoutType.VNNI4,
                 ], f"We only support {layout_str} for now"
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                assert (
-                    k % vnni_size == 0
-                ), f"k should be divisible by vnni_size for {layout_str} layout"
+                assert k % vnni_size == 0, (
+                    f"k should be divisible by vnni_size for {layout_str} layout"
+                )
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
@@ -1316,6 +1319,7 @@ class CppGemmTemplate(CppTemplate):
             num_threads=self.num_threads,
         )
         assert micro_gemm is not None
+        micro_gemm.use_local_vnni_blocking(not self.should_block_weights)
         assert self.register_blocking == micro_gemm.register_blocking
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
