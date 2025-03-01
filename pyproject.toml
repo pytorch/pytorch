@@ -1,6 +1,7 @@
 [build-system]
 requires = [
-    "setuptools",
+    # min version for recursive glob package data support
+    "setuptools>=62.3.0",
     "wheel",
     "astunparse",
     "numpy",
