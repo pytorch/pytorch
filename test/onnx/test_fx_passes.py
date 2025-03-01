@@ -31,9 +31,9 @@ class TestFxPasses(common_utils.TestCase):
         name_to_node = {node.name: node for node in gm.graph.nodes}
         pass_utils.set_node_name(nodes[0], base_name, name_to_node)
         assert nodes[0].name == base_name, f"Expected {base_name}, got {nodes[0].name}"
-        assert len({node.name for node in nodes}) == len(
-            nodes
-        ), f"Expected all names to be unique, got {nodes}"
+        assert len({node.name for node in nodes}) == len(nodes), (
+            f"Expected all names to be unique, got {nodes}"
+        )
 
     def test_set_node_name_succeeds_when_no_name_collisions(self):
         def func(x, y, z):
@@ -51,9 +51,9 @@ class TestFxPasses(common_utils.TestCase):
         name_to_node = {node.name: node for node in nodes}
         pass_utils.set_node_name(nodes[1], new_name, name_to_node)
         assert nodes[1].name == new_name, f"Expected {new_name}, got {nodes[0].name}"
-        assert len({node.name for node in nodes}) == len(
-            nodes
-        ), f"Expected all names to be unique, got {nodes}"
+        assert len({node.name for node in nodes}) == len(nodes), (
+            f"Expected all names to be unique, got {nodes}"
+        )
 
 
 if __name__ == "__main__":

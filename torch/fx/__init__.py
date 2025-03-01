@@ -84,6 +84,7 @@ Several example transformations can be found at the
 repository.
 '''
 
+from torch.fx import immutable_collections
 from torch.fx._symbolic_trace import (  # noqa: F401
     PH,
     ProxyableClassMeta,
