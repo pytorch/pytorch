@@ -4133,8 +4133,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
                 # check that there is no outer loop fusion.
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
