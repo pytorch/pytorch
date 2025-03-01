@@ -5354,7 +5354,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
-        return cls.require_exact_strides(x, ir.FlexibleLayout.contiguous_strides(x.get_size()))
+        return cls.require_exact_strides(x, FlexibleLayout.contiguous_strides(x.get_size()))
 
     def apply_constraint(self) -> None:
         pass
