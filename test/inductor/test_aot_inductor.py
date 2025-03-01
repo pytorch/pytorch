@@ -62,6 +62,7 @@ if HAS_GPU:
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
         add_kernel_autotuned_weird_param_order,
+        add_kernel_with_none_param_and_equal_to_1_arg,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
         add_kernel_with_tma_1d,
@@ -2718,6 +2719,46 @@ class AOTInductorTestsTemplate:
             torch.randn(1, device=self.device),
         )
 
+        self.check_model(Model(), example_inputs)
+
+    def test_triton_kernel_with_none_inputs_and_equal_to_1_arg(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                n_elements = x.size()[0]
+                BLOCK_SIZE = 1024
+                out1 = torch.empty_like(x)
+                out2 = torch.empty_like(x)
+                # Run the same kernel multiple times to test the optimization
+                # of removing None arguments and then update the indices of
+                # equal_to_1 arguments. The None arguments need to be before
+                # the equal_to_1 arguments
+                add_kernel_with_none_param_and_equal_to_1_arg[(1,)](
+                    x,
+                    None,
+                    out1,
+                    n_elements,
+                    x.stride(0),  # equal to 1
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                add_kernel_with_none_param_and_equal_to_1_arg[(1,)](
+                    2.71 * out1,
+                    None,
+                    out2,
+                    n_elements,
+                    x.stride(0),  # equal to 1
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                return out2
+
+        example_inputs = (torch.randn(1023, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("dynamic", [False, True])
