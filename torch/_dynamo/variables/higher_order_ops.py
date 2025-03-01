@@ -233,7 +233,7 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     ), "inputs to function body cannot alias outputs"
 
 
-def check_subgraph_args_types(args):
+def _check_all_tensorvariable(args):
     from . import TensorVariable
 
     if not all(type(a.realize()) is TensorVariable for a in args):
@@ -1430,11 +1430,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         import functools
 
-        from torch._higher_order_ops.scan import (
-            _extract_carry_and_out,
-            first_slice_copy,
-            stack_y,
-        )
+        from torch._higher_order_ops.scan import first_slice_copy, stack_y
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1469,7 +1465,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "internal error, please report an issue to PyTorch."
             )
         init_vars = init.unpack_var_sequence(tx)
-        check_subgraph_args_types(init_vars)
+        _check_all_tensorvariable(init_vars)
 
         if args[0].python_type() is not functools.partial:
             unimplemented(
@@ -1487,7 +1483,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"internal error, please report an issue to PyTorch."
             )
         xs_vars = xs.unpack_var_sequence(tx)
-        check_subgraph_args_types(xs_vars)
+        _check_all_tensorvariable(xs_vars)
 
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
@@ -1497,7 +1493,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"internal error, please report an issue to PyTorch."
             )
         additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
-        check_subgraph_args_types(additional_inputs_vars)
+        _check_all_tensorvariable(additional_inputs_vars)
 
         scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
@@ -1530,7 +1526,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description="scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
-            should_flatten_outputs=True,
         )
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
@@ -1541,25 +1536,37 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ] + list(combine_freevars_proxy)
 
         results = combine_result.unpack_var_sequence(tx)
-        carry_vars, out_vars = _extract_carry_and_out(results, init_len)
+        _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
 
         # Check whether the combine_fn returns two child trees.
         # One for the carries and one for the outputs
-        if len(_combine_treespec.fields["children_specs"].items) != 2:
+        if len(results) != 2:
             unimplemented(
-                "combine_fn needs to produce two pytrees, one for the carries and one for the outputs."
+                f"combine_fn needs to produce two pytrees, one for the carries and one for the outputs "
+                f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
             )
 
+        carry_tree, out_tree = results
+        carry_vars, carry_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            carry_tree
+        ).unpack_var_sequence(tx)
+        carry_vars = carry_vars.unpack_var_sequence(tx)
+        out_vars = _make_inlined(tx, pytree.tree_leaves)(out_tree).unpack_var_sequence(
+            tx
+        )
+
         # Check whether the carries produced by combine_fn has the same treespec as the init
-        carry_treespec = _combine_treespec.fields["children_specs"].items[0]
+        # We need to have this check this way, because in case init is a TreeSpec and carry
+        # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            _make_inlined(tx, pytree.TreeSpec.__eq__)(
-                init_treespec, carry_treespec
-            ).value
-            is not True
-        ):
+            isinstance(init_treespec.as_python_constant(), pytree.TreeSpec)
+            is not isinstance(carry_treespec.as_python_constant(), pytree.TreeSpec)
+        ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            init_treespec, carry_treespec
+        ).as_python_constant():
             unimplemented(
-                "The tree structure of the inits and the carries are not identical!"
+                f"The tree structure of the inits and the carries are are expected to be identical, but got "
+                f"init: {init_treespec.as_python_constant()} vs carry: {carry_treespec.as_python_constant()}."
             )
 
         y_proxies = [out_var.as_proxy() for out_var in out_vars]

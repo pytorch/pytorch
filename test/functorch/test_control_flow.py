@@ -2505,8 +2505,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_wrong_pytree_init_longer_carry(self):
-        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
-            return x[0], x
+        def init_longer_carry(x: torch.Tensor, y: torch.Tensor):
+            return x[0] + 1.0, y + 1.0
 
         scan_fct = compile_mode_helper(scan, "none")
 
@@ -2522,13 +2522,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"scan must be captured completely with.*",
+            r"Expected init and carry to have same number of outputs.*",
         ):
-            scan_fct(add_one_carry, init, x, dim=dim)
+            scan_fct(init_longer_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_wrong_pytree_init_shorter_carry(self):
-        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
+        def init_shorter_carry(x: torch.Tensor, y: torch.Tensor):
             return (x + 1, x + 2), x + 3
 
         scan_fct = compile_mode_helper(scan, "none")
@@ -2545,13 +2545,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             # torch._dynamo.exc.Unsupported,
             # The tree structure of the inits and the carries are not identical!
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"scan must be captured completely with.*",
+            r"Expected init and carry to have same number of outputs.*",
         ):
-            scan_fct(add_one_carry, init, x, dim=dim)
+            scan_fct(init_shorter_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_wrong_pytree_carry_shape(self):
-        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
+        def wrong_carry_shape(x: torch.Tensor, y: torch.Tensor):
             return x[0, :], x + 3
 
         scan_fct = compile_mode_helper(scan, "none")
@@ -2567,11 +2567,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected init and carry to have same metadata.*",
         ):
-            scan_fct(add_one_carry, init, x, dim=dim)
+            scan_fct(wrong_carry_shape, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_one_return(self):
-        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
+        def no_carry(x: torch.Tensor, y: torch.Tensor):
             return x + 3
 
         scan_fct = compile_mode_helper(scan, "none")
@@ -2590,7 +2590,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "scan must be captured completely with.*",
         ):
-            scan_fct(add_one_carry, init, x, dim=dim)
+            scan_fct(no_carry, init, x, dim=dim)
 
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
