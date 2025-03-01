@@ -34,7 +34,7 @@ aten = torch._ops.ops.aten
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
-    assert len(args) == (num_init_leaves + num_inp_leaves)
+    assert len(args) == (num_init_leaves + num_inp_leaves), f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
     return combine_fn(carry, xs)
@@ -100,7 +100,7 @@ def scan(
 
 
     """
-    # The reason we flatten the output before calling into dynamo is that
+    # The reason we flatten init and xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
     # and we also want to the input ordering matches the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
@@ -111,6 +111,7 @@ def scan(
         return init, []
 
     def _validate_input(cfn, lxs, linit, d, r):
+        # Basic arguments check
         if not callable(cfn):
             raise RuntimeError("Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
@@ -118,12 +119,14 @@ def scan(
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
 
+        # Checks for init
         if len(linit) == 0:
             raise RuntimeError("scan() operator requires init leaves.")
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
 
+        # Checks for xs
         for x in lxs:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")

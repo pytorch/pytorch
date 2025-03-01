@@ -1495,7 +1495,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
         _check_all_tensorvariable(additional_inputs_vars)
 
-        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
+        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
                 "scan() operator doesn't support zero-sized tensors during tracing."
@@ -1529,12 +1529,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
-        xs_proxy = tuple(x.as_proxy() for x in xs_vars)
-        init_proxy = tuple(i.as_proxy() for i in init_vars)
-        additional_inputs_proxy = [
-            ai.as_proxy() for ai in additional_inputs_vars
-        ] + list(combine_freevars_proxy)
-
+        # Collect the results from the comnbine_fn
         results = combine_result.unpack_var_sequence(tx)
         _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
 
@@ -1565,11 +1560,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init_treespec, carry_treespec
         ).as_python_constant():
             unimplemented(
-                f"The tree structure of the inits and the carries are are expected to be identical, but got "
+                f"The tree structure of the inits and the carries produced by the combine_fn "
+                f"are expected to be identical, but got "
                 f"init: {init_treespec.as_python_constant()} vs carry: {carry_treespec.as_python_constant()}."
             )
-
-        y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         # Check meta data of carries and inits. If we pass this stage, we are sure that the init and carries
         # have the same tree structure
@@ -1579,6 +1573,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "init",
             "carry",
         )
+
+        # Compute the proxies
+        xs_proxy = xs.as_proxy()
+        init_proxy = init.as_proxy()
+        additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
+            combine_freevars_proxy
+        )
+        y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
