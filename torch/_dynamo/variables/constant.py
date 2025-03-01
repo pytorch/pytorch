@@ -235,10 +235,12 @@ class EnumVariable(VariableTracker):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
         unimplemented_v2(
-            gb_type="Failed to trace enum variable",
-            context="",
-            explanation="Enum variable is constructed with non constant values",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+            gb_type="Failed to construct Enum variable",
+            context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
+            explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
+            "or is not an acceptable value for the Enum. "
+            f"Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
+            hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
     def as_proxy(self):
