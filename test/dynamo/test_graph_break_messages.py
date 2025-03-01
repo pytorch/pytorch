@@ -152,7 +152,7 @@ Unsupported method call
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_super_call_method(self):
+    return [x + 1 for x in it]
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -178,7 +178,7 @@ Unsupported function call
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_super_call_function(self):
+    return [x + 1 for x in it()]
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -203,6 +203,7 @@ Unsupported context manager
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    with obj:
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -256,6 +257,7 @@ Failed to trace builtin operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    print("abc")
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -283,7 +285,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_skipfile_call(self):
+    return unittest.skip("test")
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -307,7 +309,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_skipfile_dynamo_call(self):
+    torch._dynamo.disable()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -338,6 +340,7 @@ Attempted to inline function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    Foo().fn()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -372,7 +375,7 @@ Skip calling `torch.compiler.disable()`d function
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn():
+    return inner()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -396,7 +399,7 @@ Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_dynamo_graph_break_fn(self):
+    torch._dynamo.graph_break()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -419,7 +422,7 @@ Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_dynamo_graph_break_fn_with_msg(self):
+    torch._dynamo.graph_break(msg="test graph break")
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -571,7 +574,7 @@ Dynamic slicing with Tensor arguments
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn(x, y):
+    return x[:y]
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -595,7 +598,7 @@ Observed exception
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def test_observed_exception(self):
+    raise RuntimeError("test")
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -623,6 +626,7 @@ Uninitialized nn.Module
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    return mod(1)
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -692,7 +696,7 @@ Graph break under GenericContextWrappingVariable
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    with CtxMgr():
+    torch._dynamo.graph_break()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -732,7 +736,7 @@ Missing bytecode handler
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn():
+    class Foo:
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -765,7 +769,7 @@ Reconstruction failure
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return 0
+    return Foo().meth
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -851,6 +855,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    return torch.ops.mylib.foo(x)
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 """,
@@ -910,6 +915,9 @@ User code traceback:
 
     def test_no_internal_compiler_stacktrace(self):
         def fn():
+            gn()
+
+        def gn():
             torch._dynamo.graph_break()
 
         # assertRaises suppresses the traceback, so manually catch
@@ -921,18 +929,19 @@ User code traceback:
 
         self.assertIsNotNone(e)
 
-        msg = "".join(traceback.format_exception(e))
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         # only keep the filenames in the traceback
         msg = re.sub(r'File ".*\W(\w+\.py)"', 'File "\\1"', msg)
         # remove line numbers
         msg = re.sub(r"line (\d+)", "line N", msg)
+        # remove carets
+        msg = re.sub(r"\n\s*~*\^+\n", "\n", msg)
         self.assertExpectedInline(
             msg,
             """\
 Traceback (most recent call last):
   File "test_graph_break_messages.py", line N, in test_no_internal_compiler_stacktrace
-    # assertRaises suppresses the traceback, so manually catch
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    torch.compile(fn, backend="eager", fullgraph=True)()
   File "eval_frame.py", line N, in _fn
     raise e.with_traceback(None) from None
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
@@ -944,6 +953,9 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
+    gn()
+  File "test_graph_break_messages.py", line N, in gn
+    torch._dynamo.graph_break()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
 
@@ -953,6 +965,9 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer 
     @torch._dynamo.config.patch(verbose=True)
     def test_internal_compiler_stacktrace_verbose(self):
         def fn():
+            gn()
+
+        def gn():
             torch._dynamo.graph_break()
 
         # assertRaises suppresses the traceback, so manually catch
@@ -990,7 +1005,9 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    @torch._dynamo.config.patch(verbose=True)
+    gn()
+  File "test_graph_break_messages.py", line N, in gn
+    torch._dynamo.graph_break()
 
 """,
         )
