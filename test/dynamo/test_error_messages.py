@@ -979,7 +979,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer 
 
         self.assertIsNotNone(e)
 
-        msg = "".join(traceback.format_exception(e))
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         # only keep the filenames in the traceback
         msg = re.sub(r'File ".*\W(\w+\.py)"', 'File "\\1"', msg)
         # remove line numbers
