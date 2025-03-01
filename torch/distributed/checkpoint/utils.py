@@ -92,7 +92,11 @@ class _DistWrapper:
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
         if self.use_dist:
-            self.global_coordinator_rank = dist.get_global_rank(group, coordinator_rank)
+            self.global_coordinator_rank = (
+                dist.get_global_rank(group, coordinator_rank)
+                if group is not None
+                else coordinator_rank
+            )
             self.rank = dist.get_rank(group)
             self.is_coordinator = self.rank == coordinator_rank
         else:
