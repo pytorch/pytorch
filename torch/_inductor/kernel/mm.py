@@ -596,23 +596,14 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 )
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        # Filter out a known cause of CUDA illegal memory access errors
-        # broadcasting on the last dim of the bias term seems not to be working
-        # in the linear GEMM epilogue used by addmm.
-        if (
-            PythonWrapperCodegen.statically_known_int_or_none(
-                inp_expanded.layout.stride[-1]
-            )
-            != 0
-        ):
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-                choices,
-                layout,
-                [mat1, mat2, inp_expanded],
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(

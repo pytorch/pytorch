@@ -451,14 +451,14 @@ class TestCutlassBackend(TestCase):
         model = MyModel().cuda()
         # M, N, K
         shapes = [
-            (128, 128, 16),
+            (4096, 2048, 25728),
         ]
 
         x_shapes = [
             lambda M, N: (M, N),
-            # lambda M, N: (M, 1),
-            # lambda M, N: (1, N),
-            # lambda M, N: (N,),
+            lambda M, N: (M, 1),
+            lambda M, N: (1, N),
+            lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
             inputs = [
