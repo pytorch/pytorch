@@ -3,9 +3,9 @@ from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert (
-        sparsity <= 1.0 and sparsity >= 0.0
-    ), "sparsity should be a value between 0 and 1"
+    assert sparsity <= 1.0 and sparsity >= 0.0, (
+        "sparsity should be a value between 0 and 1"
+    )
     assert M % blocksize[0] == 0
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
