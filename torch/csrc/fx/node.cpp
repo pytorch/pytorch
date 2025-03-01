@@ -149,52 +149,6 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   }
 }
 
-template <typename F>
-inline static void visit_nodes(PyObject* a, F fn) {
-  // Like map_aggregate, but does not return anything and skips non-NodeBase's
-  // Case 1: a is a tuple.
-  if (PyTuple_Check(a)) {
-    Py_ssize_t n = PyTuple_GET_SIZE(a);
-    for (Py_ssize_t i = 0; i < n; i++) {
-      PyObject* elem = PyTuple_GET_ITEM(a, i); // Borrowed reference.
-      visit_nodes(elem, fn);
-    }
-  }
-  // Case 2: a is a list.
-  else if (PyList_Check(a)) {
-    Py_ssize_t n = PyList_GET_SIZE(a);
-    for (Py_ssize_t i = 0; i < n; i++) {
-      PyObject* elem = PyList_GET_ITEM(a, i); // borrowed ref
-      visit_nodes(elem, fn);
-    }
-  }
-  // Case 3: a is a dict.
-  else if (PyDict_Check(a)) {
-    PyObject *key = nullptr, *value = nullptr; // borrowed
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(a, &pos, &key, &value)) {
-      visit_nodes(value, fn);
-    }
-  }
-  // Case 4: a is a slice.
-  else if (PySlice_Check(a)) {
-    // Get start, stop, and step attributes.
-    THPObjectPtr start(PyObject_GetAttrString(a, "start"));
-    THPObjectPtr stop(PyObject_GetAttrString(a, "stop"));
-    THPObjectPtr step(PyObject_GetAttrString(a, "step"));
-    if (!start || !stop || !step) {
-      throw PythonError();
-    }
-    visit_nodes(start, fn);
-    visit_nodes(stop, fn);
-    visit_nodes(step, fn);
-  }
-  // Default case: call fn(a).
-  else if (is_node(a)) {
-    fn(reinterpret_cast<NodeBase*>(a));
-  }
-}
-
 ////////////////////////////////
 // NodeBase
 ///////////////////////////////
@@ -345,11 +299,8 @@ static PyObject* NodeBase__update_args_kwargs(
     return nullptr;
   }
   NodeBase* self = reinterpret_cast<NodeBase*>(self_);
-  PyObject* new_args = args[0]; // expected to be a tuple
-  PyObject* new_kwargs = args[1]; // expected to be a dict
 
-  // For each old_use in self._input_nodes.keys(), do old_use.users.pop(self)
-  // We assume node->_input_nodes is a dict of {NodeObject: None}.
+  // Clear users containing us and input_nodes
   // We want to remove 'self' from each old_use->users.
   PyObject *key = nullptr, *value = nullptr; // borrowed
   Py_ssize_t pos = 0;
@@ -363,35 +314,38 @@ static PyObject* NodeBase__update_args_kwargs(
   }
   PyDict_Clear(self->_input_nodes);
 
-  auto visit_fn = [self](NodeBase* x) {
-    // self._input_nodes.setdefault(x)
-    if (!PyDict_SetDefault(
-            self->_input_nodes, reinterpret_cast<PyObject*>(x), Py_None)) {
-      throw PythonError();
+  auto visit_fn = [self](PyObject* x) {
+    if (is_node(x)) {
+      // self._input_nodes.setdefault(x)
+      if (!PyDict_SetDefault(self->_input_nodes, x, Py_None)) {
+        throw PythonError();
+      }
+      // x.users.setdefault(self)
+      if (!PyDict_SetDefault(
+              reinterpret_cast<NodeBase*>(x)->users,
+              reinterpret_cast<PyObject*>(self),
+              Py_None)) {
+        throw PythonError();
+      }
     }
-    // x.users.setdefault(self)
-    if (!PyDict_SetDefault(
-            x->users, reinterpret_cast<PyObject*>(self), Py_None)) {
-      throw PythonError();
-    }
+    return Py_NewRef(x);
   };
 
+  // We do three things in a single pass of the args
+  // - Normalize list->immutable_list, dict->immutable_dict, etc
+  // - Populate self._input_nodes
+  // - Populate arg.users[self] for each arg
   try {
-    visit_nodes(new_args, visit_fn);
-    visit_nodes(new_kwargs, visit_fn);
+    THPObjectPtr new_args(map_aggregate(args[0], visit_fn));
+    THPObjectPtr new_kwargs(map_aggregate(args[1], visit_fn));
+    Py_CLEAR(self->_args);
+    self->_args = new_args.release();
+    Py_CLEAR(self->_kwargs);
+    self->_kwargs = new_kwargs.release();
+    Py_RETURN_NONE;
   } catch (const PythonError& e) {
     return nullptr;
   }
-
-  Py_INCREF(new_args);
-  Py_CLEAR(self->_args);
-  self->_args = new_args;
-
-  Py_INCREF(new_kwargs);
-  Py_CLEAR(self->_kwargs);
-  self->_kwargs = new_kwargs;
-
-  Py_RETURN_NONE;
 }
 
 static PyObject* NodeBase__remove_from_list(
