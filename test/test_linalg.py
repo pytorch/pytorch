@@ -5315,7 +5315,7 @@ class TestLinalg(TestCase):
         # Scaled GEMM parameters
         fillA = 0.25
         fillB = 0.75
-        m = n = k = 16
+        m = n = k = 32
         scaleA = torch.tensor(0.8, device=device)
         scaleB = torch.tensor(0.9, device=device)
 
