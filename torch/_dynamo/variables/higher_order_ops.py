@@ -228,9 +228,18 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     output_tensor_ids = {
         id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
     }
-    assert input_tensor_ids.isdisjoint(output_tensor_ids), (
-        "inputs to function body cannot alias outputs"
-    )
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
+
+
+def _check_all_tensorvariable(args):
+    from . import TensorVariable
+
+    if not all(type(a.realize()) is TensorVariable for a in args):
+        unimplemented(
+            f"Expected all leaves to be of torch.Tensor type, but got {[type(a.realize()) for a in args]}."
+        )
 
 
 def _check_supported_callable_arg(
@@ -676,9 +685,9 @@ def speculate_subgraph(
                     ][-len(lifted_freevars) :]
                     assert len(after_phs) == len(lifted_freevars)
                     for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
 
                     graph.lint()
 
@@ -826,9 +835,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1053,9 +1062,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1276,24 +1285,59 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.utils import first_slice_copy
 
         from . import TensorVariable
-        from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, xs, additional_inputs):
             return combine_fn, xs, additional_inputs
 
+        if len(args) != 2:
+            unimplemented(
+                f"Expected 2 positional arguments but got {len(args)}.\n"
+                f"Usage: associative_scan(combine_fn, xs)",
+            )
+
         combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
 
-        if xs.python_type() != list:
-            unimplemented(
-                f"Expected xs to be a list of tensors but got {xs.python_type()}",
-            )
-        assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
+        # combine_fn input check
+        # We need to get the pure combine_fn from the functools.partial
+        _check_supported_callable_arg(
+            tx, combine_fn.keywords["combine_fn"], "combine_fn"
+        )
 
-        # Ensure that all additional_inputs are TensorVariables and no
-        # ints or SymInts as this is not yet supported
-        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
+        # xs input check
+        if not isinstance(xs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected xs to be a list/tuple but got "
+                f"{xs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        xs_vars = xs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(xs_vars)
+
+        if args[0].python_type() is not functools.partial:
+            unimplemented(
+                f"Expected args[0], aka, inits to be a FunctoolsPartialVariable but got "
+                f"{args[0].python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        xs_treespec = args[0].keywords["spec"]
+
+        # additional_inputs input check
+        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected additional_inputs to be a list/tuple but got "
+                f"{additional_inputs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(additional_inputs_vars)
+
+        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
+        if scan_length == 0:
+            unimplemented(
+                "associative_scan() operator doesn't support zero-sized tensors during tracing."
+            )
 
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
@@ -1301,11 +1345,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         with discard_graph_changes(tx):
             sub_args = [
                 _make_inlined(tx, first_slice_copy)(leaf)
-                for leaf in itertools.chain(xs.items, xs.items)
+                for leaf in itertools.chain(xs_vars, xs_vars)
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
-                for t in additional_inputs.items
+                for t in additional_inputs_vars
             ]
 
         sub_args = sub_args + sub_args_additional_inputs
@@ -1323,6 +1367,43 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
+        # Collect the results from the comnbine_fn
+        # results = combine_result.unpack_var_sequence(tx)
+        results, _combine_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            combine_result
+        ).unpack_var_sequence(tx)
+
+        # Check whether the combine_fn returns one child tree for the output.
+        if len(results.items) < 1:
+            unimplemented(
+                f"combine_fn needs to produce one pytree for the output "
+                f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
+            )
+
+        # Check whether the outs produced by combine_fn has the same treespec as xs
+        # We need to have this check this way, because in case init is a TreeSpec and carry
+        # but carry is only a LeafSpec, these two cannot be compared correctly.
+        if (
+            isinstance(xs_treespec.as_python_constant(), pytree.TreeSpec)
+            is not isinstance(_combine_treespec.as_python_constant(), pytree.TreeSpec)
+        ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            xs_treespec, _combine_treespec
+        ).as_python_constant():
+            unimplemented(
+                f"The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got "
+                f"xs: {xs_treespec.as_python_constant()} vs carry: {_combine_treespec.as_python_constant()}."
+            )
+
+        check_meta_consistency_vt(
+            [_make_inlined(tx, first_slice_copy)(t) for t in xs_vars],
+            results.items,
+            "initial_xs",
+            "combine_fn_output",
+        )
+
+        # Check for device mismatches. This currently has to be a separate check
+        # because the device field is not part of the TensorMetadata
+
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
 
         from torch._higher_order_ops.utils import (
@@ -1335,11 +1416,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         with tx.fake_mode:
             xs_fake = [
                 first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
-                for leaf in itertools.chain(xs.items, xs.items)
+                for leaf in itertools.chain(xs_vars, xs_vars)
             ]
             additional_fake = [
                 leaf.proxy.node.meta["example_value"].clone()
-                for leaf in additional_inputs.items
+                for leaf in additional_inputs_vars
+            ] + [
+                leaf.node.meta["example_value"].clone()
+                if isinstance(leaf.node.meta["example_value"], TensorVariable)
+                else leaf.node.meta["example_value"]
+                for leaf in combine_lifted_freevars.keys()
             ]
             sub_args_fake = xs_fake + additional_fake
             pre_dispatch = False
@@ -1366,25 +1452,14 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ):
                 raise RuntimeError("Combine_fn might be aliasing the input!")  # noqa: F541
 
-        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
-
-        if combine_result.python_type() != list:
-            unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
-            )
-
-        xs_proxy = xs.as_proxy()
-        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
-        check_meta_consistency_vt(
-            [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
-            combine_result.unpack_var_sequence(tx),
-            "initial_xs",
-            "combine_fn_output",
-        )
-
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
         )
+
+        # Compute the proxies
+        xs_proxy = xs.as_proxy()
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1396,12 +1471,20 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = tuple(
                 inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function", torch.ops.higher_order.associative_scan, p_args, {}
-            ),
-            example_value=out_meta,
+        # return wrap_fx_proxy(
+        #     tx=tx,
+        #     proxy=tx.output.create_proxy(
+        #         "call_function", torch.ops.higher_order.associative_scan, p_args, {}
+        #     ),
+        #     example_value=out_meta,
+        # )
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.associative_scan,
+            p_args,
+            {},
+            out_meta,
+            _combine_treespec,
         )
 
 
@@ -2738,9 +2821,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(x, torch.fx.Proxy):
                 return x.node
             else:
-                assert variables.ConstantVariable.is_literal(x), (
-                    f"Only constant is allowed. Got {x}"
-                )
+                assert variables.ConstantVariable.is_literal(
+                    x
+                ), f"Only constant is allowed. Got {x}"
                 return x
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)

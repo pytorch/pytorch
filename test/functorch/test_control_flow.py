@@ -3789,11 +3789,8 @@ class AssociativeScanTests(TestCase):
         elements = (x, deltaA, deltaB_u, C, y)
 
         with self.assertRaisesRegex(
-            # Should be
-            # ValueError,
-            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ValueError,
+            "All xs leaves must at least have.*",
         ):
             associative_scan(
                 get_scan_combine_fn("different_input_size_operator", True),
@@ -4099,20 +4096,17 @@ class AssociativeScanTests(TestCase):
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
             [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
         ).to_sparse()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile does not support sparse Tensors",
+            ValueError,
+            "xs leaves must dense Tensors.*",
         ):
             associative_scan(
-                get_scan_combine_fn("add", True),
-                x,
-                0,
+                get_scan_combine_fn("add", True), x, 0, combine_mode="generic"
             )
 
     @unittest.skipIf(not SM70OrLater, "triton")
@@ -4135,10 +4129,8 @@ class AssociativeScanTests(TestCase):
 
         for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
             with self.assertRaisesRegex(
-                # Should be: RuntimeError,
-                # "The pytree of the output of the operator needs to match the xs pytree"
-                torch._dynamo.exc.Unsupported,
-                "Observed exception.*",
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Expected initial_xs and combine_fn_output to have same metadata.*",
             ):
                 associative_scan(fct, x, 0)
 
@@ -4147,7 +4139,7 @@ class AssociativeScanTests(TestCase):
         def fct_wrong_pytree(x, y):
             return {
                 "i": x["i"] * y["j"][0][0],
-                "k": 0.0,
+                "k": torch.tensor(0.0),
                 "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
             }
 
@@ -4157,11 +4149,8 @@ class AssociativeScanTests(TestCase):
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(
-            # Should be:
-            # RuntimeError,
-            # r"The number of leaves of the pytree of the output of the operator.*",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            AssertionError,
+            "Combin_fn received wrong number of arguments.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
