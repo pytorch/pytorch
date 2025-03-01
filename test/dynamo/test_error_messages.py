@@ -915,6 +915,9 @@ User code traceback:
 
     def test_no_internal_compiler_stacktrace(self):
         def fn():
+            gn()
+
+        def gn():
             torch._dynamo.graph_break()
 
         # assertRaises suppresses the traceback, so manually catch
@@ -926,11 +929,13 @@ User code traceback:
 
         self.assertIsNotNone(e)
 
-        msg = "".join(traceback.format_exception(e))
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         # only keep the filenames in the traceback
         msg = re.sub(r'File ".*\W(\w+\.py)"', 'File "\\1"', msg)
         # remove line numbers
         msg = re.sub(r"line (\d+)", "line N", msg)
+        # remove carets
+        msg = re.sub(r"\n\s*~*\^+\n", "\n", msg)
         self.assertExpectedInline(
             msg,
             """\
@@ -948,6 +953,8 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_error_messages.py", line N, in fn
+    gn()
+  File "test_error_messages.py", line N, in gn
     torch._dynamo.graph_break()
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
@@ -958,6 +965,9 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer 
     @torch._dynamo.config.patch(verbose=True)
     def test_internal_compiler_stacktrace_verbose(self):
         def fn():
+            gn()
+
+        def gn():
             torch._dynamo.graph_break()
 
         # assertRaises suppresses the traceback, so manually catch
@@ -995,6 +1005,8 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_error_messages.py", line N, in fn
+    gn()
+  File "test_error_messages.py", line N, in gn
     torch._dynamo.graph_break()
 
 """,
