@@ -460,7 +460,7 @@ static PyObject* NodeBase_get_sort_key(PyObject* self, void* /*closure*/) {
     return nullptr; // Out of memory
   }
   for (Py_ssize_t i = 0; i < n; i++) {
-    PyTuple_SET_ITEM(tuple.get(), i, PyLong_FromLong(vec[i]));
+    PyTuple_SET_ITEM(tuple.get(), i, PyLong_FromSsize_t(vec[i]));
   }
   return tuple.release(); // New reference
 }
@@ -481,7 +481,7 @@ static int NodeBase_set_sort_key(
   NodeSortKey new_vec;
   new_vec.reserve(size);
   for (Py_ssize_t i = 0; i < size; i++) {
-    long val = PyLong_AsLong(PyTuple_GET_ITEM(value, i));
+    int64_t val = PyLong_AsSsize_t(PyTuple_GET_ITEM(value, i));
     if (val == -1 && PyErr_Occurred()) {
       return -1;
     }
