@@ -45,7 +45,7 @@ else()
   # Platforms where avx512f is supported by not avx512dq and avx512vl as of
   # Jan 15 2019 : linux_manywheel_2.7mu_cpu_build and
   # linux_conda_3.7_cu100_build
-  set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
+  set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl -mf16c")
 endif()
 CHECK_CXX_SOURCE_COMPILES(
     "#if defined(_MSC_VER)
