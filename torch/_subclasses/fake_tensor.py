@@ -2177,6 +2177,33 @@ class FakeTensorMode(TorchDispatchMode):
         nil = object()
 
         real_out = nil
+        
+        # special handling for empty tensors. Meta tensors slip through the TORCH_CHECKs,
+        # which if supposed to trigger RuntimeErrors, will cause undefined behavior as seen in 
+        # issue #147100. For example, consider calling `as_strided` on an empty tensor, 
+        # normal tensors (i.e device != meta) will trigger the TORCH_CHECK assertions,
+        # but the meta ones do not. This causes the module or func to be compiled by dynamo,
+        # and later produce undefined behavior. One solution is to do a simple
+        # check here, only for empty tensors (currently known edge case).
+        # This elseif will only be run if the previous logic is not evalauted to true,
+        # which if is true, then will produce the desired behavior, i.e, the real_out variable
+        # will be set to a real Tensor, by calling the function on normal tensor.
+        # This function will check if any of the args have an empty tensor, and assign the flag to
+        # edge_case. edge_case by default will be same as self.propagate_real_tensors, 
+        # which we will alter based on edge_case. Finally, before returning we will restore the original
+        # value of self.propagate_real_tensors, so that the call is unique to the given tensor args
+        edge_case = self.propagate_real_tensors
+        propagate_real_tensors_prev = self.propagate_real_tensors
+        def check_if_edge_case(all_fake_tensor_args: Sequence[object]) -> None:
+            nonlocal edge_case
+            for fake_tensor in all_fake_tensor_args:
+                if fake_tensor.numel() == 0:
+                    edge_case = True 
+                    break
+        check_if_edge_case(flat_arg_fake_tensors)
+        # propagate real tensors based on edge case
+        self.propagate_real_tensors = (edge_case,) 
+        
         if (
             self.propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
@@ -2296,6 +2323,9 @@ class FakeTensorMode(TorchDispatchMode):
 
             return fake_out
 
+        # restore the value of self.propagate_real_tensors
+        self.propagate_real_tensors = propagate_real_tensors_prev
+        
         # Try for fastpath
         if has_symbolic_sizes:
             fast_impl = get_fast_op_impls().get(func)
