@@ -5,10 +5,10 @@ import logging
 import operator
 import types
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
-from torch._C import _NodeBase
+from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
 from torch.fx.operator_schemas import (
     ArgsKwargsPair,
     normalize_function,
@@ -17,7 +17,6 @@ from torch.fx.operator_schemas import (
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
-from .immutable_collections import immutable_dict, immutable_list
 
 
 if TYPE_CHECKING:
@@ -535,7 +534,7 @@ class Node(_NodeBase):
         self._args = args_left + (arg,) + args_right
 
         _new_input_nodes: dict[Node, None] = {}
-        map_arg(arg, _new_input_nodes.setdefault)
+        _fx_map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
             if new_use not in self._input_nodes:
@@ -596,10 +595,10 @@ class Node(_NodeBase):
         # - Populate self._input_nodes
         # - Populate arg.users[self] for each arg
         object.__setattr__(
-            self, "_args", map_aggregate(new_args, update_users_and_input_nodes)
+            self, "_args", _fx_map_aggregate(new_args, update_users_and_input_nodes)
         )
         object.__setattr__(
-            self, "_kwargs", map_aggregate(new_kwargs, update_users_and_input_nodes)
+            self, "_kwargs", _fx_map_aggregate(new_kwargs, update_users_and_input_nodes)
         )
 
     def __repr__(self) -> str:
@@ -748,8 +747,8 @@ class Node(_NodeBase):
                 for replace_hook in m._replace_hooks:
                     replace_hook(old=self, new=replace_with.name, user=use_node)
 
-            new_args = map_arg(use_node.args, maybe_replace_node)
-            new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+            new_args = _fx_map_arg(use_node.args, maybe_replace_node)
+            new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
             assert isinstance(new_args, tuple)
             assert isinstance(new_kwargs, dict)
             use_node.__update_args_kwargs(new_args, new_kwargs)
@@ -860,8 +859,8 @@ class Node(_NodeBase):
             for replace_hook in m._replace_hooks:
                 replace_hook(old=old_input, new=new_input.name, user=self)
 
-        new_args = map_arg(self.args, maybe_replace_node)
-        new_kwargs = map_arg(self.kwargs, maybe_replace_node)
+        new_args = _fx_map_arg(self.args, maybe_replace_node)
+        new_kwargs = _fx_map_arg(self.kwargs, maybe_replace_node)
         assert isinstance(new_args, tuple)
         assert isinstance(new_kwargs, dict)
         self.__update_args_kwargs(new_args, new_kwargs)
@@ -903,7 +902,7 @@ def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     have the same type and structure.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
-    return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
+    return _fx_map_arg(a, fn)
 
 
 @compatibility(is_backward_compatible=True)
@@ -914,23 +913,4 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     arg may be a list, tuple, slice, or dict with string keys: the return value will
     have the same type and structure.
     """
-    result: Argument
-
-    if isinstance(a, tuple):
-        it = (map_aggregate(elem, fn) for elem in a)
-        # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        result = type(a)(*it) if hasattr(a, "_fields") else tuple(it)
-    elif isinstance(a, list):
-        result = immutable_list([map_aggregate(elem, fn) for elem in a])
-    elif isinstance(a, dict):
-        result = immutable_dict([(k, map_aggregate(v, fn)) for k, v in a.items()])
-    elif isinstance(a, slice):
-        result = slice(
-            map_aggregate(a.start, fn),
-            map_aggregate(a.stop, fn),
-            map_aggregate(a.step, fn),
-        )
-    else:
-        result = fn(a)
-
-    return cast(ArgumentT, result)
+    return _fx_map_aggregate(a, fn)
