@@ -53,13 +53,11 @@ USE_BLACK_FILELIST = re.compile(
                     # torch/_[e-h]*/**
                     "torch/_[e-h]*/**",
                     # torch/_i*/**
-                    "torch/_i*/**",
                     # torch/_[j-z]*/**
                     "torch/_[j-z]*/**",
                     # torch/[a-c]*/**
                     "torch/[a-c]*/**",
                     # torch/d*/**
-                    "torch/d*/**",
                     # torch/[e-n]*/**
                     "torch/[e-n]*/**",
                     # torch/optim/**
