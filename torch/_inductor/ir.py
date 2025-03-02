@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -208,6 +209,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     Expr,
                     int,
                     EffectfulKernel,
+                    ShapeAsConstantBuffer,
                 ),
             ), (
                 f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -5166,7 +5168,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, (NonTensorObj)):
+        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer)):
             return x
         return cls.copy_input(x)
 
@@ -5846,6 +5848,8 @@ class UserDefinedTritonKernel(ExternKernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
 
+        # Create a copy of triton_meta to avoid modifying the original version.
+        triton_meta = copy.deepcopy(triton_meta)
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -7041,6 +7045,8 @@ class MutableBox(IRNode):
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):  # type: ignore[no-untyped-def]
+        if isinstance(data, ShapeAsConstantBuffer):
+            return data
         return TensorBox(StorageBox(data))
 
 
