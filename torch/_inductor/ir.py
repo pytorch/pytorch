@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -5847,6 +5848,8 @@ class UserDefinedTritonKernel(ExternKernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
 
+        # Create a copy of triton_meta to avoid modifying the original version.
+        triton_meta = copy.deepcopy(triton_meta)
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
