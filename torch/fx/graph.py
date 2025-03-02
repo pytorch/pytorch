@@ -1134,11 +1134,11 @@ class Graph:
             The newly-created and inserted node.
         """
         # `target in _legal_ops` is checked in Node.__init__
-        if args is None:
+        if not args:
             args = ()
         else:
             assert isinstance(args, tuple), "args must be a tuple"
-        if kwargs is None:
+        if not kwargs:
             kwargs = immutable_dict()
         else:
             assert isinstance(kwargs, dict), "kwargs must be a dict"
