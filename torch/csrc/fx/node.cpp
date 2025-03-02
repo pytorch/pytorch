@@ -314,12 +314,10 @@ static PyObject* NodeBase__update_args_kwargs(
   // - Populate self._input_nodes
   // - Populate arg.users[self] for each arg
   try {
-    THPObjectPtr new_args(map_aggregate(args[0], visit_fn));
-    THPObjectPtr new_kwargs(map_aggregate(args[1], visit_fn));
     Py_CLEAR(node->_args);
-    node->_args = new_args.release();
+    node->_args = map_aggregate(args[0], visit_fn);
     Py_CLEAR(node->_kwargs);
-    node->_kwargs = new_kwargs.release();
+    node->_kwargs = map_aggregate(args[1], visit_fn);
     Py_RETURN_NONE;
   } catch (const PythonError& e) {
     return nullptr;
