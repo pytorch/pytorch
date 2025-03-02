@@ -71,9 +71,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
-from .. import config, mutation_guard, replay_record, trace_rules
+from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, unimplemented
+from ..exc import InternalTorchDynamoError, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -1510,7 +1510,15 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         if len(value.__dict__) == 0:
-            unimplemented(f"uninitialized nn.Module: {typestr(value)}")
+            unimplemented_v2(
+                gb_type="Uninitialized nn.Module",
+                context=typestr(value),
+                explanation=f"Attempted to trace an uninitialized nn.Module of type {typestr(value)}.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    "Ensure your nn.Module instance has called `super().__init__()`.",
+                ],
+            )
         if istype(value, OptimizedModule):
             # Check if the optimized module was disabled
             if inspect.getattr_static(value.forward, "_torchdynamo_disable", False):
@@ -1659,6 +1667,21 @@ class VariableBuilder:
         if (
             source.guard_source().is_specialized_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
+            self.assert_not_wrapped_by_this_graph(value)
+            return self.tx.output.register_attr_or_module(
+                value, self.name, source=source
+            )
+
+        if get_static_address_type(value) == "guarded":
+            # If it's a guarded tensor, we can install the parameter directly
+            # into  the Fx graph instead of lifting it as an input. Lifting
+            # offers no benefit,  such as regional compilation, since we still
+            # guard on the tensor's ID.  Moreover, installing it in the Fx graph
+            # eliminates the pre-graph bytecode  required to extract the tensor
+            # from locals/globals, reducing overhead.  This can lead to
+            # significant cost savings, especially for optimizers  handling many
+            # tensors.
+            self.install_guards(GuardBuilder.ID_MATCH)
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
@@ -1950,7 +1973,10 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            if (
+            if self.source.name() in get_dynamic_sources():
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                dynamic_dim = DimDynamic.DYNAMIC
+            elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
@@ -2641,6 +2667,21 @@ def get_automatic_dynamic_shapes_mark_as():
         )
 
 
+_DYNAMIC_SOURCES: Optional[set[str]] = None
+
+
+def get_dynamic_sources() -> set[str]:
+    global _DYNAMIC_SOURCES
+    if _DYNAMIC_SOURCES is not None:
+        return _DYNAMIC_SOURCES
+
+    _DYNAMIC_SOURCES = set(
+        torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
+    )
+
+    return _DYNAMIC_SOURCES
+
+
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
 @dataclasses.dataclass
@@ -2671,6 +2712,7 @@ def _automatic_dynamic(
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
+    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2709,7 +2751,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes:
+    if static_shapes and name not in dynamic_sources:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -2829,6 +2871,11 @@ def _automatic_dynamic(
         automatic_dynamic_stride = (
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
+
+        if name in dynamic_sources:
+            log.debug("%s marked dynamic via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 

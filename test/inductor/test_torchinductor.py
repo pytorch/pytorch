@@ -822,10 +822,10 @@ def skip_if_triton(fn):
 
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_triton_backend(self.device):
             raise unittest.SkipTest(f"triton backend is required for {self.device}")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -5017,16 +5017,14 @@ class CommonTemplate:
 
     @skip_if_gpu_halide  # slow
     def test_max_pool2d6(self):
-        # Too big kernel size, use fallback
+        # Big kernel size
         def fn(x):
             return aten.max_pool2d_with_indices(x, [13, 13], [])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/94775
     def test_max_pool2d7(self):
@@ -9620,7 +9618,11 @@ class CommonTemplate:
             ],
         )
 
-    def test_tmp_not_defined_issue1(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_tmp_not_defined_issue1(self, use_block_ptr):
         def forward(
             primals_3,
             primals_4,
@@ -9657,7 +9659,8 @@ class CommonTemplate:
             (torch.Size([1, 512, 1]), torch.float32),
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
-        self.common(forward, inps, atol=1e-05, rtol=2e-05)
+        with config.patch("triton.use_block_ptr", use_block_ptr):
+            self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
         os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
@@ -14027,7 +14030,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return x.sin()
 
             fn_c = torch.compile(fn)
-            x = torch.rand(16, device="cuda")
+            x = torch.rand(16, device=GPU_TYPE)
 
             _, code = run_and_get_code(fn_c, x)
 
@@ -14042,7 +14045,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
@@ -14068,7 +14071,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             def g(x):
                 return x + 1
@@ -14109,7 +14112,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
             x, y = torch.ones(3, 3, device=self.device), torch.randn(
@@ -14131,7 +14134,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
             x, y = torch.ones(3, 3, device=self.device), torch.randn(
@@ -14152,11 +14155,11 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x1 + y1 + x @ y
-                u = (y_cpu.cuda() + 2) @ y + 3
+                u = (y_cpu.to(GPU_TYPE) + 2) @ y + 3
                 u_cpu = u.cpu() + 2
-                return z + u_cpu.cuda()
+                return z + u_cpu.to(GPU_TYPE)
 
-            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x, y = [torch.ones(2, 2, device=GPU_TYPE) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
             eager_out = f(x, y)
 
@@ -14266,7 +14269,7 @@ def _strip_tmp_path(code: str) -> str:
     """
     Canonicalize things that look like a tmp path so they can be compared.
     """
-    return re.sub('"/tmp/[A-Za-z0-9_.-]*/tmp[A-Za-z0-9_.-]*/', '"/tmp/<tmppath>/', code)
+    return re.sub('#include ".*?"', '#include "<tmppath>"', code)
 
 
 def _run_and_get_stripped_kernels(

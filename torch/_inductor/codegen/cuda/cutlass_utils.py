@@ -56,9 +56,9 @@ def try_import_cutlass() -> bool:
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
         )
         cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(
-            cutlass_library_dir
-        ), f"{cutlass_library_dir} is not a directory"
+        assert os.path.isdir(cutlass_library_dir), (
+            f"{cutlass_library_dir} is not a directory"
+        )
         config.cuda.cutlass_dir = os.path.abspath(
             os.path.join(
                 cutlass_library_dir,
@@ -86,9 +86,9 @@ def try_import_cutlass() -> bool:
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
             if os.path.exists(dst_link):
-                assert os.path.islink(
-                    dst_link
-                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.islink(dst_link), (
+                    f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                )
                 assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
                     cutlass_py_full_path
                 ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
