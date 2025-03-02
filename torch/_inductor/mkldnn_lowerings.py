@@ -588,13 +588,13 @@ def register_onednn_fusion_ops():
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
             else:
+                x_scale.realize()
                 if all(dim == 1 for dim in x_scale.get_size()):
                     # Corner-case discovered with LLaMA series.
                     # If all outer dims of x_scale are 1, make it a 0D tensor.
                     # Otherwise, epilogue creator will run into indexing issues.
                     x_scale = view(x_scale, [])
                 assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
-                x_scale.realize()
 
             if x_zp is None:
                 # If x_zp is None, x is int8 quantized per-tensor and its scale is not reshaped,
@@ -900,13 +900,13 @@ def register_onednn_fusion_ops():
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
             else:
+                x_scale.realize()
                 if all(dim == 1 for dim in x_scale.get_size()):
                     # Corner-case discovered with LLaMA series.
                     # If all outer dims of x_scale are 1, make it a 0D tensor.
                     # Otherwise, epilogue creator will run into indexing issues.
                     x_scale = view(x_scale, [])
                 assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
-                x_scale.realize()
 
             if x_zp is None:
                 x_zp = V.graph.add_tensor_constant(
