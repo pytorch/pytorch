@@ -111,6 +111,12 @@ non_deterministic:
   - sam_fast
 
 
+disable_cudagraph:
+  # tts_angular is flaky with cudagraphs. Its speedup
+  # oscillates from .05 to 1.05
+  - tts_angular
+
+
 dtype:
   force_amp_for_fp16_bf16_models:
     - DALLE2_pytorch

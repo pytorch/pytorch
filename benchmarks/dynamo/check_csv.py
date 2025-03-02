@@ -26,7 +26,7 @@ def check_csv(filename):
             textwrap.dedent(
                 f"""
                 Error {len(failed)} models failed
-                    {' '.join(failed)}
+                    {" ".join(failed)}
                 """
             )
         )
