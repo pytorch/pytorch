@@ -40,21 +40,16 @@ class CacheArtifact:
     content: bytes = dataclasses.field(repr=False)  # Do not display potential binary
 
     @staticmethod
-    def serialize(cls: "CacheArtifact") -> bytes:
-        writer = BytesWriter()
-        writer.write_int(cls.type.value)
+    def serialize(writer: BytesWriter, cls: "CacheArtifact") -> None:
+        writer.write_uint64(cls.type.value)
         writer.write_str(cls.key)
-        writer.write_int(len(cls.content))
         writer.write_bytes(cls.content)
-        return writer.get()
 
     @staticmethod
-    def deserialize(data: bytes) -> "CacheArtifact":
-        reader = BytesReader(data)
-        type = reader.read_int()
+    def deserialize(reader: BytesReader) -> "CacheArtifact":
+        type = reader.read_uint64()
         key = reader.read_str()
-        bytes_len = reader.read_int()
-        content = reader.read_bytes(bytes_len)
+        content = reader.read_bytes()
         return CacheArtifact(CacheArtifactType(type), key, content)
 
 
@@ -168,7 +163,8 @@ class CacheArtifactManager:
             # We deep copy cls._cache_info since later compilations
             # can keep adding to cache_info
             info = copy.deepcopy(cls._cache_info)
-            artifact_bytes = cls._serializer.appendListAndGet(cls._new_cache_artifacts)
+            cls._serializer.extend(cls._new_cache_artifacts)
+            artifact_bytes = cls._serializer.to_bytes()
             cls._new_cache_artifacts.clear()
             return artifact_bytes, info
         except Exception:

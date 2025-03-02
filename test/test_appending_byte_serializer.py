@@ -12,28 +12,30 @@ from torch.utils._appending_byte_serializer import (
 
 class TestAppendingByteSerializer(TestCase):
     def test_write_and_read_int(self) -> None:
-        def int_serializer(i: int) -> bytes:
-            writer = BytesWriter()
-            writer.write_int(i)
-            return writer.get()
+        def int_serializer(writer: BytesWriter, i: int) -> None:
+            writer.write_uint64(i)
 
-        def int_deserializer(data: bytes) -> int:
-            reader = BytesReader(data)
-            return reader.read_int()
+        def int_deserializer(reader: BytesReader) -> int:
+            return reader.read_uint64()
 
         s = AppendingByteSerializer(serialize_fn=int_serializer)
 
         data = [1, 2, 3, 4]
-        out = s.appendListAndGet(data)
+        s.extend(data)
         self.assertListEqual(
-            data, AppendingByteSerializer.to_list(out, deserialize_fn=int_deserializer)
+            data,
+            AppendingByteSerializer.to_list(
+                s.to_bytes(), deserialize_fn=int_deserializer
+            ),
         )
 
         data2 = [8, 9, 10, 11]
-        out = s.appendListAndGet(data2)
+        s.extend(data2)
         self.assertListEqual(
             data + data2,
-            AppendingByteSerializer.to_list(out, deserialize_fn=int_deserializer),
+            AppendingByteSerializer.to_list(
+                s.to_bytes(), deserialize_fn=int_deserializer
+            ),
         )
 
     def test_write_and_read_class(self) -> None:
@@ -44,22 +46,16 @@ class TestAppendingByteSerializer(TestCase):
             z: bytes
 
             @staticmethod
-            def serialize(cls: "Foo") -> bytes:
-                writer = BytesWriter()
-                writer.write_int(cls.x)
+            def serialize(writer: BytesWriter, cls: "Foo") -> None:
+                writer.write_uint64(cls.x)
                 writer.write_str(cls.y)
-                writer.write_int(len(cls.z))
                 writer.write_bytes(cls.z)
-                return writer.get()
 
             @staticmethod
-            def deserialize(data: bytes) -> "Foo":
-                reader = BytesReader(data)
-                x = reader.read_int()
+            def deserialize(reader: BytesReader) -> "Foo":
+                x = reader.read_uint64()
                 y = reader.read_str()
-                bytes_len = reader.read_int()
-                z = reader.read_bytes(bytes_len)
-
+                z = reader.read_bytes()
                 return Foo(x, y, z)
 
         a = Foo(5, "ok", bytes([15]))
@@ -69,13 +65,17 @@ class TestAppendingByteSerializer(TestCase):
         s.append(a)
         self.assertListEqual(
             [a],
-            AppendingByteSerializer.to_list(s.get(), deserialize_fn=Foo.deserialize),
+            AppendingByteSerializer.to_list(
+                s.to_bytes(), deserialize_fn=Foo.deserialize
+            ),
         )
 
         s.append(b)
         self.assertListEqual(
             [a, b],
-            AppendingByteSerializer.to_list(s.get(), deserialize_fn=Foo.deserialize),
+            AppendingByteSerializer.to_list(
+                s.to_bytes(), deserialize_fn=Foo.deserialize
+            ),
         )
 
 
