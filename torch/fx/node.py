@@ -5,7 +5,7 @@ import logging
 import operator
 import types
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._C import _NodeBase
@@ -914,23 +914,19 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     arg may be a list, tuple, slice, or dict with string keys: the return value will
     have the same type and structure.
     """
-    result: Argument
+    from torch.utils._cxx_pytree import tree_map
 
-    if isinstance(a, tuple):
-        it = (map_aggregate(elem, fn) for elem in a)
-        # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        result = type(a)(*it) if hasattr(a, "_fields") else tuple(it)
-    elif isinstance(a, list):
-        result = immutable_list([map_aggregate(elem, fn) for elem in a])
-    elif isinstance(a, dict):
-        result = immutable_dict([(k, map_aggregate(v, fn)) for k, v in a.items()])
-    elif isinstance(a, slice):
-        result = slice(
-            map_aggregate(a.start, fn),
-            map_aggregate(a.stop, fn),
-            map_aggregate(a.step, fn),
-        )
-    else:
-        result = fn(a)
+    def func(x: Argument) -> Argument:
+        if isinstance(x, list):
+            return immutable_list([map_aggregate(i, fn) for i in x])
+        if isinstance(x, dict):
+            return immutable_dict([(k, map_aggregate(v, fn)) for k, v in x.items()])
+        if isinstance(x, slice):
+            return slice(
+                map_aggregate(x.start, fn),
+                map_aggregate(x.stop, fn),
+                map_aggregate(x.step, fn),
+            )
+        return fn(x)
 
-    return cast(ArgumentT, result)
+    return tree_map(func, a, is_leaf=lambda x: isinstance(x, (list, dict)))
