@@ -566,6 +566,7 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        traffic_class: int
 
     class Options(Backend.Options):
         config: ProcessGroupNCCL.NCCLConfig
