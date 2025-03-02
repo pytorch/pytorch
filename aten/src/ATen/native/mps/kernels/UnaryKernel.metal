@@ -39,6 +39,37 @@ kernel void tanh_kernel(
   output[index] = T0(precise::tanh(input[index]));
 }
 
+template <typename T0, typename T1>
+kernel void sqrt_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(precise::sqrt(input[index]));
+}
+
+template <typename T0>
+kernel void sqrt_complex_kernel(
+    device vec2type_t<T0>* output [[buffer(0)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  T0 a = input[index].x;
+  T0 b = input[index].y;
+
+  // modulus
+  T0 r = T0(precise::sqrt(a * a + b * b));
+  // real part: sqrt((r + a)/2)
+  T0 real_part = T0(precise::sqrt((r + a) / 2.0));
+
+  // imaginary part: sign(b) * sqrt((r - a)/2)
+  T0 imag_part;
+  if (b >= 0) {
+    imag_part = T0(precise::sqrt((r - a) / 2.0));
+  } else {
+    imag_part = T0(-precise::sqrt((r - a) / 2.0));
+  }
+  output[index] = vec2type_t<T0>(real_part, imag_part);
+}
+
 #if __METAL_VERSION__ >= 310
 bfloat dot(bfloat2 a, bfloat2 b) {
   return a.x * b.x + a.y * b.y;
@@ -77,6 +108,10 @@ kernel void tanh_complex_kernel(
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                    \
+  template [[host_name("sqrt_" #DTYPE0 "_" #DTYPE1)]] kernel void sqrt_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);                                    \
   template [[host_name("tanh_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_kernel( \
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
@@ -102,6 +137,11 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
       uint did [[thread_position_in_grid]]);                              \
   template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
   tanh_complex_kernel<DTYPE0>(                                            \
+      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
+      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
+      uint did [[thread_position_in_grid]]);                              \
+  template [[host_name("sqrt_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
+  sqrt_complex_kernel<DTYPE0>(                                            \
       device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
       constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
       uint did [[thread_position_in_grid]]);
