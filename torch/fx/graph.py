@@ -150,7 +150,6 @@ class _Namespace:
 
     def __init__(self):
         self._obj_to_name: dict[Any, str] = {}
-        self._unassociated_names = set()
         self._used_names: set[str] = set()
         self._base_count: dict[str, int] = {}
 
@@ -182,10 +181,10 @@ class _Namespace:
         base, num = match.group(1, 2)
         if num is None or candidate in self._used_names:
             num = self._base_count.get(candidate, 0)
-            if self._is_illegal_name(candidate, obj):
+            if _illegal_names.get(candidate, obj) is not obj:
                 num += 1
                 candidate = f"{base}_{num}"
-                # we assume illegal names don't end in _\d so no need to check again
+                # assume illegal names don't end in _\d so no need to check again
         else:
             num = int(num)
 
@@ -195,9 +194,7 @@ class _Namespace:
 
         self._used_names.add(candidate)
         self._base_count[base] = num
-        if obj is None:
-            self._unassociated_names.add(candidate)
-        else:
+        if obj is not None:
             self._obj_to_name[obj] = candidate
         return candidate
 
@@ -206,14 +203,8 @@ class _Namespace:
 
         Neither `name` nor `obj` should be associated already.
         """
-        assert obj not in self._obj_to_name
-        assert name in self._unassociated_names
-        self._obj_to_name[obj] = name
-        self._unassociated_names.remove(name)
-
-    def _is_illegal_name(self, name: str, obj: Any) -> bool:
-        existing = _illegal_names.get(name, None)
-        return existing is not None and existing is not obj
+        maybe_existing = self._obj_to_name.setdefault(obj, name)
+        assert maybe_existing is name, "obj is already associated"
 
     def _rename_object(self, obj: Any, name: str):
         assert obj in self._obj_to_name
