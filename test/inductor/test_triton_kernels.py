@@ -3635,8 +3635,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
         FileCheck().check("Compile-time auto-tuning block:").check(
-            "grid_wrapper_for_op_zeros_0"
-        ).check_next("return (256").check_next("return (64").run(output)
+            "PrecomputedGrid"
+        ).check("(31 + _launcher_s0) // 32").check("(127 + _launcher_s0) // 128").run(
+            output
+        )
 
     # Triton 3.2.0 adds the required flags to the Autotuner object for this test
     # PR: https://github.com/triton-lang/triton/pull/5092
