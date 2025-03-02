@@ -250,8 +250,7 @@ class AsyncCompile:
 
     def use_process_pool(self):
         return (
-            get_compile_threads() > 1
-            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+            get_compile_threads() > 1 and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
@@ -317,9 +316,12 @@ class AsyncCompile:
                 kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                 )
-                return kernel, elapsed_us
+                get_metrics_context().add_top_n(
+                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                )
+                return kernel
 
-            future = LambdaFuture(get_result, future=task, timed=True)
+            future = LambdaFuture(get_result, future=task)
             CompiledTritonKernels.save(source_code, future)
             return future
         else:
@@ -333,10 +335,9 @@ class AsyncCompile:
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
                 kernel.precompile(warm_cache_only=False)
+                elapsed_us = (time_ns() - start_ns) // 1000
                 get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us",
-                    kernel_name,
-                    (time_ns() - start_ns) // 1000,
+                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
                 )
                 return kernel
 
@@ -428,19 +429,11 @@ class AsyncCompile:
             delay=0,
         )
 
-        metrics_context = get_metrics_context()
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
                 scope[key] = result.result()
-                if isinstance(result, LambdaFuture) and result.elapsed_us:
-                    # Log the top Triton compilation times
-                    metrics_context.add_top_n(
-                        "triton_kernel_compile_times_us",
-                        key,
-                        result.elapsed_us,
-                    )
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "

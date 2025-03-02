@@ -140,9 +140,9 @@ def _shard_dict_of_args(
     real_num_chunks = num_chunks
     first_tensor = True
 
-    assert len(args_dict) == len(
-        args_chunk_spec
-    ), f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+    assert len(args_dict) == len(args_chunk_spec), (
+        f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+    )
 
     for arg_key, arg in args_dict.items():
         flat, spec = tree_flatten(arg)

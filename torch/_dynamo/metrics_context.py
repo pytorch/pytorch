@@ -15,7 +15,8 @@ execution performance.
 
 import heapq
 import time
-from typing import Any, Callable, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
 
 
@@ -37,7 +38,7 @@ class TopN:
         return len(self.heap)
 
     def __iter__(self) -> Iterator[tuple[Any, int]]:
-        return ((key, val) for val, key in self.heap)
+        return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
 OnExitType: TypeAlias = Callable[
@@ -131,15 +132,16 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
-        metric has been assigned previously in the current context.
+        metric has been assigned previously in the current context and overwrite is
+        not set to True.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         existing = self._metrics.keys() & values.keys()
-        if existing:
+        if existing and not overwrite:
             raise RuntimeError(
                 f"Metric(s) {existing} have already been set in the current context"
             )
@@ -169,7 +171,7 @@ class MetricsContext:
         Records a metric as a TopN set of values.
         """
         if self._level == 0:
-            raise RuntimeError(f"Cannot add {metric} outside of a MetricsContext")
+            return
         if metric not in self._metrics:
             self._metrics[metric] = TopN()
         self._metrics[metric].add(key, val)
