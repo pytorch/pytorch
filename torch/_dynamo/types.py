@@ -48,8 +48,7 @@ class GuardFn(Protocol):
     extra_state: Optional[ExtraState]
 
     # maps locals of user function to bool
-    def __call__(self, f_locals: dict[str, object]) -> bool:
-        ...
+    def __call__(self, f_locals: dict[str, object]) -> bool: ...
 
 
 @dataclasses.dataclass
@@ -87,8 +86,7 @@ class DynamoCallbackFn(Protocol):
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         frame_state: FrameState,
-    ) -> ConvertFrameReturn:
-        ...
+    ) -> ConvertFrameReturn: ...
 
 
 DynamoCallback = Union[DynamoCallbackFn, None, bool]
@@ -102,8 +100,7 @@ class DynamoGuardHook(Protocol):
         f_locals: dict[str, object],
         index: int,
         last: bool,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class ProfilerStartHook(Protocol):
@@ -111,17 +108,14 @@ class ProfilerStartHook(Protocol):
         self,
         name: str,
         # TODO(whc) how do I annotate a _RecordFunction here?
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 class ProfilerEndHook(Protocol):
-    def __call__(self, record: Any) -> None:
-        ...
+    def __call__(self, record: Any) -> None: ...
 
 
 class BytecodeHook(Protocol):
     def __call__(
         self, code: types.CodeType, new_code: types.CodeType
-    ) -> Optional[types.CodeType]:
-        ...
+    ) -> Optional[types.CodeType]: ...
