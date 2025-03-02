@@ -462,7 +462,7 @@ static PyObject* NodeBase_get_sort_key(PyObject* self, void* /*closure*/) {
   for (Py_ssize_t i = 0; i < n; i++) {
     PyTuple_SET_ITEM(tuple.get(), i, PyLong_FromSsize_t(vec[i]));
   }
-  return tuple.release(); // New reference
+  return tuple.release();
 }
 
 // Setter for NodeBase::sort_key: expects a Python tuple of ints, e.g.
@@ -472,7 +472,6 @@ static int NodeBase_set_sort_key(
     PyObject* value,
     void* /*closure*/) {
   NodeBase* node = reinterpret_cast<NodeBase*>(self);
-  // We want an iterable of ints
   if (!PyTuple_Check(value)) {
     PyErr_SetString(PyExc_TypeError, "_sort_key must be an tuple of ints");
     return -1;
@@ -488,7 +487,7 @@ static int NodeBase_set_sort_key(
     new_vec.emplace_back(val);
   }
   node->sort_key() = std::move(new_vec);
-  return 0; // success
+  return 0;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
