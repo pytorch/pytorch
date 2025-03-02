@@ -6,6 +6,8 @@
 
 namespace {
 
+struct NodeBase;
+
 // Thrown to exit out of a C++ function and return an error to Python.
 class PythonError : public std::exception {};
 
@@ -153,6 +155,18 @@ struct NodeBase {
   bool _erased;
   NodeBase* _prev;
   NodeBase* _next;
+  PyObject* graph;
+  PyObject* name;
+  PyObject* op;
+  PyObject* target;
+  PyObject* type;
+  PyObject* _input_nodes;
+  PyObject* _args;
+  PyObject* _kwargs;
+  PyObject* users;
+  PyObject* _repr_fn;
+  PyObject* meta;
+  PyObject* _sort_key;
 };
 
 static PyObject* NodeBase_new(
@@ -166,11 +180,31 @@ static PyObject* NodeBase_new(
 }
 
 static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
+  PyObject* graph = nullptr;
+  PyObject* name = nullptr;
+  PyObject* op = nullptr;
+  PyObject* target = nullptr;
+  PyObject* type = nullptr;
+  if (!PyArg_ParseTuple(args, "OOOOO", &graph, &name, &op, &target, &type)) {
+    return -1;
+  }
   self->_erased = false;
   Py_INCREF(self);
   self->_prev = self;
   Py_INCREF(self);
   self->_next = self;
+  self->graph = Py_NewRef(graph);
+  self->name = Py_NewRef(name);
+  self->op = Py_NewRef(op);
+  self->target = Py_NewRef(target);
+  self->type = Py_NewRef(type);
+  self->_input_nodes = PyDict_New();
+  self->_args = nullptr; // set with _update_args_kwargs
+  self->_kwargs = nullptr; // set with _update_args_kwargs
+  self->users = PyDict_New();
+  self->_repr_fn = Py_NewRef(Py_None);
+  self->meta = PyDict_New();
+  self->_sort_key = PyTuple_New(0);
   return 0;
 }
 
@@ -179,18 +213,54 @@ static struct PyMemberDef NodeBase_members[] = {
     {"_erased", T_BOOL, offsetof(NodeBase, _erased), 0, nullptr},
     {"_prev", T_OBJECT_EX, offsetof(NodeBase, _prev), 0, nullptr},
     {"_next", T_OBJECT_EX, offsetof(NodeBase, _next), 0, nullptr},
+    {"graph", T_OBJECT_EX, offsetof(NodeBase, graph), 0, nullptr},
+    {"name", T_OBJECT_EX, offsetof(NodeBase, name), 0, nullptr},
+    {"op", T_OBJECT_EX, offsetof(NodeBase, op), 0, nullptr},
+    {"target", T_OBJECT_EX, offsetof(NodeBase, target), 0, nullptr},
+    {"type", T_OBJECT_EX, offsetof(NodeBase, type), 0, nullptr},
+    {"_input_nodes", T_OBJECT_EX, offsetof(NodeBase, _input_nodes), 0, nullptr},
+    {"_args", T_OBJECT_EX, offsetof(NodeBase, _args), 0, nullptr},
+    {"_kwargs", T_OBJECT_EX, offsetof(NodeBase, _kwargs), 0, nullptr},
+    {"users", T_OBJECT_EX, offsetof(NodeBase, users), 0, nullptr},
+    {"_repr_fn", T_OBJECT_EX, offsetof(NodeBase, _repr_fn), 0, nullptr},
+    {"meta", T_OBJECT_EX, offsetof(NodeBase, meta), 0, nullptr},
+    {"_sort_key", T_OBJECT_EX, offsetof(NodeBase, _sort_key), 0, nullptr},
     {nullptr} /* Sentinel */
 };
 
 static int NodeBase_traverse(NodeBase* self, visitproc visit, void* arg) {
   Py_VISIT(self->_prev);
   Py_VISIT(self->_next);
+  Py_VISIT(self->graph);
+  Py_VISIT(self->name);
+  Py_VISIT(self->op);
+  Py_VISIT(self->target);
+  Py_VISIT(self->type);
+  Py_VISIT(self->_input_nodes);
+  Py_VISIT(self->_args);
+  Py_VISIT(self->_kwargs);
+  Py_VISIT(self->users);
+  Py_VISIT(self->_repr_fn);
+  Py_VISIT(self->meta);
+  Py_VISIT(self->_sort_key);
   return 0;
 }
 
 static int NodeBase_clear(NodeBase* self) {
   Py_CLEAR(self->_prev);
   Py_CLEAR(self->_next);
+  Py_CLEAR(self->graph);
+  Py_CLEAR(self->name);
+  Py_CLEAR(self->op);
+  Py_CLEAR(self->target);
+  Py_CLEAR(self->type);
+  Py_CLEAR(self->_input_nodes);
+  Py_CLEAR(self->_args);
+  Py_CLEAR(self->_kwargs);
+  Py_CLEAR(self->users);
+  Py_CLEAR(self->_repr_fn);
+  Py_CLEAR(self->meta);
+  Py_CLEAR(self->_sort_key);
   return 0;
 }
 
@@ -199,6 +269,69 @@ static void NodeBase_dealloc(PyObject* self) {
   (void)NodeBase_clear((NodeBase*)self);
   Py_TYPE(self)->tp_free(self);
 }
+
+static PyObject* NodeBase__update_args_kwargs(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  // Verify argument count
+  if (nargs != 2) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "_update_args_kwargs() requires exactly 2 arguments (new_args, new_kwargs)");
+    return nullptr;
+  }
+  auto node = reinterpret_cast<NodeBase*>(self);
+  auto input_nodes = node->_input_nodes;
+  if (PyDict_GET_SIZE(input_nodes) > 0) {
+    // Clear other.users containing us and input_nodes
+    PyObject *key = nullptr, *value = nullptr; // borrowed
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(input_nodes, &pos, &key, &value)) {
+      // key.users.pop(self), intentionally ignore KeyError
+      PyDict_DelItem(reinterpret_cast<NodeBase*>(key)->users, self);
+    }
+    PyDict_Clear(input_nodes);
+  }
+
+  auto visit_fn = [self, input_nodes](PyObject* x) {
+    if (is_node(x)) {
+      // self._input_nodes.setdefault(x)
+      if (!PyDict_SetDefault(input_nodes, x, Py_None)) {
+        throw PythonError();
+      }
+      // x.users.setdefault(self)
+      if (!PyDict_SetDefault(
+              reinterpret_cast<NodeBase*>(x)->users, self, Py_None)) {
+        throw PythonError();
+      }
+    }
+    return Py_NewRef(x);
+  };
+
+  // We do three things in a single pass of the args
+  // - Normalize list->immutable_list, dict->immutable_dict, etc
+  // - Populate self._input_nodes
+  // - Populate arg.users[self] for each arg
+  try {
+    Py_CLEAR(node->_args);
+    node->_args = map_aggregate(args[0], visit_fn);
+    Py_CLEAR(node->_kwargs);
+    node->_kwargs = map_aggregate(args[1], visit_fn);
+    Py_RETURN_NONE;
+  } catch (const PythonError& e) {
+    return nullptr;
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static PyMethodDef NodeBase_methods[] = {
+    {"_update_args_kwargs",
+     (PyCFunction)(void*)(NodeBase__update_args_kwargs),
+     METH_FASTCALL,
+     "Internal method: do not call directly."},
+    {nullptr, nullptr, 0, nullptr} // Sentinel
+};
 
 PyTypeObject NodeBaseType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
@@ -229,7 +362,7 @@ PyTypeObject NodeBaseType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
+    NodeBase_methods, /* tp_methods */
     NodeBase_members, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */
