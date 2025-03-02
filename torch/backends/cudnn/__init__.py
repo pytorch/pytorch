@@ -206,12 +206,3 @@ deterministic: bool
 benchmark: bool
 allow_tf32: bool
 benchmark_limit: int
-
-def deterministic(mode: bool) -> None:
-    r"""Sets deterministic mode on or off.
-
-    If deterministic mode is True,
-    then the cuDNN deterministic configuration flag is used to
-    select deterministic convolution algorithms.
-    """
-    torch._C._set_cudnn_deterministic(mode)
