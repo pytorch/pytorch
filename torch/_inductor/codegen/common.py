@@ -1550,7 +1550,7 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
