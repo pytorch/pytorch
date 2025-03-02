@@ -288,7 +288,7 @@ static void NodeBase_dealloc(PyObject* self) {
 }
 
 static PyObject* NodeBase__update_args_kwargs(
-    PyObject* self_,
+    PyObject* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
   // Verify argument count
@@ -298,33 +298,28 @@ static PyObject* NodeBase__update_args_kwargs(
         "_update_args_kwargs() requires exactly 2 arguments (new_args, new_kwargs)");
     return nullptr;
   }
-  NodeBase* self = reinterpret_cast<NodeBase*>(self_);
-
-  // Clear users containing us and input_nodes
-  // We want to remove 'self' from each old_use->users.
-  PyObject *key = nullptr, *value = nullptr; // borrowed
-  Py_ssize_t pos = 0;
-  while (PyDict_Next(self->_input_nodes, &pos, &key, &value)) {
-    // Remove (self) from old_use->users
-    NodeBase* old_node = reinterpret_cast<NodeBase*>(key);
-    // old_node->users.pop(self)
-    if (PyDict_DelItem(old_node->users, self_) < 0) {
-      PyErr_Clear();
+  auto node = reinterpret_cast<NodeBase*>(self);
+  auto input_nodes = node->_input_nodes;
+  if (PyDict_GET_SIZE(input_nodes) > 0) {
+    // Clear other.users containing us and input_nodes
+    PyObject *key = nullptr, *value = nullptr; // borrowed
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(input_nodes, &pos, &key, &value)) {
+      // key.users.pop(self), intentionally ignore KeyError
+      PyDict_DelItem(reinterpret_cast<NodeBase*>(key)->users, self);
     }
+    PyDict_Clear(input_nodes);
   }
-  PyDict_Clear(self->_input_nodes);
 
-  auto visit_fn = [self](PyObject* x) {
+  auto visit_fn = [self, input_nodes](PyObject* x) {
     if (is_node(x)) {
       // self._input_nodes.setdefault(x)
-      if (!PyDict_SetDefault(self->_input_nodes, x, Py_None)) {
+      if (!PyDict_SetDefault(input_nodes, x, Py_None)) {
         throw PythonError();
       }
       // x.users.setdefault(self)
       if (!PyDict_SetDefault(
-              reinterpret_cast<NodeBase*>(x)->users,
-              reinterpret_cast<PyObject*>(self),
-              Py_None)) {
+              reinterpret_cast<NodeBase*>(x)->users, self, Py_None)) {
         throw PythonError();
       }
     }
@@ -338,10 +333,10 @@ static PyObject* NodeBase__update_args_kwargs(
   try {
     THPObjectPtr new_args(map_aggregate(args[0], visit_fn));
     THPObjectPtr new_kwargs(map_aggregate(args[1], visit_fn));
-    Py_CLEAR(self->_args);
-    self->_args = new_args.release();
-    Py_CLEAR(self->_kwargs);
-    self->_kwargs = new_kwargs.release();
+    Py_CLEAR(node->_args);
+    node->_args = new_args.release();
+    Py_CLEAR(node->_kwargs);
+    node->_kwargs = new_kwargs.release();
     Py_RETURN_NONE;
   } catch (const PythonError& e) {
     return nullptr;
@@ -767,8 +762,7 @@ static PyObject* py_map_arg(
       if (is_node(a)) {
         return PyObject_CallOneArg(fn, a);
       }
-      Py_INCREF(a);
-      return a;
+      return Py_NewRef(a);
     });
   } catch (const PythonError& e) {
     return nullptr; // error should already be set
