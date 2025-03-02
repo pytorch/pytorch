@@ -146,7 +146,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
       constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
       uint did [[thread_position_in_grid]]);
 
-INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
+INSTANTIATE_UNARY_KERNELS_VEC2(half, half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
 
 template <typename T0, typename T1>
