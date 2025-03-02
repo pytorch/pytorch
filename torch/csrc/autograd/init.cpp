@@ -371,7 +371,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
-    if(at::hasHPU()) {
+    if (at::hasHPU()) {
       activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
     if (at::getNumGPUs() > 0) {

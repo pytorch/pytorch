@@ -51,7 +51,7 @@ const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_WORKLOADD,
 };
 const std::set<libkineto::ActivityType> hpuTypes = {
-  libkineto::ActivityType::HPU_OP,
+    libkineto::ActivityType::HPU_OP,
 };
 const std::set<libkineto::ActivityType> kPrivateUse1Types = {
     libkineto::ActivityType::GPU_MEMCPY,
