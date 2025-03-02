@@ -434,8 +434,7 @@ static PyObject* py_map_arg(
       if (is_node(a)) {
         return PyObject_CallOneArg(fn, a);
       }
-      Py_INCREF(a);
-      return a;
+      return Py_NewRef(a);
     });
   } catch (const PythonError& e) {
     return nullptr; // error should already be set
