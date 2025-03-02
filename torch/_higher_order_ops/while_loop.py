@@ -9,7 +9,6 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
-    # check_input_mutation_and_alias,
     diff_tensor_meta,
     reenter_make_fx,
     validate_subgraph_args_types,
@@ -460,18 +459,9 @@ def while_loop_fake_tensor_mode(
 def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
-    unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
     with ctx.redispatch_to_next():
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for fn, fn_name in [
-            (cond_fn, "cond_fn"),
-            (body_fn, "body_fn"),
-        ]:
-            check_input_mutation_and_alias(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            )
         ret = while_loop_op(
             functional_cond_fn,
             functional_body_fn,

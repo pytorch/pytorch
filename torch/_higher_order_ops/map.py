@@ -6,7 +6,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    # check_input_mutation_and_alias,
+    has_potential_input_mutation_or_alias,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator
@@ -240,6 +240,8 @@ def map_fake_tensor_mode(mode, f, xs, args):
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
+    from torch._higher_order_ops.utils import UnsupportedAliasMutationException
+    
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
@@ -248,7 +250,16 @@ def map_functionalize(ctx, f, xs, pos_args):
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        check_input_mutation_and_alias(f, example_inputs, pre_dispatch=pre_dispatch)
+        inp_mutation, aliases = has_potential_input_mutation_or_alias(wrapped_fn, example_inputs, pre_dispatch=pre_dispatch)
+
+        if inp_mutation:
+            raise UnsupportedAliasMutationException(
+                f"torch.map is mutating the input!"
+            )  # noqa: F541
+        if aliases:
+            raise UnsupportedAliasMutationException(
+                f"torch.map might be aliasing the input or the output!"
+            )  # noqa: F541
 
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)

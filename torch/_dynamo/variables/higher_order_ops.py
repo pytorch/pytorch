@@ -111,7 +111,6 @@ def check_meta_consistency_vt(
     from torch._higher_order_ops.while_loop import check_meta_consistency
 
     from . import TensorVariable
-
     def _unwrap_var(var):
         if isinstance(var, TensorVariable):
             return var.proxy.node.meta["example_value"]
@@ -127,6 +126,55 @@ def check_meta_consistency_vt(
 
     return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
 
+def flatten_nested_lists(li):
+    result = []
+    for el in li:
+        if isinstance(el, (list, tuple)):
+            result.extend(el)
+        else:
+            result.append(el)
+    return result
+
+def check_mutation_and_alias(tx, graph_module, inputs, name):
+    from torch._higher_order_ops.utils import (
+        has_potential_input_mutation_or_alias
+    )
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    with tx.fake_mode:        
+        # Get the example values of the tensors.
+        # In case a BatchedTensor is detected, get the unwrapped tensor
+        inputs_fake = []
+        for inp in inputs:
+            if hasattr(inp, 'node'):
+                val = inp.node.meta["example_value"]
+                if isinstance(val, torch.Tensor):
+                    if torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
+                        # This case is for batched or functional tensors
+                        while torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
+                            val = torch._C._functorch.get_unwrapped(val)
+                        inputs_fake.append(val)
+                    else:
+                        # This is the standard case of a TensorVariable
+                        inputs_fake.append(val)
+                else:
+                    # This case is for SymInts and other non-Tensor elements
+                    inputs_fake.append(val)
+            else:
+                # This case is for ints
+                inputs_fake.append(inp)
+        
+        pre_dispatch = False
+        inp_mutation, aliases = has_potential_input_mutation_or_alias(graph_module, inputs_fake, pre_dispatch=pre_dispatch)
+
+        if inp_mutation:
+            raise RuntimeError(
+                f"{name} might be modifying the input!"
+            )  # noqa: F541
+        if aliases:
+            raise RuntimeError(
+                f"{name} might be aliasing the input or the output!"
+            )  # noqa: F541
 
 @contextlib.contextmanager
 def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
@@ -964,31 +1012,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_gm_name,
             false_gm,
         )
-
-        from torch._higher_order_ops.utils import (
-            has_potential_input_mutation_or_alias
-        )
         
-        for gm, vars, gm_name in [(true_gm, true_shared + unique_true + unique_false, true_gm_name), 
-                                  (false_gm, true_shared + unique_true + unique_false, false_gm_name)]:
-            with tx.fake_mode:
-                operands_fake = [
-                    leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
-                    for leaf in vars
-                ]
-                sub_args_fake = operands_fake
-                pre_dispatch = False
-
-                inp_mutation, aliases = has_potential_input_mutation_or_alias(gm, sub_args_fake, pre_dispatch=pre_dispatch)
-
-                if inp_mutation:
-                    raise RuntimeError(
-                        f"{gm_name} might be modifying the input!"
-                    )  # noqa: F541
-                if aliases:
-                    raise RuntimeError(
-                        f"{gm_name} might be aliasing the input or the output!"
-                    )  # noqa: F541
+        proxy_vars = true_shared + unique_true + unique_false
+        
+        for gm, gm_name in [(true_gm, true_gm_name), 
+                            (false_gm, false_gm_name)]:
+            check_mutation_and_alias(tx, gm, flatten_nested_lists(proxy_vars), gm_name)
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
@@ -998,7 +1027,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            proxy_vars,
         )
 
         return _call_function_and_unflatten_output(
@@ -1249,14 +1278,27 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
+        cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
+        cond_name = "cond_fn"
         cond_name = tx.output.install_subgraph(
-            "cond_fn",
-            torch.fx.GraphModule(cond_nn_modules, cond_graph),
+            cond_name,
+            cond_gm,
         )
+        body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
+        body_name = "body_fn"
         body_name = tx.output.install_subgraph(
             "body_fn",
-            torch.fx.GraphModule(body_nn_modules, body_graph),
+            body_gm,
         )
+        
+        proxy_vars = tuple([operand.as_proxy() for operand in operands_seq]), tuple(
+                [inp.as_proxy() for inp in additional_inputs_seq]
+                + additional_lifted_inputs
+            )
+        
+        for gm, gm_name in [(cond_gm, cond_name), 
+                            (body_gm, body_name)]:
+            check_mutation_and_alias(tx, gm, flatten_nested_lists(proxy_vars), gm_name)
 
         cond_node = make_attr(tx, cond_name)
         body_node = make_attr(tx, body_name)
@@ -1264,11 +1306,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            tuple([operand.as_proxy() for operand in operands_seq]),
-            tuple(
-                [inp.as_proxy() for inp in additional_inputs_seq]
-                + additional_lifted_inputs
-            ),
+            *proxy_vars,
         )
 
         flat_example_value = pytree.tree_map_only(
@@ -1356,26 +1394,22 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
+        xs_proxy = xs.as_proxy()
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
+        proxy_vars = xs_proxy, additional_inputs_proxy
+        proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + additional_inputs_proxy
+        check_mutation_and_alias(tx, combine_gm, flatten_nested_lists(proxy_vars_inputcheck), 'Combine_fn')
+
         from torch._higher_order_ops.utils import (
             _maybe_fake_tracing,
-            has_potential_input_mutation_or_alias
         )
         from torch._inductor.utils import is_pointwise_use
 
         with tx.fake_mode:
-            xs_fake = [
-                first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
-                for leaf in itertools.chain(xs.items, xs.items)
+            sub_args_fake = [
+                leaf.node.meta["example_value"].clone() if hasattr(leaf.node.meta["example_value"], 'clone') else leaf.node.meta["example_value"]
+                for leaf in flatten_nested_lists(proxy_vars_inputcheck)
             ]
-            additional_fake = [
-                leaf.proxy.node.meta["example_value"].clone()
-                for leaf in additional_inputs.items
-            ]
-            additional_freevar_fake = [
-                leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
-                for leaf in combine_freevars_proxy
-            ]
-            sub_args_fake = xs_fake + additional_fake + additional_freevar_fake
             pre_dispatch = False
 
             fx = _maybe_fake_tracing(
@@ -1391,24 +1425,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
                     )
 
-            inp_mutation, aliases = has_potential_input_mutation_or_alias(combine_gm, sub_args_fake, pre_dispatch=pre_dispatch)
-
-            if inp_mutation:
-                raise RuntimeError(
-                    "Combine_fn might be modifying the input!"
-                )  # noqa: F541
-            if aliases:
-                raise RuntimeError(
-                    "Combine_fn might be aliasing the input or the output!"
-                )  # noqa: F541
-
         if combine_result.python_type() != list:
             unimplemented(
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
-        xs_proxy = xs.as_proxy()
-        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
         check_meta_consistency_vt(
             [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
@@ -1422,8 +1443,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            xs_proxy,
-            additional_inputs_proxy,
+            *proxy_vars,
         )
 
         with tx.fake_mode:
@@ -1542,47 +1562,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
         
-        from torch._higher_order_ops.utils import (
-            has_potential_input_mutation_or_alias
-        )
-
-        with tx.fake_mode:
-            init_fake = [
-                leaf.proxy.node.meta["example_value"].clone()
-                for leaf in init.items
-            ]
-            xs_fake = [
-                first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
-                for leaf in xs.items
-            ]
-            additional_fake = [
-                leaf.proxy.node.meta["example_value"].clone()
-                for leaf in additional_inputs.items
-            ]
-            additional_freevar_fake = [
-                leaf.node.meta["example_value"].clone() if isinstance(leaf.node.meta["example_value"], TensorVariable) else leaf.node.meta["example_value"]
-                for leaf in combine_freevars_proxy
-            ]
-            
-            sub_args_fake = init_fake + xs_fake + additional_fake + additional_freevar_fake
-            pre_dispatch = False
-
-            inp_mutation, aliases = has_potential_input_mutation_or_alias(combine_gm, sub_args_fake, pre_dispatch=pre_dispatch)
-
-            if inp_mutation:
-                raise RuntimeError(
-                    "Combine_fn might be modifying the input!"
-                )  # noqa: F541
-            if aliases:
-                raise RuntimeError(
-                    "Combine_fn might be aliasing the input, the carry or the output!"
-                )  # noqa: F541
-
-        if combine_result.python_type() != list:
-            unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
-            )
-
         xs_proxy = xs.as_proxy()
         init_proxy = init.as_proxy()
         additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
@@ -1593,6 +1572,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             combine_result.items, num_init_leaves
         )
         y_proxies = [y_var.as_proxy() for y_var in y_vars]
+        proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
+        proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + tuple(additional_inputs_proxy)
+        check_mutation_and_alias(tx, combine_gm, flatten_nested_lists(proxy_vars_inputcheck), 'Combine_fn')
+
+        if combine_result.python_type() != list:
+            unimplemented(
+                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
+            )
 
         check_meta_consistency_vt(
             init.unpack_var_sequence(tx),
@@ -1605,10 +1592,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            init_proxy,
-            xs_proxy,
-            # dim.as_proxy(),
-            additional_inputs_proxy,
+            *proxy_vars,
         )
 
         with tx.fake_mode:

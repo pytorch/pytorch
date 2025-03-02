@@ -943,10 +943,10 @@ def forward(self, pred_1):
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
-            return {"res": [x["t"][0], (x["t"][2][0],)]}
+            return {"res": [x["t"][0] + 1., (x["t"][2][0] + 2.,)]}
 
         def false_fn(x):
-            return {"res": [x["t"][1]["b"], (x["t"][2][0],)]}
+            return {"res": [x["t"][1]["b"] + 1., (x["t"][2][0] + 2.,)]}
 
         a = torch.randn(4, requires_grad=True)
         b = torch.randn(4, requires_grad=True)
@@ -984,9 +984,7 @@ def forward(self, pred_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0]
     getitem_1 = cond[1];  cond = None
-    view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
-    view_1 = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
-    return {'res': [view, (view_1,)]}""",  # noqa: B950
+    return {'res': [getitem, (getitem_1,)]}""",  # noqa: B950
         )
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
@@ -5165,8 +5163,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5207,8 +5205,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5217,7 +5215,7 @@ def forward(self, x_1):
     # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             view_x = x.view(x.shape)
@@ -5242,8 +5240,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5271,8 +5269,8 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5305,8 +5303,8 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException,
-                "One of torch.cond branch",
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5324,8 +5322,8 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5346,8 +5344,8 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException,
-                "One of torch.cond branch might be aliasing",
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!",
             ):
                 f(example_input_func)
         finally:
@@ -5377,8 +5375,8 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "One of torch.cond branch might be aliasing",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be aliasing the input or the output!",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5513,8 +5511,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5686,8 +5684,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -6032,7 +6030,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "torch.map is aliasing the input!",
+            "torch.map might be aliasing the input or the output!",
         ):
             functional_f(*example_inputs)
 
@@ -6630,7 +6628,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=torch.tensor([True]),
                 true_fn=lambda x: x + 100,
-                false_fn=lambda x: x,
+                false_fn=lambda x: x.clone(),
                 operands=(x,),
             )
 
@@ -6644,7 +6642,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=x.sum() < y.sum(),
                 true_fn=lambda x, y: x + 100,
-                false_fn=lambda x, y: y,
+                false_fn=lambda x, y: y.clone(),
                 operands=(x, y),
             )
 
@@ -6703,7 +6701,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + c, x - c),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -6713,7 +6711,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + 1, x - 1),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -6923,8 +6921,8 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be modifying the input!",
         ):
             functional_f(example_init, example_inputs)
 
@@ -6937,8 +6935,8 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "A branch or combine_fn might be modifying the input!.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be modifying the input",
         ):
             functional_f(example_init, example_inputs)
 
@@ -6955,8 +6953,8 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "Aliasing within branch or combine_fn might be occuring!.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be aliasing the input or the output!",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7473,7 +7471,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!"
             ):
                 torch.compile(fn)(f, x)
 
@@ -7489,7 +7488,8 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!"
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -7506,12 +7506,12 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                torch._dynamo.exc.InternalTorchDynamoError, "cond_true might be modifying the input!"
             ):
                 torch.compile(fn)(f, x)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                torch._dynamo.exc.InternalTorchDynamoError, "cond_true might be modifying the input!"
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)
