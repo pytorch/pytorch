@@ -5586,7 +5586,7 @@ class ShapeEnv:
                     # NB: do NOT set upper to 2 ** 48, we're using this solely
                     # to determine if we can do size-like replacement, the
                     # upper bound is irrelevant here
-                    var_to_range[x] = ValueRanges(2, int_oo)
+                    var_to_range[x] = ValueRanges(0, int_oo)
         return bound_sympy(expr, var_to_range)  # type: ignore[arg-type]
 
     @_lru_cache
@@ -6378,7 +6378,8 @@ class ShapeEnv:
 
     # See: Note - On 0/1 specialization
     def _default_value_range(self) -> ValueRanges:
-        lower = 2 if self.specialize_zero_one else 0
+        # lower = 2 if self.specialize_zero_one else 0
+        lower = 0
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
