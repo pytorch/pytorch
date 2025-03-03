@@ -2417,9 +2417,7 @@ def _wrap_fx_proxy(
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
-        # breakpoint()
         example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-        # breakpoint()
 
     return handle_traced_output(
         example_value, tx, proxy, options, subclass_type, target_cls
@@ -2483,6 +2481,69 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
         set_example_value(proxy.node, example_value)
+        if (
+            len(example_value) == 2
+            and example_value[1]
+            and len(example_value[1]) == 5
+            and [type(val) for val in example_value[1]]
+            == [list, tuple, list, tuple, tuple]
+            and isinstance(example_value[0], torch.fx.graph_module.GraphModule)
+            and "locals_to_steal" in example_value[0].meta
+        ):
+            gm, (inputs, sizes, scalars, hooks, packed_data) = example_value
+            # gm_proxy = proxy.tracer.create_proxy(
+            #     kind="call_function",
+            #     target=operator.getitem,
+            #     args=(proxy, 0),
+            #     kwargs={},
+            # )  # mmmmm should we use the proxy vs just by value? it is const
+            # then need to guard here?
+            gm_var = SourcelessGraphModuleVariable(gm)
+            args_proxy = proxy.tracer.create_proxy(
+                kind="call_function",
+                target=operator.getitem,
+                args=(proxy, 1),
+                kwargs={},
+            )
+            inputs_proxy = proxy.tracer.create_proxy(
+                kind="call_function",
+                target=operator.getitem,
+                args=(args_proxy, 0),
+                kwargs={},
+            )
+            inputs_var = []
+            for i, inp in enumerate(inputs):
+                inputs_proxy_i = proxy.tracer.create_proxy(
+                    kind="call_function",
+                    target=operator.getitem,
+                    args=(inputs_proxy, i),
+                    kwargs={},
+                )
+                inputs_var.append(
+                    wrap_fx_proxy(
+                        tx=tx,
+                        proxy=inputs_proxy_i,
+                        example_value=inp,
+                        subclass_type=None,  # uhhh how to tell this?
+                        source=None,  # won't have any?
+                        **options,
+                    )
+                )
+
+            # need to actually pass args in here
+            args_var = TupleVariable(
+                [
+                    ListVariable(inputs_var),
+                    TupleVariable([]),
+                    ListVariable([]),
+                    TupleVariable([]),
+                    TupleVariable([]),
+                ]
+            )
+            out = TupleVariable([gm_var, args_var])
+            breakpoint()
+            return out
+
         unpacked = []
         for i, val in enumerate(example_value):
             if val is None:
@@ -2511,8 +2572,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                     # use the same options object as parent
                     options_i = options
 
+                # if isinstance(val, torch.fx.graph_module.GraphModule):
+                #     print("creating ")
+                #     unpacked.append(SourcelessGraphModuleVariable(val))
+                # unpacked.append(SourcelessBuilder.create(self.tx, v for v in example_value))
+
                 # WARNING: this assumes the same target_cls as this tuple/list call
-                breakpoint()
                 # I think we need to create a new Variable to properly model the output of the functional CA call
                 # it's wrong that we even end up here, target_cls is TensorVariable
                 unpacked.append(

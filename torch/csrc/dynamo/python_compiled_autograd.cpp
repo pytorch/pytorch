@@ -11,7 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "c10/core/impl/TorchDispatchModeTLS.h"
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 /*
 [Note: Compiled Autograd]
@@ -1143,8 +1143,9 @@ static variable_list compiled_autograd(
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  cache->clear();
 
-  
+
   // if (infra_modes[0].has_value()) {
   //   std::cout << "setting FAKE" << std::endl;
   //   c10::impl::TorchDispatchModeTLS::set_mode(infra_modes[0].value(), c10::impl::TorchDispatchModeKey::FAKE);

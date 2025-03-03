@@ -80,8 +80,9 @@ def accumulate_grad(x, new_grad):
     new_grad = torch.clone(new_grad)
     if x.grad is None:
         x.grad = new_grad
-    else:
-        x.grad.add_(new_grad)
+    # problem here. can't trace???
+    # else:
+    #     x.grad.add_(new_grad)
 
 
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):

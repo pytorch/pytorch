@@ -657,6 +657,8 @@ def _create_aot_dispatcher_function(
         needs_autograd = any(
             x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
         )
+        # only for these fullgraphs
+        needs_autograd = False
 
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
@@ -1193,6 +1195,7 @@ def aot_module_simplified(
     # convention.  This should get fixed...
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: tuple[Any]):
+        print("at runtime")
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)

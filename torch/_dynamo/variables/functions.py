@@ -1227,6 +1227,7 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+                    # not supposed to get here
                     breakpoint()
             if self.value.__qualname__ == "allow_in_graph":
                 explanation = (

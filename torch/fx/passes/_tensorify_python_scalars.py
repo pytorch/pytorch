@@ -361,6 +361,6 @@ def tensorify_python_scalars(
             metrics_context.set("tensorify_float_success", True, overwrite=True)
         raise TensorifyScalarRestartAnalysis
 
-    graph_code_log.debug(
-        "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
-    )
+    # graph_code_log.debug(
+    #     "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
+    # )
