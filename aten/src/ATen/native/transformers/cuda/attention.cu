@@ -1493,15 +1493,24 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 #if defined(USE_MEM_EFF_ATTENTION)
 
 #ifdef USE_ROCM
-  using aotriton::v2::flash::debug_fill_dropout_rng;
+  using aotriton::v2::flash::debug_simulate_encoded_softmax;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
+  at::cuda::CUDAGuard device_guard(self.device());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  at::Tensor seed_t, offset_t;
+  const auto options = at::dtype(at::kLong).device(at::kCUDA);
+  seed_t = at::scalar_tensor(at::Scalar(seed), options);
+  offset_t = at::scalar_tensor(at::Scalar(offset), options);
   hipError_t err; // TODO: Error handling
 
-  err = debug_fill_dropout_rng(mk_aotensor(self, "r"),
-                               static_cast<uint64_t>(seed),
-                               static_cast<uint64_t>(offset),
-                               stream);
+  err = debug_simulate_encoded_softmax(mk_aotensor(self, "r"),
+                                       dropout_p,
+                                       mk_aoscalartensor(seed_t),
+                                       mk_aoscalartensor(offset_t),
+                                       0,
+                                       stream);
 #else
   at::PhiloxCudaState rng_engine_inputs;
   rng_engine_inputs = at::PhiloxCudaState(seed, offset);
