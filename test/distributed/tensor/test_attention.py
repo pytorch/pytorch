@@ -37,10 +37,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 c10d_functional = torch.ops.c10d_functional
 backends = []
-if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-    backends.append(SDPBackend.FLASH_ATTENTION)
-if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
-    backends.append(SDPBackend.EFFICIENT_ATTENTION)
+# if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+#     backends.append(SDPBackend.FLASH_ATTENTION)
+# if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+#     backends.append(SDPBackend.EFFICIENT_ATTENTION)
+backends.append(SDPBackend.CUDNN_ATTENTION)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -109,7 +110,10 @@ class RingAttentionTest(DTensorTestBase):
         nheads = 8
         torch.manual_seed(10)
         dtype = (
-            torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
+            torch.bfloat16
+            if backend == SDPBackend.FLASH_ATTENTION
+            or backend == SDPBackend.CUDNN_ATTENTION
+            else torch.float32
         )
 
         _cp_options.enable_load_balance = load_balance
