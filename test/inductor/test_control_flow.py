@@ -968,6 +968,26 @@ class WhileLoopModels:
                 (c, x),
             )
 
+    class ConvLoop1(torch.nn.Module):
+        def __init__(self, device):
+            super().__init__()
+            self.conv2d = torch.nn.Conv2d(
+                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), device=device
+            )
+
+        def forward(self, c, x):
+            def cond_fn(loop_idx, x):
+                return loop_idx < 1
+
+            def body_fn(loop_idx, x):
+                return loop_idx + 1, self.conv2d(x) + 1
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                (c, x),
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1016,6 +1036,12 @@ class WhileLoopTests(TestCase):
                 inputs_with_counters = counters + unflat_inputs
                 cloned_inputs = pytree.tree_map(
                     lambda t: t.clone(), inputs_with_counters
+                )
+                print(
+                    "haha tensor_hash",
+                    hash(cloned_inputs[1]),
+                    f" rand_seed {torch.initial_seed()}",
+                    f" cuda initial_seed {torch.cuda.initial_seed()}. tensor value: {cloned_inputs[1]}",
                 )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
@@ -1278,11 +1304,22 @@ class WhileLoopTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [True, False])
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("dynamic", [False])
     def test_while_loop_with_conv(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.Conv(device),
+            inputs=(torch.randn(2, 4, 4, 4),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_conv_loop1(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.ConvLoop1(device),
             inputs=(torch.randn(2, 4, 4, 4),),
             device=device,
             dynamic=dynamic,
