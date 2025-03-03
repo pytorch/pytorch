@@ -1220,7 +1220,7 @@ def _map_param_key_to_optim_keys(
             [] for _ in range(dist.get_world_size(group))
         ]
         dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
-        merge_all_optim_state_keys = list(chain.from_iterable(all_keys))
+        merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: list[Optional[list[_OptimStateKey]]] = (
@@ -1254,9 +1254,9 @@ def _unflatten_param_groups(
         nested_unflat_param_names = [
             param_to_fqns[param] for param in param_group_params
         ]
-        unflat_param_group["params"] = list(
-            chain.from_iterable(nested_unflat_param_names)
-        )  # flatten the list of lists
+        unflat_param_group["params"] = [
+            *chain.from_iterable(nested_unflat_param_names)
+        ]  # flatten the list of lists
         param_groups.append(unflat_param_group)
     return param_groups
 

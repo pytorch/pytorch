@@ -4902,7 +4902,7 @@ class CppScheduling(BaseScheduling):
                 )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
-                    list(itertools.chain.from_iterable(nodes_list)),
+                    [*itertools.chain.from_iterable(nodes_list)],
                 )
 
             return True
