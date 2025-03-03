@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
+from torch._inductor.exc import InductorError
 from torch._inductor.ir import ChoiceCaller, FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
@@ -40,8 +41,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-from torch._inductor.exc import InductorError
 
 
 torch.set_float32_matmul_precision("high")
