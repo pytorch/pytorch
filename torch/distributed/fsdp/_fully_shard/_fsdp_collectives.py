@@ -85,7 +85,10 @@ def all_gather_copy_in_cuda(
     )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
-        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        if foreach_copy_dsts[0].device == all_gather_inputs[0].device:
+            torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs, non_blocking=True)
+        else:
+            torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
     return all_gather_input, all_gather_output
 
 
@@ -229,7 +232,10 @@ def _get_param_all_gather_inputs(
             (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
         )
         splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
-        torch._foreach_copy_(splits, foreach_copy_inputs)
+        if splits[0].device == foreach_copy_inputs[0].device:
+            torch._foreach_copy_(splits, foreach_copy_inputs, non_blocking=True)
+        else:
+            torch._foreach_copy_(splits, foreach_copy_inputs)
         for i, split in zip(foreach_copy_indices, splits):
             param_all_gather_inputs[i] = [split]
 
