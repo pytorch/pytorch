@@ -119,6 +119,7 @@ from . import config
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
+
     id: int
 
 
@@ -622,11 +623,15 @@ class CUDAWarmupNode:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
-        with torch.cuda.device(
-            self.device_index
-        ), disable_conv_cache_emptying(), clear_cublas_manager(), _use_cuda_memory_pool_manager(
-            self.device_index, self.cuda_graphs_pool, self.stream
-        ), get_history_recording():
+        with (
+            torch.cuda.device(self.device_index),
+            disable_conv_cache_emptying(),
+            clear_cublas_manager(),
+            _use_cuda_memory_pool_manager(
+                self.device_index, self.cuda_graphs_pool, self.stream
+            ),
+            get_history_recording(),
+        ):
             out = self.wrapped_function.model(new_inputs)
 
         # We need to know which outputs are allocated within the cudagraph pool
@@ -713,6 +718,7 @@ UnaliasedStorage = _UnaliasedStorage()
 
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
+
     __slots__ = ["index"]
 
     index: PathOutputIndex
@@ -1200,14 +1206,18 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
-        with preserve_rng_state(), torch.cuda.device(
-            self.device
-        ), clear_cublas_manager(), torch.cuda.graph(
-            self.graph,
-            stream=self.stream,
-            pool=self.cuda_graphs_pool,
-            capture_error_mode="thread_local",
-        ), get_history_recording():
+        with (
+            preserve_rng_state(),
+            torch.cuda.device(self.device),
+            clear_cublas_manager(),
+            torch.cuda.graph(
+                self.graph,
+                stream=self.stream,
+                pool=self.cuda_graphs_pool,
+                capture_error_mode="thread_local",
+            ),
+            get_history_recording(),
+        ):
             static_outputs = model(inputs)
 
         # running model should reclaim memory
@@ -1247,11 +1257,13 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            torch._check(
-                o.is_cuda or o.untyped_storage().data_ptr() == 0,
-                lambda: (
-                    "Expected all cuda outputs in cuda graph recording. Non cuda output "
-                    f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+            (
+                torch._check(
+                    o.is_cuda or o.untyped_storage().data_ptr() == 0,
+                    lambda: (
+                        "Expected all cuda outputs in cuda graph recording. Non cuda output "
+                        f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+                    ),
                 ),
             )
 
@@ -1291,9 +1303,9 @@ class CUDAGraphNode:
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
         else:
-            assert len(self.stack_traces) == len(
-                outputs
-            ), "Wrong number of stack traces passed in"
+            assert len(self.stack_traces) == len(outputs), (
+                "Wrong number of stack traces passed in"
+            )
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
@@ -1599,12 +1611,14 @@ class CUDAGraphNode:
         self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs: list[InputType] = []
 
-        with warnings.catch_warnings(record=True), torch.cuda.device(
-            self.device
-        ), _use_cuda_memory_pool_manager(
-            self.device,
-            mem_pool=self.cuda_graphs_pool,
-            stream=self.stream,
+        with (
+            warnings.catch_warnings(record=True),
+            torch.cuda.device(self.device),
+            _use_cuda_memory_pool_manager(
+                self.device,
+                mem_pool=self.cuda_graphs_pool,
+                stream=self.stream,
+            ),
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
@@ -1736,12 +1750,8 @@ def check_memory_pool(
     pool_id: tuple[int, int],
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
-    assert all(
-        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
-    )  # noqa: C419
-    unique_storages = {
-        stor.data_ptr() for stor in live_storages_ptrs if stor()
-    }  # noqa: set_linter
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
@@ -1864,11 +1874,14 @@ class CUDAGraphTreeManager:
             self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
-            with warnings.catch_warnings(record=True), torch.cuda.graph(
-                self.graph,
-                pool=self.cuda_graphs_thread_pool,
-                stream=self.stream,
-                capture_error_mode="thread_local",
+            with (
+                warnings.catch_warnings(record=True),
+                torch.cuda.graph(
+                    self.graph,
+                    pool=self.cuda_graphs_thread_pool,
+                    stream=self.stream,
+                    capture_error_mode="thread_local",
+                ),
             ):
                 pass
 
@@ -2230,7 +2243,10 @@ class CUDAGraphTreeManager:
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
-    ) -> tuple[ModelType, OutputType,]:
+    ) -> tuple[
+        ModelType,
+        OutputType,
+    ]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
