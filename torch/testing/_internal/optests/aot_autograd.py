@@ -35,7 +35,7 @@ def aot_autograd_check(
         kwargs,
         dynamic,
         assert_raises_regex_fn=assert_raises_regex,
-        assert_equals_fn=torch.testing._comparison.assert_close,
+        assert_equals_fn=torch.testing.assert_close,
         check_gradients=True,
         try_check_data_specialization=False,
         skip_correctness_check=False):
@@ -82,9 +82,9 @@ def aot_autograd_check(
 
 outputs_msg = (
     "Outputs of the operator are different in eager-mode PyTorch vs "
-    "AOTAutograd. This means the operator will have incorrect output "
+    "AOTDispatcher tracing. This means the operator will have incorrect output "
     "underneath torch.compile. This could be because the operator's "
-    "implementation not traceable or that there is a bug in AOTAutograd."
+    "implementation not traceable."
 )
 
 
@@ -128,16 +128,21 @@ def _test_aot_autograd_forwards_backwards_helper(
 
         msg = (
             "Gradients of the operator are different in eager-mode PyTorch vs "
-            "AOTAutograd. This means the operator will have incorrect gradients "
+            "AOTDispatcher. This means the operator will have incorrect gradients "
             "underneath torch.compile. This could be because the operator's "
-            "backward is incorrectly registered or not traceable or that there "
-            "is a bug in AOTAutograd."
+            "backward is incorrectly registered or not traceable."
         )
 
         compiled_out, compiled_grad = call_forwards_backwards(compiled_f, args)
         if not skip_correctness_check:
-            assert_equals_fn(compiled_out, orig_out, msg=outputs_msg)
-            assert_equals_fn(compiled_grad, orig_grad, msg=msg)
+            try:
+                assert_equals_fn(compiled_out, orig_out)
+            except Exception as e:
+                raise type(e)(outputs_msg) from e
+            try:
+                assert_equals_fn(compiled_grad, orig_grad)
+            except Exception as e:
+                raise type(e)(msg) from e
 
     check(args, ignore_failure=False)
 

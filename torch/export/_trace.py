@@ -1,13 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
-import types
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
@@ -33,9 +31,8 @@ from torch._export.non_strict_utils import (
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
+    _materialize_and_lift_constants,
     ConstantAttrMap,
-    lift_constants_pass,
-    rewrite_script_object_meta,
 )
 from torch._export.utils import (
     _collect_param_buffer_metadata,
@@ -68,6 +65,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
@@ -190,7 +188,7 @@ def _fixup_key(x):
 def _strip_root(x):
     if isinstance(x, str) and x.startswith("_export_root"):
         stripped = x[len("_export_root") :]
-        return stripped[1:] if stripped.startswith(".") else stripped
+        return stripped.removeprefix(".")
     return x
 
 
@@ -446,6 +444,7 @@ def _produce_aten_artifact(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
+    _prettify_placeholder_names=True,
 ) -> ATenExportArtifact:
     """
     This is a helper function that is shared between export_to_aten_ir and export_to_aten_ir_make_fx
@@ -478,8 +477,9 @@ def _produce_aten_artifact(
 
     # script objects are always stored in constants no matter whether they're initial inputs or
     # they're lifted in aot" before rewrite_script_object_meta
-    constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+    constants = _materialize_and_lift_constants(
+        gm, export_graph_signature, constant_attrs
+    )
 
     if pre_dispatch:
         from torch._export.passes.replace_autocast_with_hop_pass import (
@@ -513,15 +513,16 @@ def _produce_aten_artifact(
 
     # Prettify names for placeholder nodes.
     assert export_graph_signature is not None
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
+    if _prettify_placeholder_names:
+        placeholder_naming_pass(
+            gm,
+            export_graph_signature,
+            mod,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            constants,
+        )
 
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
@@ -736,6 +737,7 @@ def _export_to_aten_ir(
     decomp_table=None,
     _check_autograd_state: bool = True,
     _is_torch_jit_trace: bool = False,
+    _prettify_placeholder_names: bool = True,
     decompose_custom_triton_ops: bool = False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
@@ -811,6 +813,7 @@ def _export_to_aten_ir(
         fake_args=fake_args,
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
+        _prettify_placeholder_names=_prettify_placeholder_names,
     )
 
 
@@ -1395,6 +1398,22 @@ def _strict_export_lower_to_aten_ir(
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
 
+    # update unbacked bindings that might have gone out of sync
+    # between Dynamo and AOTAutograd
+    for node in gm.graph.nodes:
+        if "unbacked_bindings" in node.meta:
+            old_unbacked_bindings = node.meta["unbacked_bindings"]
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in old_unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol:
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                node.meta["unbacked_bindings"] = new_unbacked_bindings
+            else:
+                del node.meta["unbacked_bindings"]
+
     _populate_param_buffer_metadata_to_new_gm(
         params_buffers_to_node_meta, gm, export_graph_signature
     )
@@ -1494,8 +1513,7 @@ def _export_to_aten_ir_make_fx(
                 out = original_getattr(self, attr)
                 if attr in attrs_to_proxy:
                     if torch._C._is_torch_function_mode_enabled():
-                        # If it is a static function or method, we should always inline
-                        if not isinstance(out, (types.FunctionType, types.MethodType)):
+                        if isinstance(out, torch.Tensor):
                             # When we get here there is no guarantee that we will hit the
                             # PreDispatchTorchFunctionMode, so we manually peak into the torch
                             # function mode list and tweak the PreDispatchTorchFunctionMode.
@@ -1512,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                                     proxy = get_proxy_slot(self, tracer).proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
-                                        builtins.getattr,
+                                        torch.ops.export.access_subclass_inner_tensor.default,
                                         (proxy, attr),
                                         {},
                                     )
@@ -1607,7 +1625,7 @@ def _export_to_aten_ir_make_fx(
                     # from subclass tensors if we carefully rewrite track_tensor_tree
                     # in a way that it doesn't do any tensor methods.
                     torch.ops.aten.detach.default,
-                    builtins.getattr,
+                    torch.ops.export.access_subclass_inner_tensor.default,
                 ):
                     return False
                 return True
@@ -2052,6 +2070,8 @@ def _export(
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
 
+    dtrace_structured("export", payload_fn=lambda: "start!")
+
     # NOTE Export training IR rollout
     # Old export calls export._trace(pre_dispatch=True)
     # and there are still lot of internal/OSS callsites that
@@ -2060,7 +2080,7 @@ def _export(
     # export_training_ir_rollout_check returns True in OSS
     # while internally it returns False UNLESS otherwise specified.
     if pre_dispatch and export_training_ir_rollout_check():
-        return _export_for_training(
+        ep = _export_for_training(
             mod,
             args,
             kwargs,
@@ -2068,6 +2088,8 @@ def _export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
+        dtrace_structured("exported_program", payload_fn=lambda: str(ep))
+        return ep
 
     (
         args,
@@ -2138,5 +2160,7 @@ def _export(
         constants=export_artifact.aten.constants,
         verifiers=[Verifier],
     )
+
+    dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
     return exported_program

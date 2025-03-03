@@ -953,9 +953,10 @@ This class does not support ``__members__`` property.)");
       "_register_work",
       [](const at::Tensor& tensor,
          const c10::intrusive_ptr<::c10d::Work>& work) {
-        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
-            ->ref_py_object();
-        ::c10d::register_work(tensor, work);
+        py::object obj = py::cast(work);
+        auto holder = c10::make_intrusive<::c10d::PyProcessGroup::PyWorkHolder>(
+            work, obj);
+        ::c10d::register_work(tensor, holder);
       },
       py::arg("tensor"),
       py::arg("work"));
@@ -2865,10 +2866,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            auto ifnameEnv =
-                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && ifnameEnv->size() > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }

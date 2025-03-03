@@ -17,6 +17,7 @@ from torch.utils._pytree import tree_leaves
 
 class TestDraftExport(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
@@ -68,7 +69,8 @@ class TestDraftExport(TestCase):
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
 
-            ep, report = draft_export(M(), inp)
+            ep = draft_export(M(), inp)
+            report = ep._report
 
             self.assertEqual(len(report.failures), 1)
             self.assertEqual(
@@ -94,11 +96,13 @@ class TestDraftExport(TestCase):
             class M(torch.nn.Module):
                 def forward(self, a, b):
                     res = torch.ops.mylib.foo(a, b)
+                    res = torch.ops.mylib.foo(res, b)
                     return res
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
 
-            ep, report = draft_export(M(), inp)
+            ep = draft_export(M(), inp)
+            report = ep._report
 
             self.assertEqual(len(report.failures), 1)
             self.assertEqual(
@@ -126,7 +130,7 @@ class TestDraftExport(TestCase):
                 torch.ones(3, 4),
             )
 
-            ep, report = draft_export(
+            ep = draft_export(
                 M(),
                 inp,
                 dynamic_shapes={
@@ -212,7 +216,8 @@ class TestDraftExport(TestCase):
 
             inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(3))
 
-            ep, report = draft_export(M(), inp)
+            ep = draft_export(M(), inp)
+            report = ep._report
             self.assertTrue(len(report.failures) > 0)
             self.assertEqual(
                 report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
@@ -224,28 +229,83 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
+    def test_unbacked_div_mod_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.zeros(x.item())
+                x = x.unsqueeze(0).repeat(10, 2)
+                return x.view(-1, 2, 2345)
+
+        ep = draft_export(M(), (torch.tensor([938]),))
+        report = ep._report
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
+
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
                 res = 0
                 for v in [x, y]:
-                    if v.item() > 10:
-                        res += v * v
+                    b = v.item()
+                    if b > 10:
+                        res += v * b
                     else:
-                        res += v + v
+                        res += v + b
 
                 return z * res
 
         inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
 
-        ep, report = draft_export(M(), inp)
-        self.assertTrue(len(report.failures) > 0)
+        ep = draft_export(M(), inp)
+        report = ep._report
+        self.assertEqual(len(report.failures), 1)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
 
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_complex_data_dependent_expr(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                a = -a
+                a = a // 3
+                a = a + 5
+
+                z = torch.cat([y, y])
+
+                return z[:a]
+
+        ep = draft_export(
+            M(),
+            (torch.tensor(6), torch.randn(5)),
+            dynamic_shapes={"x": None, "y": {0: Dim.DYNAMIC}},
+        )
+        report = ep._report
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertTrue(len(report.expressions_created) >= 4)
+        for _ep in [ep, ep.run_decompositions()]:
+            # check data-dependent asserts
+            assert_scalar_nodes = [
+                node
+                for node in _ep.graph.nodes
+                if node.target == torch.ops.aten._assert_scalar.default
+            ]
+            self.assertEqual(len(assert_scalar_nodes), 5)
+            # unbacked bindings
+            unbacked_binding_symbols = set()
+            for node in _ep.graph.nodes:
+                if bindings := node.meta.get("unbacked_bindings"):
+                    unbacked_binding_symbols.update(bindings.keys())
+            self.assertEqual(len(unbacked_binding_symbols), 1)
 
     def test_offsets(self):
         class M(torch.nn.Module):
@@ -256,7 +316,7 @@ class TestDraftExport(TestCase):
                 return x * a
 
         inp = (torch.tensor(3),)
-        ep, report = draft_export(M(), inp)
+        draft_export(M(), inp)
 
     def test_shape_failure(self):
         class M(torch.nn.Module):
@@ -266,7 +326,8 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
 
-        ep, report = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}})
+        ep = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}})
+        report = ep._report
 
         self.assertEqual(len(report.failures), 1)
         self.assertEqual(
@@ -304,7 +365,7 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
         mod = M()
-        ep, report = draft_export(mod, inp)
+        ep = draft_export(mod, inp)
         self.assertEqual(mod.a, torch.tensor(2))
         FileCheck().check_count("torch.ops.aten.add.default", 0, exactly=True).run(
             ep.graph_module.code
@@ -320,9 +381,25 @@ class TestDraftExport(TestCase):
                 return x
 
         inp = (torch.ones(3, 3),)
-        ep, report = draft_export(M(), inp)
+        ep = draft_export(M(), inp)
+        report = ep._report
         self.assertTrue(report.successful())
         self.assertEqual(inp[0], torch.ones(3, 3))
+
+    def test_masked_linear(self):
+        class M(torch.nn.Module):
+            def forward(self, x, mask, weight, bias):
+                masked = x[mask != 0, :, :]
+                return torch.nn.functional.linear(masked, weight, bias)
+
+        x = torch.zeros(10)
+        inp = (torch.randn(10, 8, 7), x, torch.randn(25, 7), torch.randn(25))
+        draft_ep = draft_export(M(), inp)
+        ep = export(M(), inp)
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
+        x[2] += 1
+        x[3] += 1
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
 
     def test_torchbind(self):
         class Model(torch.nn.Module):
@@ -347,7 +424,8 @@ class TestDraftExport(TestCase):
         tq.push(b)
         tq3 = copy.deepcopy(tq)
         inp = (tq, torch.randn(2, 2))
-        ep, report = draft_export(mod, inp)
+        ep = draft_export(mod, inp)
+        report = ep._report
         self.assertTrue(report.successful())
         self.assertEqual(tq2.size(), 0)
         self.assertEqual(tq3.size(), 2)
@@ -378,7 +456,8 @@ class TestDraftExport(TestCase):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 export(mod, inputs, strict=True)
 
-        ep, report = draft_export(mod, inputs)
+        ep = draft_export(mod, inputs)
+        report = ep._report
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
             self.assertTrue(torch.allclose(ep_out, eager_out))
             self.assertEqual(ep_out.dtype, eager_out.dtype)
@@ -420,7 +499,8 @@ class TestDraftExport(TestCase):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 export(mod, inputs, strict=True)
 
-        ep, report = draft_export(mod, inputs)
+        ep = draft_export(mod, inputs)
+        report = ep._report
         for ep_out, eager_out in zip(
             tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
         ):
@@ -454,7 +534,8 @@ class TestDraftExport(TestCase):
         mod = M()
         inputs = (torch.randn(100, 4), torch.tensor(10))
 
-        ep, report = draft_export(mod, inputs)
+        ep = draft_export(mod, inputs)
+        report = ep._report
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
             self.assertTrue(torch.allclose(ep_out, eager_out))
             self.assertEqual(ep_out.dtype, eager_out.dtype)
@@ -479,7 +560,7 @@ class TestDraftExport(TestCase):
 
         mod = M()
         example_inputs = (torch.randn(3, 5), torch.randn(3))
-        draft_ep, _ = draft_export(mod, example_inputs)
+        draft_ep = draft_export(mod, example_inputs)
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             torch._inductor.aoti_compile_and_package(
                 draft_ep,

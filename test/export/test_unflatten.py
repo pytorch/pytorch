@@ -244,6 +244,7 @@ class TestUnflatten(TestCase):
                     target_spec: TreeSpec,
                     input_spec: TreeSpec,
                     input_args: List[Any],
+                    metadata: dict[str, Any],
                 ) -> List[Any]:
                     while len(input_args) > 2:
                         input_args.pop(-1)

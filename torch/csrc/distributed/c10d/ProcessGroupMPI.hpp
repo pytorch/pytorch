@@ -17,8 +17,6 @@
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <c10/util/CallOnce.h>
-
 #include <mpi.h>
 
 namespace c10d {
