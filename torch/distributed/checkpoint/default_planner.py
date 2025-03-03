@@ -74,7 +74,7 @@ class DefaultSavePlanner(SavePlanner):
         flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: Optional[bool] = None,
         dedup_save_to_lowest_rank: bool = False,
-        enable_plan_caching: bool = False,
+        enable_plan_caching: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
@@ -167,6 +167,7 @@ class DefaultSavePlanner(SavePlanner):
         merged_plans = _merge_delta_local_plans(
             SavePlanner._cached_all_plans[self._cached_plans_key], all_plans
         )
+        SavePlanner._cached_all_plans[self._cached_plans_key] = merged_plans
         global_plan, metadata = self._create_global_plan(merged_plans)
 
         if self._cached_plans_key in self._cached_global_plan:
