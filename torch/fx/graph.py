@@ -1189,7 +1189,10 @@ class Graph:
 
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
-        to_erase._update_args_kwargs((), immutable_dict())
+        to_erase._update_args_kwargs(
+            map_arg(to_erase._args, lambda n: None),
+            map_arg(to_erase._kwargs, lambda n: None),
+        )
 
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
