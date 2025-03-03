@@ -62,6 +62,8 @@ class TestMultipleWrapping(FSDPTest):
 
 
 devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestMultipleWrapping, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestMultipleWrapping, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

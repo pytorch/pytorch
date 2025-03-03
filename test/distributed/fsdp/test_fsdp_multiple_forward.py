@@ -74,6 +74,8 @@ class TestMultiForward(FSDPTest):
 
 
 devices = ("cpu", "hpu", "xpu")
-instantiate_device_type_tests(TestMultiForward, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestMultiForward, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

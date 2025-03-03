@@ -514,9 +514,13 @@ class TestAutograd(FSDPTest):
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
-instantiate_device_type_tests(TestParityWithDDP, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestParityWithDDP, globals(), only_for=devices, allow_xpu=True
+)
 instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices, allow_xpu=True)
-instantiate_device_type_tests(TestParamInit, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestParamInit, globals(), only_for=devices, allow_xpu=True
+)
 instantiate_device_type_tests(TestAutograd, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

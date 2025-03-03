@@ -16,8 +16,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     subtest,
     TEST_HPU,
-    TEST_XPU,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 

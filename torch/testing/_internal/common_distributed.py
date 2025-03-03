@@ -949,6 +949,8 @@ class DistributedTestBase(MultiProcessTestCase):
             return "nccl"
         elif "hpu" in device :   # intel gaudi
             return "hccl"
+        elif "xpu" in device:
+            return "xccl"
         else :
             return "gloo"
 
@@ -961,7 +963,7 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store
         )
-        if "nccl" or "xccl" in self.backend(device):
+        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
             torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
