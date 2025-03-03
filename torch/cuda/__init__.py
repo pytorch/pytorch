@@ -207,7 +207,9 @@ def is_bf16_supported(including_emulation: bool = True):
     if int(cuda_version.split(".")[0]) >= 10:
         warnings.warn(
             f"{device_properties.name} does not natively support bfloat16. "
-            "All computations are internally done with float32."
+            "All computations are internally done with float32.",
+            category=UserWarning,
+            stacklevel=2,
         )
         return True
     else:
