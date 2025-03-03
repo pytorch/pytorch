@@ -1202,6 +1202,7 @@ class TestBasicGEMM(TestCase):
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
 
+
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == "__main__":
