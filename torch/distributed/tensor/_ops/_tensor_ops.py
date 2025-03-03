@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence, Sized
+from itertools import accumulate
 from typing import cast, Optional
 
 import torch
@@ -592,6 +593,38 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             kwargs_schema=op_schema.kwargs_schema,
         )
     return result
+
+
+@register_prop_rule([aten.index_put.default, aten.index_put_.default])
+def prop_index_put(op_schema: OpSchema) -> OutputSharding:
+    src_spec, indices_spec, values_spec, accumulate = op_schema.args_schema
+    print(op_schema)
+
+    assert isinstance(values_spec, DTensorSpec)
+    assert isinstance(indices_spec, tuple)
+    assert isinstance(src_spec, DTensorSpec)
+    assert isinstance(accumulate, bool)
+
+    replicate_spec_tuple = (
+        DTensorSpec(
+            mesh=src_spec.mesh,
+            placements=[Replicate()],
+        )
+    ) * len(indices_spec)
+
+    return OutputSharding(
+        output_spec=src_spec,
+        redistribute_schema=OpSchema(
+            op=op_schema.op,
+            args_schema=(
+                src_spec,
+                *replicate_spec_tuple,
+                values_spec,
+                None,
+            ),
+            kwargs_schema=op_schema.kwargs_schema,
+        ),
+    )
 
 
 @register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))

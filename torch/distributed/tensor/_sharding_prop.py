@@ -90,6 +90,11 @@ class ShardingPropagator:
         """
         Register a sharding propagation rule for an operator.
         """
+        if (
+            op_overload == aten.index_put.default
+            or op_overload == aten.index_put_.default
+        ):
+            print(f"{op_overload} has sharding rule registered")
         self.op_to_rules[op_overload] = rule_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
@@ -103,6 +108,11 @@ class ShardingPropagator:
         """
         Register a sharding strategy generator for an operator.
         """
+        if (
+            op_overload == aten.index_put.default
+            or op_overload == aten.index_put_.default
+        ):
+            print(f"{op_overload} has sharding strategy registered")
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
@@ -433,6 +443,11 @@ class ShardingPropagator:
             )
             return output_sharding
         elif op_schema.op in self.op_to_rules:
+            if (
+                op_schema.op == aten.index_put.default
+                or op_schema.op == aten.index_put_.default
+            ):
+                print(f"{op_schema.op} has sharding rule registered")
             # propagate the sharding with rule
             sharding_prop_func = self.op_to_rules[op_schema.op]
 
