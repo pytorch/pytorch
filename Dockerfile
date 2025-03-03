@@ -9,8 +9,7 @@ ARG BASE_IMAGE=ubuntu:22.04
 ARG PYTHON_VERSION=3.11
 
 FROM ${BASE_IMAGE} as dev-base
-RUN apt-get update &&  DEBIAN_FRONTEND=noninteractive apt-get --reinstall install -y libc-bin
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         ccache \
