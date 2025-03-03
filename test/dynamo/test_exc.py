@@ -50,7 +50,7 @@ from user code:
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 """,
         )
 
@@ -121,7 +121,7 @@ from user code:
    File "test_exc.py", line N, in fn001
     comptime(f)
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,
         )
@@ -161,7 +161,7 @@ from user code:
    File "test_exc.py", line N, in fn001
     comptime(f)
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 """,
         )
 
@@ -229,7 +229,7 @@ User code traceback:
 backend='relu_compile_error_TESTING_ONLY' raised:
 ReluCompileError:
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 """,
         )
 
