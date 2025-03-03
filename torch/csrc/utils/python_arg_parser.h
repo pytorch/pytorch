@@ -302,7 +302,9 @@ struct PythonArgs {
   inline bool isNone(int i);
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
- private:
+  // Functions used in performance-critical inline functions should
+  // be `public` so tagging them with `TORCH_PYTHON_API` looks
+  // more appropriate.
   TORCH_PYTHON_API at::Tensor tensor_slow(int i);
   TORCH_PYTHON_API at::Scalar scalar_slow(int i);
   TORCH_PYTHON_API at::Scalar scalar_slow(PyObject* arg);
