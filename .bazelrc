@@ -94,8 +94,8 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
 # Hence, we just disable this warning altogether. We may want to clean
 # up some of the clear-cut cases that could be risky, but we still
 # likely want to have this disabled for the most part.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
-build --per_file_copt='^//:aten/src/ATen/native/cuda/RowwiseScaledMM\.cu$'@-Wno-missing-field-initializers
+build --per_file_copt='^//.*\.(cpp|cc|cu)$'@-Wno-missing-field-initializers
+build --per_file_copt='//:aten/src/ATen/native/cuda/RowwiseScaledMM\.cu$'@-Wno-missing-field-initializers
 
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-function
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-variable
