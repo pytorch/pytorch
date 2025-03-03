@@ -165,7 +165,9 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, (str, os.PathLike)):
-        cpp_module = torch._C.import_ir_module(cu, os.fspath(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
+        cpp_module = torch._C.import_ir_module(
+            cu, os.fspath(f), map_location, _extra_files, _restore_shapes
+        )  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             cu, f.read(), map_location, _extra_files, _restore_shapes

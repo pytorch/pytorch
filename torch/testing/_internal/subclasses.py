@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-from typing import Any, Optional, Type
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,13 +17,13 @@ class WrapperSubclass(torch.Tensor):
             outer_stride = a.stride()
 
         kwargs = {}
-        kwargs["strides"] = a.stride()
+        kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
-        out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
 
         return out
 
@@ -68,7 +68,7 @@ class WrapperSubclass(torch.Tensor):
             return return_and_correct_aliasing(func, args, kwargs, out)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[Type] = None
+        self, expected_metadata: Any, expected_type: Optional[type] = None
     ):
         if expected_type == type(self.a):
             return self.a

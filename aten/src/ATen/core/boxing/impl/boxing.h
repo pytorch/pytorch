@@ -91,7 +91,7 @@ torch::jit::Stack boxArgs(Args... args) {
 template <class T>
 inline constexpr size_t boxed_size_one() {
   static_assert(
-      !std::is_same<std::decay_t<T>, c10::TensorOptions>::value,
+      !std::is_same_v<std::decay_t<T>, c10::TensorOptions>,
       "need to patch this path to support TensorOptions passed by reference");
   return 1;
 }
@@ -195,7 +195,7 @@ struct PopResult<std::tuple<Types...>> final {
   static Result pop_to_tuple_impl(
       Stack& stack,
       std::index_sequence<indices...>) {
-    return std::make_tuple((std::move(stack[indices]).to<Types>())...);
+    return std::make_tuple((std::move(stack[indices]).template to<Types>())...);
   }
 };
 

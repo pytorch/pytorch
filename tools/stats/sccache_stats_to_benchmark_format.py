@@ -2,13 +2,13 @@ import glob
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def flatten_data(d: Dict[str, Any]) -> Dict[str, Any]:
+def flatten_data(d: dict[str, Any]) -> dict[str, Any]:
     # Flatten the sccache stats data from a possibly nested dictionary to a flat
     # dictionary.  For example, the input:
     # {
