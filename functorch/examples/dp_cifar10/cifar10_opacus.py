@@ -12,9 +12,8 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
-import torchvision.transforms as transforms
 from opacus import PrivacyEngine
-from torchvision import models
+from torchvision import models, transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
@@ -120,7 +119,7 @@ def test(args, model, test_loader, device):
 
     top1_avg = np.mean(top1_acc)
 
-    print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
+    print(f"\tTest set:Loss: {np.mean(losses):.6f} Acc@1: {top1_avg:.6f}")
     return np.mean(top1_acc)
 
 

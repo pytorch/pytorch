@@ -758,11 +758,10 @@ const auto sinc_string = jiterator_stringify(
   T sinc(T a) {
     if (a == T(0)) {
       return T(1);
-    } else {
-      constexpr T pi = T(3.14159265358979323846L);
-      T product = pi * a;
-      return std::sin(product) / product;
     }
+    constexpr T pi = T(3.14159265358979323846L);
+    T product = pi * a;
+    return std::sin(product) / product;
   }
 ); // sinc_string
 
@@ -2134,6 +2133,17 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
 
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
+    unsigned short getHermitianLimit() {
+        if (sizeof(T) <= sizeof(float)) {
+            return 128;
+        } else if (sizeof(T) <= sizeof(double)) {
+            return 512;
+        } else {
+            return 1024;
+        }
+    }
+
+    template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
@@ -2145,6 +2155,10 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
         if (n == 1) {
             return x + x;
+        }
+
+        if (n > getHermitianLimit<T>()) {
+            return NAN;
         }
 
         T p = T(1.0);
@@ -2168,6 +2182,17 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
 const auto hermite_polynomial_he_string = jiterator_stringify(
     template<typename T>
+    unsigned short getHermitianLimit() {
+        if (sizeof(T) <= sizeof(float)) {
+            return 128;
+        } else if (sizeof(T) <= sizeof(double)) {
+            return 512;
+        } else {
+            return 1024;
+        }
+    }
+
+    template<typename T>
     T hermite_polynomial_he_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
@@ -2179,6 +2204,10 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
 
         if (n == 1) {
             return x;
+        }
+
+        if (n > getHermitianLimit<T>()) {
+            return NAN;
         }
 
         T p = T(1.0);

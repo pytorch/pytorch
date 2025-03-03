@@ -10,7 +10,6 @@ self-hosted-runner:
     - linux.9xlarge.ephemeral
     - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
-    - linux.12xlarge.ephemeral
     - linux.24xlarge
     - linux.24xlarge.ephemeral
     - linux.arm64.2xlarge
@@ -42,8 +41,10 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
-    # Organization-wide AMD hosted MI300 runners
+    # Organization-wide AMD hosted runners
     - linux.rocm.gpu
+    - linux.rocm.gpu.2
+    - linux.rocm.gpu.4
     # Repo-specific Apple hosted  runners
     - macos-m1-ultra
     - macos-m2-14

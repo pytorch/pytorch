@@ -90,10 +90,39 @@ class TestCase(InductorTestCase):
 
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
         with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-            func_opt = torch._dynamo.optimize("inductor")(func)
+            func_opt = torch.compile(func, backend="inductor")
             code = run_and_get_triton_code(func_opt, *inps)
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
+
+        @requires_gpu()
+        @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+        @parametrize(
+            "reduction_func",
+            [
+                torch.prod,
+                torch.sum,
+                torch.argmax,
+                torch.argmin,
+                torch.min,
+                torch.max,
+            ],
+        )
+        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+        @config.patch("triton.use_block_ptr", True)
+        def test_low_precision_reduction(
+            self, input_shape, reduction_func, input_dtype
+        ):
+            @torch.compile
+            def func(a, b, c, d):
+                return reduction_func(a * b * c * d)
+
+            inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", False):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                self.assertTrue(".to(tl.float32)" in code)
+                self.assertEqual(func(*inps), func_opt(*inps))
 
     def test_op_dtype_support(self):
         """
@@ -176,7 +205,7 @@ class TestCase(InductorTestCase):
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * num_args
         tl_dtype_str = str(input_dtype).replace("torch", "tl")
         with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
-            compiled = torch._dynamo.optimize("inductor")(op)
+            compiled = torch.compile(op, backend="inductor")
             code = run_and_get_triton_code(compiled, *inps)
 
             # Search the code with a regex.
@@ -221,6 +250,7 @@ class TestCase(InductorTestCase):
         x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
 
         out, code = run_and_get_code(torch.compile(fn), x, y)
+
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(x, y), out)
 

@@ -13,7 +13,8 @@ from __future__ import annotations
 import copy
 import inspect
 import logging
-from typing import Any, Iterable, Mapping, Sequence, TYPE_CHECKING, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 import onnxscript
 from onnxscript import evaluator, ir
@@ -97,9 +98,9 @@ def _construct_named_inputs_and_attrs(
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
-            assert isinstance(
-                param, _schemas.AttributeParameter
-            ), f"Expected AttributeParameter, got {type(param)}"
+            assert isinstance(param, _schemas.AttributeParameter), (
+                f"Expected AttributeParameter, got {type(param)}"
+            )
             if reversed_args_stack:
                 # First exhaust the positional arguments
                 attribute = reversed_args_stack.pop()  # type: ignore[assignment]
@@ -165,9 +166,9 @@ def _resolve_parameter_dtypes(
     type_binding = {}
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
         if isinstance(arg, (int, float, bool, str, Sequence, torch.Tensor)):
             # Skip the Python constants because we do not know what dtype they should take yet
             continue
@@ -317,9 +318,9 @@ def _process_python_constants(
     #       - Otherwise, set named_inputs[param.name] = Constant(value)
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
 
         if isinstance(arg, ir.Value):
             # TODO(justinchuby): Cast the ir.Value here if needed
@@ -354,6 +355,14 @@ def _process_python_constants(
     return named_inputs  # type: ignore[return-value]
 
 
+def _reshape_to_1d_tensor(opset: onnxscript.values.Opset, arg: ir.Value) -> ir.Value:
+    """Reshape the input to a 1D tensor."""
+
+    return opset.Reshape(
+        arg, opset.Constant(value=ir.tensor([-1], dtype=ir.DataType.INT64))
+    )
+
+
 def _process_python_sequences(
     signature: _schemas.OpSignature,
     named_inputs: dict[str, AllowedArgType],
@@ -375,9 +384,9 @@ def _process_python_sequences(
     """
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(
-            param, _schemas.Parameter
-        ), f"Expected Parameter, got {type(param)}"
+        assert isinstance(param, _schemas.Parameter), (
+            f"Expected Parameter, got {type(param)}"
+        )
 
         if not isinstance(arg, (tuple, list)):
             continue
@@ -418,26 +427,29 @@ def _process_python_sequences(
             # 3. Concat the list as a single input
             # E.g. [Value, 42] should be converted to op.Concat(Value, Constant(42))
             # when the expected input type is INT64
-            # We assume this only happens for 1D cases
+            # We assume this only happens for 0D cases
             if all(isinstance(val, ir.Value) for val in arg):
-                named_inputs[name] = opset.Concat(*arg, axis=0)
+                expanded_args = [_reshape_to_1d_tensor(opset, val) for val in arg]
+                named_inputs[name] = opset.Concat(*expanded_args, axis=0)
                 continue
 
             dtype = _determine_input_dtype(param, arg, type_binding)
             new_args = []
             for val in arg:
                 if isinstance(val, ir.Value):
-                    new_args.append(val)
+                    new_args.append(_reshape_to_1d_tensor(opset, val))
                 elif val is None:
                     # Skip None values
                     continue
                 elif isinstance(val, (ir.Tensor, ir.TensorProtocol)):
-                    new_args.append(opset.Constant(value=val))
+                    new_args.append(
+                        _reshape_to_1d_tensor(opset, opset.Constant(value=val))
+                    )
                 else:
                     # Turn the Python constant into 1D tensor for the constant
-                    assert isinstance(
-                        val, (bool, int, float)
-                    ), f"Expected int or float, got {type(val)}"
+                    assert isinstance(val, (bool, int, float)), (
+                        f"Expected int or float, got {type(val)}"
+                    )
                     new_args.append(
                         _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type]
                     )
@@ -446,11 +458,32 @@ def _process_python_sequences(
     return named_inputs
 
 
+def _determine_output_number(
+    signature: _schemas.OpSignature, named_attrs: Mapping[str, ValidAttributeType]
+) -> int:
+    """Determine the number of outputs for the node with heuristics."""
+    if signature.domain == "":
+        if signature.name == "BatchNormalization":
+            if not named_attrs.get("training_mode", 0):
+                return 1
+        if signature.name == "Split":
+            num_outputs = named_attrs.get("num_outputs")
+            if num_outputs is not None and isinstance(num_outputs, int):
+                return num_outputs
+            else:
+                raise ValueError(
+                    "Could not determine the number of outputs for Split. "
+                    "num_outputs must be provided"
+                )
+    return len(signature.outputs)
+
+
 def _construct_node(
     signature: _schemas.OpSignature,
     named_inputs: Mapping[str, ir.Value | None],
     named_attrs: Mapping[str, ValidAttributeType],
     opset: onnxscript.values.Opset,
+    num_outputs: int,
 ) -> ir.Node:
     """Construct the node with the inputs and attributes.
 
@@ -464,6 +497,7 @@ def _construct_node(
             are not used in this function. The data structure is passed in for
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
+        num_outputs: The number of outputs for the node.
     """
     inputs: list[ir.Value | None] = []
     # Flatten variadic inputs
@@ -485,7 +519,7 @@ def _construct_node(
         for attr in ir_convenience.convert_attributes(named_attrs)
         if attr.value is not None
     ]
-    outputs = [_tensors.SymbolicTensor(opset) for _ in signature.outputs]
+    outputs = [_tensors.SymbolicTensor(opset) for _ in range(num_outputs)]
     return ir.Node(
         signature.domain,
         signature.name,
@@ -514,6 +548,7 @@ class OpRecorder(evaluator.Evaluator):
         op_signature: _schemas.OpSignature,
         named_inputs: dict[str, AllowedArgType],
         named_attrs: dict[str, ValidAttributeType],
+        num_outputs: int,
     ) -> Sequence[_tensors.SymbolicTensor]:
         """Record nodes for the given opschema and arguments.
 
@@ -544,7 +579,11 @@ class OpRecorder(evaluator.Evaluator):
         try:
             self.nodes.append(
                 node := _construct_node(
-                    op_signature, converted_named_inputs, named_attrs, self.opset
+                    op_signature,
+                    converted_named_inputs,
+                    named_attrs,
+                    self.opset,
+                    num_outputs,
                 )
             )
         except Exception as e:
@@ -587,7 +626,10 @@ class OpRecorder(evaluator.Evaluator):
                         # Create a Cast node
                         return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
 
-            outputs = self._call_op(op_signature, named_inputs, named_attrs)
+            num_outputs = _determine_output_number(op_signature, named_attrs)
+            outputs = self._call_op(
+                op_signature, named_inputs, named_attrs, num_outputs
+            )
             if len(outputs) == 1:
                 return outputs[0]
             return outputs
@@ -603,6 +645,7 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
+            # TODO(justinchuby): Remove this once IsScalar and Rank are removed
             # Special cases for handling IsScalar and Rank
             if function.name == "IsScalar":
                 if len(args) != 1:
@@ -641,10 +684,9 @@ class OpRecorder(evaluator.Evaluator):
                     # Python constants are scalars
                     return 0
 
-            # NOTE: signature is written to function in the registration process
-            # TODO: Upstream signature to ONNX Function
-            if hasattr(function, "signature"):
-                op_signature = function.signature
+            # NOTE: signature should be written to function in the registration process
+            if hasattr(function, "_pt_onnx_signature"):
+                op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]
             else:
                 op_signature = _schemas.OpSignature.from_function(
                     function,
@@ -652,11 +694,13 @@ class OpRecorder(evaluator.Evaluator):
                     function.name,
                     opset_version=function.opset.version,
                 )
+                function._pt_onnx_signature = op_signature  # type: ignore[attr-defined]
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
             )
 
+            # TODO(after torchlib migration): Remove traceable function handling
             # NOTE: We need to call traceable functions after the _construct_named_inputs_and_attrs
             # call because it will filter out the unexpected kwargs for us.
             if function.traceable:
@@ -693,6 +737,7 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature,
                 named_inputs,
                 named_attrs,
+                len(op_signature.outputs),
             )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function

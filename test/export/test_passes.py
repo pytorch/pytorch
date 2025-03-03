@@ -3,12 +3,13 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
+import copy
+
 # Owner(s): ["oncall: export"]
 import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -46,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -75,11 +77,11 @@ class _AtenAddOperatorSupport(OperatorSupport):
         return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
@@ -404,7 +406,9 @@ class TestPasses(TestCase):
         x = torch.zeros(2, 2, 3)
 
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
-        ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
+        ep = torch.export.export(
+            M(), (x,), dynamic_shapes={"x": {1: dim1_x}}, strict=True
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -431,7 +435,10 @@ class TestPasses(TestCase):
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -461,7 +468,10 @@ class TestPasses(TestCase):
         dim0_x = torch.export.Dim("dim0_x", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -496,7 +506,7 @@ class TestPasses(TestCase):
 
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}
+            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
         with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
@@ -526,7 +536,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = export(M(), (x,), strict=True)
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
@@ -542,7 +552,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
         foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(
+        ep = export(foo, (x,), strict=True)._transform_do_not_use(
             ReplaceViewOpsWithViewCopyOpsPass()
         )
         # After this pass, there shouldn't be any view nodes in the graph
@@ -643,7 +653,7 @@ def forward(self, token, obj_attr, x):
                 allow_non_fake_inputs=True,
             )
             with _fakify_script_objects(m, (), {}, fake_mode) as (
-                patched_mod,
+                _,
                 _,
                 _,
                 fake_constant_attrs,
@@ -657,17 +667,16 @@ def forward(self, token, obj_attr, x):
     @unittest.expectedFailure
     def test_fakify_script_objects_properly_handle_containers(self):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
         with _fakify_script_objects(m, (), {}, fake_mode) as (
-            patched_mod,
+            _,
             _,
             _,
             fake_constant_attrs,
-            fake_to_real,
+            _,
         ):
             self.assertTrue("attr" in fake_constant_attrs.values())
             self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
@@ -685,7 +694,7 @@ def forward(self, token, obj_attr, x):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
@@ -710,7 +719,9 @@ def forward(self, token, obj_attr, x):
 
         mod = M()
         dim0_x = torch.export.Dim("dim0_x")
-        ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
+        ep = torch.export.export(
+            mod, (x,), dynamic_shapes={"x": {0: dim0_x}}, strict=True
+        )
 
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
@@ -763,7 +774,7 @@ def forward(self, token, obj_attr, x):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = export(mod, (torch.tensor(True), x, y), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, "is outside of inline constraint \\[2, 5\\]."
@@ -780,7 +791,7 @@ def forward(self, token, obj_attr, x):
 
         func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(func, args=(x,), strict=True)
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
@@ -1232,7 +1243,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True)
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             nodes = inplace_ep.graph.nodes
             for node in nodes:
@@ -1275,7 +1286,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,)).run_decompositions({})
+            ep = export(mod, (x,), strict=True).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(
@@ -1305,7 +1316,7 @@ default](args = (%x, %b_state), kwargs = {})
         # move the exported program from cpu to cuda:0
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
-        ep = export(mod, example_inputs)
+        ep = export(mod, example_inputs, strict=True)
         location = torch.device("cuda:0")
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
@@ -1326,6 +1337,97 @@ default](args = (%x, %b_state), kwargs = {})
         test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cuda:0"))
+
+    def test_constant_folding_pass(self):
+        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
+        from torch.ao.quantization.pt2e._affine_quantization import (
+            AffineQuantizedMinMaxObserver,
+        )
+        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+        from torch.ao.quantization.quantizer import (
+            QuantizationAnnotation,
+            QuantizationSpec,
+            Quantizer,
+        )
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, torch.fx.Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, torch.fx.Node)
+
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerGroup(group_size=128),
+                            ),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(5, 128),)
+        model = M()
+        quantizer = BackendAQuantizer()
+        m = torch.export.export(model.eval(), example_inputs, strict=True).module()
+        m = prepare_pt2e(m, quantizer)
+        # Calibration
+        m(*example_inputs)
+        # Get the quantized model
+        m_fold = copy.deepcopy(m)
+        m_fold = convert_pt2e(m_fold, fold_quantize=True)
+
+        # If fold, check the graph only contains frozed params and no linear_weight
+        FileCheck().check("_frozen_param0").check_not("linear_weight").run(m_fold.code)
+
+        m_not_fold = copy.deepcopy(m)
+        m_not_fold = convert_pt2e(m_not_fold, fold_quantize=False)
+
+        # If not fold, check the graph doesn't contain frozed params and contain linear_weight
+        FileCheck().check_not("_frozen_param0").check("linear_weight").run(
+            m_not_fold.code
+        )
 
 
 if __name__ == "__main__":

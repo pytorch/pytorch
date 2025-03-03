@@ -31,14 +31,14 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
         model = M().eval()
         indices = torch.randint(low=0, high=10, size=(20,))
 
-        quantized_node = ns.call_module(nnq.Embedding)
+        ns.call_module(nnq.Embedding)
         configs = [
             (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
             (None, ns.call_module(nn.Embedding)),
             (default_qconfig, ns.call_module(nn.Embedding)),
         ]
 
-        for qconfig, node in configs:
+        for qconfig, _ in configs:
             qconfig_dict = {"": qconfig}
             m = prepare_fx(
                 model,

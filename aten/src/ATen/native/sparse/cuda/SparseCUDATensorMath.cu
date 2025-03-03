@@ -511,7 +511,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
     const TensorInfo<int64_t, int64_t> input_indices_pos_ti,
     const TensorInfo<scalar_t, int64_t> grad_values_expand_ti,
     TensorInfo<scalar_t, int64_t> grad_input_values_ti) {
-  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t i = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = input_indices_pos_ti.data[i];
 
@@ -679,7 +679,7 @@ __global__ void search_end_matrix_indices_cuda_kernel(
   const TensorInfo<int64_t, int64_t> indices_1D_ti,
   const int64_t num_elements
 ){
-  const int64_t target_mat_num = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t target_mat_num = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (target_mat_num >= num_matrices) return;
 
   const int64_t* indices_1D = indices_1D_ti.data;

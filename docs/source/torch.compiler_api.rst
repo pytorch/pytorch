@@ -24,3 +24,4 @@ For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
      cudagraph_mark_step_begin
      is_compiling
      is_dynamo_compiling
+     is_exporting

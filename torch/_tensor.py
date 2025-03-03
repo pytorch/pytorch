@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C as _C
@@ -68,6 +68,28 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     else:
         ret = torch._utils._set_obj_state(ret, state)
     return ret
+
+
+def _dtype_to_typestr(dtype):
+    # CUDA devices are little-endian and tensors are stored in native byte
+    # order. 1-byte entries are endian-agnostic.
+    return {
+        torch.complex64: "<c8",
+        torch.complex128: "<c16",
+        torch.bfloat16: "<V2",  # Same as ml_dtypes.bfloat16.dtype.str.
+        torch.float16: "<f2",
+        torch.float32: "<f4",
+        torch.float64: "<f8",
+        torch.uint8: "|u1",
+        torch.int8: "|i1",
+        torch.uint16: "<u2",
+        torch.int16: "<i2",
+        torch.uint32: "<u4",
+        torch.int32: "<i4",
+        torch.uint64: "<u8",
+        torch.int64: "<i8",
+        torch.bool: "|b1",
+    }[dtype]
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -151,8 +173,8 @@ class Tensor(torch._C.TensorBase):
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
-                        Tuple[torch.qscheme, float, int],
-                        Tuple[torch.qscheme, Tensor, Tensor, int],
+                        tuple[torch.qscheme, float, int],
+                        tuple[torch.qscheme, Tensor, Tensor, int],
                     ]
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
@@ -295,7 +317,7 @@ class Tensor(torch._C.TensorBase):
 
         # See Note [Don't serialize hooks]
         warn_if_has_hooks(self)
-        backward_hooks: Dict[Any, Any] = OrderedDict()
+        backward_hooks: dict[Any, Any] = OrderedDict()
 
         skip_data = torch.serialization._serialization_tls.skip_data
         materialize_fake_tensors = (
@@ -364,7 +386,7 @@ class Tensor(torch._C.TensorBase):
                 )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
-                Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
+                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
             ]
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
@@ -728,7 +750,7 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
 
         from torch.utils.hooks import RemovableHandle
 
@@ -918,6 +940,7 @@ class Tensor(torch._C.TensorBase):
         normalized: bool = False,
         onesided: Optional[bool] = None,
         return_complex: Optional[bool] = None,
+        align_to_window: Optional[bool] = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -939,6 +962,7 @@ class Tensor(torch._C.TensorBase):
                 normalized=normalized,
                 onesided=onesided,
                 return_complex=return_complex,
+                align_to_window=align_to_window,
             )
         return torch.stft(
             self,
@@ -951,6 +975,7 @@ class Tensor(torch._C.TensorBase):
             normalized,
             onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
 
     def istft(
@@ -1079,8 +1104,14 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
@@ -1262,28 +1293,8 @@ class Tensor(torch._C.TensorBase):
                 "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
             )
 
-        # CUDA devices are little-endian and tensors are stored in native byte
-        # order. 1-byte entries are endian-agnostic.
-        typestr = {
-            torch.complex64: "<c8",
-            torch.complex128: "<c16",
-            torch.bfloat16: "<f2",
-            torch.float16: "<f2",
-            torch.float32: "<f4",
-            torch.float64: "<f8",
-            torch.uint8: "|u1",
-            torch.int8: "|i1",
-            torch.uint16: "<u2",
-            torch.int16: "<i2",
-            torch.uint32: "<u4",
-            torch.int32: "<i4",
-            torch.uint64: "<u8",
-            torch.int64: "<i8",
-            torch.bool: "|b1",
-        }[self.dtype]
-
+        typestr = _dtype_to_typestr(self.dtype)
         itemsize = self.element_size()
-
         shape = tuple(self.shape)
         if self.is_contiguous():
             # __cuda_array_interface__ v2 requires the strides to be omitted
@@ -1491,7 +1502,7 @@ class Tensor(torch._C.TensorBase):
         return self.to_sparse()
 
     def dim_order(
-        self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
+        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
     ):
         """
         dim_order(ambiguity_check=False) -> tuple
@@ -1499,7 +1510,7 @@ class Tensor(torch._C.TensorBase):
         Returns the uniquely determined tuple of int describing the dim order or
         physical layout of :attr:`self`.
 
-        The dim order represents how dimensions are laid out in memory,
+        The dim order represents how dimensions are laid out in memory of dense tensors,
         starting from the outermost to the innermost dimension.
 
         Note that the dim order may not always be uniquely determined.
@@ -1511,6 +1522,8 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
+
+        Examples::
 
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
@@ -1534,11 +1547,18 @@ class Tensor(torch._C.TensorBase):
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.
+
         .. warning::
             The dim_order tensor API is experimental and subject to change.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        if self.is_sparse:
+            raise AttributeError(
+                f"Can't get dim order on sparse type: {self.type()} "
+                "Use Tensor.to_dense() to convert to a dense tensor first."
+            )
 
         # Sanity check ambiguity_check data types
         if not isinstance(ambiguity_check, bool):
@@ -1723,7 +1743,7 @@ class Tensor(torch._C.TensorBase):
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+    def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
 

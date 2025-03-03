@@ -504,7 +504,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        act_post_processes_pairs = []
         for n in m.graph.nodes:
             if n.target in [
                 torch.ops.aten.view.default,
@@ -741,7 +740,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         with override_quantized_engine("qnnpack"):
             model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
             niter = 10
             example_inputs = (
                 # input_tensor
@@ -803,7 +801,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         with override_quantized_engine("qnnpack"):
             model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
             niter = 10
             example_inputs = (
                 # input_tensor

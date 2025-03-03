@@ -241,7 +241,7 @@ class TestMisc(PackageTestCase):
             )
             self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
 
-        with self.assertRaises(PackagingError) as e:
+        with self.assertRaises(PackagingError):
             with PackageExporter(BytesIO()) as he:
                 import package_b
 

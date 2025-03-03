@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -31,6 +32,7 @@ class LogisticNormal(TransformedDistribution):
         tensor([ 0.7653,  0.0341,  0.0579,  0.1427])
 
     """
+
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.simplex
     has_rsample = True
@@ -48,9 +50,9 @@ class LogisticNormal(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def loc(self):
+    def loc(self) -> Tensor:
         return self.base_dist.base_dist.loc
 
     @property
-    def scale(self):
+    def scale(self) -> Tensor:
         return self.base_dist.base_dist.scale

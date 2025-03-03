@@ -1,19 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import (
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -38,7 +27,7 @@ from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 aten = torch.ops.aten
 
-Shape = Tuple[int, ...]
+Shape = tuple[int, ...]
 
 
 @dataclass
@@ -50,7 +39,7 @@ class DimSpec:
 
 
 # Rules that map each dimension of the output to dimensions of the input tensor
-DimMap = Tuple[DimSpec, ...]
+DimMap = tuple[DimSpec, ...]
 
 
 @dataclass
@@ -146,7 +135,7 @@ class Split(DimSpec):
     split_id: int
 
     @classmethod
-    def new(cls, dim: DimSpec, group_shape: Tuple[int, ...], idx: int) -> DimSpec:
+    def new(cls, dim: DimSpec, group_shape: tuple[int, ...], idx: int) -> DimSpec:
         assert len(group_shape) > 0
         if len(group_shape) == 1:
             # not really a group, just return the input dim back
@@ -209,7 +198,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
     return tuple(mapping)
 
 
-def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
+def normalize_sizes(sizes: Union[Shape, tuple[Shape]]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
@@ -228,7 +217,7 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
         # other dims are passed through
         if end_dim < 0:
             end_dim += ndim
-        results: List[DimSpec] = [InputDim(i) for i in range(start_dim)]
+        results: list[DimSpec] = [InputDim(i) for i in range(start_dim)]
         results.append(
             Flatten.new(tuple(InputDim(i) for i in range(start_dim, end_dim + 1)))
         )
@@ -265,9 +254,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    assert (
-        len(sizes) >= ndim
-    ), f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
+    assert len(sizes) >= ndim, (
+        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
+    )
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -286,9 +275,9 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        assert (
-            total_size % size == 0
-        ), f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
+        assert total_size % size == 0, (
+            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
+        )
         return tuple(s if s != -1 else missing_size for s in sizes)
     assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
@@ -387,7 +376,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     return tuple(result_pp)
 
 
-def dim_tile(ndim: int, dims: Tuple[int, ...]) -> DimMap:
+def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
     if len(dims) < ndim:
         dims = (1,) * (ndim - len(dims)) + dims
     return dim_repeat(ndim, dims)
@@ -426,7 +415,7 @@ def dim_unsqueeze(ndim: int, dim: int) -> DimMap:
 
 def dim_view_as_real(shape: Shape) -> DimMap:
     ndim = len(shape)
-    results: List[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
+    results: list[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
     # each complex number is split into two real numbers,
     # resulting in one more dimension of size 2
     results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 0))
@@ -454,7 +443,7 @@ def dim_reduction(
     )
 
 
-dim_maps: Dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
+dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.atleast_1d: lambda x: dim_pad_left(x.ndim, 1),
     torch.atleast_2d: lambda x: dim_pad_left(x.ndim, 2),
     torch.atleast_3d: lambda x: dim_atleast_3d(x.ndim),
@@ -485,7 +474,7 @@ def propagate_shape_and_sharding(
     local_in_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
-) -> Tuple[Sequence[Placement], Sequence[Placement]]:
+) -> tuple[Sequence[Placement], Sequence[Placement]]:
     """
     Determine input target sharding and output sharding based on
     given global tensor shape and input source sharding.
@@ -500,11 +489,11 @@ def propagate_shape_and_sharding(
     assert len(input_src_placements) == len(mesh_sizes)
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
-    shardable_dims: Dict[int, List[bool]] = {}
+    shardable_dims: dict[int, list[bool]] = {}
 
     # in case an input dimension disappears (e.g. collapsing, reduction)
     # we cannot shard in that dimension (we need a replication fall-back rule)
-    seen_input_dims: Set[int] = set()
+    seen_input_dims: set[int] = set()
 
     def collect_used_inputs(cmd: DimSpec) -> None:
         if isinstance(cmd, InputDim):
@@ -549,9 +538,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                assert (
-                    out_size % submesh_size == 0
-                ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
+                assert out_size % submesh_size == 0, (
+                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
+                )
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None

@@ -97,13 +97,11 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     auto csr_accessor = csr.accessor<int64_t, 1>();
     // Convert the sparse matrix to CSR format
     at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t h, hp0, hp1;
       for (const auto i : c10::irange(start, end)) {
-        hp0 = indices[i];
-        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+        auto hp0 = indices[i];
+        auto hp1 = (i+1 == nnz) ?  dim : indices[i+1];
         if (hp0 != hp1) {
-          for (h = hp0; h < hp1; h++) {
+          for (int64_t h = hp0; h < hp1; h++) {
             csr_accessor[h+1] = i+1;
           }
         }

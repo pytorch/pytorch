@@ -3,7 +3,6 @@
 import unittest
 from collections.abc import Sequence
 from functools import partial
-from typing import List
 
 import numpy as np
 
@@ -424,7 +423,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
             )
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     ReductionOpInfo(
         "masked.sum",
         ref=reference_reduction_numpy(np.sum),
@@ -769,26 +768,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_duplicate_values",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_reference_masked",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_small_input",
-                dtypes=(torch.bool,),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
@@ -90,9 +89,9 @@ class _MaskPartial(Partial):
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
-        assert (
-            self.offset_shape is not None
-        ), "offset_shape needs to be set for _MaskPartial"
+        assert self.offset_shape is not None, (
+            "offset_shape needs to be set for _MaskPartial"
+        )
         local_shard_size, local_offset_on_dim = Shard._local_shard_size_on_dim(
             self.offset_shape[self.offset_dim],
             num_chunks,

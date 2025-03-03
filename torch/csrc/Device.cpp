@@ -53,7 +53,7 @@ static PyObject* THPDevice_pynew(
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
       {"device(Device device)",
-       "device(c10::string_view type, int64_t? index=-1)"});
+       "device(std::string_view type, int64_t? index=-1)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {

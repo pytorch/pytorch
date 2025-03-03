@@ -239,7 +239,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d_simple(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [1, 2, 3, 0]
         data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
@@ -489,7 +489,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [0, 2, 3, 0]
         data = np.arange(50).reshape(5, 2, 5).tolist()
