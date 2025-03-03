@@ -417,9 +417,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(
-        content, (str, bytes)
-    ), "Only strings and byte arrays can be saved in the cache"
+    assert isinstance(content, (str, bytes)), (
+        "Only strings and byte arrays can be saved in the cache"
+    )
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -975,9 +975,9 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> (
-            Generator[tuple[CompiledFxGraph, bytes], None, None]
-        ):
+        def iterate_over_candidates() -> Generator[
+            tuple[CompiledFxGraph, bytes], None, None
+        ]:
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
@@ -1123,9 +1123,9 @@ class FxGraphCache:
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(
-            compiled_graph, CompiledFxGraph
-        ), f"serialization for {type(compiled_graph)} NYI"
+        assert isinstance(compiled_graph, CompiledFxGraph), (
+            f"serialization for {type(compiled_graph)} NYI"
+        )
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -1315,9 +1315,8 @@ class FxGraphCache:
                     "distributed_ephemeral_timeout_us", time_saved_ns // 1000
                 )
                 if (
-                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                        time_saved_ns
-                    )
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
@@ -1556,9 +1555,9 @@ class AotCodeCompiler:
                 cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(
-                    v, (str)
-                ), "Metadata must only contain strings"
+                assert isinstance(k, str) and isinstance(v, (str)), (
+                    "Metadata must only contain strings"
+                )
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))

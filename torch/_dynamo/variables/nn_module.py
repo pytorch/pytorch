@@ -32,10 +32,11 @@ from typing import TYPE_CHECKING
 
 import torch.nn
 
-from .. import trace_rules, variables
+from .. import graph_break_hints, trace_rules, variables
 from ..exc import (
     raise_observed_exception,
     unimplemented,
+    unimplemented_v2,
     UnspecializeRestartAnalysis,
     Unsupported,
 )
@@ -362,8 +363,16 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))
             else:
-                unimplemented(
-                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                unimplemented_v2(
+                    gb_type="Unsupported nn.Module attribute type",
+                    context=f"nn.Module subclass: {typestr(base)}, name: {name}, attribute type: {typestr(subobj)}",
+                    explanation=f"Dynamo does not support tracing nn.Module attributes of type `{typestr(subobj)}`",
+                    hints=[
+                        f"Refactor your code so that `{name}` (type `{typestr(subobj)}`) is not an attribute of `{typestr(base)}`",
+                        "Currently supported attribute types are methods, classmethods, staticmethods, "
+                        "properties, constants, and tensors.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
         return variables.GetAttrVariable(self, name, source=source)
@@ -391,9 +400,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert (
-                    not is_lazy
-                ), "Expected lazy sequential isn't a valid combination?"
+                assert not is_lazy, (
+                    "Expected lazy sequential isn't a valid combination?"
+                )
                 assert not kwargs
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -1145,9 +1154,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
-        assert (
-            source is not None
-        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
+        assert source is not None, (
+            "FSDPManagedNNModule depends on having an accurate source to control guarding."
+        )
 
         super().__init__(value=value, **kwargs)
         self.source = source

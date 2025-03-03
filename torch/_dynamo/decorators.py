@@ -26,6 +26,7 @@ from .eval_frame import (
     DynamoStance,
     innermost_fn,
     RunOnlyContext,
+    skip_code,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        skip_code,
         unsupported,
     )
 
@@ -224,12 +224,14 @@ def disallow_in_graph(fn):
 
         torch._dynamo.disallow_in_graph(torch.sub)
 
+
         @torch._dynamo.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = torch.sub(x, 1)
             x = torch.add(x, 1)
             return x
+
 
         fn(...)
 
