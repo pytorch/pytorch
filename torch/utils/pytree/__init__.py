@@ -14,21 +14,19 @@ inside some nested collection. pytrees are helpful for implementing nested
 collection support for PyTorch APIs.
 """
 
-from __future__ import annotations
-
 import os as _os
 import sys as _sys
-from typing import Any as _Any
+from typing import Any as _Any, Optional as _Optional
 
 import torch.utils._pytree as python
 from torch.utils._exposed_in import exposed_in as _exposed_in
-from torch.utils._pytree import (  # noqa: TC001 # these type aliases are identical in both implementations
-    FlattenFunc as FlattenFunc,
-    FlattenWithKeysFunc as FlattenWithKeysFunc,
-    FromDumpableContextFunc as FromDumpableContextFunc,
+from torch.utils._pytree import (  # these type aliases are identical in both implementations
+    FlattenFunc,
+    FlattenWithKeysFunc,
+    FromDumpableContextFunc,
     PyTree as PyTree,
-    ToDumpableContextFunc as ToDumpableContextFunc,
-    UnflattenFunc as UnflattenFunc,
+    ToDumpableContextFunc,
+    UnflattenFunc,
 )
 
 
@@ -94,7 +92,7 @@ if not PYTORCH_USE_CXX_PYTREE:
         treespec_pprint as treespec_pprint,
     )
 
-    PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)
+    PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)  # type: ignore[misc]
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
         PyTreeSpec as PyTreeSpec,
@@ -152,11 +150,11 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
     *,
-    serialized_type_name: str | None = None,
-    to_dumpable_context: ToDumpableContextFunc | None = None,
-    from_dumpable_context: FromDumpableContextFunc | None = None,
+    serialized_type_name: _Optional[str] = None,
+    to_dumpable_context: _Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: _Optional[FromDumpableContextFunc] = None,
     # intentionally use `*_func` over `*_fn` to match annotations
-    flatten_with_keys_func: FlattenWithKeysFunc | None = None,
+    flatten_with_keys_func: _Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
