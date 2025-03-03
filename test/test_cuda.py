@@ -4921,6 +4921,18 @@ class TestMemPool(TestCase):
         # the pointer to the mempool is thread local
         self.assertEqual(len(set(active_pool_ids)), 4)
 
+    def test_mempool_expandable(self):
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True"
+        )
+        pool = torch.cuda.MemPool()
+
+        # torch.cuda.MemPool doesn't work with expandable segments
+        with self.assertRaises(RuntimeError):
+            nelem_1mb = 1024 * 1024 // 4
+            with torch.cuda.use_mem_pool(pool):
+                out_0 = torch.randn(nelem_1mb, device="cuda")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
