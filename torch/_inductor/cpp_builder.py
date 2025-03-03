@@ -183,6 +183,8 @@ def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
         return False
+    if _is_clang(cpp_compiler): #regex for g\+\+ will match clang++
+        return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
 
