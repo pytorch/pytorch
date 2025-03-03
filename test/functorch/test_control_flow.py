@@ -2522,7 +2522,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Expected init and carry to have same number of outputs.*",
+            r"scan must be captured completely.*",
         ):
             scan_fct(init_longer_carry, init, x, dim=dim)
 
@@ -2545,7 +2545,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             # torch._dynamo.exc.Unsupported,
             # The tree structure of the inits and the carries are not identical!
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Expected init and carry to have same number of outputs.*",
+            r"scan must be captured completely.*",
         ):
             scan_fct(init_shorter_carry, init, x, dim=dim)
 

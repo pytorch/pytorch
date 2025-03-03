@@ -1554,8 +1554,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            isinstance(init_treespec.as_python_constant(), pytree.TreeSpec)
-            is not isinstance(carry_treespec.as_python_constant(), pytree.TreeSpec)
+            isinstance(init_treespec.as_python_constant(), pytree.LeafSpec)
+            != isinstance(carry_treespec.as_python_constant(), pytree.LeafSpec)
         ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
             init_treespec, carry_treespec
         ).as_python_constant():
