@@ -1732,22 +1732,25 @@ def make_dynamo_test(
     def standard_test(
         self: Any,
         fn: Callable[..., Any],
+        kwargs,
     ) -> None:
-        def dummy(fn: Callable[..., Any]) -> None:
-            fn(self)
+        def dummy() -> None:
+            fn(self, **kwargs)
 
         actual = CompileCounter()
 
-        dummy(fn)
+        dummy()
         reset()
         opt_fn = optimize_assert(actual)(dummy)
-        opt_fn(fn)
+        opt_fn()
         reset()
 
-    def test_fn(self: Any) -> None:
+    @functools.wraps(fn)
+    def test_fn(self: Any, **kwargs) -> None:
         return standard_test(
             self,
             fn=fn,
+            kwargs=kwargs,
         )
 
     return test_fn
