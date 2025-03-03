@@ -66,7 +66,7 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 
 
 if PYTORCH_USE_CXX_PYTREE:
-    import torch.utils._cxx_pytree as cxx  # noqa: F401
+    import torch.utils._cxx_pytree as cxx
 
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
