@@ -262,9 +262,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> (
-        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
-    ):
+    def _binops() -> dict[
+        Callable[..., object], tuple[list[str], Callable[..., object]]
+    ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -669,6 +669,14 @@ class BuiltinVariable(VariableTracker):
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
                         return ConstantVariable.create(op.__name__ != "is_")
+                    if left is right:
+                        return ConstantVariable.create(op(left, right))
+                    if (
+                        istype(left, variables.ExceptionVariable)
+                        and istype(right, variables.ExceptionVariable)
+                        and left.exc_type is not right.exc_type
+                    ):
+                        return ConstantVariable.create(op(left, right))
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
@@ -1006,11 +1014,14 @@ class BuiltinVariable(VariableTracker):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will
                 # trace fine
-                fn, args = torch.select, [
-                    args[0],
-                    variables.ConstantVariable.create(0),
-                    args[1],
-                ]
+                fn, args = (
+                    torch.select,
+                    [
+                        args[0],
+                        variables.ConstantVariable.create(0),
+                        args[1],
+                    ],
+                )
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
