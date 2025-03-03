@@ -667,33 +667,33 @@ Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cu
 
 .. code:: python
    import os
-   
+
    import torch
    import torch.distributed as dist
    from torch.cuda.memory import CUDAPluggableAllocator
    from torch.distributed.distributed_c10d import _get_default_group
    from torch.utils import cpp_extension
-   
-   
+
+
    # create allocator
    nccl_allocator_source = """
    #include <nccl.h>
    #include <iostream>
    extern "C" {
-   
+
    void* nccl_alloc_plug(size_t size, int device, void* stream) {
      std::cout << "Using ncclMemAlloc" << std::endl;
      void* ptr;
      ncclResult_t err = ncclMemAlloc(&ptr, size);
      return ptr;
-   
+
    }
-   
+
    void nccl_free_plug(void* ptr, size_t size, int device, void* stream) {
      std::cout << "Using ncclMemFree" << std::endl;
      ncclResult_t err = ncclMemFree(ptr);
    }
-   
+
    }
    """
    nccl_allocator_libname = "nccl_allocator"
@@ -706,7 +706,7 @@ Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cu
        is_python_module=False,
        build_directory="./",
    )
-   
+
    allocator = CUDAPluggableAllocator(
        f"./{nccl_allocator_libname}.so", "nccl_alloc_plug", "nccl_free_plug"
    ).allocator()
@@ -720,7 +720,7 @@ Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cu
    device = torch.device(f"cuda:{local_rank}")
    default_pg = _get_default_group()
    backend = default_pg._get_backend(device)
-   
+
    # Note: you can also get the above allocator as follows:
    allocator = backend.mem_allocator
 
@@ -737,10 +737,10 @@ allocate tensors into that pool:
        # tensor gets allocated with ncclMemAlloc passed in the pool
        tensor = torch.arange(1024 * 1024 * 2, device=device)
        print(f"tensor ptr on rank {rank} is {hex(tensor.data_ptr())}")
-   
+
    # register user buffers using ncclCommRegister (called under the hood)
    backend.register_mem_pool(pool)
-   
+
    # Collective uses Zero Copy NVLS
    dist.all_reduce(tensor[0:4])
    torch.cuda.synchronize()
@@ -761,37 +761,37 @@ The following :class:`torch.cuda.MemPool` ``use_count()`` and ``snapshot()`` API
 
 .. code:: python
    pool = torch.cuda.MemPool(allocator)
-   
+
    # pool's use count should be 1 at this point as MemPool object
    # holds a reference
    assert pool.use_count() == 1
-   
+
    nelem_1mb = 1024 * 1024 // 4
-   
+
    with torch.cuda.use_mem_pool(pool):
        out_0 = torch.randn(nelem_1mb, device="cuda")
-   
+
        # pool's use count should be 2 at this point as use_mem_pool
        # holds a reference
        assert pool.use_count() == 2
-   
+
    # pool's use count should be back to 1 at this point as use_mem_pool
    # released its reference
    assert pool.use_count() == 1
-   
+
    with torch.cuda.use_mem_pool(pool):
        # pool should have 1 segment since we made a small allocation (1 MB)
        # above and so the CUDACachingAllocator packed it into a 2 MB buffer
        assert len(pool.snapshot()) == 1
-   
+
        out_1 = torch.randn(nelem_1mb, device="cuda")
-   
+
        # pool should still have 1 segment since we made another small allocation
        # (1 MB) that got packed into the existing 2 MB buffer
        assert len(pool.snapshot()) == 1
-   
+
        out_2 = torch.randn(nelem_1mb, device="cuda")
-   
+
        # pool now should have 2 segments since the CUDACachingAllocator had
        # to make a new 2 MB buffer to accomodate out_2
        assert len(pool.snapshot()) == 2
