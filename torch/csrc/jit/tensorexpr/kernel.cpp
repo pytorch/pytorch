@@ -1448,7 +1448,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
       ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
-    const_tensor = const_tensor.clone(at::MemoryFormat::Contiguous);
+    const_tensor = const_tensor.clone().contiguous();
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 

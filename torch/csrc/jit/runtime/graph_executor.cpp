@@ -322,8 +322,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
 
   void addOutputForTensor(const at::Tensor& tensor) {
+    auto v = Variable(tensor);
     add_next_edge(
-        tensor.defined() ? torch::autograd::impl::gradient_edge(tensor)
+        v.defined() ? torch::autograd::impl::gradient_edge(v)
                     : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {

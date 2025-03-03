@@ -56,12 +56,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto [k_, sk] = ensure_4d(key);
   auto [v_, sv] = ensure_4d(value);
   std::optional<Tensor> mask_;
-  if (attn_mask) {
-    auto maskExpandedDims = query.sizes().vec();
-    maskExpandedDims[maskExpandedDims.size() - 1] = k_.size(2);
-    mask_ = attn_mask->expand(maskExpandedDims);
-    std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
-  }
 
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
@@ -122,7 +116,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                        truePredicateTensor:maskedMM
                                       falsePredicateTensor:minusInf
                                                       name:nil];
-          } else if (mask_) {
+          } else if (attn_mask) {
+            auto maskExpandedDims = query.sizes().vec();
+            maskExpandedDims[maskExpandedDims.size() - 1] = maxSeqLength;
+            mask_ = attn_mask->expand(maskExpandedDims);
+            std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *mask_);
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
           }

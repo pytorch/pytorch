@@ -239,7 +239,7 @@ void FusedKernelCUDA::launch_raw(
 }
 
 FusedKernelCUDA::~FusedKernelCUDA() {
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleUnload(module_));
+  nvrtc().cuModuleUnload(module_);
 }
 
 static std::shared_ptr<FusedKernel> createFusionKernel(

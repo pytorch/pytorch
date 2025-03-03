@@ -344,7 +344,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (!mask.numel() || !mask._nnz()) {
-    return mask.to(self.device(), self.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
+    return mask.clone().to(self.device(), self.scalar_type());
   }
 
   if (self.layout() == kStrided) {
