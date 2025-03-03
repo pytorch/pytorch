@@ -35,6 +35,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -8621,69 +8622,97 @@ def ___make_guard_fn():
         opt()
 
     def test_tracing_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        xs = [torch.tensor(i) for i in range(3)]
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        counter = CompileCounter()
-        torch.compile(fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 3)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
+
+                xs = [torch.tensor(i) for i in range(3)]
+
+                counter = CompileCounter()
+                torch.compile(fn, backend=counter, fullgraph=True)(xs)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = [xs, xs, xs, xs]
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
+
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = [xs, xs, xs, xs]
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = (xs, xs, xs, xs)
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
+
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = (xs, xs, xs, xs)
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = {
-            "a": xs,
-            "b": xs,
-            "c": xs,
-        }
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
+
+                xs = [torch.tensor(i) for i in range(3)]
+                xsl = {
+                    "a": xs,
+                    "b": xs,
+                    "c": xs,
+                }
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 9)
 
     def test_dynamic_one_hot(self):
         def fn(x):
@@ -8702,26 +8731,33 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        xs = [torch.tensor(i) for i in range(3)]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
-        xsl = {
-            "a": xs,
-            "b": xsa,
-            "c": xsb,
-        }
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 18)
+                def fn(xs):
+                    flat_xs, spec = module.tree_flatten(xs)
+                    res = [x.clone() for x in flat_xs]
+                    return module.tree_unflatten(res, spec)
+
+                xs = [torch.tensor(i) for i in range(3)]
+                xsa = (xs, xs)
+                xsb = {"aa": xsa, "ab": xs}
+                xsl = {
+                    "a": xs,
+                    "b": xsa,
+                    "c": xsb,
+                }
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+                real_out = fn(xsl)
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 18)
 
     def test_any_all_symnode(self):
         cnt = CompileCounter()
@@ -8753,41 +8789,55 @@ def ___make_guard_fn():
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
-        def fn(xs):
-            nested_xs = [[xs]]
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            return flat_xs[0].clone()
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-        # use checkpoint to trigger a "sourceless" tensor subclass
-        def checkpoint_fn(xs):
-            return checkpoint(fn, xs, use_reentrant=True)
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+                def fn(xs):
+                    nested_xs = [[xs]]
+                    flat_xs, spec = module.tree_flatten(xs)
+                    return flat_xs[0].clone()
 
-        counter = CompileCounter()
-        torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 2)
+                # use checkpoint to trigger a "sourceless" tensor subclass
+                def checkpoint_fn(xs):
+                    return checkpoint(fn, xs, use_reentrant=True)
+
+                xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+
+                counter = CompileCounter()
+                torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
-        def fn(xs):
-            def mapper(x):
-                return x.clone()
+        implemtations = [("generic", pytree), ("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
-            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
-            return y
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
 
-        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
+                def fn(xs):
+                    def mapper(x):
+                        return x.clone()
 
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
-        real_out = fn(xsb)
+                    y = module.tree_map_only(torch.Tensor, mapper, xs)
+                    return y
 
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
+                xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+                xsa = (xs, xs)
+                xsb = {"aa": xsa, "ab": xs}
+
+                counter = CompileCounter()
+                comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
+                real_out = fn(xsb)
+
+                self.assertEqual(comp_out, real_out)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(counter.op_count, 9)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -10136,7 +10186,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -10170,7 +10220,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -10221,7 +10271,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
