@@ -40,7 +40,25 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return source_codes
 
     def kernel_driver(self) -> str:
-        return ""
+        source_codes = """
+            namespace {
+
+            struct Grid {
+                Grid(uint32_t x, uint32_t y, uint32_t z)
+                  : grid_x(x), grid_y(y), grid_z(z) {}
+                uint32_t grid_x;
+                uint32_t grid_y;
+                uint32_t grid_z;
+
+                bool is_non_zero() {
+                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
+                }
+            };
+
+            }  // anonymous namespace
+
+        """
+        return source_codes
 
     def cpp_stream_type(self) -> str:
         return "sycl::queue*"

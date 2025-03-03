@@ -1143,6 +1143,8 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
+                            additional_files = graph.wrapper_code.additional_files
+
                             with dynamo_timed(
                                 "AotCodeCompiler.compile", log_pt2_compile_event=True
                             ):
@@ -1152,11 +1154,7 @@ class _InProcessFxCompile(FxCompile):
                                     code,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
-                                    additional_files=[
-                                        *dict.fromkeys(
-                                            graph.wrapper_code.additional_files
-                                        )
-                                    ],
+                                    additional_files=additional_files,
                                 )
                         else:
                             compiled_fn = graph.compile_to_module().call
