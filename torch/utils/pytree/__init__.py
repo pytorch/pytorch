@@ -22,7 +22,7 @@ from typing import Any as _Any
 
 import torch.utils._pytree as python
 from torch.utils._exposed_in import exposed_in as _exposed_in
-from torch.utils._pytree import (  # these type aliases are identical in both implementations
+from torch.utils._pytree import (  # noqa: TC001 # these type aliases are identical in both implementations
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
     FromDumpableContextFunc as FromDumpableContextFunc,
@@ -33,12 +33,6 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
 
 
 __all__ = [
-    "PyTree",
-    "FlattenFunc",
-    "UnflattenFunc",
-    "FlattenWithKeysFunc",
-    "ToDumpableContextFunc",
-    "FromDumpableContextFunc",
     "PyTreeSpec",
     "register_pytree_node",
     "tree_flatten",
@@ -99,6 +93,8 @@ if not PYTORCH_USE_CXX_PYTREE:
         tree_unflatten as tree_unflatten,
         treespec_pprint as treespec_pprint,
     )
+
+    PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
         PyTreeSpec as PyTreeSpec,
