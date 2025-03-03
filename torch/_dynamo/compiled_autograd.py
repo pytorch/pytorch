@@ -134,7 +134,7 @@ class Op:
 ops = OpNamespace()
 
 
-_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "packed_data"]
 _impure_targets = OrderedSet(
     [
         call_hook,
@@ -206,7 +206,13 @@ class AutogradCompilerInstance:
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
         self.symnode_proxy_lookup = {}
-        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
+        (
+            args_proxy,
+            self.sizes_proxy,
+            self.scalars_proxy,
+            self.hooks_proxy,
+            self.packed_data_proxy,
+        ) = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -268,7 +274,12 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
-        return str(CompileContext.current_compile_id()), inputs, sizes, scalars
+        return (
+            str(CompileContext.current_compile_id()),
+            inputs,
+            sizes,
+            scalars,
+        )
 
     def log_compile_reasons(
         self,
@@ -567,6 +578,19 @@ class AutogradCompilerInstance:
             kwargs,
         )
 
+    def unpack_hook(self, hook_id, data_id):
+        assert self.hooks_proxy is not None
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        data = self.packed_data_proxy[data_id]  # type: ignore[index]
+        proxy = self.proxy_call_hook(
+            hook,
+            data,
+            hook_type="unpack_hook",
+        )
+        out = self.allocate_dummy()
+        self.bind_objects_to_proxies([out], [proxy])
+        return out
+
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
@@ -706,6 +730,9 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
+    def create_graph_module(self, id):
+        return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
+
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
@@ -745,6 +772,7 @@ class AutogradCompilerInstance:
             ).print_readable(print_output=False),
         )
         self.rename_aot_dispatcher_nodes()
+        self.delay_unpack_hook_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
         self.reorder_accumulate_grad_nodes()
@@ -763,9 +791,7 @@ class AutogradCompilerInstance:
         # should prevent these ops from going into the CA graph.
         self.dce()
 
-        graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
-        )
+        graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
             "Compiled autograd graph",
@@ -781,7 +807,7 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
-        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, packed_inputs):
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
@@ -789,7 +815,7 @@ class AutogradCompilerInstance:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    return compiled_fn(inputs, sizes, scalars, hooks)
+                    return compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
             finally:
                 in_compiled_autograd_region = False
 
@@ -938,6 +964,19 @@ class AutogradCompilerInstance:
                 if getitem_node is not None:
                     arg.append(getitem_node)
 
+    def delay_unpack_hook_nodes(self):
+        """
+        We can delay unpack hooks until they are needed, even later than in the eager autograd engine.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "unpack_hook":
+                continue
+
+            first_user = min(node.users)
+            first_user.prepend(node)
+
     def reorder_tensor_pre_hook_nodes(self):
         """
         Usage of AOTAutograd causes all the tensor_pre_hook nodes to get pushed
@@ -1060,9 +1099,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            assert (
-                acc_grad_node is not None
-            ), "post_acc_grad_hook must have corresponding acc grad node"
+            assert acc_grad_node is not None, (
+                "post_acc_grad_hook must have corresponding acc grad node"
+            )
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)

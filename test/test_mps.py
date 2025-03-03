@@ -235,6 +235,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        '_unsafe_masked_index',
         'abs',
         'add',
         'alias_copy',
@@ -284,6 +285,7 @@ def mps_ops_modifier(ops):
         'linalg.svd',
         'mH',
         'mT',
+        'masked_fill',
         'masked_scatter',
         'masked_select',
         'meshgridlist_of_tensors',
@@ -323,12 +325,14 @@ def mps_ops_modifier(ops):
         'sinc',
         'slice',
         'special.spherical_bessel_j0',
+        'special.entr',
         'special.xlog1py',
         'special.zeta',
         'split',
         'split_with_sizes',
         'split_with_sizes_copy',
         'splitlist_args',
+        'sqrt',
         'squeeze',
         'squeeze_copy',
         'squeezemultiple',
@@ -363,7 +367,6 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
-        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -441,7 +444,6 @@ def mps_ops_modifier(ops):
         'logical_xor',
         'logsumexp',
         'long',
-        'masked_fill',
         'masked.mean',
         'masked.prod',
         'masked.std',
@@ -649,7 +651,6 @@ def mps_ops_modifier(ops):
         'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
-        'special.entr': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
@@ -715,6 +716,9 @@ def mps_ops_modifier(ops):
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # entr does not support boolean types
+        'special.entr': [torch.bool],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -933,9 +937,6 @@ def mps_ops_error_inputs_modifier(ops):
         'gather',
         'scatter',
         'scatter_add',
-
-        # unsupported complex dtypes
-        'masked_fill',
 
         # MPS does not support tensor dimensions > 16
         'amax',
@@ -2282,6 +2283,13 @@ class TestMPS(TestCaseMPS):
             if mask_cpu[i]:
                 dst2[i] = val
         self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
+
+        if MACOS_VERSION >= 14.0:
+            # Regression test for https://github.com/pytorch/pytorch/issues/143477
+            # Allocating 48x25x1024x1024 tensor crashes on MacOS-13
+            mask_bool = torch.triu(torch.ones(1024, 1024, device=device), diagonal=1).bool()
+            attn_scores = torch.rand(48, 25, 1024, 1024, device=device)
+            attn_scores.masked_fill_(mask_bool, 0)
 
     def test_masked_fill__non_contiguous(self):
         shape = (3, 5)
@@ -6552,6 +6560,12 @@ class TestMPS(TestCaseMPS):
         # align_corners=True
         helper([2, 3, 4, 5], [3, 4], None, 'bilinear', True)
         helper([2, 3, 4, 5], None, [1.4, 1.7], 'bilinear', True)
+        # Regression test for https://github.com/pytorch/pytorch/issues/144245
+        inp = torch.tensor([[[1.]], [[2]], [[4]]], device='mps')
+        for align_corners in [True, False]:
+            def interp(x):
+                return F.interpolate(x, 3, mode='linear', align_corners=align_corners)
+            self.assertEqual(interp(inp).cpu(), interp(inp.cpu()))
 
     # Test concat forward
     def test_cat1(self):
@@ -8758,42 +8772,39 @@ class TestLogical(TestCaseMPS):
 
 
 class TestSmoothL1Loss(TestCaseMPS):
+    @parametrize("reduction", ["none", "mean", "sum"])
+    @parametrize("requires_grad", [False, True])
+    def test_smooth_l1_loss(self, reduction, requires_grad):
+        def helper(sizes):
+            # CPU
+            input_cpu = torch.randn(*sizes, requires_grad=requires_grad)
+            target_cpu = torch.randn(*sizes)
 
-    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
-        # CPU
-        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
-        target_cpu = torch.randn(4, 7)
+            # MPS
+            input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
+            target_mps = target_cpu.detach().clone().to('mps')
 
-        # MPS
-        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
-        target_mps = target_cpu.detach().clone().to('mps')
+            smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
+            smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
 
-        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
-        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
+            self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
 
-        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
+            if requires_grad:
+                if reduction == "none":
+                    grad_cpu = torch.zeros_like(smooth_l1_loss_cpu)
+                    grad_mps = grad_cpu.to('mps')
 
-        if requires_grad:
-            smooth_l1_loss_cpu.backward()
-            smooth_l1_loss_mps.backward()
-            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
+                    smooth_l1_loss_cpu.backward(grad_cpu)
+                    smooth_l1_loss_mps.backward(grad_mps)
+                else:
+                    smooth_l1_loss_cpu.backward()
+                    smooth_l1_loss_mps.backward()
+                self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
 
-        return smooth_l1_loss_cpu, smooth_l1_loss_mps
-
-    def test_smooth_l1_loss_reduction_none(self):
-        self._smooth_l1_loss_helper(reduction="none")
-
-    def test_smooth_l1_loss_reduction_mean(self):
-        self._smooth_l1_loss_helper(reduction="mean")
-
-    def test_smooth_l1_loss_reduction_sum(self):
-        self._smooth_l1_loss_helper(reduction="sum")
-
-    def test_smooth_l1_loss_reduction_mean_backward(self):
-        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
-
-    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
-        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
+        helper((2, 3, 4))
+        helper((8, 5))
+        helper((3, ))
+        helper((3, 3, 0))
 
 class TestNLLLoss(TestCaseMPS):
     def test_nll_loss_mismatched_batch(self, device='mps'):
@@ -9784,6 +9795,8 @@ class TestSDPA(TestCaseMPS):
             self._compare_tensors(y.cpu(), y_ref)
 
     def test_sdpa_mask_fp32(self):
+        self._test_sdpa_mask(torch.float32)
+        # Test twice to catch https://github.com/pytorch/pytorch/issues/148194
         self._test_sdpa_mask(torch.float32)
 
     def test_sdpa_mask_fp16(self):
@@ -12500,8 +12513,6 @@ class TestConsistency(TestCaseMPS):
             # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
             # fixed in macOS 13.3+
             return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
-        if op.name == "nn.functional.interpolate":
-            return (1e-3, 1e-4)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
@@ -12879,6 +12890,7 @@ instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
+instantiate_parametrized_tests(TestSmoothL1Loss)
 
 if __name__ == "__main__":
     run_tests()
