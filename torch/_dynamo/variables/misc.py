@@ -275,9 +275,17 @@ class ExceptionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.exc_type = exc_type
         self.args = args
+        # When raising a new exception while another exception is already being
+        # handled, the new exception's __context__ attribute is automatically
+        # set to the handled exception.
         self.__context__ = ConstantVariable(None)
+        # Set when user raised an exception from another:
+        # raise ... from ...
         self.__cause__ = ConstantVariable(None)
+        # Boolean flag that controls whether the __context__ attribute is set
         self.__suppress_context__ = ConstantVariable(False)
+        # Contains the call stack where the exception was raised. Dynamo does
+        # not track traceback. So, this variable is always set to None
         self.__traceback__ = ConstantVariable(None)
 
     def set_context(self, context: "ExceptionVariable"):
@@ -301,16 +309,36 @@ class ExceptionVariable(VariableTracker):
         name_var: VariableTracker,
         val: VariableTracker,
     ):
+        def raise_error(msg):
+            raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+
         name = name_var.as_python_constant()
         if name == "__context__":
             self.set_context(val)
         elif name == "__cause__":
-            self.__cause__ = val
-            self.__suppress_context__ = variables.ConstantVariable(True)
+            if (isinstance(val, ConstantVariable) and val.value is None) or isinstance(
+                val,
+                (
+                    variables.BuiltinVariable,
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            ):
+                self.__cause__ = val
+                self.__suppress_context__ = variables.ConstantVariable(True)
+            else:
+                raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
-            self.__suppress_context__ = val
+            if isinstance(val, ConstantVariable) and val.value in (True, False):
+                self.__suppress_context__ = val
+            else:
+                raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            self.__traceback__ = val
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.__traceback__ = val
+            else:
+                unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
         else:
             unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
         return variables.ConstantVariable(None)
@@ -320,7 +348,7 @@ class ExceptionVariable(VariableTracker):
             return self.call_setattr(tx, *args)
         elif name == "with_traceback":
             [tb] = args
-            self.__traceback__ = tb
+            self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
             return self
         else:
             return super().call_method(tx, name, args, kwargs)

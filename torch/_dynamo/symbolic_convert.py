@@ -1668,7 +1668,9 @@ class InstructionTranslatorBase(
         #   2) raise execption instance - raise NotImplemetedError("foo")
 
         # 1) when user raises exception type
-        if isinstance(val, variables.BuiltinVariable):
+        if isinstance(
+            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
+        ):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
