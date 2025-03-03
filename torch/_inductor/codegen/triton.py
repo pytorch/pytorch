@@ -1272,14 +1272,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
-    def int_truediv(a, b):
-        # TODO: as mentioned in the original common.py::int_truediv, this is not completely correct
-        # This is replicated here rather than using ops.truediv
-        # since truediv has different data type propagation rules from
-        # int_truediv.
-        return f"{a} / {b}"
-
-    @staticmethod
     def sign(x):
         z = ops.constant(0, torch.int32)
         left = ops.to_dtype((ops.lt(z, x)), torch.int8)
@@ -1584,11 +1576,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
-        self.block_ptr_to_buffer = dict[str, str]()
         self.helper_functions = HelperFunctions()
-        self.pointer_advancements: dict[SymT, dict[str, list[sympy.Expr]]] = (
-            collections.defaultdict(dict)
-        )
+        self.pointer_advancements: dict[
+            SymT, dict[str, list[sympy.Expr]]
+        ] = collections.defaultdict(dict)
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
@@ -2044,9 +2035,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     name, f"{block_ptr} = {indexing.format(var, roffset=False)}"
                 )
             )
-            # Store for later use. If the buffer is removed the below advancements
-            # are no longer necessary
-            self.block_ptr_to_buffer[block_ptr] = name
 
             # Generate block pointer advancements, for later use.
             for symt in TritonSymbols.reduction_types:
@@ -2060,9 +2048,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert block_ptr not in advancements, (
-                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
-                )
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -2483,7 +2471,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer.splice(
                 f"""\
                 {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {self.reduction_resize(f"{result_var}_idx")}
+                {result_var} = {self.reduction_resize(f'{result_var}_idx')}
                 """
             )
 
@@ -2583,8 +2571,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
                     {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
                 )
-                {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
-                {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
+                {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
+                {accumulator_index} = {where_cond(f'{accumulator_index}_next', accumulator_index)}
                 """
                 )
                 final_argreduce(
@@ -2758,9 +2746,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         self.compute.splice(
             f"""\
-            {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
-            {accumulator_m2} = {where_cond(f"{accumulator_m2}_next", accumulator_m2)}
-            {accumulator_weight} = {where_cond(f"{accumulator_weight}_next", accumulator_weight)}
+            {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
+            {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
+            {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
             """
         )
         result_mean = result_var
@@ -3047,9 +3035,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert self.persistent_reduction, (
-            "ops.sort is only supported in persistent reductions"
-        )
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -3163,10 +3151,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             ]
 
                         self.body.writeline(
-                            DeferredLine(
-                                self.block_ptr_to_buffer[block_ptr],
-                                f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})",
-                            )
+                            f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})"
                         )
 
                 # Invalidate any cache entries that came from inside the loop.
@@ -3310,7 +3295,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             {}
             import torch
             from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
+        """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
 
     def _get_heuristic(self):
@@ -3350,19 +3337,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             inductor_meta["profile_bandwidth"] = config.profile_bandwidth
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
-            inductor_meta["profile_bandwidth_with_do_bench_using_profiling"] = (
-                config.profile_bandwidth_with_do_bench_using_profiling
-            )
+            inductor_meta[
+                "profile_bandwidth_with_do_bench_using_profiling"
+            ] = config.profile_bandwidth_with_do_bench_using_profiling
         if config.coordinate_descent_tuning:
-            inductor_meta["coordinate_descent_tuning"] = (
-                config.coordinate_descent_tuning
-            )
-            inductor_meta["coordinate_descent_search_radius"] = (
-                config.coordinate_descent_search_radius
-            )
-            inductor_meta["coordinate_descent_check_all_directions"] = (
-                config.coordinate_descent_check_all_directions
-            )
+            inductor_meta[
+                "coordinate_descent_tuning"
+            ] = config.coordinate_descent_tuning
+            inductor_meta[
+                "coordinate_descent_search_radius"
+            ] = config.coordinate_descent_search_radius
+            inductor_meta[
+                "coordinate_descent_check_all_directions"
+            ] = config.coordinate_descent_check_all_directions
         return inductor_meta
 
     def codegen_kernel(self, name=None):
@@ -3927,11 +3914,17 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
-            BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
-            BackendFeature.TUPLE_REDUCTION,
         ]
     )
+    if torch.version.hip is None:
+        backend_features.update(
+            [
+                # TODO: Move this above when ROCm triton adds support for multiple inputs
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.SORT,
+            ]
+        )
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
@@ -4052,10 +4045,9 @@ class TritonScheduling(SIMDScheduling):
     ) -> tuple[float, str]:
         """Benchmark an already compiled module"""
         device_interface = get_interface_for_device(V.graph.device_type)
-        with (
-            preserve_rng_state(),
-            device_interface.device(V.graph.get_current_device_or_throw()),  # type: ignore[attr-defined]
-        ):
+        with preserve_rng_state(), device_interface.device(
+            V.graph.get_current_device_or_throw()
+        ):  # type: ignore[attr-defined]
             ms = None
 
             def cache_file_path():
@@ -4329,9 +4321,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
-            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        )
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.
