@@ -76,10 +76,12 @@ from torch.testing._internal.custom_tensor import (
     CustomTensorPlainOut,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
+    register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
@@ -4707,6 +4709,62 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
+
+    def test_export_method(self):
+        from torch._export.utils import sync_state, wrap_method
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.t = torch.nn.Buffer(torch.tensor(10))
+
+            def forward(self, x):
+                return self.foo(x) * self.bar(x)
+
+            def foo(self, x):
+                self.t.mul_(2)
+                return x + self.t
+
+            def bar(self, x):
+                return x - self.t
+
+        # exporting...
+        em = M()
+        ex = torch.randn(4)
+
+        # ...foo
+        epm_foo = export(
+            wrap_method(em.foo),
+            (ex,),
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        ).module()
+
+        # ...bar
+        epm_bar = export(
+            wrap_method(em.bar),
+            (ex,),
+            dynamic_shapes=((Dim.DYNAMIC,),),
+        ).module()
+
+        if is_serdes_test(self._testMethodName):
+            sync_state(epm_foo, epm_bar)
+
+        # running...
+        m = M()
+        rx = torch.randn(5)
+
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+
+        # ...foo
+        self.assertTrue(torch.allclose(epm_foo(rx), m.foo(rx)))
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+
+        # ...bar
+        self.assertTrue(torch.allclose(epm_bar(rx), m.bar(rx)))
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
 
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
@@ -9639,6 +9697,27 @@ graph():
             )
         )
 
+    @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
+    @testing.expectedFailureSerDer  # register_constant needs to handle serialization
+    def test_register_constant(self):
+        @dataclass
+        class MyInput:
+            int_1: int
+            int_2: int
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, f):
+                return x + f.int_1 + f.int_2
+
+        register_constant(MyInput)
+        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
@@ -12584,15 +12663,7 @@ def forward(self, x):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
-        if IS_FBCODE:
-            lib_file_path = "//caffe2/test/cpp/jit:test_custom_class_registrations"
-        elif IS_SANDCASTLE or IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-        torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
 
     def test_lift_custom_obj(self):
         # TODO: fix this test once custom class tracing is implemented

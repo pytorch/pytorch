@@ -235,6 +235,7 @@ IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False,
 )
+IN_RE_WORKER: bool = os.environ.get("INSIDE_RE_WORKER") is not None
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and
@@ -1436,11 +1437,7 @@ NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEP
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 
 
-# Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN: bool = TestEnvironment.def_flag(
-    "NO_MULTIPROCESSING_SPAWN",
-    env_var="NO_MULTIPROCESSING_SPAWN",
-)
+NO_MULTIPROCESSING_SPAWN: bool = False
 TEST_WITH_ASAN: bool = TestEnvironment.def_flag(
     "TEST_WITH_ASAN",
     env_var="PYTORCH_TEST_WITH_ASAN",
@@ -2300,7 +2297,7 @@ def to_gpu(obj, type_map=None):
         assert obj.is_leaf
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().to(dtype=t, device="cuda")
+            res = obj.to(dtype=t, device="cuda", copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
