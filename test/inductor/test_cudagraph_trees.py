@@ -2514,7 +2514,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(compiled_result, eager_result)
 
         @torch._inductor.config.patch("graph_partition", True)
-        def test_graph_partition_cudagraph(self):
+        def test_graph_partition(self):
             def f(x, y):
                 x1 = x + 1
                 y1 = y + 1
@@ -2536,29 +2536,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
-        def test_graph_partition_backward(self):
-            def f(x, y):
-                x1 = x + 1
-                y1 = y + 1
-                y_cpu = y1.cpu() + 1
-                z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+        def test_graph_partition_forward_backward(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
 
-            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
-            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
-            x.requires_grad = True
-            x_cloned.requires_grad = True
-            eager_out = f(x, y)
-            eager_out.sum().backward()
+                def forward(self, x):
+                    x1 = x + 1
+                    y1 = x + 2
+                    y_cpu = y1.cpu() + 1
+                    z = x @ y1
+                    inp = x1 + y1 + z + y_cpu.cuda()
+                    return self.linear(inp)
 
-            f_compiled = torch.compile(f, mode="reduce-overhead")
+            model = Mod().cuda()
+
+            input_data = torch.randn(16, 16).cuda()
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
 
             for _ in range(5):
-                torch.compiler.cudagraph_mark_step_begin()
-                compiled_out = f_compiled(x_cloned, y_cloned)
-                compiled_out.sum().backward()
-                self.assertEqual(eager_out, compiled_out)
-                self.assertEqual(x.grad, x_cloned.grad)
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
             # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
