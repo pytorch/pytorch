@@ -142,7 +142,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value
 
     def __repr__(self) -> str:
-        return f"UserDefinedClassVariable({self.value})"
+        return f"{self.__class__.__name__}({self.value})"
 
     @staticmethod
     @functools.lru_cache(None)
@@ -721,21 +721,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self.exc_vt = variables.ExceptionVariable(value, ())
-
     @property
     def fn(self):
-        return self.exc_type
+        return self.value
 
-    def __getattr__(self, name):
-        if name in self.__class__.__dict__.keys():
-            return getattr(self, name)
-        return getattr(self.exc_vt, name)
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.value.__name__})"
+    @property
+    def python_type(self):
+        return self.value
 
 
 class NO_SUCH_SUBOBJ:
@@ -1492,6 +1484,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
+        if (
+            name == "__setattr__"
+            and len(args) == 2
+            and isinstance(args[0], variables.ConstantVariable)
+            and args[0].value
+            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+        ):
+            self.exc_vt.call_setattr(tx, args[0], args[1])
         return super().call_method(tx, name, args, kwargs)
 
     def __getattr__(self, name):
