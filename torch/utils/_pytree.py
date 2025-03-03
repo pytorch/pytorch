@@ -329,10 +329,14 @@ def register_constant(cls: type[Any]) -> None:
     def _unflatten(_, context):  # type: ignore[no-untyped-def]
         return context.value
 
+    def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
     _private_register_pytree_node(
         cls,
         _flatten,
         _unflatten,
+        flatten_with_keys_fn=_flatten_with_keys,
     )
 
 
@@ -990,14 +994,26 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self._context)
 
 
+# NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
+# this class with `dataclasses.fields`, etc., while having a simplified
+# constructor that takes no argument, we wrap with `dataclass(init=True, ...)`
+# again, with fields that have `init=False`.
 @deprecated(
     "`isinstance(treespec, LeafSpec)` is deprecated, "
     "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
 class LeafSpec(TreeSpec):
-    def __init__(self) -> None:
-        super().__init__(None, None, [])
+    type: Any = dataclasses.field(default=None, init=False)
+    _context: Context = dataclasses.field(default=None, init=False)
+    _children: list[Self] = dataclasses.field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        # Override `__post_init__` for `num_leaves` derivation.
+        object.__setattr__(self, "num_nodes", 1)
+        object.__setattr__(self, "num_leaves", 1)
+        object.__setattr__(self, "num_children", 0)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
@@ -1204,17 +1220,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
 def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
-
-
-@overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -1310,6 +1326,17 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only(
     type_or_types_or_pred: Callable[[Any], bool],
     /,
     func: FnAny[Any],
@@ -1356,6 +1383,17 @@ def tree_map_only_(
     type_or_types_or_pred: Type3[T, S, U],
     /,
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
