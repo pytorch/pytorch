@@ -12,14 +12,18 @@ It includes two main components:
 The metrics system enables comprehensive monitoring and analysis of both compilation and
 execution performance.
 """
+
 from __future__ import annotations
 
 import heapq
 import logging
 import time
-from collections.abc import Iterator
-from typing import Any, Callable, Optional, Self
-from typing_extensions import TypeAlias
+from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing_extensions import Self, TypeAlias
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 log = logging.getLogger(__name__)
