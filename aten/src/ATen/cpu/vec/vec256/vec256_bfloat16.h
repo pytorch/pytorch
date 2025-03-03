@@ -228,5 +228,3 @@ CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
 #endif // defined(CPU_CAPABILITY_AVX2)
 }} // namsepace at::vec::CPU_CAPABILITY
-
-#pragma GCC diagnostic pop
