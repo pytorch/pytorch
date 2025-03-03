@@ -21,7 +21,6 @@ import sys as _sys
 from typing import Any as _Any
 
 import torch.utils._pytree as python
-from torch.utils._exposed_in import exposed_in as _exposed_in
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
@@ -118,35 +117,6 @@ else:
         tree_unflatten as tree_unflatten,
         treespec_pprint as treespec_pprint,
     )
-
-
-# Change `__module__` of reexported public APIs to 'torch.utils.pytree'
-__func_names = frozenset(
-    {
-        "tree_all",
-        "tree_all_only",
-        "tree_any",
-        "tree_any_only",
-        "tree_flatten",
-        "tree_iter",
-        "tree_leaves",
-        "tree_map",
-        "tree_map_",
-        "tree_map_only",
-        "tree_map_only_",
-        "tree_structure",
-        "tree_unflatten",
-        "treespec_pprint",
-    }
-)
-globals().update(
-    {
-        name: _exposed_in(__name__)(member)
-        for name, member in globals().items()
-        if name in __func_names
-    }
-)
-del __func_names, _exposed_in
 
 
 def register_pytree_node(  # type: ignore[no-any-unimported]
