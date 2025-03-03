@@ -11,7 +11,11 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+)
 
 
 class CustomException(Exception):
@@ -22,6 +26,10 @@ class CustomExceptionWithArgs(Exception):
     def __init__(self, a, b=None):
         self.a = a
         self.b = b
+
+
+class MyException(OSError):
+    pass
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -527,6 +535,78 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_set_cause_with_arg(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t, err):
+            err.__cause__ = ValueError()
+            return t.sin()
+
+        t = torch.randn(2)
+        e = TypeError("abcd")
+        fn(t, e)
+        self.assertIsInstance(e.__cause__, ValueError)
+
+    def test_set_cause_with_arg_error(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t, err):
+            err.__cause__ = 2
+            return t.sin()
+
+        t = torch.randn(2)
+        e = TypeError("abcd")
+        with self.assertRaisesRegex(TypeError, "exception cause must be"):
+            fn(t, e)
+
+    @unittest.expectedFailure
+    @parametrize(
+        "ex",
+        [TypeError, CustomException],
+        name_fn=lambda x: x.__name__,
+    )
+    @make_dynamo_test
+    def test_set___cause__(self, ex):
+        def fn():
+            try:
+                raise ex
+            except ex:
+                raise TypeError from None
+
+        try:
+            fn()
+        except TypeError as e:
+            assert isinstance(e.__context__, ex)
+            assert e.__cause__ is None
+            assert e.__suppress_context__ is True
+
+    @unittest.expectedFailure
+    @parametrize(
+        "ex",
+        [RuntimeError, CustomException],
+        name_fn=lambda x: x.__name__,
+    )
+    @make_dynamo_test
+    def test_set___cause___error(self, ex):
+        def fn():
+            try:
+                raise ex
+            except Exception as e:
+                e.__cause__ = 2
+                raise
+
+        z = 0
+
+        try:
+            fn()
+        except TypeError as e:
+            z = 1
+            assert e.args == (
+                "exception cause must be None or derive from BaseException",
+            )
+        except Exception:
+            raise AssertionError from None
+
+        assert z == 1
+
     def test_user_defined_exception_variable(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -559,7 +639,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         fn(t)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_raise_set___context__(self):
         try:
@@ -567,39 +646,34 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         except TypeError as e:
             exc = e
 
-        self.assertIsNone(exc.__context__)
+        assert exc.__context__ is None
 
         try:
             raise ValueError
         except ValueError as e:
             exc2 = e
 
-        self.assertIsNone(exc2.__context__)
+        assert exc2.__context__ is None
 
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def testChainingAttrs(self):
         e = Exception()
-        self.assertIsNone(e.__context__)
-        self.assertIsNone(e.__cause__)  # we don't track __cause__
+        assert e.__context__ is None
+        assert e.__cause__ is None
 
         e = TypeError()
-        self.assertIsNone(e.__context__)
-        self.assertIsNone(e.__cause__)
-
-        class MyException(OSError):
-            pass
+        assert e.__context__ is None
+        assert e.__cause__ is None
 
         e = MyException()
-        self.assertIsNone(e.__context__)
-        self.assertIsNone(e.__cause__)
+        assert e.__context__ is None
+        assert e.__cause__ is None
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def testChainingDescriptors(self):
         try:
@@ -607,19 +681,18 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         except Exception as exc:
             e = exc
 
-        self.assertIsNone(e.__context__)
-        self.assertIsNone(e.__cause__)
-        self.assertFalse(e.__suppress_context__)
+        assert e.__context__ is None
+        assert e.__cause__ is None
+        assert e.__suppress_context__ is False
 
         e.__context__ = NameError()
         e.__cause__ = None
-        self.assertIsInstance(e.__context__, NameError)
-        self.assertIsNone(e.__cause__)
-        self.assertTrue(e.__suppress_context__)
+        assert isinstance(e.__context__, NameError)
+        assert e.__cause__ is None
+        assert e.__suppress_context__ is True
         e.__suppress_context__ = False
-        self.assertFalse(e.__suppress_context__)
+        assert e.__suppress_context__ is False
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_try_and_finally(self):
         try:
@@ -632,10 +705,9 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             exc = e
 
-        self.assertIs(exc, ve)
-        self.assertIs(exc.__context__, te)
+        assert exc is ve
+        assert exc.__context__ is te
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_except_and_finally(self):
         try:
@@ -651,11 +723,10 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             exc = e
 
-        self.assertIs(exc, oe)
-        self.assertIs(exc.__context__, ve)
-        self.assertIs(exc.__context__.__context__, te)
+        assert exc is oe
+        assert exc.__context__ is ve
+        assert exc.__context__.__context__ is te
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_else_and_finally(self):
         try:
@@ -672,8 +743,8 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             exc = e
 
-        self.assertIs(exc, oe)
-        self.assertIs(exc.__context__, ve)
+        assert exc is oe
+        assert exc.__context__ is ve
 
     @unittest.expectedFailure
     @make_dynamo_test
@@ -812,6 +883,9 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(c.__context__, b)
         self.assertIs(b.__context__, a)
         self.assertIs(a.__context__, c)
+
+
+instantiate_parametrized_tests(ExceptionTests)
 
 
 if __name__ == "__main__":
