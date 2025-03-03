@@ -2185,28 +2185,33 @@ class FakeTensorMode(TorchDispatchMode):
         # but the meta ones do not. This causes the module or func to be compiled by dynamo,
         # and later produce undefined behavior. One solution is to do a simple
         # check here, only for empty tensors (currently known edge case).
-        # This elseif will only be run if the previous logic is not evalauted to true,
-        # which if is true, then will produce the desired behavior, i.e, the real_out variable
-        # will be set to a real Tensor, by calling the function on normal tensor.
-        # This function will check if any of the args have an empty tensor, and assign the flag to
+        # If we find empty tensors, then we need to propagate them
+        # to produce the desired behavior. After propagation the real_out variable
+        # will be set to a real Tensor.
+        # This code block will check if any of the args have an empty tensor, and assign the flag to
         # edge_case. edge_case by default will be same as self.propagate_real_tensors, 
-        # which we will alter based on edge_case. Finally, before returning we will restore the original
+        # . If we do find any edge case, then we need to run the propagation,
+        # To run propagation, we need to ensure that the real_tensor attribute is not None.
+        # Therefore, we do another check to ensure that Empty FakeTensors do have a real_tensor
+        # Finally, before returning we will restore the original
         # value of self.propagate_real_tensors, so that the call is unique to the given tensor args
-        edge_case = self.propagate_real_tensors
+        # NOTE: The actual reason for SEGFAULT can be found here: (https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html)
+        # which is CPU kernel getting called with a fake tensor trying to dereference the data pointer
         propagate_real_tensors_prev = self.propagate_real_tensors
-        def check_if_edge_case(all_fake_tensor_args: Sequence[object]) -> None:
-            nonlocal edge_case
-            for fake_tensor in all_fake_tensor_args:
-                if fake_tensor.numel() == 0:
-                    edge_case = True 
-                    break
-        check_if_edge_case(flat_arg_fake_tensors)
-        # propagate real tensors based on edge case
-        self.propagate_real_tensors = (edge_case,) 
-        
+        all_tensors_has_real = all(e.real_tensor is not None for e in flat_arg_fake_tensors)
+        edge_case = any(e.numel() == 0 for e in flat_arg_fake_tensors)
+        self.propagate_real_tensors = edge_case 
+
+        # We only need to create a real_tensor, if there is an edge_case
+        if edge_case and not all_tensors_has_real:
+            for fake_tensor in flat_arg_fake_tensors:
+                if fake_tensor.real_tensor is None:
+                    fake_tensor.real_tensor = torch.empty(fake_tensor.shape, dtype= fake_tensor.dtype)
+        all_tensors_has_real = all_tensors_has_real or edge_case
+
         if (
             self.propagate_real_tensors
-            and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
+            and all_tensors_has_real
             # TODO: Handle SymFloat/SymBool
             and not any(
                 (
