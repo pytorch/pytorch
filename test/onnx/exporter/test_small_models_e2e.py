@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import torchvision
 import transformers
@@ -22,6 +23,25 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         assert onnx_program is not None
         return onnx_program
+
+    def assert_onnx_program(
+        self,
+        onnx_program,
+        *,
+        rtol: float | None = None,
+        atol: float | None = None,
+        args: tuple[Any, ...] | None = None,
+        kwargs: dict[str, Any] | None = None,
+        strategy: str | None = "TorchExportNonStrictStrategy",
+    ):
+        onnx_testing.assert_onnx_program(
+            onnx_program,
+            rtol=rtol,
+            atol=atol,
+            args=args,
+            kwargs=kwargs,
+            strategy=strategy,
+        )
 
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
@@ -42,7 +62,7 @@ class DynamoExporterTest(common_utils.TestCase):
         self.assertNotIn("call_method", str(ep.graph))
 
         onnx_program = self.export(model, (query, key, value))
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        self.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
     def test_constant_complex(self):
         class MulModule(torch.nn.Module):
@@ -56,7 +76,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         onnx_program = self.export(MulModule(), (x,))
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_pow_does_not_trigger_type_promotion(self):
         class Model(torch.nn.Module):
@@ -66,7 +86,7 @@ class DynamoExporterTest(common_utils.TestCase):
         x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
 
         onnx_program = self.export(Model(), (x,))
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
     def test_onnx_export_control_flow(self):
@@ -84,9 +104,9 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_model = onnx_program.model
         self.assertIn("If", [node.op_type for node in onnx_model.graph])
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
         # Test different branches
-        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
+        self.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_onnx_export_nested_control_flow_and_nested_weights(self):
         class Submodule(torch.nn.Module):
@@ -122,9 +142,9 @@ class DynamoExporterTest(common_utils.TestCase):
                 return y
 
         onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
-        onnx_testing.assert_onnx_program(onnx_program)
-        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
-        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
+        self.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
+        self.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
 
     def test_onnx_export_control_flow_multi_outputs(self):
         class CondModel(torch.nn.Module):
@@ -150,8 +170,8 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamo=True,
             fallback=False,
         )
-        onnx_testing.assert_onnx_program(onnx_program)
-        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
+        self.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_onnx_export_torchvision_ops(self):
         class VisionModel(torch.nn.Module):
@@ -168,7 +188,7 @@ class DynamoExporterTest(common_utils.TestCase):
             0,
         )
         onnx_program = self.export(VisionModel(), args)
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_empty(self):
         def func(x):
@@ -187,7 +207,7 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = self.export(
             TopKModel(), (torch.arange(1.0, 6.0, requires_grad=True),)
         )
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_exported_program_torch_distributions_normal_Normal(self):
         class Model(torch.nn.Module):
@@ -242,7 +262,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return x + 1
 
         onnx_program = self.export(LoggingLoggerModule(), (torch.tensor(1),))
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_export_with_hf_logging_logger(self):
         logger = transformers.utils.logging.get_logger(__name__)
@@ -253,7 +273,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return x + 1
 
         onnx_program = self.export(HFLoggingLoggerModule(), (torch.tensor(1),))
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_export_with_print(self):
         class PrintModule(torch.nn.Module):
@@ -262,7 +282,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return x + 1
 
         onnx_program = self.export(PrintModule(), (torch.tensor(1),))
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assert_onnx_program(onnx_program)
 
     def test_export_with_dynamic_input(self):
         class Model(torch.nn.Module):
@@ -276,7 +296,7 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamic_shapes=({0: dim0},),
         )
 
-        onnx_testing.assert_onnx_program(
+        self.assert_onnx_program(
             onnx_program, args=(torch.randn(3, 3, 4, dtype=torch.float),)
         )
 
@@ -297,7 +317,7 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
-        onnx_testing.assert_onnx_program(onnx_program, args=(torch.ones(8, 5), 5))
+        self.assert_onnx_program(onnx_program, args=(torch.ones(8, 5), 5))
 
     def test_export_with_none_arg_name_in_dynamic(self):
         class Model(torch.nn.Module):
@@ -318,7 +338,7 @@ class DynamoExporterTest(common_utils.TestCase):
             torch.randn(4, 4),
             torch.randn(7, 4),
         )
-        onnx_testing.assert_onnx_program(onnx_program, args=test_inputs)
+        self.assert_onnx_program(onnx_program, args=test_inputs)
 
     def test_export_with_non_arg_name_with_kwarg(self):
         class Model(torch.nn.Module):
@@ -337,7 +357,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         # This should work even if the kwarg order are flipped.
-        onnx_testing.assert_onnx_program(
+        self.assert_onnx_program(
             onnx_program,
             args=(torch.randn(4, 4), torch.randn(7, 4)),
             kwargs={"kw2": torch.ones(4, 4), "kw1": torch.zeros(9, 4)},
@@ -370,7 +390,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 dynamic_shapes=({0: dim}, {0: dim}),
             )
 
-            onnx_testing.assert_onnx_program(
+            self.assert_onnx_program(
                 onnx_program,
                 args=(torch.rand((4, 3), dtype=torch.float32), torch.randn(4, 3)),
             )
@@ -410,7 +430,7 @@ class DynamoExporterTest(common_utils.TestCase):
 
         # NOTE: Careful with the input format. The input format should be
         # consistent with how the model is exported.
-        onnx_testing.assert_onnx_program(
+        self.assert_onnx_program(
             onnx_program,
             args=((torch.randn(4, 4), torch.randn(6, 4)), torch.randn(4, 4)),
         )
@@ -434,7 +454,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         inputs = {"x": torch.randn(6, 3), "y": torch.randn(6, 3)}
-        onnx_testing.assert_onnx_program(onnx_program, kwargs=inputs)
+        self.assert_onnx_program(onnx_program, kwargs=inputs)
 
     def test_export_of_rename_dynamic_axes_required_model_with_mixed_type_of_dynamic_shapes(
         self,
@@ -487,7 +507,7 @@ class DynamoExporterTest(common_utils.TestCase):
             {"a": torch.zeros(4), "b": torch.ones(4)},
             torch.ones(5),
         )
-        onnx_testing.assert_onnx_program(
+        self.assert_onnx_program(
             onnx_program,
             args=input,
         )
@@ -531,7 +551,7 @@ class DynamoExporterTest(common_utils.TestCase):
             {0: dz, 1: 3},
         )
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assert_onnx_program(onnx_program, args=inputs)
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
 

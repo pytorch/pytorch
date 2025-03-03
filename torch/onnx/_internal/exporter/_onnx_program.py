@@ -76,6 +76,8 @@ class ONNXProgram:
         self.exported_program = exported_program
         self._inference_session: ort.InferenceSession | None = None
         self._tempdir: tempfile.TemporaryDirectory | None = None
+        # Strategy used to capture the exported program
+        self._capture_strategy: str | None = None
 
     def __repr__(self) -> str:
         return f"""\

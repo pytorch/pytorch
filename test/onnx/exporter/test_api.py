@@ -52,10 +52,10 @@ class NestedModelForDynamicShapes(torch.nn.Module):
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
-    def assert_export(self, *args, **kwargs):
+    def assert_export(self, *args, strategy="TorchExportNonStrictStrategy", **kwargs):
         onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True)
         assert onnx_program is not None
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
 
     def test_args_normalization_with_no_kwargs(self):
         self.assert_export(
@@ -128,7 +128,11 @@ class TestExportAPIDynamo(common_utils.TestCase):
             def forward(self, x):
                 return x
 
-        self.assert_export(torch.jit.script(ScriptModule()), (torch.randn(1, 1, 2),))
+        self.assert_export(
+            torch.jit.script(ScriptModule()),
+            (torch.randn(1, 1, 2),),
+            strategy="JitTraceConvertStrategy",
+        )
 
     def test_dynamic_shapes_with_fully_specified_axes(self):
         exported_program = torch.export.export(
