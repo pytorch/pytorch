@@ -551,8 +551,9 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
 
     if not config.verbose and hasattr(exc, "real_stack"):
         msg += (
-            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, "
-            'set TORCH_LOGS="+dynamo"\n'
+            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            "(please do this especially if you're reporting a bug to PyTorch). "
+            'For even more developer context, set TORCH_LOGS="+dynamo"\n'
         )
 
     if hasattr(exc, "inner_exception") and hasattr(
