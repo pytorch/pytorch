@@ -4294,6 +4294,7 @@ class CommonTemplate:
                 x.size(-1),
                 stride,
                 padding,
+                dilation=dilation,
             )
             return vals, indices, offsets
 
