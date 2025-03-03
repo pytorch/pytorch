@@ -1419,6 +1419,44 @@ namespace {
       TORCH_CHECK(false, "Tensor should not be self-overlapping");
     }
   }
+
+  void check_scale(const Tensor& mat, const Tensor& scale, const int arg_idx) {
+    if (mat.dim() == 2) {
+      TORCH_CHECK(
+          scale.dim() == 1,
+          "scale must be a 1D tensor, but got ",
+          scale.dim(),
+          "D, arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.is_contiguous(), "scale_a must be contiguous for arg ", arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(0),
+          "scale must have the same length as mat for arg ",
+          arg_idx);
+    } else {
+      TORCH_CHECK(
+          scale.dim() == 2,
+          "scale must be a 2D tensor, but got ",
+          scale.dim(),
+          "D for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.stride(1),
+          "scale_a must be contiguous in the last dimension for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(0),
+          "scale must have the same batch dimension as mat for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(1) == mat.size(1),
+          "scale must have the same first dimension as mat for arg ",
+          arg_idx);
+    }
+}
+
+
 }
 
 Tensor
@@ -1451,10 +1489,19 @@ bool use_fast_accum) {
   TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
   const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs_a, offs_b);
   Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()), "Expected mat_a to be Float8 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat_b.scalar_type()), "Expected mat_b to be Float8 matrix got ", mat_a.scalar_type());
+
+  TORCH_CHECK(a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
   TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
+
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+  TORCH_CHECK(
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "Both scale_a and scale_b must be float (fp32) tensors.");
+
+  check_scale(mat_a, scale_a, 0);
+  check_scale(mat_b, scale_b, 1);
 
   TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
   at::cuda::detail::f8f8bf16_grouped_mm(
