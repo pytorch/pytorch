@@ -305,8 +305,9 @@ class TracerBase:
         # for new types *SHOULD NOT* become nodes in the FX graph.
         handler = _create_arg_bypass.get(type(a))
         if handler is not None:
+            # this is just a performance optimization and can be removed if needed
             # for common types, we have a fast path to avoid isinstance() overhead
-            # this doesn't remove the checks below since we need to handle subclases
+            # this doesn't remove the checks below since we need to handle subclasses
             return handler(self, a)
 
         if isinstance(a, Proxy):
