@@ -199,6 +199,7 @@ class VecSVE256_BF16(VecSVE256):
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
+
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
@@ -344,7 +345,14 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256(), VecSVE256_BF16()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE256(),
+    VecSVE256_BF16(),
+]
 
 
 def get_isa_from_cpu_capability(
@@ -411,7 +419,7 @@ def valid_vec_isa_list() -> list[VecISA]:
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
-   
+
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
