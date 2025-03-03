@@ -96,6 +96,8 @@ class HalidePrinter(PythonPrinter):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
 
+    _print_FloorToInt = _print_floor
+
     def _print_Trunc(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.trunc({self._print(expr.args[0])})")
@@ -140,39 +142,42 @@ class HalidePrinter(PythonPrinter):
 
     def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cos(({self._print(expr.args[0])})"
+        return f"hl.cos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cosh(({self._print(expr.args[0])})"
+        return f"hl.cosh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.acos(({self._print(expr.args[0])})"
+        return f"hl.acos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sin(({self._print(expr.args[0])})"
+        return f"hl.sin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sinh(({self._print(expr.args[0])})"
+        return f"hl.sinh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.asin(({self._print(expr.args[0])})"
+        return f"hl.asin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tan(({self._print(expr.args[0])})"
+        return f"hl.tan({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tanh(({self._print(expr.args[0])})"
+        return f"hl.tanh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.atan(({self._print(expr.args[0])})"
+        return f"hl.atan({self._print(expr.args[0])})"
+
+    def _print_OpaqueUnaryFn_log2(self, expr):
+        raise NotImplementedError("log2")
 
     def _print_FloorDiv(self, expr):
         if expr.is_integer:
@@ -452,6 +457,10 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def log(x):
         return f"hl.log({x})"  # hl.fast_log fails accuracy
+
+    @staticmethod
+    def log2(x):
+        raise NotImplementedError("log2")
 
     @staticmethod
     def isinf(x):
