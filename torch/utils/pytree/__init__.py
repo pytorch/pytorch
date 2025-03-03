@@ -74,10 +74,15 @@ if PYTORCH_USE_CXX_PYTREE:
             "Please install `optree` via `python -m pip install --upgrade optree`. "
             "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
+else:
+    cxx = _sys.modules.get("torch.utils._cxx_pytree")
 
 
 _sys.modules[f"{__name__}.python"] = python
-_sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
+if cxx is not None:
+    _sys.modules[f"{__name__}.cxx"] = cxx
+else:
+    del cxx
 
 
 if not PYTORCH_USE_CXX_PYTREE:
