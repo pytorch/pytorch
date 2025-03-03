@@ -76,6 +76,7 @@ if PYTORCH_USE_CXX_PYTREE:
         )
 
 
+_sys.modules[f"{__name__}.python"] = python
 _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
 
