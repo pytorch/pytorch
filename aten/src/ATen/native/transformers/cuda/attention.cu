@@ -1146,9 +1146,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   // compute_logsumexp is false
   constexpr int kAlignLSE = 1;
   res = at::empty({B, M, num_heads, Kv}, query.options());
-  logsumexp = at::empty(
-      { B, num_heads, max_seqlen_q },
-      query.options().dtype(at::ScalarType::Float));
+  if (!compute_logsumexp) {
+    // Set the tensor to empty when compute_logsumexp is false
+    logsumexp = at::empty(
+        { B * num_heads, max_seqlen_q, 0 },
+        query.options().dtype(at::ScalarType::Float));
+  }
   at::Tensor softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
   at::Tensor q_t = query.transpose(1, 2);
   at::Tensor k_t = key.transpose(1, 2);
@@ -1165,32 +1168,40 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
 
+  at::Tensor atomic_counter;
+  if (is_causal) {
+    atomic_counter = at::zeros({1}, query.options());
+  }
+
   using aotriton::v2::flash::attn_fwd;
   using aotriton::v2::flash::attn_fwd_compact_varlen;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
+  aotriton::TensorView<2> empty_t2(0, {0, 0}, {0, 0}, aotriton::DType::kFloat32);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
   const bool use_philox_state = in_capture_stream;
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
   auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
-  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto nullscalar = mk_philoxtensor(nullptr);
+  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
+  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
+  auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
   hipError_t err; // TODO: Error handling
   if (seqstart_q.has_value()) {
     // varlen aka nested tensor
     err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
                                   mk_aotensor(k_t, "k"),
                                   mk_aotensor(v_t, "v"),
+                                  bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
                                   mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q"),
                                   mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k"),
                                   max_seqlen_q,
                                   max_seqlen_k,
-                                  bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
                                   softmax_scale,
-                                  mk_aotensor<2>(softmax_lse, "M"),
+                                  compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
                                   mk_aotensor(output_t, "Out"),
                                   dropout_p,
                                   seed,
@@ -1200,6 +1211,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                   offset_output,
                                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
                                   is_causal,
+                                  persistent_counter,
                                   stream);
   } else {
     err = attn_fwd(mk_aotensor(q_t, "q"),
@@ -1207,7 +1219,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                    mk_aotensor(v_t, "v"),
                    bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
                    softmax_scale,
-                   mk_aotensor<2>(softmax_lse, "M"),
+                   compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
                    mk_aotensor(output_t, "Out"),
                    dropout_p,
                    seed,
@@ -1217,6 +1229,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                    offset_output,
                    mk_aotensor(softmax_fa_t, "encoded_softmax"),
                    is_causal,
+                   persistent_counter,
                    stream);
   }
   if (!compute_logsumexp) {
