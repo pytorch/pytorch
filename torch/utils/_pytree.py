@@ -841,7 +841,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
 @dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
-class TreeSpec:
+class PyTreeSpec:
     type: Any
     context: Context
     children_specs: list["TreeSpec"]
@@ -999,7 +999,7 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
-PyTreeSpec: TypeAlias = TreeSpec
+TreeSpec: TypeAlias = PyTreeSpec
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
