@@ -619,7 +619,7 @@ Workspace chooseAlgorithm(
   try {
     return Workspace(workspace_size);
   } catch (const std::exception& e) {
-    hipGetLastError(); // clear OOM error
+    std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
@@ -640,7 +640,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
     *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
   } catch (const std::exception& e) {
-    hipGetLastError(); // clear OOM error
+    std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm
     solution = search::getSolution(args, true);
