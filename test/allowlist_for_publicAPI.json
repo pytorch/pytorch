@@ -1107,7 +1107,8 @@
     "to_dlpack"
   ],
   "torch.utils.pytree.cxx": [
-    "PyTreeSpec"
+    "PyTreeSpec",
+    "TreeSpec"
   ],
   "torch": [
     "BFloat16Storage",
