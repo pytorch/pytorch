@@ -1170,7 +1170,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   at::Tensor atomic_counter;
   if (is_causal) {
-    atomic_counter = at::zeros({1}, query.options());
+    atomic_counter = at::zeros({1}, query.options().dtype(at::kInt));
   }
 
   using aotriton::v2::flash::attn_fwd;
@@ -1178,6 +1178,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
+  using sdp::aotriton_adapter::mk_atomictensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   aotriton::TensorView<2> empty_t2(0, {0, 0}, {0, 0}, aotriton::DType::kFloat32);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
@@ -1185,10 +1186,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
   auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-  auto nullscalar = mk_philoxtensor(nullptr);
-  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
-  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
-  auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
+  auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
+  auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
+  auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
   hipError_t err; // TODO: Error handling
   if (seqstart_q.has_value()) {
     // varlen aka nested tensor

@@ -64,6 +64,10 @@
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
 
+#if AOTRITON_VERSION_MINOR != 9
+#error "This adaptor code is only tested with AOTriton 0.9.x"
+#endif
+
 namespace pytorch_flash {
 
 namespace {
@@ -205,7 +209,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
 
   at::Tensor atomic_counter;
   if (is_causal) {
-    atomic_counter = at::zeros({1}, q.options());
+    atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
   }
 
   hipError_t err; // TODO: Error handling
@@ -213,15 +217,15 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
+  using sdp::aotriton_adapter::mk_atomictensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
   auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-  auto nullscalar = mk_philoxtensor(nullptr);
-  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
-  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
-  auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
+  auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
+  auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
+  auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
