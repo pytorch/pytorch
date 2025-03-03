@@ -666,6 +666,7 @@ Using :class:`torch.cuda.MemPool`, you can enable several features, such as:
 Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
 
 .. code:: python
+
    import os
 
    import torch
@@ -724,15 +725,19 @@ Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cu
    # Note: you can also get the above allocator as follows:
    allocator = backend.mem_allocator
 
+
 You can now define a new memory pool by passing this allocator to :class:`torch.cuda.MemPool`:
 
 .. code:: python
+
    pool = torch.cuda.MemPool(allocator)
+
 
 The pool can then be used with the :class:`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
 .. code:: python
+
    with torch.cuda.use_mem_pool(pool):
        # tensor gets allocated with ncclMemAlloc passed in the pool
        tensor = torch.arange(1024 * 1024 * 2, device=device)
@@ -746,6 +751,7 @@ allocate tensors into that pool:
    torch.cuda.synchronize()
    print(tensor[0:4])
 
+
 Note the usage of ``register_mem_pool`` in the above example. This is an extra step for
 NVLS reductions, where the user buffers need to be registered with NCCL. A user can
 de-register the buffers with a similar ``deregister_mem_pool`` call.
@@ -755,11 +761,14 @@ of the tensors are holding a reference to the pool, :meth:`~torch.cuda.empty_cac
 be called internally on deletion of the pool, hence returning all the memory to the system.
 
 .. code:: python
+
    del tensor, del pool
+
 
 The following :class:`torch.cuda.MemPool` ``use_count()`` and ``snapshot()`` APIs can be used for debugging purposes:
 
 .. code:: python
+
    pool = torch.cuda.MemPool(allocator)
 
    # pool's use count should be 1 at this point as MemPool object
@@ -796,7 +805,9 @@ The following :class:`torch.cuda.MemPool` ``use_count()`` and ``snapshot()`` API
        # to make a new 2 MB buffer to accomodate out_2
        assert len(pool.snapshot()) == 2
 
+
 .. note::
+
    * :class:`torch.cuda.MemPool` holds a reference to the pool. When you use the
      :class:`torch.cuda.use_mem_pool` context manager, it will also acquire another reference
      to the pool. On exit of the context manager, it will release its reference. After that,
@@ -817,6 +828,7 @@ The following :class:`torch.cuda.MemPool` ``use_count()`` and ``snapshot()`` API
 
 .. _NCCL has specific requirements:
     https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+
 
 cuBLAS workspaces
 -----------------
