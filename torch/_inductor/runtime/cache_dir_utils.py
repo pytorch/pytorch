@@ -8,6 +8,7 @@ import tempfile
 
 
 def cache_dir() -> str:
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/home/yunfei/code/docker_folder/pytorch/torchinductor_cache/"
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
         os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
