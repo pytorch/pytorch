@@ -128,20 +128,6 @@ def make_dual(tensor, tangent, *, level=None):
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-# This type previously was an opaque leaf type in pytree utilities by subclassing the namedtuple type:
-#
-#     class _UnpackedDualTensor(NamedTuple):
-#         primal: torch.Tensor
-#         tangent: torch.Tensor | None
-#
-#     class UnpackedDualTensor(_UnpackedDualTensor):
-#         pass  # naive subclassing
-#
-# Now, the pytree utilities consider the subclasses of namedtuple type also pytree nodes (previously
-# the subclasses of namedtuple types are opaque leaf types). The previous hack will not work anymore.
-# To keep backward-compatibility and make the unit tests happy, we need to make this a quasi-namedtuple
-# type that is not a pytree node while still keep Dynamo trace this type as a namedtuple type.
-# We achieve this by removing the `_asdict` attribute. See the comment below the class definition.
 class UnpackedDualTensor(NamedTuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
 
@@ -150,10 +136,6 @@ class UnpackedDualTensor(NamedTuple):
 
     primal: torch.Tensor
     tangent: Optional[torch.Tensor]
-
-
-# remove `_asdict` method to make it an opaque leaf (pytree checks `_fields`, `_make`, `_asdict`)
-del UnpackedDualTensor._asdict
 
 
 def unpack_dual(tensor, *, level=None):

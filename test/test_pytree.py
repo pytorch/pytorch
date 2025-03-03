@@ -739,22 +739,6 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_unpacked_dual_tensor_is_leaf(self, pytree_impl):
-        from torch.autograd.forward_ad import UnpackedDualTensor
-
-        # Test that an UnpackedDualTensor is considered a leaf node
-        dt = UnpackedDualTensor(primal=1, tangent=2)
-        leaves, spec = pytree_impl.tree_flatten(dt)
-        self.assertEqual(leaves, [dt])
-        self.assertTrue(spec.is_leaf())
-
-    @parametrize(
-        "pytree_impl",
-        [
-            subtest(py_pytree, name="py"),
-            subtest(cxx_pytree, name="cxx"),
-        ],
-    )
     def test_is_namedtuple(self, pytree_impl):
         DirectNamedTuple1 = namedtuple("DirectNamedTuple1", ["x", "y"])
 
