@@ -82,6 +82,9 @@ struct WelfordHelper {
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
+    if (depth <= 4) {
+      depth = 0;
+    }
     welford_stk.assign(depth, Welford<T>());
   }
 };
@@ -126,12 +129,18 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
 }
 
 template <typename T>
-Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WelfordHelper<T>* w1, WelfordHelper<T>* w2) {
-  for (const auto i : c10::irange(w1->depth)) {
-    a = welford_combine(a, w1->welford_stk[i]);
+Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WelfordHelper<T>* w1, WelfordHelper<T>* w2, int num_threads=1) {
+  for (const auto n : c10::irange(num_threads)) {
+    for (const auto i : c10::irange(w1->depth)) {
+      a = welford_combine(a, w1->welford_stk[i]);
+    }
+    w1++;
   }
-  for (const auto i : c10::irange(w2->depth)) {
-    b = welford_combine(b, w2->welford_stk[i]);
+  for (const auto n : c10::irange(num_threads)) {
+    for (const auto i : c10::irange(w2->depth)) {
+      b = welford_combine(b, w2->welford_stk[i]);
+    }
+    w2++;
   }
   return welford_combine(a, b);
 }
@@ -140,7 +149,7 @@ template <typename T>
 Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr) {
   // Combine Welford algorithm with cascade sum to improve numerical stability.
   if constexpr (IsVecType<T>::value) {
-    if (w != nullptr && acc.index == kChunkSize) {
+    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
       w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
       acc.mean = T(0);
       acc.m2 = T(0);

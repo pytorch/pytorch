@@ -215,6 +215,7 @@ def reduction_combine(
     src_dtype=None,
     welford_helper=None,
     masked_welford_helper=None,
+    num_threads=None,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
@@ -230,7 +231,13 @@ def reduction_combine(
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
         if welford_helper and masked_welford_helper:
-            return f"welford_combine({var}, {next_value}, &{welford_helper}, &{masked_welford_helper})"
+            if num_threads:
+                return (
+                    f"welford_combine({var}, {next_value}, &{welford_helper}_arr[0], "
+                    f"&{masked_welford_helper}_arr[0], {num_threads})"
+                )
+            else:
+                return f"welford_combine({var}, {next_value}, &{welford_helper}, &{masked_welford_helper})"
         else:
             return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
@@ -3028,14 +3035,27 @@ class CppVecKernel(CppKernel):
             tmpvar = acc_vec
             if is_welford_reduction(reduction_type):
                 masked_tmpvar = f"masked_{tmpvar}"
-                reduction_combine_line = reduction_combine(
+                non_parallel_reduction_combine_line = reduction_combine(
                     reduction_type,
                     tmpvar,
                     masked_tmpvar,
                     welford_helper=self.welford_helper_val,
                     masked_welford_helper=self.masked_welford_helper_val,
                 )
-                self.reduction_suffix.writeline(f"{tmpvar} = {reduction_combine_line};")
+                self.non_parallel_reduction_suffix.writeline(
+                    f"{tmpvar} = {non_parallel_reduction_combine_line};"
+                )
+                parallel_reduction_combine_line = reduction_combine(
+                    reduction_type,
+                    tmpvar,
+                    masked_tmpvar,
+                    welford_helper=self.welford_helper_val,
+                    masked_welford_helper=self.masked_welford_helper_val,
+                    num_threads=self.num_threads,
+                )
+                self.parallel_reduction_suffix.writeline(
+                    f"{tmpvar} = {parallel_reduction_combine_line};"
+                )
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
