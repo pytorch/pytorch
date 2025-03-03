@@ -20,6 +20,7 @@ class SimpleCNN(nn.Module):
         output = output.view(1)
         return output
 
+
 try:
     # Mock one infer
     net = SimpleCNN()
