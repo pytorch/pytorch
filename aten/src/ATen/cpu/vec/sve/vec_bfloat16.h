@@ -170,16 +170,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const {
-    __at_align__ BFloat16 tmp[size()];
-    __at_align__ BFloat16 tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
-  }
+  Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const;
   Vectorized<BFloat16> nextafter(const Vectorized<BFloat16> &b) const;
   Vectorized<BFloat16> log() const;
   Vectorized<BFloat16> log2() const;
@@ -364,6 +355,7 @@ DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
 DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
 DEFINE_BF16_FUNC_VIA_FLOAT(log);
 DEFINE_BF16_FUNC_VIA_FLOAT(log2);
