@@ -4968,6 +4968,7 @@ def new_full(
 def empty_out(
     size: TensorLikeType,
     out: TensorLikeType,
+    memory_format: Optional[torch.memory_format] = None,
 ) -> TensorLikeType:
     return out
 
