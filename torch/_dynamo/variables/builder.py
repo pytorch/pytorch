@@ -1162,6 +1162,7 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
+            # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedExceptionClassVariable(value)
         elif issubclass(type(value), type):
