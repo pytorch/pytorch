@@ -14,7 +14,7 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
@@ -43,6 +43,7 @@ from .ir import (
     ComputedBuffer,
     get_device_type,
     GraphPartitionSignature,
+    IRNode,
     MultiOutput,
     MultiOutputLayout,
 )
@@ -342,7 +343,7 @@ class BaseSchedulerNode:
         self.unmet_dependencies = OrderedSet(
             dep
             for dep in self.unmet_dependencies
-            if dep.name not in self.scheduler.available_buffer_names
+            if dep.name not in self.scheduler.available_buffer_names  # type: ignore[has-type]
         )
 
     def prune_weak_deps(self) -> None:
@@ -459,7 +460,7 @@ class BaseSchedulerNode:
         inconsequential_nodes = (
             self.ancestors
             | V.graph.removed_operations
-            | self.scheduler.completed_operations
+            | self.scheduler.completed_operations  # type: ignore[has-type]
         )
 
         for buf in self.get_outputs():
@@ -787,7 +788,8 @@ class BaseSchedulerNode:
                 from torch.utils.flop_counter import FlopCounterMode
 
                 if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
+                    isinstance(n, IRNode)
+                    and len(free_unbacked_symbols(n.get_numel())) > 0
                     for n in self.node.inputs
                 ):
                     # Tensor has unbacked symints, we don't know how to estimate
@@ -803,7 +805,7 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input, guard_shape=False)
+                        ir_node_to_tensor(cast(IRNode, input), guard_shape=False)
                         for input in self.node.inputs
                     ]
                     cls = self.node.__class__
@@ -992,10 +994,12 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
+        self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
+        assert body is not None
+        self._body = body
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
@@ -1866,7 +1870,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: list[list[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: tuple[int, ...] = (),
+    priority_idx: Sequence[int] = (),
 ) -> list[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -2654,6 +2658,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
+                assert isinstance(out_tensorbox, ir.TensorBox)
                 out_storage = out_tensorbox.data
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
@@ -2833,6 +2838,7 @@ class Scheduler:
 
                 new_timings = {}
                 # Benchmark each choice after compilation completes
+                assert isinstance(multi_node, ir.MultiTemplateBuffer)
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
@@ -2849,6 +2855,7 @@ class Scheduler:
                             )
                         continue
                     with multi_node.swap_as_triton_caller(choice):
+                        assert device is not None
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, device
                         )
@@ -2889,6 +2896,7 @@ class Scheduler:
                         if fut is not None:
                             fut.result()
 
+                    assert device is not None
                     ms1, path1 = self.benchmark_codegened_module(
                         future_and_mod_l1[1], device
                     )
@@ -3545,7 +3553,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
+                OrderedSet(cast(IRNode, inp).get_name() for inp in template.inputs)
                 - allowed_prologue_inps
             )
 
@@ -3860,11 +3868,9 @@ class Scheduler:
 
     def free_buffers(self) -> None:
         """Free any buffers that are no longer needed"""
-        for name in sorted(
-            self.buffer_names_to_free
-            - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed
-        ):
+        freed: OrderedSet[str] = V.graph.wrapper_code.freed  # type: ignore[has-type]
+
+        for name in sorted(self.buffer_names_to_free - V.graph.removed_buffers - freed):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
                 if buf.can_free():
@@ -4122,8 +4128,8 @@ class Scheduler:
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(
-            [node.get_name() for node in signature.output_nodes]
+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
+            node.get_name() for node in signature.output_nodes
         )
 
     def _codegen_partitions(self) -> None:

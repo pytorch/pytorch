@@ -448,7 +448,7 @@ class Final(type):
 class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
-        graph_signature: ep.ExportGraphSignature,
+        graph_signature: Optional[ep.ExportGraphSignature],
         module_call_graph: list[ep.ModuleCallEntry],
     ):
         self.graph_state = GraphState()
@@ -1507,6 +1507,7 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
         log.debug("\n[serialize]")
         graph = self.serialize_graph(graph_module)
+        assert self.graph_signature is not None
 
         return GraphModule(
             graph=graph,

@@ -577,18 +577,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)
+        x_ = ir.ExternKernel.require_channels_last(x)
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)
+        weight_ = ir.ExternKernel.require_channels_last(weight)
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+        x_ = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight_ = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
@@ -599,11 +599,11 @@ def convolution(
         "groups",
     ]
     if bias is None:
-        args = [x, weight]
+        args = [x_, weight_]
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
-        args = [x, weight, bias]
+        args = [x_, weight_, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
@@ -627,7 +627,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan, x_.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -638,7 +638,7 @@ def convolution(
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
         for cfg in conv_configs(
-            sympy_product([x.get_size()[0], *x.get_size()[2:]]),
+            sympy_product([x_.get_size()[0], *x_.get_size()[2:]]),
             out_chan,
             in_chan,
             device_type=ir.get_device_type(x),
@@ -646,7 +646,7 @@ def convolution(
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
                     choices,
-                    input_nodes=(x, weight),
+                    input_nodes=(x_, weight_),
                     layout=layout,
                     KERNEL_H=kernel_shape[0],
                     KERNEL_W=kernel_shape[1],
@@ -666,7 +666,7 @@ def convolution(
             elif ndim == 3:
                 conv3d_template.maybe_append_choice(
                     choices,
-                    input_nodes=(x, weight),
+                    input_nodes=(x_, weight_),
                     layout=layout,
                     KERNEL_D=kernel_shape[0],
                     KERNEL_H=kernel_shape[1],
@@ -690,7 +690,7 @@ def convolution(
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
-            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
+            input_nodes=(x_, weight_) + ((bias,) if bias is not None else tuple()),
             stride=stride,
             padding=padding,
             dilation=dilation,

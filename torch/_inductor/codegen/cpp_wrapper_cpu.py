@@ -925,6 +925,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, ir.BaseView)
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -1606,7 +1607,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tmp_name
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: str):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(

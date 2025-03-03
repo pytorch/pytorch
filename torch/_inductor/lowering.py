@@ -61,6 +61,7 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
+    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -1316,7 +1317,7 @@ def quantized_decomposed_quantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
@@ -1371,7 +1372,7 @@ def quantized_decomposed_dequantize_per_channel(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
     assert input.get_dtype() == dtype, (
@@ -1421,7 +1422,7 @@ def quantized_decomposed_quantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1462,7 +1463,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
     )
@@ -1499,7 +1500,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1549,7 +1550,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -2260,7 +2261,7 @@ def searchsorted(
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[TensorBox] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )
@@ -2505,20 +2506,22 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
+        def realize() -> Union[ir.TensorBox, ir.BaseView]:
+            ir_node = ir.ExternKernel.realize_input(arg)
+            assert isinstance(ir_node, (ir.TensorBox, ir.BaseView))
+            ret = ir.try_match_insignificant_strides(ir_node, meta_stride_expr)
+            assert isinstance(ret, (ir.TensorBox, ir.BaseView))
+            return ret
+
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride_expr
-            )
+            return realize()
 
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
             and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
-            return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride_expr
-            )
-
+            return realize()
         if effn_attn_fwd_bias:
             out_size = list(arg.get_size())
 
@@ -2558,28 +2561,21 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride_expr
-            )
+            return realize()
 
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
             and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
-            return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride_expr
-            )
+            return realize()
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         if isinstance(arg.data, ir.BaseView):
-            if not is_aligned(arg):
-                if is_aligned(arg.unwrap_view()):
-                    return ir.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride_expr
-                    )
+            if not is_aligned(arg) and is_aligned(arg.unwrap_view()):
+                return realize()
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -3578,7 +3574,8 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    op_overload = cast(torch._ops.OpOverload, V.graph.current_node.target)
+    ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
 
@@ -4399,10 +4396,11 @@ def _max_pool2d_with_offsets(
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
+    assert isinstance(result, TensorBox)
     if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
         # Only realize if reduction isn't unrolled
         result.realize()
-    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined, union-attr]
         # Only realize if reduction isn't unrolled
         offsets.realize()
 
@@ -4541,10 +4539,12 @@ def max_pool2d_with_indices_backward(
     x_stride: Optional[Sequence[Any]]
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
+        device = data.get_device()
+        assert device is not None
         x_buffer = ir.ComputedBuffer(
             name=None,
             layout=ir.FlexibleLayout(
-                device=data.get_device(),
+                device=device,
                 dtype=data.get_dtype(),
                 size=data.get_size(),
             ),
@@ -5725,6 +5725,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
             override_return_dtype=override_return_dtype,
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
+        assert isinstance(result, TensorBox)
         if isinstance(
             result.data.data,  # type: ignore[attr-defined]
             Reduction,
@@ -5972,12 +5973,14 @@ def mutate_to(changed, val, unsafe_alias=False):
 
     if not isinstance(val, ir.StorageBox):
         # introduce a copy to handle views
-        val = Pointwise.create(
+        pw = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
             inner_fn=val.make_loader(),
             ranges=changed.get_size(),
-        ).data
+        )
+        assert isinstance(pw, TensorBox)
+        val = pw.data
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox) and not (
@@ -6352,6 +6355,7 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     assert indices is not None
+    assert isinstance(indices, TensorBox)
     return values, to_dtype(indices, torch.int64)
 
 
