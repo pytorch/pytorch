@@ -390,11 +390,14 @@ def check_meta_consistency(
             rhs: Union[torch.Tensor, torch.SymInt, int],
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-                if rhs.device.type == lhs.device.type and rhs.device.index == lhs.device.index:
-                    return ''
+                if (
+                    rhs.device.type == lhs.device.type
+                    and rhs.device.index == lhs.device.index
+                ):
+                    return ""
                 else:
-                    return 'device'
-            return ''
+                    return "device"
+            return ""
 
         if len(lhs_list) != len(rhs_list):
             raise torch._dynamo.exc.UncapturedHigherOrderOpError(
