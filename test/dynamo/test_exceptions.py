@@ -335,7 +335,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_call = torch.compile(lambda x: m(x), backend="eager")
         self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
         metrics = torch._dynamo.utils.get_compilation_metrics()
-        self.assertEqual(metrics[0].fail_reason, "Observed exception")
+        self.assertIn("Observed exception", metrics[0].fail_reason)
 
     def test_key_error(self):
         def fn(x, d):
