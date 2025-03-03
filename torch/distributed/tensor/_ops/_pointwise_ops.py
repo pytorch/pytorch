@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -649,8 +650,9 @@ def list_pointwise_strategy(
     list_strategy: list[OpStrategy] = []
     for child_idx, child_strtgy in enumerate(follow_strategy.childs):
         assert isinstance(child_strtgy, OpStrategy)
-        args_schema: list[StrategyType] = [
-            arg_strategy.childs[child_idx] for arg_strategy in args_strategies
+        args_schema: list[OpStrategy] = [
+            cast(OpStrategy, arg_strategy.childs[child_idx])
+            for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
             args_schema, child_strtgy, linearity

@@ -343,6 +343,13 @@ class OpSchema:
         This util can be used to get a mesh from the OpSchema that contains multiple
         DTensors as arguments. When `validate` is True, it will try to validate that all the
         arguments have the same mesh to avoid unexpected cross mesh errors.
+
+        NOTE: this util currently does not handle TupleStrategy when `validate=True`,
+        this is because for TupleStrategy there could be different types of checks, i.e.:
+            - for stack and cat like op, we need to check within a TupleStrategy is every
+              input is on the same mesh
+            - for foreach like ops we need to check "zipped" inputs are on the same mesh
+              for each index.
         """
         first_arg = self.args_schema[0]
         if isinstance(first_arg, (DTensorSpec, OpStrategy)):
