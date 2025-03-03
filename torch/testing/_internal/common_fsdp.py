@@ -59,7 +59,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     TEST_CUDA,
     TEST_HPU,
-    TEST_XPU
+    TEST_XPU,
 )
 from torch.utils._triton import has_triton
 

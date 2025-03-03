@@ -64,7 +64,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if TEST_CUDA and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -340,7 +340,7 @@ class DTensorTestBase(MultiProcessTestCase):
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" or "xccl" in self.backend:
+        if "nccl" in self.backend or "xccl" in self.backend:
             # set device for nccl pg for collectives
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
