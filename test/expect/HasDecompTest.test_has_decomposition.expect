@@ -1167,8 +1167,6 @@ aten::set_
 aten::set_.source_Storage
 aten::set_.source_Storage_storage_offset
 aten::set_.source_Tensor
-aten::slice_copy.Tensor
-aten::slice_copy.Tensor_out
 aten::slice_inverse
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
@@ -1308,8 +1306,6 @@ aten::topk.values
 aten::transpose_
 aten::triangular_solve
 aten::triangular_solve.X
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unique_consecutive
 aten::unique_consecutive.out
 aten::unique_dim

@@ -14,7 +14,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_bf16_aligned_128x128_k128_seqaligned_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }
@@ -33,7 +33,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_bf16_aligned_128x128_k128_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }
@@ -52,7 +52,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_bf16_aligned_64x64_k128_seqaligned_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }
@@ -71,7 +71,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_bf16_aligned_64x64_k128_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }

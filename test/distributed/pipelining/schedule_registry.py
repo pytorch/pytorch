@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 # This file is a Schedule zoo for testing torch.distributed.pipelining.
 # It includes schedules designed purely for testing purposes
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Optional
 
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -32,9 +32,8 @@ class ScheduleVShaped(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: Dict[int, int],
         loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
@@ -42,7 +41,6 @@ class ScheduleVShaped(PipelineScheduleMulti):
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
-            stage_index_to_group_rank=stage_index_to_group_rank,
             scale_grads=scale_grads,
         )
 
@@ -71,6 +69,7 @@ class ScheduleVShaped(PipelineScheduleMulti):
                 None,
             ],
         }
+        self._validate_and_set_stage_mapping(self.pipeline_order)
 
 
 class ScheduleUnbalanced(PipelineScheduleMulti):
@@ -82,9 +81,8 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: Dict[int, int],
         loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
@@ -92,7 +90,6 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
-            stage_index_to_group_rank=stage_index_to_group_rank,
             scale_grads=scale_grads,
         )
 
@@ -122,6 +119,7 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
                 None,
             ],
         }
+        self._validate_and_set_stage_mapping(self.pipeline_order)
 
 
 class ScheduleWithW(PipelineScheduleMulti):
@@ -134,7 +132,7 @@ class ScheduleWithW(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         enable_zero_bubble: bool = True,
@@ -183,6 +181,7 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(1, W, 1),
             ],
         }
+        self._validate_and_set_stage_mapping(self.pipeline_order)
 
 
 class ScheduleWithReorderedB(_PipelineScheduleRuntime):
@@ -195,7 +194,7 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,

@@ -20,6 +20,8 @@ import tempfile
 import unittest
 from typing import Any
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 from torch import _dynamo as torchdynamo
@@ -90,8 +92,14 @@ class TestExecutionTrace(TestCase):
             _record_function_with_args_exit(rf_handle)
 
     def get_execution_trace_root(self, output_file_name) -> Json:
+        import gzip
+
         nodes = []
-        with open(output_file_name) as f:
+        with (
+            gzip.open(output_file_name)
+            if output_file_name.endswith(".gz")
+            else open(output_file_name)
+        ) as f:
             et_graph = json.load(f)
             assert "nodes" in et_graph
             nodes = et_graph["nodes"]
@@ -297,7 +305,8 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.XPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        # Use a gzip file to test compression codepath
+        fp = tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False)
         fp.close()
         expected_loop_events = 0
 
@@ -589,7 +598,7 @@ class TestExecutionTrace(TestCase):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
 
-        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_INTEGRAL_TENSOR_RANGE"] = "1"
+        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
         t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
         t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
         with profile(
@@ -612,6 +621,43 @@ class TestExecutionTrace(TestCase):
                 for attr in n["attrs"]:
                     if attr["name"] == "tensor_range":
                         assert attr["value"] == '{"0":[1,4],"1":[0,1]}'
+
+    @unittest.skipIf(
+        not TEST_CUDA,
+        "need CUDA device availability to run",
+    )
+    def test_execution_trace_record_integral_tensor_data(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fp_name = os.path.join(temp_dir, "test.et.json")
+
+            os.environ[
+                "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"
+            ] = "aten::gather"
+            et = ExecutionTraceObserver()
+            et.register_callback(fp_name)
+            et.set_extra_resource_collection(True)
+
+            t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
+            t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
+            with profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(
+                    skip_first=0, wait=0, warmup=0, active=1, repeat=1
+                ),
+                record_shapes=True,
+                execution_trace_observer=et,
+            ) as p:
+                torch.gather(t1, 1, t2)
+                p.step()
+
+            resourceDir = fp_name.replace(".json", "_resources")
+            assert os.path.exists(resourceDir + "/nid_4_tid_0.dat")
+            assert os.path.exists(resourceDir + "/nid_4_tid_1.dat")
+
+            t1 = np.fromfile(resourceDir + "/nid_4_tid_0.dat", dtype=np.int64)
+            t2 = np.fromfile(resourceDir + "/nid_4_tid_1.dat", dtype=np.int64)
+            assert (t1 == np.array([1, 2, 3, 4])).all()
+            assert (t2 == np.array([0, 0, 1, 0])).all()
 
 
 devices = ["cpu", "cuda"]

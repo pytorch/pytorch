@@ -18,7 +18,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -80,7 +80,7 @@ class WorkerSpec:
     fn: Optional[Callable] = None
     # TODO @kiuk - make entrypoint a required field
     entrypoint: Union[Callable, str, None] = None
-    args: Tuple = ()
+    args: tuple = ()
     max_restarts: int = 3
     monitor_interval: float = 0.1
     master_port: Optional[int] = None
@@ -320,7 +320,7 @@ class _RoleInstanceInfo:
             return -1
 
     @staticmethod
-    def find_role_boundaries(roles_infos: List, role: str) -> tuple[int, int]:
+    def find_role_boundaries(roles_infos: list, role: str) -> tuple[int, int]:
         start_idx, end_idx = -1, -1
         for idx, role_info in enumerate(roles_infos):
             if role_info.role == role:
@@ -357,8 +357,8 @@ class RunResult:
     """
 
     state: WorkerState
-    return_values: Dict[int, Any] = field(default_factory=dict)
-    failures: Dict[int, ProcessFailure] = field(default_factory=dict)
+    return_values: dict[int, Any] = field(default_factory=dict)
+    failures: dict[int, ProcessFailure] = field(default_factory=dict)
 
     def is_failed(self) -> bool:
         return self.state == WorkerState.FAILED
@@ -448,7 +448,7 @@ class SimpleElasticAgent(ElasticAgent):
         return self._worker_group
 
     @abc.abstractmethod
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         r"""Start ``worker_group.spec.local_world_size`` number of workers.
 
         This is according to worker spec for the worker group .
@@ -554,7 +554,7 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def _assign_worker_ranks(
         self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
-    ) -> List[Worker]:
+    ) -> list[Worker]:
         """Determine proper ranks for worker processes.
 
         Fast Path: when all workers have the same role and world size. We calculate
