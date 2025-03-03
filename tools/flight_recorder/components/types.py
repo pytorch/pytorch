@@ -388,9 +388,9 @@ class Op:
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
         self.pg_name, self.pg_desc = event["process_group"]
-        assert type in COLLECTIVES | P2P | {
-            "coalesced"
-        }, f"{type} is not a supported operation"
+        assert type in COLLECTIVES | P2P | {"coalesced"}, (
+            f"{type} is not a supported operation"
+        )
         self.type = type
         if type == "send":
             assert isinstance(meta, str)
@@ -414,7 +414,7 @@ class Op:
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
         self.time_created_ns = event["time_created_ns"]
-        self.collective_frames = event["frames"]
+        self.collective_frames = event.get("frames", [])
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
