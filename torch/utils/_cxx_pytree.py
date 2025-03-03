@@ -30,7 +30,6 @@ from optree import (  # noqa: F401  # direct import for type annotations
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import (
     Context as Context,
-    DumpableContext as DumpableContext,
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
     FromDumpableContextFunc as FromDumpableContextFunc,
@@ -83,6 +82,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
+
 
 OpTreeUnflattenFunc: TypeAlias = Callable[[Context, Iterable[Any]], PyTree]
 
