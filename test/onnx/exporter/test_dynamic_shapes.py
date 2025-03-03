@@ -609,6 +609,25 @@ class TestDynamicShapes(common_utils.TestCase):
         self.assertEqual(dynamic_shapes_with_export_dim, expected_dynamic_shapes)
         self.assertTrue(need_axis_mapping)
 
+    def test__any_str_or_dim_in_dynamic_shapes_returns_true(self):
+        dynamic_shapes = {
+            "input_x": [
+                {
+                    0: torch.export.Dim.AUTO,
+                    1: torch.export.Dim("abc"),
+                },
+                {
+                    0: torch.export.Dim.AUTO,
+                    1: torch.export.Dim.STATIC,
+                },
+            ],
+            "input_b": {2: "customb_dim_0"},
+            "input_c": None,
+        }
+        self.assertTrue(
+            _dynamic_shapes._any_str_or_dim_in_dynamic_shapes(dynamic_shapes)
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

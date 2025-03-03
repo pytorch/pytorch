@@ -12,16 +12,8 @@ import pprint
 import sys
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    Mapping,
-    Optional,
-    Sequence,
-    TypeVar,
-)
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, Optional, TypeVar
 
 import error_reproduction
 import numpy as np
@@ -178,9 +170,9 @@ def add_decorate_info(
             # If the OpInfo doesn't exist and it is not enabled, we skip the OpInfo
             # because it could be an OpInfo that is in torch-nightly but not older versions.
             continue
-        assert (
-            opinfo is not None
-        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert opinfo is not None, (
+            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
