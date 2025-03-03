@@ -1030,7 +1030,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking(4, 16, 1),
+            GemmBlocking(1, 16, 1),
             1,
             True,
             True,
