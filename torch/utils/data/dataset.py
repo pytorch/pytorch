@@ -3,8 +3,14 @@ import bisect
 import itertools
 import math
 import warnings
-from collections.abc import Iterable, Sequence
-from typing import cast, Generic, Optional, TypeVar, Union
+from collections.abc import Sequence
+
+# UP006 wants 'Iterable' to be imported from collections.abc but it needs to
+# stay from typing for now due to BC concerns. In particular several internal
+# targets fail to typecheck with:
+#     TypeError: Cannot create a consistent method resolution order (MRO) for
+#     bases Iterable, Generic
+from typing import cast, Generic, Iterable, Optional, TypeVar, Union  # noqa: UP035
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi

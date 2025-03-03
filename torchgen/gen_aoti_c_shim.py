@@ -299,7 +299,7 @@ def gen_declaration_and_definition(
 {declaration} {{
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
         {tmp_result}{backend_call}(
-{textwrap.indent(', '.join(callsite_exprs), "            ")}
+{textwrap.indent(", ".join(callsite_exprs), "            ")}
         );{textwrap.indent(ret_assignments_str, "        ")}
     }});
 }}

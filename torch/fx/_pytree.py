@@ -33,12 +33,19 @@ def register_pytree_flatten_spec(
         )
 
 
+@deprecated(
+    "torch.fx._pytree._deregister_pytree_flatten_spec is deprecated and it is now a no-op. ",
+    category=FutureWarning,
+)
+def _deregister_pytree_flatten_spec(cls: type[Any]) -> None:
+    pass
+
+
 # The pytree may be wrapped with torch.fx.Proxy, so we cannot use `treespec.flatten_up_to(pytree)`.
 # Use the key path API to index into the pytree instead.
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
-    exact_structural_match: bool = False,
 ) -> list[Any]:
     if not isinstance(spec, TreeSpec):
         assert python_pytree._cxx_pytree_exists, "C++ PyTree is not available"
