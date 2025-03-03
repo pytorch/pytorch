@@ -56,17 +56,11 @@ kernel void sqrt_complex_kernel(
   T0 b = input[index].y;
 
   // modulus
-  T0 r = T0(precise::sqrt(a * a + b * b));
-  // real part: sqrt((r + a)/2)
-  T0 real_part = T0(precise::sqrt((r + a) / 2.0));
-
-  // imaginary part: sign(b) * sqrt((r - a)/2)
-  T0 imag_part;
-  if (b >= 0) {
-    imag_part = T0(precise::sqrt((r - a) / 2.0));
-  } else {
-    imag_part = T0(-precise::sqrt((r - a) / 2.0));
-  }
+  auto m = precise::sqrt(a * a + b * b);
+  // real part: sqrt((m + a)/2)
+  auto real_part = precise::sqrt((m + a) * .5);
+  // imaginary part: sign(b) * sqrt((m - a)/2)
+  auto imag_part = copysign(static_cast<T0>(precise::sqrt((m - a) * .5)), b);
   output[index] = vec2type_t<T0>(real_part, imag_part);
 }
 
@@ -146,7 +140,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
       constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
       uint did [[thread_position_in_grid]]);
 
-INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
+INSTANTIATE_UNARY_KERNELS_VEC2(half, half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
 
 template <typename T0, typename T1>
