@@ -11155,15 +11155,13 @@ graph():
 graph():
     %b_buffer : [num_users=1] = placeholder[target=b_buffer]
     %x : [num_users=1] = placeholder[target=x]
-    %twotensor___init__0 : [num_users=0] = get_attr[target=twotensor___init__0]
-    %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__1]
+    %twotensor___init__0 : [num_users=1] = get_attr[target=twotensor___init__0]
     %twotensor_const_func_spec0 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
-    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__1, %x, %x), kwargs = {})
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__0, %x, %x), kwargs = {})
     %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
-    %twotensor___init__2 : [num_users=0] = get_attr[target=twotensor___init__0]
-    %twotensor___init__3 : [num_users=1] = get_attr[target=twotensor___init__2]
-    %twotensor_const_func_spec1 : [num_users=1] = get_attr[target=twotensor_const_func_spec1]
-    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec1, %twotensor___init__3, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
+    %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__1]
+    %twotensor_const_func_spec0_1 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0_1, %twotensor___init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
     %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
     %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
@@ -11204,6 +11202,32 @@ graph():
     %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
     return (add_4,)""",
             )
+
+    def test_capture_subclass_wrong(self):
+        from torch._export.wrappers import (
+            mark_subclass_constructor_exportable_experimental,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "on fn which is not supported. If"):
+
+            @torch._disable_dynamo
+            @mark_subclass_constructor_exportable_experimental
+            def fn(a, b):
+                return a + b
+
+        class Foo(torch.nn.Module):
+            @torch._disable_dynamo
+            @mark_subclass_constructor_exportable_experimental
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.cos()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "TestExport.test_capture_subclass_wrong.<locals>.Foo"
+        ):
+            export(Foo(), (torch.randn(4, 4),))
 
     def test_capture_subclass_constructor_torch_ir(self):
         class Foo(torch.nn.Module):

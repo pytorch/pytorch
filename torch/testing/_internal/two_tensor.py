@@ -2,7 +2,7 @@
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.wrappers import _mark_subclass_constructor_exportable_experimental
+from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
@@ -38,7 +38,7 @@ class TwoTensor(torch.Tensor):
         return out
 
     @torch._disable_dynamo
-    @_mark_subclass_constructor_exportable_experimental
+    @mark_subclass_constructor_exportable_experimental
     def __init__(self, a, b, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
