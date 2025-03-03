@@ -204,10 +204,7 @@ def is_bf16_supported(including_emulation: bool = True):
 
     # With CUDA 10 or later, you get emulated BF16 support
     # where the internal computations are done with FP32.
-    if (
-        cuda_version is not None
-        and int(cuda_version.split(".")[0]) >= 10
-    ):
+    if cuda_version is not None and int(cuda_version.split(".")[0]) >= 10:
         warnings.warn(
             f"{device_properties.name} does not natively support bfloat16. "
             "All computations are internally done with float32.",
