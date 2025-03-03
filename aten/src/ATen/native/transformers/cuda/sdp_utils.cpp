@@ -107,8 +107,13 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
+  // AOTriton 0.9+ supports head_dim up to 512
+  const auto max_size = c10::SymInt(512);
+#else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
