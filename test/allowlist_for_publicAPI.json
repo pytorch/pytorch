@@ -1115,6 +1115,20 @@
     "ToDumpableContextFunc",
     "UnflattenFunc"
   ],
+  "torch.utils.pytree.cxx": [
+    "Context",
+    "DumpableContext",
+    "FlattenFunc",
+    "FlattenWithKeysFunc",
+    "FromDumpableContextFn",
+    "FromDumpableContextFunc",
+    "PyTree",
+    "PyTreeSpec",
+    "ToDumpableContextFn",
+    "ToDumpableContextFunc",
+    "TreeSpec",
+    "UnflattenFunc"
+  ],
   "torch": [
     "BFloat16Storage",
     "BFloat16Tensor",

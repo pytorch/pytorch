@@ -147,7 +147,7 @@ class TestGenericPytree(TestCase):
         ],
     )
     def test_public_api_import(self, modulename):
-        for use_cxx_pytree in [None, "0", *(["1"] if not IS_FBCODE else [])]:
+        for use_cxx_pytree in [None, "", "0", *(["1"] if not IS_FBCODE else [])]:
             env = (
                 {"PYTORCH_USE_CXX_PYTREE": use_cxx_pytree}
                 if use_cxx_pytree is not None
@@ -168,6 +168,7 @@ class TestGenericPytree(TestCase):
                         # fail, so just set CWD to this script's directory
                         cwd=os.path.dirname(os.path.realpath(__file__)),
                         env=env,
+                        start_new_session=True,
                     )
                 except subprocess.CalledProcessError as e:
                     self.fail(
@@ -814,6 +815,7 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                start_new_session=True,
             )
         except subprocess.CalledProcessError as e:
             self.fail(

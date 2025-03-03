@@ -57,6 +57,7 @@ __all__ = [
     "keystr",
     "key_get",
     "register_pytree_node",
+    "tree_is_leaf",
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
@@ -67,6 +68,7 @@ __all__ = [
     "tree_map",
     "tree_map_with_path",
     "tree_map_",
+    "map_only",
     "tree_map_only",
     "tree_map_only_",
     "tree_all",
@@ -876,60 +878,6 @@ def tree_any_only(
     return any(pred(x) for x in flat_args if isinstance(x, type_or_types))
 
 
-def broadcast_prefix(
-    prefix_tree: PyTree,
-    full_tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> list[Any]:
-    """Return a list of broadcasted leaves in ``prefix_tree`` to match the number of leaves in ``full_tree``.
-
-    If a ``prefix_tree`` is a prefix of a ``full_tree``, this means the ``full_tree`` can be
-    constructed by replacing the leaves of ``prefix_tree`` with appropriate **subtrees**.
-
-    This function returns a list of leaves with the same size as ``full_tree``. The leaves are
-    replicated from ``prefix_tree``. The number of replicas is determined by the corresponding
-    subtree in ``full_tree``.
-
-    >>> broadcast_prefix(1, [1, 2, 3])
-    [1, 1, 1]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, 3])
-    [1, 2, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, 3, 4])
-    Traceback (most recent call last):
-        ...
-    ValueError: list arity mismatch; expected: 3, got: 4; list: [1, 2, 3, 4].
-    >>> broadcast_prefix([1, 2, 3], [1, 2, (3, 4)])
-    [1, 2, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {"a": 3, "b": 4, "c": (None, 5)}])
-    [1, 2, 3, 3, 3, 3]
-
-    Args:
-        prefix_tree (pytree): A pytree with the same structure as a prefix of ``full_tree``.
-        full_tree (pytree): A pytree with the same structure as a suffix of ``prefix_tree``.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
-
-    Returns:
-        A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
-    """
-    result: list[Any] = []
-
-    def add_leaves(x: Any, subtree: PyTree) -> None:
-        subtreespec = tree_structure(subtree, is_leaf=is_leaf)
-        result.extend([x] * subtreespec.num_leaves)
-
-    tree_map_(
-        add_leaves,
-        prefix_tree,
-        full_tree,
-        is_leaf=is_leaf,
-    )
-    return result
-
-
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
 # values. If this is not possible, then this function returns None.
 #
@@ -945,10 +893,23 @@ def _broadcast_to_and_flatten(
 ) -> Optional[list[Any]]:
     assert _is_pytreespec_instance(treespec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
+    result: list[Any] = []
+
+    def add_leaves(x: Any, subtree: PyTree) -> None:
+        subtreespec = tree_structure(subtree, is_leaf=is_leaf)
+        result.extend([x] * subtreespec.num_leaves)
+
     try:
-        return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
+        tree_map_(
+            add_leaves,
+            tree,
+            full_tree,
+            is_leaf=is_leaf,
+        )
     except ValueError:
         return None
+    else:
+        return result
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
@@ -995,12 +956,12 @@ def treespec_pprint(treespec: TreeSpec) -> str:
     return repr(dummy_tree)
 
 
-class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
+class _LeafSpecMetaa(type(TreeSpec)):  # type: ignore[misc]
     def __instancecheck__(self, instance: object) -> bool:
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
-class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
+class LeafSpec(TreeSpec, metaclass=_LeafSpecMetaa):
     def __new__(cls) -> "LeafSpec":
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
 
