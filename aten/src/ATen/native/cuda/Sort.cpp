@@ -63,9 +63,6 @@ void sort_cuda_kernel(
     "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
-  // FIXME: remove this check once cub sort supports bool
-  TORCH_CHECK(self_dtype != ScalarType::Bool,
-    "Sort currently does not support bool dtype on CUDA.");
   TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
 #if defined(USE_ROCM)
@@ -76,6 +73,10 @@ void sort_cuda_kernel(
   if (self_dtype == ScalarType::Bool) {
       self.copy_(self.to(at::kByte));
   }
+#else
+  // FIXME: remove this check once cub sort supports bool
+  TORCH_CHECK(self_dtype != ScalarType::Bool,
+    "Sort currently does not support bool dtype on CUDA.");
 #endif
 
   // use inplace algorithm for smaller input sizes without stable=True
