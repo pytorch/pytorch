@@ -533,7 +533,11 @@ def _sdpa_handler(
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
 
-    if op_call == aten._scaled_dot_product_flash_attention.default:
+    if op_call in [
+        aten._scaled_dot_product_flash_attention.default,
+        aten._scaled_dot_product_efficient_attention.default,
+        aten._scaled_dot_product_cudnn_attention.default,
+    ]:
         local_results = _scaled_dot_product_ring_flash_attention(
             op_info.mesh,
             *op_info.local_args,  # type: ignore[arg-type]
@@ -541,6 +545,12 @@ def _sdpa_handler(
         )
     elif op_call == aten._scaled_dot_product_efficient_attention.default:
         local_results = _scaled_dot_product_ring_efficient_attention(
+            op_info.mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
+    elif op_call == aten._scaled_dot_product_cudnn_attention.default:
+        local_results = _scaled_dot_product_cudnn_attention(
             op_info.mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
@@ -1141,9 +1151,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1157,9 +1167,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
