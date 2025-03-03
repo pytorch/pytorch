@@ -1,12 +1,12 @@
 import re
-from typing import Any, Callable, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.utils._pytree import tree_flatten_with_path, tree_map
 
 
-KeyPath = tuple[Any, ...]
-NonTensorShapeFn = Callable[[Union[int, float]], tuple[Any, ...]]
+KeyPath = Tuple[Any, ...]
+NonTensorShapeFn = Callable[[Union[int, float]], Tuple[Any, ...]]
 
 __all__ = [
     "normalize_source_name",
@@ -21,9 +21,9 @@ def normalize_source_name(name: str) -> str:
     return re.sub(r"\.([a-zA-Z_][a-zA-Z0-9_]*)", r"['\1']", name)
 
 
-def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
+def module_to_nested_dict(module: torch.nn.Module) -> Dict[str, Any]:
     """Recursively converts an nn.Module into a nested dictionary with explicit 'parameters' and 'modules' keys."""
-    self_dict: dict[str, Any] = {}
+    self_dict: Dict[str, Any] = {}
 
     self_dict["_parameters"] = {}
     self_dict["_modules"] = {}
@@ -50,8 +50,8 @@ def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
 
 
 def track_dynamism_across_examples(
-    example_inputs: list[Any],
-) -> dict[Any, Any]:
+    example_inputs: List[Any],
+) -> Dict[Any, Any]:
     """
     This function analyzes a list of example inputs to determine the dynamism of their shapes.
     It tracks whether the dimensions of tensors or non-tensor values change across
@@ -60,7 +60,7 @@ def track_dynamism_across_examples(
     indicating which dimensions are dynamic (i.e., change across examples). This
     helps in understanding how the structure of data varies across different instances.
     """
-    tracking: dict[KeyPath, tuple[list[set[Any]], bool]] = {}
+    tracking: Dict[KeyPath, Tuple[List[Set[Any]], bool]] = {}
 
     for ex in example_inputs:
         if "self" in ex and isinstance(ex["self"], torch.nn.Module):
@@ -86,7 +86,7 @@ def track_dynamism_across_examples(
             for i, dim in enumerate(shape):
                 tracking[key_path][0][i].add(dim)
 
-    output: dict[Any, Any] = {}
+    output: Dict[Any, Any] = {}
     for key_path, (dim_sets, _is_tensor) in tracking.items():
         final_dyn = tuple(len(s) > 1 for s in dim_sets)
         key_str = "L" + "".join(f"{str(k)}" for k in key_path)
