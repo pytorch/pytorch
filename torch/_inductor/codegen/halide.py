@@ -1633,7 +1633,7 @@ class HalideKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device=current_device,
+            gpu=False,  # grid/stream is handled internally in halide
             triton=False,
         )
 
