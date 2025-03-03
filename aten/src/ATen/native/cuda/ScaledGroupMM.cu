@@ -5,6 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
@@ -50,6 +51,10 @@ C10_DIAGNOSTIC_POP()
 
 namespace {
 
+struct Strides {
+  int64_t strides[3];
+};
+
 template <
     typename DtypeA,
     typename DtypeB,
@@ -71,55 +76,78 @@ __global__ void prepare_gemm_data(
     DtypeScale** inputA_scale_ptrs,
     DtypeScale** inputB_scale_ptrs,
     ProblemShape* problem_sizes,
+    // Strides for cutlass, cute::Stride
     StrideA* stride_A,
     StrideB* stride_B,
     StrideOutput* stride_output,
     const int32_t* offs,
     int32_t M,
     int32_t N,
-    int32_t K) {
+    int32_t K,
+    // Original strides of the input tensors
+    Strides tensor_StrideA,
+    Strides tensor_StrideB,
+    Strides tensor_StrideOutput,
+    int64_t a_scale_stride,
+    int64_t b_scale_stride) {
   int32_t tid = threadIdx.x;
   int32_t delta = 0;
   if (offs != nullptr) {
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
     delta = offs[tid] - start;
   }
+  int64_t lda, ldb, ldoutput;
   if (M < 0) {
+    // A and output is 2d
     M = delta;
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * K;
+    lda = tensor_StrideA.strides[0];
+    ldb = tensor_StrideB.strides[2]; // B is transposed
+    ldoutput = tensor_StrideOutput.strides[0];
+    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * lda;
     inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
-    output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1] * N;
-    B_ptrs[tid] = B + tid * N * K;
-    inputB_scale_ptrs[tid] = scale_B + tid * N;
+    output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1] * ldoutput;
+    B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
+    inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
   } else if (N < 0) {
     // TODO double check
     N = delta;
-    A_ptrs[tid] = A + tid * M * K;
-    inputA_scale_ptrs[tid] = scale_A + tid * M;
+    lda = tensor_StrideA.strides[1];
+    ldb = tensor_StrideB.strides[1]; // B is transposed
+    ldoutput = tensor_StrideOutput.strides[0];
+    A_ptrs[tid] = A + tid * tensor_StrideA.strides[0];
+    inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
     inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
   } else if (K < 0) {
     // TODO double check
+    // A, B is 2d, output is 3d
     K = delta;
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * K;
+    lda = tensor_StrideA.strides[0];
+    ldb = tensor_StrideB.strides[1]; // B is transposed
+    ldoutput = tensor_StrideOutput.strides[1];
+    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * tensor_StrideA.strides[1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
     inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
     inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
-    output_ptrs[tid] = output + tid * M * N;
+    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0] * ldoutput;
   } else {
-    A_ptrs[tid] = A + tid * M * K;
-    B_ptrs[tid] = B + tid * N * K;
-    inputA_scale_ptrs[tid] = scale_A + tid * M;
-    inputB_scale_ptrs[tid] = scale_B + tid * N;
-    output_ptrs[tid] = output + tid * M * N;
+    // A, B, output are 3D
+    lda = tensor_StrideA.strides[1];
+    ldb = tensor_StrideB.strides[2];
+    ldoutput = tensor_StrideOutput.strides[1];
+    A_ptrs[tid] = A + tid * tensor_StrideA.strides[0];
+    B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
+    inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
+    inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
+    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0] * ldoutput;
   }
   problem_sizes[tid] = ProblemShape(M, N, K);
-  // TODO this works for ragged mata only
-  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {M, K, 1});
-  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {N, K, 1});
+
+  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {M, lda, 1});
+  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {N, ldb, 1});
   stride_output[tid] =
-      cutlass::make_cute_packed_stride(StrideOutput{}, {M, N, 1});
+      cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
 }
 
 constexpr int kNumSMsForH100 = 132;
@@ -340,6 +368,23 @@ void f8f8bf16_grouped_gemm_impl_sm90(
 
   TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
   auto stream = at::cuda::getCurrentCUDAStream().stream();
+
+  auto make_strides = [](at::IntArrayRef strides) -> Strides {
+    Strides out;
+    for (const auto i : c10::irange(strides.size())) {
+      out.strides[i] = strides[i];
+    }
+    return out;
+  };
+
+  Strides tensor_StrideA = make_strides(mat_a.strides());
+  Strides tensor_StrideB = make_strides(mat_b.strides());
+  Strides tensor_StrideOutput = make_strides(out.strides());
+  // scale stride will be used inside the kernel only if needed,
+  // so for 1d scales the "1" assigned here won't be used
+  int64_t a_scale_stride = scale_a.stride(0);
+  int64_t b_scale_stride = scale_b.stride(0);
+
   prepare_gemm_data<<<1, group_count, 0, stream>>>(
       reinterpret_cast<DtypeA*>(mat_a.data_ptr()),
       reinterpret_cast<DtypeB*>(mat_b.data_ptr()),
@@ -358,7 +403,12 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
       M,
       N,
-      K);
+      K,
+      tensor_StrideA,
+      tensor_StrideB,
+      tensor_StrideOutput,
+      a_scale_stride,
+      b_scale_stride);
 
   auto buf_cpu = mat_a.new_empty(
       input_args_size, at::TensorOptions().dtype(at::kByte).device(at::kCPU));

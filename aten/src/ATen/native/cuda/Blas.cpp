@@ -1490,8 +1490,8 @@ bool use_fast_accum) {
   const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs_a, offs_b);
   Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
 
-  TORCH_CHECK(a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
   TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
 
