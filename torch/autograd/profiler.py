@@ -272,7 +272,9 @@ class profile:
                 warn("XPU is not available, disabling XPU profiling")
                 self.use_device = None
 
-            if self.use_device == "hpu" and not torch.hpu.is_available():
+            if self.use_device == "hpu" and not (
+                hasattr(torch, "hpu") and torch.hpu.is_available()
+            ):
                 warn("HPU is not available, disabling HPU profiling")
                 self.use_device = None
 
