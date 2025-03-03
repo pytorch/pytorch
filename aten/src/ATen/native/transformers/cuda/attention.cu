@@ -1147,11 +1147,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   constexpr int kAlignLSE = 1;
   res = at::empty({B, M, num_heads, Kv}, query.options());
   at::Tensor softmax_lse;
+  logsumexp = at::empty(
+      { B, num_heads, compute_logsumexp ? max_seqlen_q : 0},
+      query.options().dtype(at::ScalarType::Float));
   if (compute_logsumexp) {
-    // Set the tensor to empty when compute_logsumexp is false
-    logsumexp = at::empty(
-        { B * num_heads, max_seqlen_q, 0 },
-        query.options().dtype(at::ScalarType::Float));
     softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
   }
   at::Tensor q_t = query.transpose(1, 2);
