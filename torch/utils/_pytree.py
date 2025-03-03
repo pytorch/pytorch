@@ -49,8 +49,6 @@ __all__ = [
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
-    "ToDumpableContextFn",
-    "FromDumpableContextFn",
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
     "PyTreeSpec",

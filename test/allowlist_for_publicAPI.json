@@ -1120,11 +1120,9 @@
     "DumpableContext",
     "FlattenFunc",
     "FlattenWithKeysFunc",
-    "FromDumpableContextFn",
     "FromDumpableContextFunc",
     "PyTree",
     "PyTreeSpec",
-    "ToDumpableContextFn",
     "ToDumpableContextFunc",
     "TreeSpec",
     "UnflattenFunc"

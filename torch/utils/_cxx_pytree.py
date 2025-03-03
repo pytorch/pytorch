@@ -47,8 +47,6 @@ __all__ = [
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
-    "ToDumpableContextFn",
-    "FromDumpableContextFn",
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
     "PyTreeSpec",
@@ -93,8 +91,6 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
-ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
-FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
 OpTreeUnflattenFunc: TypeAlias = Callable[[Context, Iterable[Any]], PyTree]
 
 
