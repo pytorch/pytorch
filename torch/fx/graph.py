@@ -9,7 +9,6 @@ import keyword
 import math
 import os
 import re
-import textwrap
 import typing
 import warnings
 from collections import defaultdict
@@ -768,7 +767,7 @@ class CodeGen:
                 new_lines.append(line)
 
         code = "\n".join(new_lines).lstrip("\n")
-        code = textwrap.indent(code, "    ")
+        code = "\n".join("    " + line for line in code.split("\n"))
 
         fn_code = f"""
 {wrap_stmts}
