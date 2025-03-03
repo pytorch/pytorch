@@ -75,7 +75,7 @@ if PYTORCH_USE_CXX_PYTREE:
             "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
 else:
-    cxx = _sys.modules.get("torch.utils._cxx_pytree")
+    cxx = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
 
 _sys.modules[f"{__name__}.python"] = python
