@@ -5,7 +5,7 @@ import torch
 import torch._custom_ops
 from torch._C import DispatchKey
 from torch._higher_order_ops.flat_apply import (
-    ConstantFunction,
+    _ConstantFunction,
     flat_apply,
     to_graphable,
 )
@@ -220,7 +220,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         )
 
         _, func_spec = torch.utils._pytree.tree_flatten(
-            ConstantFunction(type(subclass))
+            _ConstantFunction(type(subclass))
         )
 
         # We actually don't want to create a new spec for each instance
