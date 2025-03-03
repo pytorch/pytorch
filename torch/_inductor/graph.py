@@ -1138,14 +1138,22 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                decided_constraint = require_contiguous
-
                 # use contiguous unless the (custom) op asks something else
                 # explicitly
                 if torch._C.Tag.needs_fixed_stride_order in target.tags:
                     decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
                 elif torch._C.Tag.flexible_layout in target.tags:
                     decided_constraint = None  # type: ignore[assignment]
+                else:
+                    # If there are no tags, we do different things depending on
+                    # if it's a builtin ATen/prim ops or custom ops.
+                    # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
+                    # For custom ops, we constrain_to_fx_strides to maintain the
+                    # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
+                    if torch._library.utils.is_builtin(target):
+                        decided_constraint = require_contiguous  # type: ignore[assignment]
+                    else:
+                        decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
 
                 # for implicitly fallback ops, we conservatively requires
                 # contiguous input since some eager kernels does not
