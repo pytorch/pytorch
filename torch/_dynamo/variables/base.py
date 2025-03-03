@@ -333,11 +333,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
         try:
             return self.as_python_constant()
-        except NotImplementedError as e:
+        except NotImplementedError:
             unimplemented_v2(
-                gb_type=f"{self} is not a constant",
+                gb_type="Not a Python constant",
                 context=f"guard_as_python_constant {self}",
-                explanation=str(e),
+                explanation=f"Failed to convert {self} into a Python constant.",
                 hints=[],
             )
 
@@ -418,7 +418,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         unimplemented_v2(
             gb_type="Unsupported inspect call",
             context=f"inspect_parameter_names {self}",
-            explanation="",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
             hints=[],
         )
 
@@ -428,10 +428,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         unimplemented_v2(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
-            explanation=f"hasattr {self.__class__.__name__} {name}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
             hints=[
                 f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                "Please report an issue to PyTorch.",
+                *graph_break_hints.SUPPORTABLE,
             ],
         )
 
@@ -485,9 +485,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
                 unimplemented_v2(
-                    gb_type="Unsupported method call",
+                    gb_type="Comparison failed",
                     context=f"call_method {self} {name} {args} {kwargs}",
-                    explanation=f"{other} is not a python constant or it has pending mutation",
+                    explanation=f"Failed to compare {self} with {other}, "
+                    + "because {other} is not a Python constant or its mutation check fails.",
                     hints=[],
                 )
 
@@ -535,9 +536,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def next_variable(self, tx):
         unimplemented_v2(
-            gb_type="Non-iterator variable",
+            gb_type="Unsupported next() call",
             context=f"next({self})",
-            explanation="",
+            explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
             hints=[*graph_break_hints.USER_ERROR],
         )
 
