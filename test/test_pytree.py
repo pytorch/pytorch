@@ -143,12 +143,16 @@ class TestGenericPytree(TestCase):
         "modulename",
         [
             subtest("python", name="py"),
-        ]
-        + ([subtest("cxx", name="cxx")] if not IS_FBCODE else []),
+            *([subtest("cxx", name="cxx")] if not IS_FBCODE else []),
+        ],
     )
     def test_public_api_import(self, modulename):
-        for use_cxx_pytree in ("0", "1"):
-            env = {"PYTORCH_USE_CXX_PYTREE": use_cxx_pytree} if not IS_FBCODE else None
+        for use_cxx_pytree in [None, "0", *(["1"] if not IS_FBCODE else [])]:
+            env = (
+                {"PYTORCH_USE_CXX_PYTREE": use_cxx_pytree}
+                if use_cxx_pytree is not None
+                else None
+            )
             for statement in (
                 f"import torch.utils.pytree.{modulename}",
                 f"from torch.utils.pytree import {modulename}",
