@@ -108,17 +108,19 @@ RUN set -eux; \
             METADATA_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/${PACKAGE}-${PYTORCH_VERSION}+${CUDA_PATH}-cp${PY_DOTLESS}-cp${PY_DOTLESS}-manylinux_2_28_x86_64.whl.metadata"; \
             echo "Attempting to fetch .whl.metadata from: ${METADATA_URL}"; \
             if curl -fsSL "${METADATA_URL}" -o "${TEMP_DIR}/${PACKAGE}.metadata"; then \
-                # Parse the .whl.metadata to extract requires_dist
                 jq -r '.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.metadata" >> "$DEP_REQUIREMENTS"; \
                 rm -f "${TEMP_DIR}/${PACKAGE}.metadata"; \
+            else \
+                curl -fsSL "https://pypi.org/pypi/${PACKAGE}/json" -o "${TEMP_DIR}/${PACKAGE}.json"; \
+                jq -r '.info.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.json" >> "$DEP_REQUIREMENTS"; \
+                rm -f "${TEMP_DIR}/${PACKAGE}.json"; \
+            fi; \
         else \
-            # Fallback: stable or whl release channel => PyPI
             curl -fsSL "https://pypi.org/pypi/${PACKAGE}/json" -o "${TEMP_DIR}/${PACKAGE}.json"; \
             jq -r '.info.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.json" >> "$DEP_REQUIREMENTS"; \
             rm -f "${TEMP_DIR}/${PACKAGE}.json"; \
         fi; \
     done; \
-    \
     # Remove duplicates while preserving environment markers
     sort -u "$DEP_REQUIREMENTS" -o "$DEP_REQUIREMENTS"; \
     \
