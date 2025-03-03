@@ -11,7 +11,6 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
-using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
 #if CUDA_VERSION >= 11040
