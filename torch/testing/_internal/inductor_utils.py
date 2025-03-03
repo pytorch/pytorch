@@ -9,6 +9,7 @@ import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch._inductor.codegen import common as codegen_common
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type
@@ -136,3 +137,7 @@ IS_H100 = LazyVal(
 )
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+def has_cpp_wrapper_for_device(device: str) -> bool:
+    codegen_common.init_backend_registration()
+    return codegen_common.get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None

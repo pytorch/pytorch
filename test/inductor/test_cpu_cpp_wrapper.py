@@ -6,6 +6,7 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -45,6 +46,7 @@ RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
     and not IS_MACOS
+    and has_cpp_wrapper_for_device("cpu")
 )
 
 
@@ -250,7 +252,7 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            condition=config.cpu_backend == "cpp" and not IS_WINDOWS,
+            condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
             code_string_count={"py::gil_scoped_release release;": 2},
         ),
