@@ -332,6 +332,7 @@ def mps_ops_modifier(ops):
         'split_with_sizes',
         'split_with_sizes_copy',
         'splitlist_args',
+        'sqrt',
         'squeeze',
         'squeeze_copy',
         'squeezemultiple',
@@ -6853,6 +6854,12 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Test complex half
+        x = torch.rand(8, device='mps', dtype=torch.chalf)
+        rc_h = x.sqrt()
+        rc_f = x.cfloat().sqrt().chalf()
+        self.assertEqual(rc_h, rc_f)
+
     # Test selu, elu, celu
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
@@ -9795,6 +9802,8 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp32(self):
         self._test_sdpa_mask(torch.float32)
+        # Test twice to catch https://github.com/pytorch/pytorch/issues/148194
+        self._test_sdpa_mask(torch.float32)
 
     def test_sdpa_mask_fp16(self):
         self._test_sdpa_mask(torch.float16)
@@ -12510,8 +12519,6 @@ class TestConsistency(TestCaseMPS):
             # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
             # fixed in macOS 13.3+
             return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
-        if op.name == "nn.functional.interpolate":
-            return (1e-3, 1e-4)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237

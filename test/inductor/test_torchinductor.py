@@ -20,6 +20,8 @@ import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import numpy as np
@@ -131,6 +133,10 @@ from torch.testing._internal.inductor_utils import (
     skipCUDAIf,
 )
 from torch.testing._internal.triton_utils import requires_cuda
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -6395,16 +6401,16 @@ class CommonTemplate:
             return x.cos().sin().softmax(-1)
 
         x = torch.randn(16, 256, device=self.device)
-        _, (coda_a0,) = run_and_get_kernels(a, x)
-        _, (coda_b0,) = run_and_get_kernels(b, x)
-        _, (coda_c0,) = run_and_get_kernels(c, x)
+        _, (coda_a0,) = _run_and_get_stripped_kernels(a, x)
+        _, (coda_b0,) = _run_and_get_stripped_kernels(b, x)
+        _, (coda_c0,) = _run_and_get_stripped_kernels(c, x)
         self.assertEqual(coda_a0, coda_c0)
 
         # compile in a different order
         torch.compiler.reset()
-        _, (coda_c1,) = run_and_get_kernels(c, x)
-        _, (coda_a1,) = run_and_get_kernels(a, x)
-        _, (coda_b1,) = run_and_get_kernels(b, x)
+        _, (coda_c1,) = _run_and_get_stripped_kernels(c, x)
+        _, (coda_a1,) = _run_and_get_stripped_kernels(a, x)
+        _, (coda_b1,) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(coda_a0, coda_a1)
         self.assertEqual(coda_b0, coda_b1)
         self.assertEqual(coda_c0, coda_c1)
@@ -6417,9 +6423,9 @@ class CommonTemplate:
             "__init__",
             lambda self, _: CompileContext_init(self, CompileId(999, 999)),
         ):
-            _, (coda_a2,) = run_and_get_kernels(a, x)
-            _, (coda_c2,) = run_and_get_kernels(c, x)
-            _, (coda_b2,) = run_and_get_kernels(b, x)
+            _, (coda_a2,) = _run_and_get_stripped_kernels(a, x)
+            _, (coda_c2,) = _run_and_get_stripped_kernels(c, x)
+            _, (coda_b2,) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(coda_a0, coda_a2)
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
@@ -6442,7 +6448,7 @@ class CommonTemplate:
             return x
 
         x = torch.randn(16, 256, device=self.device)
-        _, (code0, code1) = run_and_get_kernels(b, x)
+        _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
@@ -6464,8 +6470,8 @@ class CommonTemplate:
 
         x = torch.randn(16, 256, device=self.device)
         y = torch.randn(256, 256, device=self.device)
-        _, (code0,) = run_and_get_kernels(a, x)
-        _, (code1,) = run_and_get_kernels(b, x, y)
+        _, (code0,) = _run_and_get_stripped_kernels(a, x)
+        _, (code1,) = _run_and_get_stripped_kernels(b, x, y)
         self.assertEqual(code0, code1)
 
     def test_flip(self):
@@ -12527,6 +12533,17 @@ class CommonTemplate:
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    def test_slice_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/147071
+        def f(input):
+            var = torch.slice_copy(
+                input, dim=0, start=449, end=None, step=9223372036854775807
+            )
+            return torch.reciprocal(var)
+
+        input = torch.randn((875,))
+        self.assertEqual(torch.compile(f)(input), f(input))
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_no_inputs(self):
         def foo():
@@ -14024,7 +14041,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return x.sin()
 
             fn_c = torch.compile(fn)
-            x = torch.rand(16, device="cuda")
+            x = torch.rand(16, device=GPU_TYPE)
 
             _, code = run_and_get_code(fn_c, x)
 
@@ -14039,7 +14056,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
@@ -14065,7 +14082,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             def g(x):
                 return x + 1
@@ -14106,7 +14123,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
             x, y = torch.ones(3, 3, device=self.device), torch.randn(
@@ -14128,7 +14145,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
+                return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
             x, y = torch.ones(3, 3, device=self.device), torch.randn(
@@ -14149,11 +14166,11 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 y1 = y + 1
                 y_cpu = y1.cpu() + 1
                 z = x1 + y1 + x @ y
-                u = (y_cpu.cuda() + 2) @ y + 3
+                u = (y_cpu.to(GPU_TYPE) + 2) @ y + 3
                 u_cpu = u.cpu() + 2
-                return z + u_cpu.cuda()
+                return z + u_cpu.to(GPU_TYPE)
 
-            x, y = [torch.ones(2, 2, device="cuda") for _ in range(2)]
+            x, y = [torch.ones(2, 2, device=GPU_TYPE) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
             eager_out = f(x, y)
 
@@ -14257,6 +14274,20 @@ if HAS_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
+
+
+def _strip_tmp_path(code: str) -> str:
+    """
+    Canonicalize things that look like a tmp path so they can be compared.
+    """
+    return re.sub('#include ".*?"', '#include "<tmppath>"', code)
+
+
+def _run_and_get_stripped_kernels(
+    fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> tuple[_T, list[str]]:
+    result, codes = run_and_get_kernels(fn, *args, **kwargs)
+    return result, [_strip_tmp_path(code) for code in codes]
 
 
 if __name__ == "__main__":

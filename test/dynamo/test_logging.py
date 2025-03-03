@@ -187,7 +187,7 @@ from user code:
    File "test_logging.py", line N, in dynamo_error_fn
     output = output.add(torch.ones(10, 10))
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,  # noqa: B950
         )
@@ -235,7 +235,7 @@ LoweringException: AssertionError:
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
   ))
 
-Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace. For even more developer context, set TORCH_LOGS="+dynamo"
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,
         )
