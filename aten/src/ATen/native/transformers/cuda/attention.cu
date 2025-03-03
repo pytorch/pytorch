@@ -1146,7 +1146,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   // compute_logsumexp is false
   constexpr int kAlignLSE = 1;
   res = at::empty({B, M, num_heads, Kv}, query.options());
-  if (!compute_logsumexp) {
+  if (compute_logsumexp) {
     // Set the tensor to empty when compute_logsumexp is false
     logsumexp = at::empty(
         { B * num_heads, max_seqlen_q, 0 },
@@ -1231,12 +1231,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                    is_causal,
                    persistent_counter,
                    stream);
-  }
-  if (!compute_logsumexp) {
-    // Set the tensor to empty when compute_logsumexp is false
-    logsumexp = at::empty(
-        { B * num_heads, max_seqlen_q, 0 },
-        query.options().dtype(at::ScalarType::Float));
   }
 #else
   // CUDA Implementation
