@@ -186,31 +186,33 @@ def is_bf16_supported(including_emulation: bool = True):
         return False
 
     device = torch.cuda.current_device()
+    device_properties = torch.cuda.get_device_properties(device)
 
     # Check for CUDA version and device compute capability.
     # This is a fast way to check for it.
     cuda_version = torch.version.cuda
     if (
         cuda_version is not None
-        and int(cuda_version.split(".")[0]) >= 11
-        and torch.cuda.get_device_properties(device).major >= 8
+        # BF16 support was first introduced in CUDA 8 (https://en.wikipedia.org/wiki/CUDA#Version_support)
+        and int(cuda_version.split(".")[0]) >= 8
+        and device_properties.major >= 8
     ):
         return True
 
     if not including_emulation:
         return False
-
-    # Finally try to create a bfloat16 device.
-    return _check_bf16_tensor_supported(device)
-
-
-@lru_cache(maxsize=16)
-def _check_bf16_tensor_supported(device: _device_t):
-    try:
-        torch.tensor([1.0], dtype=torch.bfloat16, device=device)
+    
+    # With CUDA 10 or later, you get emulated BF16 support
+    # where the internal computations are done with FP32.
+    if device_properties.major >= 10:
+        warnings.warn(
+            f"{device_properties.name} does not natively support bfloat16. "
+            "All computations are internally done with float32."
+        )
         return True
-    except Exception:
+    else:
         return False
+        
 
 
 def is_tf32_supported() -> bool:
