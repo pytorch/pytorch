@@ -198,7 +198,7 @@ class PyCodegen:
                 self.call_reconstruct(source)
             except NotImplementedError:
                 unimplemented_v2(
-                    gb_type="Reconstruction failure",
+                    gb_type="Reconstruction failure: source.reconstruct not implemented",
                     context=str(source),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
                     hints=[
