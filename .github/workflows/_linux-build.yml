@@ -83,9 +83,7 @@ on:
         type: string
       disable-monitor:
         description: |
-          [Experimental] Disable utilization monitoring for tests.
-          Currently, by default we disable the monitor job and only look for specific tests,
-          since we are investigating the behaviour of the monitor script with different tests.
+          Disable utilization monitoring for builds.
         required: false
         type: boolean
         default: false
@@ -369,7 +367,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           build-time: ${{ steps.build.outputs.build_time }}
-          
+
       - name: Upload utilization stats
         if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
