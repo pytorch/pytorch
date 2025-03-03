@@ -1007,6 +1007,7 @@ def max_pool2d_with_indices(
         x.size(-1),
         stride,
         padding,
+        dilation,
     )
     return vals, indices
 
