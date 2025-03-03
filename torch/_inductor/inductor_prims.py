@@ -162,7 +162,7 @@ def _low_memory_max_pool_with_offsets_aten(
             indices.shape[-dim + d], dtype=torch.int64, device=self.device
         ).view(bh_shape)
         hbase = bh * stride[d] - padding[d]
-        h_inc = idhw[d] - hbase
+        h_inc = (idhw[d] - hbase) // dilation[d]
         dhw_inc.append(h_inc)
 
     offsets = _flatten_index(dhw_inc, kernel_size)
@@ -171,8 +171,14 @@ def _low_memory_max_pool_with_offsets_aten(
 
 
 def _low_memory_max_pool_offsets_to_indices_aten(
-    offsets, kernel_size, input_size, stride, padding, dim
+    offsets,
+    kernel_size,
+    input_size,
+    stride,
+    padding,
+    dilation,
 ):
+    dim = len(kernel_size)
     offsets = offsets.to(torch.int64)
     dhw_inc = _flattened_index_to_nd(offsets, kernel_size)
 
@@ -184,7 +190,7 @@ def _low_memory_max_pool_offsets_to_indices_aten(
             offsets.shape[-dim + d], dtype=torch.int64, device=offsets.device
         ).view(bh_shape)
         hbase = bh * stride[d] - padding[d]
-        idhw.append(hbase + dhw_inc[d])
+        idhw.append(hbase + dhw_inc[d] * dilation[d])
 
     return _flatten_index(idhw, input_size)
 
@@ -197,7 +203,7 @@ _low_memory_max_pool_with_offsets = make_prim(
 )
 
 _low_memory_max_pool_offsets_to_indices = make_prim(
-    "_low_memory_max_pool_offsets_to_indices(Tensor self, SymInt[] kernel_size, SymInt[] input_size, SymInt[] stride, SymInt[] padding) -> Tensor",  # noqa: B950
+    "_low_memory_max_pool_offsets_to_indices(Tensor self, SymInt[] kernel_size, SymInt[] input_size, SymInt[] stride, SymInt[] padding, SymInt[] dilation) -> Tensor",  # noqa: B950
     _low_memory_max_pool_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

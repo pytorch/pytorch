@@ -1010,6 +1010,7 @@ def _max_pool_with_indices(
         x.shape[-dim:],
         stride,
         padding,
+        dilation,
     )
     return vals, indices
 

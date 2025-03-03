@@ -4290,14 +4290,22 @@ def constant_boundary_condition(
     return load
 
 
-def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None):
+    if dilation is None:
+        dilation = [1] * len(padding)
+
     x_out = FloorDiv(
-        x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
+        x + 2 * padding[i] - dilation[i] * (kernel_size[i] - 1) + (stride[i] - 1),
+        stride[i],
     )
 
     if ceil_mode:
         x_alt = FloorDiv(
-            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
+            x
+            + 2 * padding[i]
+            - dilation[i] * (kernel_size[i] - 1)
+            + 2 * (stride[i] - 1),
+            stride[i],
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
@@ -4363,7 +4371,9 @@ def _max_pool_with_offsets(
 
     dhw_out, ceil_mode = zip(
         *[
-            pooling_size(dhw[d], d, kernel_size, stride, padding, ceil_mode)
+            pooling_size(
+                dhw[d], d, kernel_size, stride, padding, ceil_mode, dilation=dilation
+            )
             for d in range(dim)
         ]
     )
@@ -4459,7 +4469,7 @@ def _low_memory_max_pool_with_offsets(
     prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
 )
 def _low_memory_max_pool_offsets_to_indices(
-    offsets, kernel_size, input_size, stride, padding
+    offsets, kernel_size, input_size, stride, padding, dilation
 ):
     # TODO: Generalize to other max pooling flavors
     dim = len(kernel_size)
@@ -4471,7 +4481,7 @@ def _low_memory_max_pool_offsets_to_indices(
             ops.index_expr(bh[d] * stride[d] - padding[d], torch.int64)
             for d in range(dim)
         ]
-        idhw = [hbase[d] + dhw_inc[d] for d in range(dim)]
+        idhw = [hbase[d] + dhw_inc[d] * dilation[d] for d in range(dim)]
         return inductor_prims._flatten_index(idhw, w_in)
 
     def offsets_to_indices(idx):
