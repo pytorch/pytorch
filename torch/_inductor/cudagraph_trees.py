@@ -2015,6 +2015,7 @@ class CUDAGraphTreeManager:
         )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
+        # print(f"function_id:{function_id}, GenerationTracker.generation:{GenerationTracker.generation}, self.current_gen:{self.current_gen}")
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once

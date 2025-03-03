@@ -1859,6 +1859,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        @torch._inductor.config.patch("graph_partition", False)
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1900,6 +1901,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        @torch._inductor.config.patch("graph_partition", False)
         def test_incompatible_cudagraph_ops_nonzero(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -2510,6 +2512,56 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             compiled_result = self.run_twc(compiled, example_input)
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cudagraph(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(5):
+                compiled_out = f_compiled(x_cloned, y_cloned)
+                self.assertEqual(eager_out, compiled_out)
+
+            # 2 graph partitions lead to 2 cudagraph
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_backward(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            x.requires_grad = True
+            x_cloned.requires_grad = True
+            eager_out = f(x, y)
+            eager_out.sum().backward()
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(5):
+                torch.compiler.cudagraph_mark_step_begin()
+                compiled_out = f_compiled(x_cloned, y_cloned)
+                compiled_out.sum().backward()
+                self.assertEqual(eager_out, compiled_out)
+                self.assertEqual(x.grad, x_cloned.grad)
+
+            # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

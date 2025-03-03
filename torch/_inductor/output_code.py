@@ -486,7 +486,7 @@ class CompiledFxGraph(OutputCode):
 
         cudagraph_info = None
 
-        def _init_cudagraph() -> Optional[CudagraphCachedInfo]:
+        def _init_and_get_cudagraph() -> Optional[CudagraphCachedInfo]:
             if config.graph_partition:
                 return get_cudagraph_info(gm)
 
@@ -544,7 +544,7 @@ class CompiledFxGraph(OutputCode):
                 return get_cudagraph_info(gm, cudagraph_fail_reasons)
 
         if cudagraphs:
-            cudagraph_info = _init_cudagraph()
+            cudagraph_info = _init_and_get_cudagraph()
 
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
