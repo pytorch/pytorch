@@ -104,6 +104,8 @@ jobs:
       # Setup multi-arch image builds
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
+        with:
+          image: 'docker.io/tonistiigi/binfmt:qemu-v9.2.0'
         env:
           QEMU_BINARY_PATH: ${{ runner.temp }}/bin
       - name: Set up Docker Buildx
