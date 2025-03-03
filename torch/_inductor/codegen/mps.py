@@ -363,6 +363,18 @@ class MetalOverrides(OpOverrides):
     def zeta(a: CSEVariable, b: CSEVariable) -> str:
         return f"c10::metal::zeta({a}, {b})"
 
+    @staticmethod
+    def spherical_bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::spherical_bessel_j0({x})"
+
+    @staticmethod
+    def xlog1py(x: CSEVariable) -> str:
+        return f"c10::metal::xlog1py({x})"
+
+    @staticmethod
+    def entr(x: CSEVariable) -> str:
+        return f"c10::metal::entr({x})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -548,7 +560,10 @@ class MetalKernel(SIMDKernel):
             threads = [self.pexpr(v.numel) for v in self.active_range_trees()]  # type: ignore[misc]
             args += [f"threads=[{', '.join(threads)}]"]
         if self.inside_reduction:
-            threads = [self.pexpr(v.numel) if v.is_reduction else "1" for v in self.active_range_trees()]  # type: ignore[misc]
+            threads = [
+                self.pexpr(v.numel) if v.is_reduction else "1"  # type: ignore[misc]
+                for v in self.active_range_trees()
+            ]
             args += [f"group_size=[{', '.join(threads)}]"]
 
         wrapper.generate_kernel_call(

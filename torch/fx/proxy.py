@@ -114,6 +114,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "arg_kwarg_vals",
 ]
 
 
