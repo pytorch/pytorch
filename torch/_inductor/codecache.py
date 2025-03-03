@@ -54,6 +54,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 from torch._inductor.cpp_builder import (
+    _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
     _transform_cuda_paths,
@@ -1710,6 +1711,7 @@ class AotCodeCompiler:
                 )
                 so_build_options.save_flags_to_json(linker_flags)
                 generated_files.append(linker_flags)
+                generated_files.append(_LINKER_SCRIPT)
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
