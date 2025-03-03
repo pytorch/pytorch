@@ -3150,7 +3150,6 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 8.5,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['out'] = 10.0
             fudge_factors['grad_key'] = 45.0
             fudge_factors['grad_query'] = 360.0
             if seq_len_k >= 1024:
@@ -3272,12 +3271,10 @@ class TestSDPACudaOnly(NNTestCase):
             "grad_attn_mask": 45.0,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['out'] = 10.0
             fudge_factors['grad_key'] = 45.0
             fudge_factors['grad_query'] = 360.0
             if seq_len_k >= 1024:
                 fudge_factors['grad_key'] = 70.0
-                fudge_factors['grad_value'] = 40.0
             if seq_len_k >= 2048:
                 fudge_factors['grad_key'] = 160.0
                 fudge_factors['grad_query'] = 650.0
@@ -3566,19 +3563,15 @@ class TestSDPACudaOnly(NNTestCase):
             grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
             grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
-            fudge_factors = {
-                'out': 3.0,
-                'grad_query': 100.0,
-                'grad_key': 8.0,
-                'grad_value': 3.0,
-            }
-            if TEST_WITH_ROCM:
-                fudge_factors['out'] = 10.0
-
             check_out_and_grad(
                 (out_ref, out_lp_ref, out),
                 *zip(grads_ref, grads_ref_lp, grads),
-                fudge_factors=fudge_factors
+                fudge_factors={
+                    'out': 3.0,
+                    'grad_query': 100.0,
+                    'grad_key': 8.0,
+                    'grad_value': 3.0,
+                }
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
