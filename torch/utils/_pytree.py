@@ -44,13 +44,6 @@ from typing_extensions import deprecated, NamedTuple, Self, TypeAlias
 
 
 __all__ = [
-    "PyTree",
-    "Context",
-    "FlattenFunc",
-    "UnflattenFunc",
-    "DumpableContext",
-    "ToDumpableContextFunc",
-    "FromDumpableContextFunc",
     "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",

@@ -42,13 +42,6 @@ from torch.utils._pytree import (
 
 
 __all__ = [
-    "PyTree",
-    "Context",
-    "FlattenFunc",
-    "UnflattenFunc",
-    "DumpableContext",
-    "ToDumpableContextFunc",
-    "FromDumpableContextFunc",
     "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",

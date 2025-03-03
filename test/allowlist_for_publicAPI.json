@@ -1106,26 +1106,8 @@
     "Any",
     "to_dlpack"
   ],
-  "torch.utils.pytree": [
-    "FlattenFunc",
-    "FlattenWithKeysFunc",
-    "FromDumpableContextFunc",
-    "PyTree",
-    "PyTreeSpec",
-    "ToDumpableContextFunc",
-    "UnflattenFunc"
-  ],
   "torch.utils.pytree.cxx": [
-    "Context",
-    "DumpableContext",
-    "FlattenFunc",
-    "FlattenWithKeysFunc",
-    "FromDumpableContextFunc",
-    "PyTree",
-    "PyTreeSpec",
-    "ToDumpableContextFunc",
-    "TreeSpec",
-    "UnflattenFunc"
+    "PyTreeSpec"
   ],
   "torch": [
     "BFloat16Storage",
