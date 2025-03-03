@@ -1726,7 +1726,9 @@ class InstructionTranslatorBase(
         #   2) raise execption instance - raise NotImplemetedError("foo")
 
         # 1) when user raises exception type
-        if isinstance(val, variables.BuiltinVariable):
+        if isinstance(
+            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
+        ):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
@@ -1771,7 +1773,14 @@ class InstructionTranslatorBase(
             from_vt = self.pop()
             if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
                 val = self.pop()
-                self._raise_exception_variable(val)
+                try:
+                    self._raise_exception_variable(val)
+                finally:
+                    # Update __cause__/__supppress_context__ in the raised exception
+                    curr_exc = self.exn_vt_stack.get_current_exception()
+                    curr_exc.call_setattr(
+                        self, ConstantVariable("__cause__"), ConstantVariable(None)
+                    )
             unimplemented_v2(
                 gb_type="Re-raise with 2 arguments",
                 context=str(from_vt),
