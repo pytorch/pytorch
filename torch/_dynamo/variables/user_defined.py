@@ -714,7 +714,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         return getattr(self.exc_vt, name)
 
     def __str__(self):
-        return f"{self.value.__name__}"
+        return f"{self.__class__.__name__}({self.value.__name__})"
 
 
 class NO_SUCH_SUBOBJ:
