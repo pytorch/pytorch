@@ -23,7 +23,7 @@ class _CacheEntry:
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
-class _FrameAction(enum.Enum):
+class _FrameAction(enum.IntEnum):
     DEFAULT = 0
     SKIP = 1
     RUN_ONLY = 2
