@@ -1931,15 +1931,7 @@ class InstructionTranslatorBase(
     def POP_EXCEPT(self, inst):
         if sys.version_info >= (3, 11):
             val = self.pop()
-            assert isinstance(
-                val,
-                (
-                    variables.ExceptionVariable,
-                    UserDefinedExceptionClassVariable,
-                    UserDefinedExceptionObjectVariable,
-                ),
-            )
-
+            assert self._isinstance_exception(val)
             # This exception is handled and therefore we can clear the error indicator
             assert len(self.exn_vt_stack)
             self.exn_vt_stack.pop()
