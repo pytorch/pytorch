@@ -16,6 +16,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         cmake \
         curl \
         git \
+        libc-bin \
         libjpeg-dev \
         libpng-dev && \
     rm -rf /var/lib/apt/lists/*
