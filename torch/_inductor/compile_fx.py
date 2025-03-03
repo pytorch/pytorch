@@ -661,9 +661,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -1125,9 +1125,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
                             code, linemap = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug("Output code: \n%s", code)
 
@@ -2186,19 +2186,21 @@ def compile_fx(
                 )
 
                 from torch._export.utils import _detect_fake_mode_from_gm
+
                 fake_mode = _detect_fake_mode_from_gm(gm)
-                # aot_export_module doesn't account for constant tensor attributes 
-                # so we end up having tensors that don't have fake vals attached. 
-                # This can happen when upstream export is non-strict where we 
+                # aot_export_module doesn't account for constant tensor attributes
+                # so we end up having tensors that don't have fake vals attached.
+                # This can happen when upstream export is non-strict where we
                 # preserve the original module params/buffers. Once AOTI switches
-                # to ep.run_decompositions() flow to lower to post-autograd opset 
-                # this will go away. 
+                # to ep.run_decompositions() flow to lower to post-autograd opset
+                # this will go away.
                 for node in gm.graph.nodes:
                     if node.op == "get_attr" and "val" not in node.meta:
                         target = getattr(gm, node.target)
                         if isinstance(target, torch.Tensor):
-                            node.meta["val"] = fake_mode.from_tensor(target)
-
+                            node.meta["val"] = fake_mode.from_tensor(
+                                target, static_shapes=True
+                            )
 
             unlifted_gm = _unlift_graph(model_, gm, graph_signature)
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
