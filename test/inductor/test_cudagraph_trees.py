@@ -2536,6 +2536,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_graph_partition_reduce_overhead_mode_effectiveness(self):
+            # test that `mode="reduce-overhead"` still controls whether
+            # cudagraph is applied. i.e., cudagraph is not applied when
+            # mode="default".
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+
+            f_compiled = torch.compile(f)
+            for _ in range(5):
+                _out = f_compiled(x, y)
+            self.assertEqual(self.get_manager() is None, True)
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward(self):
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
@@ -2568,6 +2588,40 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_only(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    x1 = x + 1
+                    y1 = x + 2
+                    y_cpu = y1 + 1
+                    z = x @ y1
+                    inp = x1 + y1 + z + y_cpu
+                    return self.linear(inp)
+
+            model = Mod().cpu()
+
+            input_data = torch.randn(16, 16).cpu()
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            compiled_model = torch.compile(model, mode="default")
+
+            for _ in range(5):
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cpu())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            # 0 cudagraph since all ops are on cpu
+            self.assertEqual(self.get_manager() is None, True)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
