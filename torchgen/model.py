@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -374,6 +374,7 @@ class ScalarType(Enum):
     Float8_e5m2fnuz = auto()
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
+    Float8_e8m0fnu = auto()
 
     def __str__(self) -> str:
         return self.name
@@ -628,9 +629,9 @@ class NativeFunction:
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
         if use_const_ref_for_mutable_tensors:
-            assert (
-                not func.arguments.out
-            ), "see https://github.com/pytorch/pytorch/issues/145522"
+            assert not func.arguments.out, (
+                "see https://github.com/pytorch/pytorch/issues/145522"
+            )
 
         variants_s = e.pop("variants", "function")
         assert isinstance(variants_s, str)
@@ -644,9 +645,9 @@ class NativeFunction:
                 raise AssertionError(f"illegal variant {v}")
 
         manual_kernel_registration = e.pop("manual_kernel_registration", False)
-        assert isinstance(
-            manual_kernel_registration, bool
-        ), f"not a bool: {manual_kernel_registration}"
+        assert isinstance(manual_kernel_registration, bool), (
+            f"not a bool: {manual_kernel_registration}"
+        )
 
         manual_cpp_binding = e.pop("manual_cpp_binding", False)
         assert isinstance(manual_cpp_binding, bool), f"not a bool: {manual_cpp_binding}"
@@ -655,9 +656,9 @@ class NativeFunction:
         assert isinstance(device_guard, bool), f"not a bool: {device_guard}"
 
         device_check_s = e.pop("device_check", None)
-        assert device_check_s is None or isinstance(
-            device_check_s, str
-        ), f"not a str: {device_check_s}"
+        assert device_check_s is None or isinstance(device_check_s, str), (
+            f"not a str: {device_check_s}"
+        )
         assert (
             device_check_s is None or device_check_s in DeviceCheckType.__members__
         ), f"illegal device_check: {device_check_s}"
@@ -683,26 +684,26 @@ class NativeFunction:
             structured_delegate = OperatorName.parse(structured_delegate_s)
 
         structured_inherits = e.pop("structured_inherits", None)
-        assert structured_inherits is None or isinstance(
-            structured_inherits, str
-        ), f"not a str: {structured_inherits}"
+        assert structured_inherits is None or isinstance(structured_inherits, str), (
+            f"not a str: {structured_inherits}"
+        )
         assert structured_inherits is None or "::" not in structured_inherits, (
             "namespace is not supported in structured inherits,"
             " using the same namespace as the native function"
         )
 
         python_module = e.pop("python_module", None)
-        assert python_module is None or isinstance(
-            python_module, str
-        ), f"not a str: {python_module}"
-        assert (
-            python_module is None or Variant.method not in variants
-        ), "functions in modules cannot be methods"
+        assert python_module is None or isinstance(python_module, str), (
+            f"not a str: {python_module}"
+        )
+        assert python_module is None or Variant.method not in variants, (
+            "functions in modules cannot be methods"
+        )
 
         category_override = e.pop("category_override", None)
-        assert category_override is None or isinstance(
-            category_override, str
-        ), f"not a str: {category_override}"
+        assert category_override is None or isinstance(category_override, str), (
+            f"not a str: {category_override}"
+        )
 
         precomputed_dict = e.pop("precomputed", None)
         assert precomputed_dict is None or structured is True
@@ -741,12 +742,12 @@ class NativeFunction:
             for ks, v in raw_dispatch.items():
                 if ks == "__line__":
                     continue  # not worth tracking line numbers for dispatch entries
-                assert isinstance(
-                    ks, str
-                ), f"illegal dispatch key '{ks}' in {raw_dispatch}"
-                assert isinstance(
-                    v, str
-                ), f"illegal dispatch value '{v}' in {raw_dispatch}"
+                assert isinstance(ks, str), (
+                    f"illegal dispatch key '{ks}' in {raw_dispatch}"
+                )
+                assert isinstance(v, str), (
+                    f"illegal dispatch value '{v}' in {raw_dispatch}"
+                )
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     num_dispatch_keys += 1
@@ -880,9 +881,9 @@ class NativeFunction:
             import torchgen.api.ufunc as ufunc
 
             for dispatch_key in UFUNC_DISPATCH_KEYS:
-                assert (
-                    dispatch_key not in dispatch
-                ), f"ufunc should not have explicit dispatch entry for {dispatch_key}"
+                assert dispatch_key not in dispatch, (
+                    f"ufunc should not have explicit dispatch entry for {dispatch_key}"
+                )
                 dispatch[dispatch_key] = BackendMetadata(
                     kernel=ufunc.schema_kernel_name(func, dispatch_key),
                     structured=True,
@@ -998,31 +999,31 @@ class NativeFunction:
                 "Put structured field on the out= "
                 "variant of a function; did you mean structured_delegate?"
             )
-            assert (
-                self.device_guard
-            ), "device_guard: False is not respected by structured kernels"
+            assert self.device_guard, (
+                "device_guard: False is not respected by structured kernels"
+            )
         if self.structured_delegate:
             assert self.func.kind() != SchemaKind.out, (
                 "structured_delegate field not allowed "
                 "on out= functions; did you mean structured?"
             )
-            assert (
-                self.device_guard
-            ), "device_guard: False is not respected by structured kernels"
+            assert self.device_guard, (
+                "device_guard: False is not respected by structured kernels"
+            )
         # Technically, with the asserts above, this assert is impossible to
         # happen
-        assert not (
-            self.structured and self.structured_delegate
-        ), "Cannot have both structured and structured_delegate on function"
+        assert not (self.structured and self.structured_delegate), (
+            "Cannot have both structured and structured_delegate on function"
+        )
         defaulted_arguments = {
             a.name for a in self.func.schema_order_arguments() if a.default is not None
         }
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f"Invalid cpp_no_default_args: {invalid_args}"
         if self.structured_inherits is not None:
-            assert (
-                self.structured
-            ), "structured_inherits must also imply structured: True"
+            assert self.structured, (
+                "structured_inherits must also imply structured: True"
+            )
         if str(self.func.name).startswith("_foreach"):
             assert self.device_check == DeviceCheckType.NoCheck, (
                 "foreach kernels fall back to slow path when tensor are on different devices, "
@@ -1300,9 +1301,9 @@ class BackendIndex:
     ) -> None:
         for k, v in child_index.items():
             for op_name, metadata in v.items():
-                assert (
-                    op_name not in parent_index[k]
-                ), f"duplicate operator {op_name} for dispatch key {k}"
+                assert op_name not in parent_index[k], (
+                    f"duplicate operator {op_name} for dispatch key {k}"
+                )
                 parent_index[k][op_name] = metadata
 
     def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
@@ -1451,9 +1452,9 @@ class FunctionSchema:
         # We also enforce that if you have any mutable, positional args, then they are not returned.
         # This makes it easier to group these functions properly with their functional/out= counterparts.
         for a in self.arguments.post_self_positional_mutable:
-            assert not any(
-                a.annotation == r.annotation for r in self.returns
-            ), f"If you have a schema with mutable positional args, we expect them to not be returned. schema: {str(self)}"
+            assert not any(a.annotation == r.annotation for r in self.returns), (
+                f"If you have a schema with mutable positional args, we expect them to not be returned. schema: {str(self)}"
+            )
         # Invariant: we expect out arguments to appear as keyword arguments in the schema.
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
@@ -1476,9 +1477,9 @@ class FunctionSchema:
         # (1) It's more annoying to handle properly
         # (2) It's unnecessary - you can't method-chain on the first (mutated) output because it's part of a tuple.
         # Instead, we expect the (a!) argument to not be returned.
-        assert (
-            len(mutable_returns) == 0 or len(immutable_returns) == 0
-        ), f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
+        assert len(mutable_returns) == 0 or len(immutable_returns) == 0, (
+            f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
+        )
         for ret in mutable_returns:
             assert any(ret.annotation == arg.annotation for arg in out_and_self), (
                 'All mutable returns must be aliased either to a keyword argument, or to "self". '
@@ -1491,23 +1492,22 @@ class FunctionSchema:
             # and all other types of out= op schemas should return void.
             # There are a bunch of existing out= ops that return tuples of tensors though, so we're stuck with allowing that.
             if any(a.type != BaseType(BaseTy.Tensor) for a in self.arguments.out):
-                assert (
-                    len(self.returns) == 0
-                ), "out= ops that accept tensor lists as out arguments "
+                assert len(self.returns) == 0, (
+                    "out= ops that accept tensor lists as out arguments "
+                )
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert (
-                    len(
-                        [
-                            arg
-                            for arg in self.arguments.out
-                            if not arg.name.startswith("_scratch_")
-                        ]
-                    )
-                    == len(self.returns)
-                ), "Must return as many arguments as there are out arguments, or no return at all"
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(self.returns), (
+                    "Must return as many arguments as there are out arguments, or no return at all"
+                )
 
         if self.name.name.inplace:
             self_a = self.arguments.self_arg
@@ -1600,12 +1600,14 @@ class FunctionSchema:
         if is_inplace:
             return SchemaKind.inplace
         elif is_scratch:
-            assert (
-                is_out
-            ), "invariant: all scratch operators are expected to be out= operators too"
+            assert is_out, (
+                "invariant: all scratch operators are expected to be out= operators too"
+            )
             return SchemaKind.scratch
         elif is_out:
-            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"  # noqa: B950
+            assert not is_scratch, (
+                "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            )  # noqa: B950
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -1706,9 +1708,11 @@ class FunctionSchema:
             for a in itertools.chain(
                 # Order is important here (otherwise e.g. inplace with mutable args
                 # and out= with mutable args won't have the same signature)
-                [self.arguments.self_arg.argument]
-                if self.arguments.self_arg is not None
-                else [],
+                (
+                    [self.arguments.self_arg.argument]
+                    if self.arguments.self_arg is not None
+                    else []
+                ),
                 self.arguments.out,
                 self.arguments.post_self_positional,
             )
@@ -1802,13 +1806,13 @@ class Annotation:
         before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
         alias_set = tuple(before_alias.split("|"))
         is_write = m.group(3) == "!"
-        assert not (
-            is_write and len(alias_set) > 1
-        ), f"alias set larger than 1 is not mutable, got {ann} instead."
+        assert not (is_write and len(alias_set) > 1), (
+            f"alias set larger than 1 is not mutable, got {ann} instead."
+        )
         after_set = tuple(m.group(5).split("|")) if m.group(5) else ()
-        assert not (
-            len(before_alias) > 1 and len(after_set) > 1
-        ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
+        assert not (len(before_alias) > 1 and len(after_set) > 1), (
+            f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
+        )
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
@@ -1821,7 +1825,7 @@ class Annotation:
             alias_set = f"{alias_set}!"
         alias_set_after = "|".join(self.alias_set_after)
         if alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+            alias_set = f"{alias_set} -> {alias_set_after}"
         return alias_set
 
 
@@ -2300,9 +2304,11 @@ class Arguments:
             pre_self_positional=tuple(
                 map(strip_arg_annotation, self.pre_self_positional)
             ),
-            self_arg=SelfArgument(strip_arg_annotation(self.self_arg.argument))
-            if self.self_arg is not None
-            else None,
+            self_arg=(
+                SelfArgument(strip_arg_annotation(self.self_arg.argument))
+                if self.self_arg is not None
+                else None
+            ),
             post_self_positional=tuple(
                 map(strip_arg_annotation, self.post_self_positional)
             ),
@@ -2349,9 +2355,9 @@ class Arguments:
             if not arg:
                 continue
             if arg == "*":
-                assert (
-                    arguments_acc is positional
-                ), "invalid syntax: kwarg-only specifier * can only occur once"
+                assert arguments_acc is positional, (
+                    "invalid syntax: kwarg-only specifier * can only occur once"
+                )
                 arguments_acc = kwarg_only
                 continue
             parg = Argument.parse(arg)
@@ -2476,9 +2482,9 @@ class Arguments:
             for a in self.pre_self_positional
             if a.annotation is not None and a.annotation.is_write
         ]
-        assert (
-            len(mutable_pre_self_positionals) == 0
-        ), "mutable pre_self_positional arguments are not currently supported in the schema"
+        assert len(mutable_pre_self_positionals) == 0, (
+            "mutable pre_self_positional arguments are not currently supported in the schema"
+        )
 
 
 # Names that validly are __iXXX__ indicating inplace operations.
@@ -2531,6 +2537,12 @@ class BaseOperatorName:
     # Doing that is BC-breaking though, so we're stuck with the above modeling.
     functional_overload: bool = False
 
+    # NB: We don't officially support namespace in FunctionSchema, we treat this prefix
+    # as part of the base operator name, for __str__() to consume.
+    # The canonical input (from the rest of the infra) will not contain namespace, but
+    # we have a usecase in ExecuTorch where we want to support BaseOperatorName with namespace.
+    namespace: Optional[str] = None
+
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
         assert op != ""
@@ -2538,7 +2550,13 @@ class BaseOperatorName:
             "_out suffix is reserved and not permitted for operator names; "
             "did you mean to specify an out overload name instead?"
         )
-        m = re.match(r"^__([^_]+)__$", op)
+        # Extract namespace out. Base operator name may or may not contain namespace.
+        # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid.
+        # We want to split the namespace out from the base operator name.
+        match = re.match(r"^(?:(.*)::)?(.*)$", op)
+        namespace = match.group(1) if match else ""
+        op_without_ns = match.group(2) if match else op
+        m = re.match(r"^__([^_]+)__$", op_without_ns)
         if m is not None:
             dunder_method = True
             base = m.group(1)
@@ -2554,7 +2572,7 @@ class BaseOperatorName:
                 assert base[0] != "i"
         else:
             dunder_method = False
-            base = op
+            base = op_without_ns
             if base[-1] == "_":
                 inplace = True
                 base = base[:-1]
@@ -2577,14 +2595,16 @@ class BaseOperatorName:
             inplace=inplace,
             dunder_method=dunder_method,
             functional_overload=functional_overload,
+            namespace=namespace,
         )
         assert str(r) == op, f"{str(r)} != {op}"
         return r
 
     def __str__(self) -> str:
+        namespace_prefix = f"{self.namespace}::" if self.namespace else ""
         if self.dunder_method:
             i = "i" if self.inplace else ""
-            return f"__{i}{self.base}__"
+            return f"{namespace_prefix}__{i}{self.base}__"
         else:
             i = (
                 "_"
@@ -2593,7 +2613,7 @@ class BaseOperatorName:
                 if self.functional_overload
                 else ""
             )
-            return f"{self.base}{i}"
+            return f"{namespace_prefix}{self.base}{i}"
 
 
 # Operator name is the base operator name along with the (typically not
@@ -2832,9 +2852,9 @@ class Precompute:
             )
 
             arg, with_list_raw = raw_replace_item.split(" -> ")
-            assert (
-                " " not in arg
-            ), f"illegal kernel param name '{arg}' in precomputed parameters'"
+            assert " " not in arg, (
+                f"illegal kernel param name '{arg}' in precomputed parameters'"
+            )
             with_list = with_list_raw.split(",")
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args

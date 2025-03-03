@@ -80,6 +80,7 @@ from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
+    register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
@@ -3643,9 +3644,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         shapes_collection = torch.export.ShapesCollection()
         dim = torch.export.Dim("dim", max=10)
+        # specify shape of tensor
         shapes_collection[x] = (dim,)
+        # tensor can be arbitrarily deep
         shapes_collection[y[0]] = (dim,)
-        shapes_collection[z["k"]] = (dim,)
+        # can also specify some dimension in shape of tensor
+        shapes_collection[z["k"]][0] = dim
 
         ep = export(m, args, dynamic_shapes=shapes_collection)
         sym = next(iter(ep.range_constraints.keys()))
@@ -4705,6 +4709,62 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
 
+    def test_export_method(self):
+        from torch._export.utils import sync_state, wrap_method
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.t = torch.nn.Buffer(torch.tensor(10))
+
+            def forward(self, x):
+                return self.foo(x) * self.bar(x)
+
+            def foo(self, x):
+                self.t.mul_(2)
+                return x + self.t
+
+            def bar(self, x):
+                return x - self.t
+
+        # exporting...
+        em = M()
+        ex = torch.randn(4)
+
+        # ...foo
+        epm_foo = export(
+            wrap_method(em.foo),
+            (ex,),
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        ).module()
+
+        # ...bar
+        epm_bar = export(
+            wrap_method(em.bar),
+            (ex,),
+            dynamic_shapes=((Dim.DYNAMIC,),),
+        ).module()
+
+        if is_serdes_test(self._testMethodName):
+            sync_state(epm_foo, epm_bar)
+
+        # running...
+        m = M()
+        rx = torch.randn(5)
+
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+
+        # ...foo
+        self.assertTrue(torch.allclose(epm_foo(rx), m.foo(rx)))
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+
+        # ...bar
+        self.assertTrue(torch.allclose(epm_bar(rx), m.bar(rx)))
+        self.assertTrue(torch.allclose(m.t, epm_foo.t))
+        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
 
@@ -5090,22 +5150,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return x0, x1, x2
 
         inps = (
-            [
+            (
                 {"data": torch.randn(4, 4)},
                 torch.randn(4, 4),
                 torch.randn(6, 4),
-            ],
+            ),
             {
                 "a": torch.randn(8, 4),
                 "b": torch.randn(9, 6),
             },
         )
         dynamic_shapes = {
-            "x": [
+            "x": (
                 {"data": (Dim("dx00"), Dim("dx01"))},
                 (Dim("dx10"), Dim("dx11")),
                 (Dim("dx20"), Dim("dx21")),
-            ],
+            ),
             "y": {
                 "a": (Dim("dya0"), Dim("dya1")),
                 "b": (Dim("dyb0"), Dim("dyb1")),
@@ -5984,7 +6044,7 @@ def forward(self, x):
                 a = x.item()
                 torch._check(a >= 4)
                 torch._check(a <= 7)
-                return torch.empty((a, 4))
+                return torch.randn((a, 4))
 
         f = Module()
         ep = export(f, (torch.tensor([5]),))
@@ -6012,9 +6072,9 @@ def forward(self, x):
                 a = x.item()
                 torch._check(a >= 4)
                 torch._check(a <= 7)
-                empty = torch.empty((a, 4))
+                randn = torch.randn((a, 4))
 
-                return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+                return torch.cat((randn.transpose(0, 1), torch.zeros(6, a)), 0)
 
         f = Module()
         ep = export(f, (torch.tensor([6]),))
@@ -6397,6 +6457,7 @@ def forward(self, b_a_buffer, x):
             )
 
     @requires_cuda
+    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -6415,6 +6476,7 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
     @requires_cuda
+    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -6432,7 +6494,8 @@ def forward(self, b_a_buffer, x):
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    # This test is expected to fail because accociative_scan's backend is not set to "eager"
+    # TODO: need combine_mode='pointwise' here in order to avoid,
+    # but 'pointwise does not support lifted arguments yet supported in inductor
     @unittest.expectedFailure
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):
@@ -6447,7 +6510,6 @@ def forward(self, b_a_buffer, x):
                 return (x + y) * self.buffer
 
             def forward(self, x):
-                # TODO: need combine_mode='generic' here as lifted arguments are not yet supported in inductor
                 return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
 
         inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
@@ -9634,6 +9696,27 @@ graph():
             )
         )
 
+    @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
+    @testing.expectedFailureSerDer  # register_constant needs to handle serialization
+    def test_register_constant(self):
+        @dataclass
+        class MyInput:
+            int_1: int
+            int_2: int
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, f):
+                return x + f.int_1 + f.int_2
+
+        register_constant(MyInput)
+        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
@@ -12016,6 +12099,7 @@ class GraphModule(torch.nn.Module):
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
     @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -12033,6 +12117,7 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(len(nodes), 1)
 
     @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

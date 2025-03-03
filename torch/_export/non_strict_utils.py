@@ -94,7 +94,13 @@ def fakify(
         return t
 
     if not isinstance(t, torch.Tensor):
-        raise ValueError(f"Unsupported input type {type(t)}")
+        raise ValueError(
+            f"Unsupported input type {type(t)}. "
+            "Export only supports pytree containers of basic types (Tensor, int, float, ...) as input. "
+            "To register a custom dataclass, use torch.export.register_dataclass. "
+            "To register a custom container type, use torch.utils._pytree.register_pytree_node. "
+            "To register a constant input, use torch.utils._pytree.register_constant"
+        )
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
