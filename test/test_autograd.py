@@ -47,6 +47,7 @@ from torch.autograd.profiler_util import (
     FunctionEvent,
     FunctionEventAvg,
 )
+from torch.overrides import TorchFunctionMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -80,7 +81,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import (
@@ -7547,7 +7547,6 @@ for shape in [(1,), ()]:
                 self.assertTrue(
                     log[-3] == "mode3" and log[-2] == "mode2" and log[-1] == "mode1"
                 )
-
 
                 log = []
                 out.backward()
