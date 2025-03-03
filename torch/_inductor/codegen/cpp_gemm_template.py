@@ -1043,7 +1043,8 @@ class CppGemmTemplate(CppTemplate):
             blocked_w = cls.block_weight(W, new_size, padding)
             new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
         elif isinstance(W, ir.IRNode):
-            blocked_w = ir.ExternKernel.require_contiguous(W)
+            # Require W layout to be fixed & contiguous, happens inplace.
+            ir.ExternKernel.require_contiguous(W)
 
         def _is_int8_gemm(inputs):
             return (
