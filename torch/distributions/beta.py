@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
-from numbers import Number, Real
-
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Beta"]
@@ -29,6 +28,7 @@ class Beta(ExponentialFamily):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
+
     arg_constraints = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
@@ -37,7 +37,7 @@ class Beta(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration1, concentration0, validate_args=None):
-        if isinstance(concentration1, Real) and isinstance(concentration0, Real):
+        if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
             )
@@ -62,19 +62,19 @@ class Beta(ExponentialFamily):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.concentration1 / (self.concentration1 + self.concentration0)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self._dirichlet.mode[..., 0]
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         total = self.concentration1 + self.concentration0
         return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
-    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = ()) -> Tensor:
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):
@@ -87,23 +87,23 @@ class Beta(ExponentialFamily):
         return self._dirichlet.entropy()
 
     @property
-    def concentration1(self):
+    def concentration1(self) -> Tensor:
         result = self._dirichlet.concentration[..., 0]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result
 
     @property
-    def concentration0(self):
+    def concentration0(self) -> Tensor:
         result = self._dirichlet.concentration[..., 1]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration1, self.concentration0)
 
     def _log_normalizer(self, x, y):

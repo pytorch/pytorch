@@ -75,6 +75,71 @@ class TestUtils(TestCase):
             )
         )
 
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+            "inline_inbuilt_nn_modules": False,
+        }
+    )
+    def test_graph_break_counting(self):
+        """
+        Run a compilation that includes a graph break and validate that the
+        graph break counter is incremented.
+        """
+
+        def run_forward_backward():
+            model = torch.compile(TestModel())
+            x = torch.rand([3], requires_grad=True)
+            output = model(x)
+            loss_fn = torch.nn.MSELoss()
+            target = torch.tensor([1.0])
+            loss = loss_fn(output, target)
+            loss.backward()
+
+        @torch.compile
+        def add(x, y):
+            return x + y
+
+        @torch.compile
+        def break_it(x):
+            y = x.sum()
+            if y > 0:
+                return x + y.item()
+            return x - y.item()
+
+        @torch.compile
+        def break_it2(x):
+            y = x.sum()
+            if y > 0:
+                if y > 1:
+                    return x * y.item()
+                return x + y.item()
+            return x - y.item()
+
+        add(torch.rand([10]), torch.rand([10]))
+        utils.reset_frame_count()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 0)
+
+            # We should fallback to normal mode and increment the graph break counter
+            torch.compile(break_it, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 1)
+
+            # Graph break counter should be incremented by 1 (after a reset), not 2
+            torch.compile(break_it, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 1)
+
+            # Graph break counter should be incremented by 2
+            torch.compile(break_it2, backend="inductor")(torch.ones(3, 3))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+            self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -169,7 +234,8 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0]}""",  # noqa: B950
+ 'create_aot_dispatcher_function': [0.0],
+ 'gc': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -186,6 +252,7 @@ class TestDynamoTimed(TestCase):
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
  'entire_frame_compile': 0.0,
+ 'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}""",  # noqa: B950
         )
@@ -210,6 +277,8 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        # guard_latency_us is not deterministic
+        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -242,6 +311,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
@@ -257,12 +327,15 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': True,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
  'non_compliant_ops': set(),
+ 'num_graph_breaks': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -278,6 +351,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
@@ -285,6 +361,7 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -317,6 +394,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
  'graph_op_count': None,
@@ -332,12 +410,15 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': False,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
  'non_compliant_ops': None,
+ 'num_graph_breaks': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
+ 'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -353,6 +434,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
@@ -375,6 +459,7 @@ class TestInductorConfigParsingForLogging(TestCase):
 
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertTrue(isinstance(inductor_config_json, str))
+        self.assertIn('trace"', inductor_config_json)
 
     @mock.patch("torch._dynamo.utils.torch._inductor.config")
     def test_inductor_config_parsing_non_conforming_items(self, mocked_inductor_config):
@@ -387,27 +472,25 @@ class TestInductorConfigParsingForLogging(TestCase):
         """
         obj = TestCase
         test_mock_config = {
-            "some": {1: "0", obj: "this", "name": obj, "some": True},
-            "data": {1: "0", obj: "this", "name": obj, "some": True},
+            "some": {"name": obj, "some": True},
+            "data": {"name": obj, "some": True},
             "list": [
-                {1: "0", obj: "this", "name": obj, "some": True},
-                {1: "0", obj: "this", "name": obj, "some": True},
+                {"name": obj, "some": True},
+                {"name": obj, "some": True},
             ],
             "object": {
-                1: "0",
-                obj: "this",
                 "name": obj,
                 "some": True,
-                "data": {1: "0", obj: "this", "name": obj, "some": True},
+                "data": {"name": obj, "some": True},
             },
         }
         expected = (
-            """{"some": {"1": "0", "name": "Value is not JSON serializable", "some": true},"""
-            """ "data": {"1": "0", "name": "Value is not JSON serializable", "some": true}, "list": """
-            """[{"1": "0", "name": "Value is not JSON serializable", "some": true}, """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}], "object": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true, "data": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}}}"""
+            """{"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"list": [{"name": "Value is not JSON serializable", "some": true}, """
+            """{"name": "Value is not JSON serializable", "some": true}], """
+            """"object": {"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"name": "Value is not JSON serializable", "some": true}, """
+            """"some": {"name": "Value is not JSON serializable", "some": true}}"""
         )
         mocked_inductor_config.get_config_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()

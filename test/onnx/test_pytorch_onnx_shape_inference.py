@@ -350,7 +350,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         # the added "Cast" node doesn't stop shape inference.
         cond = g.addInput()
         cond.setType(input.type().with_dtype(torch.int32).with_sizes([1]))
-        if_op, (if_context, else_context), new_node = jit_utils.add_op_with_blocks(
+        _, (if_context, else_context), new_node = jit_utils.add_op_with_blocks(
             as_graphcontext(g), "If", cond, n_blocks=2
         )
         block1_output = if_context.op("Add", input, input)

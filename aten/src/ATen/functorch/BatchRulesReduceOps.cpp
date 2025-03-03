@@ -11,6 +11,7 @@
 
 #include <utility>
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
@@ -216,8 +217,8 @@ static void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit
   }
   op.callBoxed(stack);
 
-  const auto returns = torch::jit::pop(*stack, num_returns);
-  for (const auto& ret : returns) {
+  auto returns = torch::jit::pop(*stack, num_returns);
+  for (auto& ret : returns) {
     if (ret.isTensor()) {
       auto res = ret.toTensor();
       // see NOTE: [boxed_reduction_batch_rule scalar tensor handling]
@@ -227,7 +228,7 @@ static void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit
         TORCH_INTERNAL_ASSERT(res.size(-1) == 1);
         res = res.squeeze(-1);
       }
-      torch::jit::push(stack, makeBatched(res, 0, cur_level));
+      torch::jit::push(stack, makeBatched(std::move(res), 0, cur_level));
     } else {
       TORCH_INTERNAL_ASSERT(false, "This boxed batching rule does not currently support ops that return non-tensor values");
     }
@@ -510,3 +511,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 } // namespace at::functorch
+// NOLINTEND(bugprone-unchecked-optional-access)

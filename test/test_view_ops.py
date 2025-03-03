@@ -74,7 +74,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -1546,7 +1546,7 @@ class TestOldViewOps(TestCase):
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
+            for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
                     for contiguous in [False, True]:
                         # Generate Input.
@@ -1994,6 +1994,18 @@ class TestOldViewOps(TestCase):
             x.resize_([8, 8, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
+
+    @onlyNativeDeviceTypes
+    def test_as_strided_overflow_storage_offset(self, device):
+        t = torch.randn(2, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**63 - 1)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**61 - 1)
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):

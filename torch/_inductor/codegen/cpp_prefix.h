@@ -24,6 +24,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
+#include <c10/util/irange.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -135,10 +136,10 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
 
 template <typename T>
 struct IndexValue {
-  int64_t index;
+  int64_t index{};
   T value;
-  IndexValue(int64_t idx, T val) :index(idx), value(val) {};
-  IndexValue() {};
+  IndexValue(int64_t idx, T val) :index(idx), value(val) {}
+  IndexValue() = default;
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
@@ -563,16 +564,16 @@ constexpr float uint32_to_uniform_float(uint32_t value) {
   return static_cast<float>(value & 0x7FFFFFFF) * scale;
 }
 
-float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
+inline float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
   return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
 }
 
-float randn_cpu(uint32_t seed, uint32_t offset) {
+inline float randn_cpu(uint32_t seed, uint32_t offset) {
   at::Philox4_32 engine(seed, 0, offset);
   return engine.randn(10);
 }
 
-int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+inline int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
@@ -586,13 +587,13 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
@@ -643,9 +644,40 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }
+
+template <typename T, bool atomic_add>
+struct transpose_mxn_helper;
+
+template <typename T>
+struct transpose_mxn_helper<T, true> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        for (int i = 0; i < M; i++) {
+          for (int j = 0; j < N; j++) {
+            atomic_add(&dst[j*ld_dst + i], src[i*ld_src + j]);
+          }
+        }
+    }
+};
+
+template <typename T>
+struct transpose_mxn_helper<T, false> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        at::vec::transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
+    }
+};
+
+template <typename T, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+  transpose_mxn_helper<T, atomic_add>::call(src, ld_src, dst, ld_dst, M, N);
+}
+
+template <typename T, int M, int N, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T, atomic_add>(src, ld_src, dst, ld_dst, M, N);
+}
 #endif
 
-std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
+inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
   int count = 0;
   for (int64_t i = std::sqrt(number); i > 0; --i) {
     if (number % i == 0) {
@@ -663,7 +695,7 @@ std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
   return std::make_tuple(factors, count);
 }
 
-std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
+inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>> cache;
   auto it = cache.find(number);
   if (it != cache.end()) {
@@ -675,7 +707,7 @@ std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   }
 }
 
-void _mm_get_thread_blocking(
+inline void _mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -771,7 +803,7 @@ void _mm_get_thread_blocking(
   assert(Mt != 0);
 }
 
-void mm_get_thread_blocking(
+inline void mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -886,25 +918,23 @@ void mm_get_cache_blocking(
 }
 
 struct amx_tilecfg {
-  uint8_t palette_id;
-  uint8_t start_row;
-  uint8_t reserved_0[14];
-  uint16_t colsb[16];
-  uint8_t rows[16];
+  uint8_t palette_id{0};
+  uint8_t start_row{0};
+  uint8_t reserved_0[14]{};
+  uint16_t colsb[16]{};
+  uint8_t rows[16]{};
 };
 
 class AMXState {
  private:
-  amx_tilecfg tilecfg_;
-  uint8_t rows_;
-  uint16_t colsb_;
-  uint8_t num_tile_rows_;
-  uint8_t num_tile_columns_;
+  amx_tilecfg tilecfg_{};
+  uint8_t rows_{0};
+  uint16_t colsb_{0};
+  uint8_t num_tile_rows_{0};
+  uint8_t num_tile_columns_{0};
 
  public:
-  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
-    memset(&tilecfg_, 0, sizeof(tilecfg_));
-  }
+  AMXState() = default;
 
   inline void configure(
       uint8_t rows,

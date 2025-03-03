@@ -482,11 +482,19 @@ class TestModule(TestCase):
                     output_flattened = torch.utils._pytree.tree_leaves(output)
                     return output_flattened
 
+            def do_check(flat_input):
+                self.assertTrue(
+                    check(
+                        fn_to_gradcheck,
+                        flat_input,
+                        nondet_tol=gradcheck_nondet_tol,
+                        fast_mode=module_info.gradcheck_fast_mode
+                    ))
+
             # check total derivative
             grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
             flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-
-            self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+            do_check(flat_input)
 
             # check partial derivatives
             old_params_requires_grad = [p.requires_grad for p in params]
@@ -501,14 +509,14 @@ class TestModule(TestCase):
                 p.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 p.requires_grad = False
 
             for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
                 obj.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])
@@ -915,7 +923,6 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
-                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]

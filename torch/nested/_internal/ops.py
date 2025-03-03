@@ -3,7 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +13,7 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 from .nested_tensor import NestedTensor
 
 
-__all__: List[Any] = []
+__all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
@@ -585,8 +585,14 @@ def linear_backward_default(func, *args, **kwargs):
         input_2d = inp._values.reshape(-1, weight.size(1))
         dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
-        # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
-        db = grad_output._values
+        # Sum over all but the last dim to get a 1D bias grad. We cannot
+        # rely on the autograd engine to reduce for us, because returning a
+        # tensor aliasing the input would violate the aten signature annotation
+        reduce_dims = tuple(range(grad_output._values.ndim - 1))
+        if reduce_dims == ():
+            db = grad_output._values.clone()
+        else:
+            db = torch.sum(grad_output._values, reduce_dims, keepdim=False)
     return (ds, dw, db)
 
 
@@ -652,9 +658,20 @@ def copy_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     src = new_kwargs.pop("src")
     if inp._size != src._size:
-        raise RuntimeError(
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
-        )
+        # try to recursively copy_ on unbound components to get around nested int mismatch
+        # TODO: eventually do a direct copy when this is possible
+        inp_comps = inp.unbind()
+        inp_comp_shapes = [c.shape for c in inp_comps]
+        src_comps = src.unbind()
+        src_comp_shapes = [c.shape for c in src_comps]
+        if inp_comp_shapes != src_comp_shapes:
+            raise RuntimeError(
+                "copy_(): expected compatible input and src shapes, but got: "
+                f"{inp.shape} and {src.shape}"
+            )
+        for inp_comp, src_comp in zip(inp_comps, src_comps):
+            inp_comp.copy_(src_comp)
+
     # AOTD allows mutations of inputs only, (not views of the inputs).
     # NJT.values() returns _values.detach() to workaround some issues.
     # To keep mutation in the graph, AOTD manually calls copy_ on the input (NJT).
@@ -673,6 +690,7 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
         torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
+        torch.ops.aten.rand_like.default,
         torch.ops.aten.randn_like.default,
     ],
     "self: jt_all",
@@ -689,7 +707,52 @@ def like_factory_default(func, *args, **kwargs):
     # This should be set to strided for redispatching on values.
     new_kwargs["layout"] = torch.strided
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    new_values = func(inp._values, **new_kwargs)
+    new_offsets = inp._offsets.to(device=new_values.device)
+    new_lengths = None
+    if inp._lengths is not None:
+        new_lengths = inp._lengths.to(device=new_values.device)
+    output_kwargs = extract_kwargs(inp)
+    if "offsets" in output_kwargs:
+        output_kwargs["offsets"] = new_offsets
+    if "lengths" in output_kwargs:
+        output_kwargs["lengths"] = new_lengths
+
+    if inp.device != new_values.device:
+        # Update the nested int registry to indicate that the ragged structure is the same
+        # between the two offsets / lengths on different devices.
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            mb_unwrap_functional_tensor,
+        )
+
+        from .nested_tensor import _tensor_symint_registry
+
+        ragged_source = inp._offsets if inp._lengths is None else inp._lengths
+        new_thing = new_offsets if new_lengths is None else new_lengths
+        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+            # Temporary hack until we have the union find
+            tgt = mb_unwrap_functional_tensor(new_thing)
+            src = mb_unwrap_functional_tensor(ragged_source)
+            tgt.nested_int_memo = src.nested_int_memo
+        else:
+            _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
+
+    return NestedTensor(new_values, **output_kwargs)
+
+
+register_jagged_func(torch.ops.aten.full_like.default, "self: jt_all, fill_value: any")(
+    like_factory_default
+)
+
+register_jagged_func(torch.ops.aten.randint_like.default, "self: jt_all, high: any")(
+    like_factory_default
+)
+
+register_jagged_func(
+    torch.ops.aten.randint_like.low_dtype, "self: jt_all, low: any, high: any"
+)(like_factory_default)
 
 
 @register_jagged_func(torch.ops.aten.zero_.default, "self: jt_all")
@@ -917,8 +980,6 @@ def chunk_default(func, *args, **kwargs):
 
     if operating_on_batch:
         chunks = new_kwargs["chunks"]
-        dim0_size = inp._size[0]
-        chunk_size = math.ceil(dim0_size / chunks)
 
         # get _offsets of the chunks
         lengths = inp._offsets.diff()
@@ -964,7 +1025,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
+    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
         # This torch._check and torch._check_is_size are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -1083,7 +1144,7 @@ def cat_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.matmul.default, "self: jt_all, other: any")
+@register_jagged_func(torch.ops.aten.matmul.default, "self: any, other: any")
 def matmul_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1098,8 +1159,10 @@ def matmul_default(func, *args, **kwargs):
         ]
 
     def _padded_impl(a, b):
-        assert a.is_nested and not b.is_nested
-        nt = a
+        if a.is_nested:
+            nt = a
+        else:
+            nt = b
 
         from .nested_tensor import nested_from_padded
 
@@ -1117,8 +1180,12 @@ def matmul_default(func, *args, **kwargs):
             *nt.shape[nt._ragged_idx + 1 :],
         )
         padded_nt = nt.to_padded_tensor(0.0, output_size=padded_shape)
+        if a.is_nested:
+            padded_t = func(padded_nt, b)
+        else:
+            padded_t = func(a, padded_nt)
         return nested_from_padded(
-            func(padded_nt, b),
+            padded_t,
             offsets=nt._offsets,
             ragged_idx=nt._ragged_idx,
             sum_S=total_L,
@@ -1130,17 +1197,40 @@ def matmul_default(func, *args, **kwargs):
     # NJT x dense
     if inp.is_nested and not other.is_nested:
         # (B, j1, D) x (B, D, E) => (B, j1, E)
-        if inp.dim() >= 3 and inp.dim() == other.dim():
+        if (
+            inp.dim() >= 3
+            and inp.dim() == other.dim()
+            and inp._ragged_idx < inp.dim() - 1
+        ):
             # convert to padded for this
             return _padded_impl(inp, other)
         # Support broadcasting the dense:
         # (B, j1, D) x (D, E) => (B, j1, E)
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
         # etc.
-        elif other.dim() == 2 and inp.dim() > other.dim():
+        elif (
+            other.dim() == 2
+            and inp.dim() > other.dim()
+            and inp._ragged_idx < inp.dim() - 1
+        ):
             return NestedTensor(
                 func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
             )
+    # Dense x NJT
+    elif not inp.is_nested and other.is_nested:
+        # (B, D, E) x (B, E, j1) => (B, E, j1)
+        if other.dim() >= 3 and other.dim() == inp.dim() and other._ragged_idx >= 2:
+            # convert to padded for this
+            return _padded_impl(inp, other)
+        # Support broadcasting the dense:
+        # (D, E) x (B, E, j1) => (B, D, j1)
+        # (D, E) x (B, E, j1, F) => (B, D, j1, F)
+        # etc.
+        elif inp.dim() == 2 and other.dim() > inp.dim() and other._ragged_idx >= 2:
+            return NestedTensor(
+                func(inp, other._values, **new_kwargs), **extract_kwargs(other)
+            )
+
     # NJT x NJT
     elif inp.is_nested and other.is_nested:
         # Support ragged batch dim:
@@ -2016,6 +2106,42 @@ def argmax_default(func, *args, **kwargs):
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 
+@register_jagged_func(
+    torch.ops.aten.value_selecting_reduction_backward.default,
+    "grad: jt_all, dim: any, indices: jt_all, sizes: any, keepdim: any",
+)
+def value_selecting_reduction_backward_default(func, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    grad = new_kwargs.pop("grad")
+    new_kwargs["grad"] = grad._values
+    indices = new_kwargs.pop("indices")
+    new_kwargs["indices"] = indices._values
+    # should always succeed; sizes should contain a nested int
+    ragged_idx = next(i for i, s in enumerate(new_kwargs["sizes"]) if is_nested_int(s))
+    # convert dim -> values-space dim
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        len(new_kwargs["sizes"]),
+        new_kwargs["dim"],
+        ragged_idx,
+        "value_selecting_reduction_backward",
+    )
+    # convert saved NJT sizes -> values-space sizes
+    sizes = new_kwargs.pop("sizes")
+    sizes[ragged_idx] = indices._values.size(indices._ragged_idx - 1)
+    sizes = sizes[1:]
+    new_kwargs["sizes"] = sizes
+
+    output_kwargs = extract_kwargs(indices)
+    output_kwargs["_ragged_idx"] = ragged_idx
+
+    return NestedTensor(func(**new_kwargs), **output_kwargs)
+
+
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")
 def stack_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2410,6 +2536,17 @@ def activation_backward(func, *args, **kwargs):
     )
 
 
+@register_jagged_func(torch.ops.aten.fill.Scalar, "self: jt_all, value: any")
+def fill_Scalar(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.fill_.Scalar, "self: jt_all, value: any")
 def fill__Scalar(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2420,6 +2557,49 @@ def fill__Scalar(func, *args, **kwargs):
 
     func(inp._values, **new_kwargs)
     return inp
+
+
+@register_jagged_func(torch.ops.aten.frexp.Tensor, "self: jt_all")
+def frexp_Tensor(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    output_kwargs = extract_kwargs(inp)
+
+    mantissa, exponent = func(inp._values)
+    return NestedTensor(mantissa, **output_kwargs), NestedTensor(
+        exponent, **output_kwargs
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.matmul_backward.default,
+    "grad: any, self: any, other: any, mask: any",
+)
+def matmul_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    grad = new_kwargs.pop("grad")
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("other")
+    grad_input_mask = new_kwargs.pop("mask")
+
+    if grad is None:
+        return (None, None)
+
+    grad_self = None
+    if grad_input_mask[0]:
+        grad_self = torch.matmul(grad, other.transpose(-1, -2))
+
+    grad_other = None
+    if grad_input_mask[1]:
+        grad_other = torch.matmul(inp.transpose(-1, -2), grad)
+
+    return (grad_self, grad_other)
 
 
 from torch._higher_order_ops.flex_attention import (

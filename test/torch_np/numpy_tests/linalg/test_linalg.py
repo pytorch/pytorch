@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-
 """ Test functions for linalg module
 
 """

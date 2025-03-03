@@ -58,7 +58,7 @@ struct BenchmarkConfig {
   // If set autograd profiler will be enabled. I.e. this variable would be
   // created before the main benchmark loop (but after the warmup):
   // RecordProfile guard(profiler_output_path);
-  std::string profiler_output_path{""};
+  std::string profiler_output_path;
 };
 
 namespace detail {

@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, Optional
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -37,7 +37,7 @@ def _compute_mm_arithmetic_intensity(M: int, N: int, K: int) -> float:
     return M * N * K / (M * K + N * K + M * N)
 
 
-def _filter_nodes_by_target(nodes: List[torch.fx.Node], target) -> List[torch.fx.Node]:
+def _filter_nodes_by_target(nodes: list[torch.fx.Node], target) -> list[torch.fx.Node]:
     return [x for x in nodes if x.target == target]
 
 
@@ -288,7 +288,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 
 @dataclass
 class _Matmul:
-    nodes: List[torch.fx.Node]
+    nodes: list[torch.fx.Node]
     arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
@@ -344,7 +344,7 @@ class _Matmul:
                 node.graph.erase_node(node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_Matmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_Matmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten.mm.default,
@@ -373,7 +373,7 @@ class _ScaledMatmul(_Matmul):
         self.arg_ancestor_nodes |= _find_ancestors(self.B_scale_node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_ScaledMatmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_ScaledMatmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten._scaled_mm.default,
@@ -386,12 +386,104 @@ class _ScaledMatmul(_Matmul):
                 return default
             return node.args[idx]
 
+        def insert_reshape_op(node: torch.fx.Node):
+            """
+            Given a reciprocal node with a parent reshape node,
+            insert a reshape node after the reciprocal node which reshapes
+            the reciprocal output back to the original shape before the first reshape.
+
+            Before:
+                reshape (a,bc,) to (a*b,c) -> reciprocal
+
+            After:
+                reshape (a,bc,) to (a*b,c) -> reciprocal -> reshape (a*b,c) to (a,b,c)
+
+            Returns the new reshape node.
+            """
+            # ensure the given node matches the pattern described in the docstring
+            assert node.target == aten.reciprocal.default, (
+                "Node must be a aten.reciprocal.default op"
+            )
+            assert len(node.all_input_nodes) == 1, "Node must have exactly one parent"
+
+            parent_node = node.all_input_nodes[0]
+            assert parent_node.target == aten.reshape.default, (
+                "Parent node must be a aten.reshape.default op"
+            )
+            assert len(parent_node.all_input_nodes) == 1, (
+                "Parent node must have exactly one input node"
+            )
+
+            parent_input_node = parent_node.all_input_nodes[0]
+            parent_input_shape = list(_get_tensor(parent_input_node).shape)
+
+            # insert reshape back to shape from before the parent reshape op
+            graph = node.graph
+            with graph.inserting_after(node):
+                reshape_node = graph.call_function(
+                    aten.reshape.default, (node, parent_input_shape)
+                )
+
+            # ensure all users of original node (except the reshape node) now use the reshaped node instead
+            node_users = list(node.users)
+            for user in node_users:
+                if user != reshape_node:
+                    user.replace_input_with(node, reshape_node)
+
+            return reshape_node
+
+        is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
+        mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
+
+        # `A_node` is pulled directly from match rather than `mm_node` because it needs to handle
+        # both of the following cases:
+        #
+        # Case 1: single node match (mm):
+        # - match[0].args[0] will be the "A tensor" node of scaled_mm
+        # - Has 2D shape
+        #
+        # Case 2: 3 node match (reshape -> mm -> reshape)
+        # - match[0].args[0] will be the "A tensor" input to the reshape op
+        # - Has 3D+ shape
+        A_node = cast(torch.fx.Node, match[0].args[0])
+        B_node = cast(torch.fx.Node, mm_node.args[1])
+        A_scale_node = cast(torch.fx.Node, mm_node.args[2])
+        B_scale_node = cast(torch.fx.Node, mm_node.args[3])
+
+        A_ndim = _get_tensor(A_node).ndim
+        A_scale_ndim = _get_tensor(A_scale_node).ndim
+        is_reciprocal_with_reshape_parent = (
+            A_scale_node.target == aten.reciprocal.default
+            and len(A_scale_node.all_input_nodes) == 1
+            and A_scale_node.all_input_nodes[0].target == aten.reshape.default
+        )
+        is_tensorwise_scaling = A_scale_ndim <= 1
+
+        # This is a temporary workaround to handle the reshape -> scaled_mm -> reshape
+        # pattern when scales are row-wise, and have been reshaped along with the target
+        # tensor. See https://github.com/pytorch/pytorch/pull/148001 for details.
+        #
+        # If tensor dim does not match scale dim, check if the scale node follows
+        # the "reshape -> reciprocal" pattern. If so, we can insert a reshape op after
+        # the reciprocal, to reshape the reciprocal back to the original shape before
+        # the first reshape op.
+        #
+        # TODO: remove this workaround once torch._scaled_matmul exists and can be used
+        # to implement a more robust long-term support for 3D+ scaled matmuls.
+        if (
+            is_reshape_mm_reshape_pattern
+            and A_ndim != A_scale_ndim
+            and not is_tensorwise_scaling
+            and is_reciprocal_with_reshape_parent
+        ):
+            A_scale_node = insert_reshape_op(A_scale_node)
+
         return _ScaledMatmul(
             nodes=match,
-            A_node=cast(torch.fx.Node, match[0].args[0]),
-            B_node=cast(torch.fx.Node, mm_node.args[1]),
-            A_scale_node=cast(torch.fx.Node, mm_node.args[2]),
-            B_scale_node=cast(torch.fx.Node, mm_node.args[3]),
+            A_node=A_node,
+            B_node=B_node,
+            A_scale_node=A_scale_node,
+            B_scale_node=B_scale_node,
             bias_node=get_arg(mm_node, 4, None),
             result_scale_node=get_arg(mm_node, 5, None),
             out_dtype=get_arg(mm_node, 6, None),
@@ -399,7 +491,7 @@ class _ScaledMatmul(_Matmul):
         )
 
 
-def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
+def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     if node.target != aten.reshape.default:
         return []
 
@@ -447,7 +539,7 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
     return matmuls
 
 
-def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
+def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     """
     Find the matmuls that use `node` as the lhs argument.
     """
@@ -468,7 +560,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
 
 def _insert_fused_all_gather_matmul(
     graph: torch.fx.Graph,
-    matmuls: List[_Matmul],
+    matmuls: list[_Matmul],
     shard_node: torch.fx.Node,
     gather_dim: int,
     group_name: str,
@@ -481,9 +573,10 @@ def _insert_fused_all_gather_matmul(
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_matmul.default,
             args=(shard_node, B_nodes, gather_dim, group_name),
+            kwargs={"return_A": True},
         )
     elif mm_type == _ScaledMatmul:
-        scaled_matmuls = cast(List[_ScaledMatmul], matmuls)
+        scaled_matmuls = cast(list[_ScaledMatmul], matmuls)
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
@@ -592,6 +685,15 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             matmul.erase()
         all_gather.replace_with(new_ag_node)
         all_gather.erase()
+
+        # If the new_ag_node has no users, we tell the fused op to not return
+        # it. This creates more optimization opportunities.
+        if len(new_ag_node.users) == 0:
+            graph.erase_node(new_ag_node)
+            kwargs = dict(fused_node.kwargs)
+            if "return_A" in kwargs:
+                kwargs["return_A"] = False
+                fused_node.kwargs = kwargs
 
     # Raise ancestors of non-A args that are topologically ordered between
     # ag_res_node and the matmul above fused_node.
@@ -749,13 +851,11 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
+) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
     Compute the ancestors for all nodes in a graph.
     """
-    node_to_ancestors = defaultdict(
-        OrderedSet[torch.fx.Node]
-    )  # type: ignore[var-annotated]
+    node_to_ancestors = defaultdict(OrderedSet[torch.fx.Node])  # type: ignore[var-annotated]
     for node in graph.nodes:
         node_to_ancestors[node] = OrderedSet(node.all_input_nodes)
         for dep in node.all_input_nodes:
@@ -766,7 +866,7 @@ def _get_node_to_ancestors(
 
 def _get_collective_to_overlappable_nodes(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+) -> dict[torch.fx.Node, list[torch.fx.Node]]:
     """
     For each collective in the graph, find nodes that are neither ancestors nor
     descendants of the collective.
@@ -796,7 +896,7 @@ def _get_collective_to_overlappable_nodes(
     return collective_to_overlappable_nodes
 
 
-def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
     Find all unexposed collectives in the graph.
 

@@ -785,7 +785,8 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -806,7 +807,8 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -836,7 +838,8 @@ void initJitScriptBindings(PyObject* module) {
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(

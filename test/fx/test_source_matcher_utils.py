@@ -18,6 +18,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -212,6 +213,9 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions[torch.nn.functional.linear]), 4)
         self.assertEqual(len(module_partitions[torch.nn.functional.relu]), 2)
 
+    @skipIfTorchDynamo(
+        "unexplained 3.13 failure: weakref inlining raises dynamic shape error only in 3.13"
+    )
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_legalize_slice(self):
         class M(torch.nn.Module):
@@ -221,7 +225,7 @@ class TestSourceMatcher(JitTestCase):
                 torch._check(b + 1 < y.size(0))
                 return y[: b + 1]
 
-        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)))
+        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)), strict=True)
         fake_inputs = [
             node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder"
         ]
@@ -442,6 +446,38 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions), 2)
         self.assertEqual(len(module_partitions["linear"]), 4)
         self.assertEqual(len(module_partitions["relu"]), 2)
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @parametrize("strict", (True, False))
+    def test_module_partitioner_weight_tied(self, strict: bool):
+        # real-world example: https://github.com/pytorch/pytorch/issues/142035
+        class M(torch.nn.Module):
+            def __init__(self, input_size, output_size):
+                super().__init__()
+                # Define a linear layer
+                self.linear = torch.nn.Linear(input_size, output_size)
+                self.tied_weight = self.linear.weight
+
+            def forward(self, x):
+                # Forward pass through the linear layer
+                b = self.tied_weight + 1
+                return self.linear(x), b
+
+        inputs = (torch.randn(1, 10),)
+        gm = torch.export.export(
+            M(input_size=10, output_size=1), inputs, strict=strict
+        ).module()
+        gm.graph.eliminate_dead_code()
+
+        k = torch.nn.Linear if strict else "linear"
+        module_partitions = get_source_partitions(gm.graph, [k])
+
+        self.assertEqual(len(module_partitions), 1)
+        self.assertEqual(len(module_partitions[k]), 1)
+        self.assertEqual(len(module_partitions[k][0].output_nodes), 1)
+        self.assertEqual(module_partitions[k][0].output_nodes[0].name, "linear")
+        input_node_names = {node.name for node in module_partitions[k][0].input_nodes}
+        self.assertEqual(input_node_names, {"x"})
 
 
 instantiate_parametrized_tests(TestSourceMatcher)

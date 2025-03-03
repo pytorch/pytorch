@@ -23,7 +23,7 @@ from torch.utils.mobile_optimizer import optimize_for_mobile
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -231,7 +231,7 @@ class TestXNNPACKOps(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -753,7 +753,7 @@ class TestXNNPACKSerDes(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -860,7 +860,6 @@ class TestXNNPACKRewritePass(TestCase):
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         output_paddings = (output_pad_h, output_pad_w)
@@ -941,7 +940,7 @@ class TestXNNPACKRewritePass(TestCase):
             Conv2D(), pattern_count_map, data_shape
         )
 
-        transpose_data_shape = (batch_size, input_channels, height, width)
+        transpose_data_shape = (batch_size, input_channels, height, width)  # noqa: F841
         transpose_pattern_count_map = {
             "Tensor = aten::conv_transpose2d": -1,
             "prepacked::conv2d_transpose_clamp_prepack": 1,
@@ -1242,7 +1241,7 @@ class TestXNNPACKRewritePass(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,

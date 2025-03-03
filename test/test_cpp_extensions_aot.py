@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     shell,
     skipIfTorchDynamo,
+    TEST_XPU,
     xfailIfTorchDynamo,
 )
 
@@ -26,7 +27,7 @@ try:
     import pytest
 
     HAS_PYTEST = True
-except ImportError as e:
+except ImportError:
     HAS_PYTEST = False
 
 # TODO: Rewrite these tests so that they can be collected via pytest without
@@ -112,6 +113,22 @@ class TestCppExtensionAOT(common.TestCase):
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+    @unittest.skipIf(not TEST_XPU, "XPU not found")
+    @unittest.skipIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
+    def test_sycl_extension(self):
+        import torch_test_cpp_extension.sycl as sycl_extension
+
+        x = torch.zeros(100, device="xpu", dtype=torch.float32)
+        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+        z = sycl_extension.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
@@ -231,7 +248,7 @@ class TestPybindTypeCasters(common.TestCase):
         Our Pybind functions have a signature of the form `() -> return_type`.
         """
         # Imports needed for the `eval` below.
-        from typing import List, Tuple  # noqa: F401
+        from typing import List, Tuple  # noqa: F401, UP035
 
         return eval(re.search("-> (.*)\n", func.__doc__).group(1))
 
@@ -311,9 +328,9 @@ class TestPybindTypeCasters(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
     def test_unregistered(self):
-        a = torch.arange(0, 10, device="cpu")
+        torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
-            b = torch.arange(0, 10, device="maia")
+            torch.arange(0, 10, device="maia")
 
     @skipIfTorchDynamo("dynamo cannot model maia device")
     def test_zeros(self):
@@ -336,7 +353,7 @@ class TestMAIATensor(common.TestCase):
         b = torch.empty(5, 5, device="maia")
         self.assertEqual(maia_extension.get_test_int(), 0)
 
-        c = a + b
+        a + b
         self.assertEqual(maia_extension.get_test_int(), 1)
 
     def test_conv_backend_override(self):

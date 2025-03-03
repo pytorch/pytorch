@@ -8,16 +8,19 @@ import inspect
 import logging
 import operator
 import sys
+from collections import OrderedDict
+from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable, Dict, Iterator, Optional, OrderedDict, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._C import _fx_map_aggregate as map_aggregate
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
-from .node import Argument, base_types, map_aggregate, Node, Target
+from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -112,6 +115,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "arg_kwarg_vals",
 ]
 
 
@@ -135,18 +139,18 @@ class TracerBase:
     scope: Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, Tuple[str, Any]]
+    module_stack: OrderedDict[str, tuple[str, Any]]
 
     # Mapping of node name to module scope
-    node_name_to_scope: Dict[str, Tuple[str, type]]
+    node_name_to_scope: dict[str, tuple[str, type]]
 
     @compatibility(is_backward_compatible=True)
     def create_node(
         self,
         kind: str,
         target: Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -171,7 +175,7 @@ class TracerBase:
 
         # Optionally set stack trace on the created Node for debugging purposes
         if fx_traceback.has_preserved_node_meta():
-            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+            current_meta: dict[str, Any] = fx_traceback.get_current_meta()
 
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
@@ -211,8 +215,8 @@ class TracerBase:
         self,
         kind: str,
         target: Target,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
         # fix noqa when updating bc tests
@@ -287,6 +291,17 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        # IMPORTANT: Are you here because you are trying to proxy a new type into
+        # the graph? Please Please Please contact someone on the PyTorch Compiler team;
+        # the considerations are subtle.
+        #
+        # 1) When you add a new type, all of the downstream consumers and pass writers
+        # need to handle the new type. torch.fx is intended to be easy to write
+        # passes for, so we will push back against new types.
+        # 2) In torch.compile's IR, there are only specific operations that go
+        # into the graph. In particular, Tensor operations should go into the graph,
+        # but non-Tensor operations shouldn't. What that means is that constructors
+        # for new types *SHOULD NOT* become nodes in the FX graph.
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
         elif hasattr(a, "__fx_create_arg__"):
@@ -455,10 +470,10 @@ class Proxy:
         # we peephole optimize to the method invocation
         return Attribute(self, k)
 
-    def __getstate__(self) -> Dict:
+    def __getstate__(self) -> dict:
         return self.__dict__
 
-    def __deepcopy__(self, memo) -> Dict:
+    def __deepcopy__(self, memo) -> dict:
         # We have to explicitly override this method, because otherwise deepcopy
         # will go to __getattr__(self, "__deepcopy__") and return a
         # Attribute(__deepcopy__), and may go into an infinite loop in some cases.
@@ -564,14 +579,14 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        tracers: Dict[Any, None] = {}
+        tracers: dict[Any, None] = {}
 
         def find_tracer(a):
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        torch.fx.node.map_aggregate(args, find_tracer)
-        torch.fx.node.map_aggregate(kwargs, find_tracer)
+        map_aggregate(args, find_tracer)
+        map_aggregate(kwargs, find_tracer)
 
         if len(tracers) > 1:
             raise RuntimeError(

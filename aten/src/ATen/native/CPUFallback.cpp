@@ -214,7 +214,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  if (tgt_device == std::nullopt) {
+  if (!tgt_device.has_value()){
     tgt_device = compute_target_device(tensor_args, tensorlist_args);
   }
 

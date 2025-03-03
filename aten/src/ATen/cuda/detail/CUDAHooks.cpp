@@ -106,6 +106,10 @@ const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const 
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
+Generator CUDAHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::CUDAGeneratorImpl>(device_index);
+}
+
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
@@ -325,7 +329,7 @@ std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
   int runtimeVersion = 0;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  AT_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
   auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM

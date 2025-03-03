@@ -1734,6 +1734,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
+DEFINE_TO(c10::List<c10::SymInt>, toSymIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
 DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
@@ -1779,7 +1780,7 @@ std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   std::vector<Elem> result;
   result.reserve(list.size());
   for (Elem v : list) {
@@ -1827,7 +1828,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
 template <typename T>
 T generic_to(IValue ivalue, _fake_type<T>) {
   using ElemType = typename std::remove_pointer<T>::type::element_type;
-  return std::move(ivalue).toCustomClass<ElemType>();
+  return std::move(ivalue).template toCustomClass<ElemType>();
 }
 
 template <typename T>
@@ -1871,7 +1872,7 @@ OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
     return {};
   }
   return createVectorFromList<T>(
-    std::move(ivalue).to<c10::List<T>>()
+    std::move(ivalue).template to<c10::List<T>>()
   );
 }
 
@@ -1884,7 +1885,7 @@ std::array<Elem, sizeof...(I)> generic_to_array(
   // We need to do a deep copy of the array because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   TORCH_CHECK(
       list.size() == sizeof...(I),
       "Tried to convert a List with ",
@@ -1929,7 +1930,7 @@ std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
     return std::nullopt;
   }
-  return std::move(ivalue).to<T>();
+  return std::move(ivalue).template to<T>();
 }
 
 namespace detail {
@@ -1989,6 +1990,20 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::SymInt> IValue::toSymIntList() && {
+  AT_ASSERT(
+      isSymIntList() || isIntList(),
+      "Expected SymIntList or IntList but got ",
+      tagKind());
+  return c10::List<c10::SymInt>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::SymInt> IValue::toSymIntList() const& {
+  AT_ASSERT(
+      isSymIntList() || isIntList(),
+      "Expected SymIntList or IntList but got ",
+      tagKind());
+  return c10::List<c10::SymInt>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
   AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());

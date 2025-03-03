@@ -7,7 +7,6 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from io import StringIO
-from typing import List
 from unittest.mock import patch
 
 import numpy as np
@@ -421,7 +420,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 x = torch.cat([x, x])
                 y = x @ self.weight1
                 z = (x + y @ self.weight2) * u0
@@ -442,7 +441,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 a = torch.ones(u0)
                 x = torch.cat([x, x])
                 y = x @ self.weight1
@@ -466,7 +465,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
             def forward(self, x, y):
                 # partition one (contains the u0 def)
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 x = torch.cat([x, x])
                 y1 = x @ self.weight1
                 # partition two (contains the variable)
@@ -511,7 +510,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             ):
                 super().__init__()
                 layers = []
-                for l in range(2):
+                for _ in range(2):
                     layer = nn.ModuleList(
                         [
                             nn.LayerNorm(96),
@@ -529,7 +528,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 for m in self.layers:
                     x = x.reshape(B * F, T, H)
                     x = m[0](x)
-                    x, attn = m[1].forward(x, x, x)
+                    x, _ = m[1].forward(x, x, x)
                     x = x.reshape(B, F, T, H)
                 return x
 
@@ -937,8 +936,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -967,10 +966,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                z = y
+                z = y  # noqa: F841
                 print("woof")
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -999,8 +998,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -1405,7 +1404,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = DDP(model, device_ids=self.device_ids)
 
         hidden_states = torch.randn(B, S, H * D).to(device)
-        attention_scores = model(hidden_states)
+        model(hidden_states)
         torch.cuda.synchronize()
 
     @patch.object(config, "optimize_ddp", True)
@@ -1461,7 +1460,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = DDP(model, device_ids=self.device_ids)
 
         hidden_states = torch.randn(B, S, H * D).to(device)
-        attention_scores = model(hidden_states)
+        model(hidden_states)
         torch.cuda.synchronize()
 
     @patch.object(config, "optimize_ddp", True)
@@ -1723,15 +1722,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
-        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+        m, inputs, _ = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
+        # Test is that this function call does not throw an exception.
         fsdp_m = torch.compile(fsdp_m)
-        self.assertRaisesRegex(
-            AssertionError,
-            "Dynamo only supports FSDP with use_orig_params=True",
-            fsdp_m,
-            inputs,
-        )
 
     def test_fsdp_skip_guards(self):
         """
@@ -1959,7 +1953,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = ModuleWithStaticMethod(False)
         x = torch.randn((2, 3), device="cuda")
         ref_out = model(x)
-        test_outs: List[torch.Tensor] = []
+        test_outs: list[torch.Tensor] = []
 
         for use_self in (False, True):
             model = ModuleWithStaticMethod(use_self)

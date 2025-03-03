@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 import torch
 
@@ -18,6 +18,13 @@ class GuardManager:
     def globals_dict_manager(
         self,
         f_globals: dict[str, Any],
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def framelocals_manager(
+        self,
+        key: tuple[str, int],
         source,
         example_value,
         guard_manager_enum,
@@ -49,6 +56,34 @@ class GuardManager:
         example_value,
         guard_manager_enum,
     ) -> GuardManager: ...
+    def tensor_property_size_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_shape_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_storage_offset_manager(
+        self,
+        idx: None,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def indexed_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
     def lambda_manager(
         self,
         python_lambda,
@@ -69,6 +104,7 @@ class GuardManager:
     def add_torch_function_mode_stack_guard(
         self, initial_stack, verbose_code_parts: list[str]
     ) -> None: ...
+    def add_mapping_keys_guard(sef, value, verbose_code_parts: list[str]) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -112,9 +148,18 @@ def install_storage_overlapping_guard(
     non_overlapping_guard_managers: list[GuardManager],
     verbose_code_parts: list[str],
 ): ...
+def install_symbolic_shape_guard(
+    guard_managers: list[GuardManager],
+    nargs_int: int,
+    nargs_float: int,
+    py_addr: int,
+    py_addr_keep_alive: Any,
+    verbose_code_parts: list[str],
+): ...
 def profile_guard_manager(
     guard_manager: GuardManager,
-    f_locals: Dict[str, Any],
+    f_locals: dict[str, Any],
+    n_iters: int,
 ) -> float: ...
 
 class TensorGuards:

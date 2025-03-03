@@ -38,11 +38,9 @@ env:
   {%- else %}
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   {%- endif %}
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: !{{ build_environment }}
-  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -75,6 +73,7 @@ jobs:
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
+      timeout-minutes: 420
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -112,7 +111,10 @@ jobs:
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
-      {%- elif config["gpu_arch_type"] == "cuda" %}
+      {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] == "12.8" %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] != "12.8"%}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
       {%- else %}

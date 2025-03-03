@@ -227,15 +227,10 @@ TuningResultsValidator::TuningResultsValidator() {
   }
   // rocblas
   {
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-#undef XSTRINGIFY
-#undef STRINGIFY
+    size_t rocblas_version_size;
+    rocblas_get_version_string_size(&rocblas_version_size);
+    std::string rocblas_version(rocblas_version_size - 1, '\0');
+    rocblas_get_version_string(rocblas_version.data(), rocblas_version_size);
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
@@ -459,6 +454,8 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
   }
 }
 
@@ -578,20 +575,28 @@ bool TuningContext::IsICacheFlushEnabled() const {
 }
 
 void TuningContext::SetRotatingBufferSize(int size) {
-  rotating_buffer_size_ = size < 0 ? 0 : size;
+  // Any negative rotating buffer size means l2_cache_size
+  // see GetRotatingBufferSize
+  //
+  // size is set in MB like the environment variable
+  constexpr int MB = 1024 * 1024;
+  rotating_buffer_size_ = size * MB;
 }
 
 int TuningContext::GetRotatingBufferSize() const {
+  // If the environment variable is negative or not set, return the L2 cache size.
+  // The default rotating_buffer_size is -1, but this member function will
+  // return l2_cache size.
+  // This member function will always return a zero or a positive integer.
   static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-  if (env.has_value()) {
+  int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  if (env.has_value()) {  // env variable is set
     constexpr int MB = 1024 * 1024;
     int val = stoi(env.value());
-    return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
+    return val < 0 ? l2_cache_size : val * MB;  // env var is specified as MB, returned as bytes
   }
-  else {
+  else {  // env variable is not set
     if (rotating_buffer_size_ < 0) {
-      // negative buffer size (default) means query for L2 cache size
-      int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
       return l2_cache_size;
     }
     else {
