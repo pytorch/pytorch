@@ -12,7 +12,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   docker-cache:
