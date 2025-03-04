@@ -4,6 +4,7 @@ import io
 import sys
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -14,19 +15,22 @@ from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.c10d_logger import _c10d_logger
 from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
-from torch.distributed.checkpoint.utils import _create_file_view, find_state_dict_object, _DistWrapper
-import torch.distributed as dist
+from torch.distributed.checkpoint.utils import (
+    _create_file_view,
+    _DistWrapper,
+    find_state_dict_object,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
-from torch.testing._internal.distributed.distributed_utils import with_fake_comms
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
+from torch.testing._internal.distributed.distributed_utils import with_fake_comms
 
 
 if TEST_WITH_DEV_DBG_ASAN:
