@@ -827,11 +827,11 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(torch.real(self), dim, keepdim=True)
-    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
-    maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
+        return torch.sum(torch.exp(self), dim, keepdim).log()  # type: ignore[arg-type]
+    maxes = torch.amax(torch.real(self), dim, keepdim=True)  # type: ignore[arg-type]
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)  # type: ignore[assignment]
+    maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)  # type: ignore[call-overload]
+    result = torch.sum(torch.exp(self - maxes), dim, keepdim)  # type: ignore[arg-type]
     return result.log().add(maxes_squeezed)
 
 
@@ -2269,7 +2269,7 @@ def all(
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
+    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))  # type: ignore[arg-type]
 
     if a.dtype == torch.uint8:
         result = result.to(dtype=torch.uint8)
@@ -2288,7 +2288,7 @@ def any(
     if isinstance(dim, (list, tuple)) and len(dim) == 0:
         result = a_.clone()
     else:
-        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
+        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)  # type: ignore[arg-type]
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
