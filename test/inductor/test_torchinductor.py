@@ -4273,10 +4273,11 @@ class CommonTemplate:
         prims = torch.ops.prims
 
         def fn(x):
-            kernel_size = [3, 3]
-            stride = [2, 2]
-            padding = [1, 1]
-            dilation = [1, 1]
+            dim = 2
+            kernel_size = [3] * dim
+            stride = [2] * dim
+            padding = [1] * dim
+            dilation = [1] * dim
             ceil_mode = False
 
             vals, offsets = prims._low_memory_max_pool_with_offsets(
@@ -4289,8 +4290,8 @@ class CommonTemplate:
             )
             indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
-                kernel_size[1],
-                x.size(-1),
+                kernel_size,
+                x.size[-dim:],
                 stride,
                 padding,
                 dilation=dilation,
