@@ -10,17 +10,6 @@ T complex_div(T a, T b) {
   return T(dot(a, b), a.y * b.x - a.x * b.y) / denom;
 }
 
-struct erfinv_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(erfinv(x));
-  }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return erfinv(static_cast<float>(x));
-  }
-};
-
 struct exp_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -93,6 +82,8 @@ struct sqrt_functor {
   }
 };
 
+DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
+
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
@@ -131,13 +122,14 @@ kernel void round_decimals_kernel(
       rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
 }
 
-#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                 \
-  template [[host_name("round_decimals_" #DTYPE "_" #DTYPE)]] kernel void \
-  round_decimals_kernel(                                                  \
-      device DTYPE* output [[buffer(0)]],                                 \
-      constant DTYPE* input [[buffer(1)]],                                \
-      constant long& ndigits [[buffer(2)]],                               \
-      uint id [[thread_position_in_grid]])
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                  \
+  template                                                                 \
+      [[host_name("round_decimals_dense_" #DTYPE "_" #DTYPE)]] kernel void \
+      round_decimals_kernel(                                               \
+          device DTYPE* output [[buffer(0)]],                              \
+          constant DTYPE* input [[buffer(1)]],                             \
+          constant long& ndigits [[buffer(2)]],                            \
+          uint id [[thread_position_in_grid]])
 
 INSTANTIATE_ROUND_DECIMALS(float);
 INSTANTIATE_ROUND_DECIMALS(half);
