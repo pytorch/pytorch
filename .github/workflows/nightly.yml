@@ -72,7 +72,7 @@ jobs:
             pin-folder: .ci/docker/ci_commit_pins
     if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
-      - name: update-vision-commit-hash
+      - name: "${{ matrix.repo-owner }}/${{ matrix.repo-name }} update-commit-hash"
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         with:
           repo-owner: ${{ matrix.repo-owner }}
