@@ -973,8 +973,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    cplState = getPipelineStateForFunc(
-        fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
+    cplState = getPipelineStateForFunc(fmt::format(
+        "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
 
     if (!outputTensor.is_contiguous()) {
       outputTensor = outputTensor.contiguous();
