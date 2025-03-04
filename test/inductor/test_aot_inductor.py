@@ -1164,18 +1164,16 @@ class AOTInductorTestsTemplate:
 
     def test_aoti_constant_tensor(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, device):
                 super().__init__()
-                self.a = torch.ones(4, 4)
-                self.b = torch.ones(4, 4)
+                self.a = torch.ones(4, 4, device=device)
+                self.b = torch.ones(4, 4, device=device)
 
             def forward(self, x):
                 return torch.ops.aten.linear.default(x, self.a, self.b)
 
-        ep = torch.export.export(
-            Foo(), (torch.ones(4, 4),), strict=False
-        ).run_decompositions({})
-        _ = torch._inductor.aoti_compile_and_package(ep)
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        self.check_model(Foo(self.device), example_inputs)
 
     def test_large_grid(self):
         if self.device != GPU_TYPE:
