@@ -583,7 +583,6 @@ def _sdpa_handler(
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     elif op_call == aten._scaled_dot_product_cudnn_attention.default:
-        print("Using CUDNN")
         local_results = _scaled_dot_product_ring_cudnn_attention(
             op_info.mesh,
             *op_info.local_args,  # type: ignore[arg-type]

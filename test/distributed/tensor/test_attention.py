@@ -21,6 +21,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -37,11 +38,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 c10d_functional = torch.ops.c10d_functional
 backends = []
-# if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-#     backends.append(SDPBackend.FLASH_ATTENTION)
-# if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
-#     backends.append(SDPBackend.EFFICIENT_ATTENTION)
-backends.append(SDPBackend.CUDNN_ATTENTION)
+if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+    backends.append(SDPBackend.FLASH_ATTENTION)
+if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+    backends.append(SDPBackend.EFFICIENT_ATTENTION)
+if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+    backends.append(SDPBackend.CUDNN_ATTENTION)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -73,8 +75,7 @@ class RingAttentionTest(DTensorTestBase):
                 "backend": backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
-                # "test_forward_only": [True, False],
-                "test_forward_only": [True],
+                "test_forward_only": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
@@ -88,6 +89,10 @@ class RingAttentionTest(DTensorTestBase):
         rotater: _RotateMethod,
         test_forward_only: bool,
     ) -> None:
+        # TODO: SDPBackend.CUDNN_ATTENTION does not support backward so far
+        if not test_forward_only and backend == SDPBackend.CUDNN_ATTENTION:
+            return
+
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -194,9 +199,7 @@ class RingAttentionTest(DTensorTestBase):
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 1e-3 * self.world_size
             )
-            print(f"out={out}, cp_out={cp_out}")
-            # self.assertTrue(torch.allclose(out, cp_out, atol=atol))
-            self.assertEqual(out, cp_out)
+            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
 
             if not test_forward_only:
                 cp_dq, cp_dk, cp_dv = context_parallel_unshard(

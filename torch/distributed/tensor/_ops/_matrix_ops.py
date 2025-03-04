@@ -573,11 +573,9 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
         _,  # value
         attn_bias_strategy,
         _,  # compute_log_sumexp
-        _,  # dropout_p
-        _,  # is_causal
-        *rest_args,
+        *rest_args,  # optional args: dropout_p, is_causal, return_debug_mask, scale
     ) = op_schema.args_schema
-    return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[0]
+    return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
     has_attn_bias = attn_bias_strategy is not None
     debug_attn_mask_sharding: Optional[Placement] = Replicate()
 
