@@ -81,7 +81,13 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented_v2, Unsupported
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    format_graph_break_message,
+    unimplemented_v2,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
@@ -538,8 +544,27 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+    # graph break message fields for data dependent branching
+    _gb_type = "Data-dependent branching"
+    _explanation = (
+        "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
+        "Dynamo does not support tracing dynamic control flow."
+    )
+    _hints = [
+        *graph_break_hints.FUNDAMENTAL,
+        "Use `torch.cond` to express dynamic control flow.",
+    ]
+
     def jump_graph_break(self, inst, value, extra_msg=""):
-        log_graph_break(self.code_options, reason="Data-dependent branching")
+        log_graph_break(
+            self.code_options,
+            reason=format_graph_break_message(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints,
+            ),
+        )
         if not self.should_compile_partial_graph():
             unimplemented_v2(
                 gb_type="Should not compile partial graph (data-dependent branching)",
@@ -747,11 +772,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                raise exc.UserError(
-                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                    "Dynamic control flow is not supported at the moment. Please use "
-                    "torch.cond to explicitly capture the control flow.",
-                    case_name="cond_operands",
+                unimplemented_v2(
+                    gb_type=_gb_type,
+                    context=f"attempted to jump with {value}",
+                    explanation=_explanation,
+                    hints=_hints,
                 )
 
     return inner
@@ -1195,7 +1220,7 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
-                if hasattr(e, "msg") and "data-dependent" in e.msg:
+                if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     print(
                         "\n"
                         + torch.fx.GraphModule(
