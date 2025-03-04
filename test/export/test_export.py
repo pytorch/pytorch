@@ -4271,21 +4271,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         m = BasicDynamiShapeModel()
         a = torch.randn(3, 4)
-        # dim0_x = torch.export.Dim("dim0_x", min=3)
-        # dim1_x = torch.export.Dim("dim1_x", max=8000)
-        # dynamic_shapes = {"x": (dim0_x, dim1_x)}
-        # em = torch.export._trace._export(
-        #     m,
-        #     (a,),
-        #     dynamic_shapes=dynamic_shapes,
-        #     allow_complex_guards_as_runtime_asserts=True,
-        # )
-        # em.module()(torch.randn(4, 3))
-        # with self.assertRaisesRegex(
-        #     RuntimeError,
-        #     r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, s0 \- 1\), 0\)",
-        # ):
-        #     em.module()(torch.randn(4, 5))
+        dim0_x = torch.export.Dim("dim0_x", min=3)
+        dim1_x = torch.export.Dim("dim1_x", max=8000)
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        em = torch.export._trace._export(
+            m,
+            (a,),
+            dynamic_shapes=dynamic_shapes,
+            allow_complex_guards_as_runtime_asserts=True,
+        )
+        em.module()(torch.randn(4, 3))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, s0 \- 1\), 0\)",
+        ):
+            em.module()(torch.randn(4, 5))
 
         dim0_x = None
         dim1_x = 2 * torch.export.Dim("_dim1_x", max=4000)
@@ -5092,59 +5092,59 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 export(Foo(), inps, dynamic_shapes=new_shapes)
                 return new_shapes
 
-        # # specialize dims + derived dims
-        # class Foo(torch.nn.Module):
-        #     def forward(self, x, y, z):
-        #         x0 = x + y[1:] + z[2:]
-        #         x1 = x @ torch.randn(4, 4)
-        #         return x0, x1
+        # specialize dims + derived dims
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                x0 = x + y[1:] + z[2:]
+                x1 = x @ torch.randn(4, 4)
+                return x0, x1
 
-        # inps = (
-        #     torch.randn(
-        #         4,
-        #     ),
-        #     torch.randn(
-        #         5,
-        #     ),
-        #     torch.randn(
-        #         6,
-        #     ),
-        # )
-        # dx = Dim("dx", max=16)
-        # dynamic_shapes = {"x": (dx,), "y": (dx + 1,), "z": (dx + 2,)}
-        # new_shapes = helper(Foo(), inps, dynamic_shapes)
-        # self.assertEqual(new_shapes["x"][0], 4)
-        # self.assertEqual(new_shapes["z"][0], 6)
+        inps = (
+            torch.randn(
+                4,
+            ),
+            torch.randn(
+                5,
+            ),
+            torch.randn(
+                6,
+            ),
+        )
+        dx = Dim("dx", max=16)
+        dynamic_shapes = {"x": (dx,), "y": (dx + 1,), "z": (dx + 2,)}
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(new_shapes["x"][0], 4)
+        self.assertEqual(new_shapes["z"][0], 6)
 
-        # # refine lower, upper bound
-        # class Foo(torch.nn.Module):
-        #     def forward(self, x, y):
-        #         if x.shape[0] >= 6 and y.shape[0] <= 16:
-        #             return x * 2.0, y + 1
+        # refine lower, upper bound
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] >= 6 and y.shape[0] <= 16:
+                    return x * 2.0, y + 1
 
-        # inps = (torch.randn(16), torch.randn(12))
-        # dynamic_shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
-        # new_shapes = helper(Foo(), inps, dynamic_shapes)
-        # self.assertEqual(new_shapes["x"][0].min, 6)
-        # self.assertEqual(new_shapes["y"][0].max, 16)
+        inps = (torch.randn(16), torch.randn(12))
+        dynamic_shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(new_shapes["x"][0].min, 6)
+        self.assertEqual(new_shapes["y"][0].max, 16)
 
-        # # divisiblity, will introduce new root
-        # class Foo(torch.nn.Module):
-        #     def forward(self, x):
-        #         if x.shape[0] >= 9:
-        #             return x.reshape([-1, 3])
+        # divisiblity, will introduce new root
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] >= 9:
+                    return x.reshape([-1, 3])
 
-        # inps = (
-        #     torch.randn(
-        #         15,
-        #     ),
-        # )
-        # dynamic_shapes = ((Dim("dx"),),)
-        # new_shapes = helper(Foo(), inps, dynamic_shapes)
-        # dim = new_shapes[0][0]
-        # root = dim.root
-        # self.assertEqual(dim.fn(2), 6)
-        # self.assertEqual(root.min, 3)
+        inps = (
+            torch.randn(
+                15,
+            ),
+        )
+        dynamic_shapes = ((Dim("dx"),),)
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        dim = new_shapes[0][0]
+        root = dim.root
+        self.assertEqual(dim.fn(2), 6)
+        self.assertEqual(root.min, 3)
 
         # turn dim into derived dim/relation
         class Foo(torch.nn.Module):
@@ -5161,50 +5161,50 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(new_shapes["y"][0].fn(5), 9)
         self.assertEqual(new_shapes["x"][1], new_shapes["y"][1])  # dx1 = dy1
 
-        # # nested dynamic shapes spec
-        # class Foo(torch.nn.Module):
-        #     def forward(self, x, y):
-        #         x0 = x[0]["data"] + x[1] + x[2][2:]
-        #         x1 = y["a"] @ torch.randn(4, 4)
-        #         x2 = y["b"] @ torch.randn(6, 6)
-        #         return x0, x1, x2
+        # nested dynamic shapes spec
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x0 = x[0]["data"] + x[1] + x[2][2:]
+                x1 = y["a"] @ torch.randn(4, 4)
+                x2 = y["b"] @ torch.randn(6, 6)
+                return x0, x1, x2
 
-        # inps = (
-        #     (
-        #         {"data": torch.randn(4, 4)},
-        #         torch.randn(4, 4),
-        #         torch.randn(6, 4),
-        #     ),
-        #     {
-        #         "a": torch.randn(8, 4),
-        #         "b": torch.randn(9, 6),
-        #     },
-        # )
-        # dynamic_shapes = {
-        #     "x": (
-        #         {"data": (Dim("dx00"), Dim("dx01"))},
-        #         (Dim("dx10"), Dim("dx11")),
-        #         (Dim("dx20"), Dim("dx21")),
-        #     ),
-        #     "y": {
-        #         "a": (Dim("dya0"), Dim("dya1")),
-        #         "b": (Dim("dyb0"), Dim("dyb1")),
-        #     },
-        # }
-        # new_shapes = helper(Foo(), inps, dynamic_shapes)
-        # self.assertEqual(
-        #     new_shapes["x"][0]["data"][0], new_shapes["x"][1][0]
-        # )  # dx10 = dx00
-        # self.assertEqual(
-        #     new_shapes["x"][2][0].root, new_shapes["x"][0]["data"][0]
-        # )  # dx20 = dx00 + 2
-        # self.assertEqual(new_shapes["x"][2][0].fn(10), 12)
-        # self.assertEqual(
-        #     new_shapes["x"][0]["data"][1], new_shapes["x"][1][1]
-        # )  # dx11 = dx01
-        # self.assertEqual(new_shapes["y"]["a"][1], 4)
-        # self.assertEqual(new_shapes["y"]["b"][1], 6)
-        # self.assertEqual(new_shapes["y"]["b"][0].__name__, "dyb0")  # unchanged
+        inps = (
+            (
+                {"data": torch.randn(4, 4)},
+                torch.randn(4, 4),
+                torch.randn(6, 4),
+            ),
+            {
+                "a": torch.randn(8, 4),
+                "b": torch.randn(9, 6),
+            },
+        )
+        dynamic_shapes = {
+            "x": (
+                {"data": (Dim("dx00"), Dim("dx01"))},
+                (Dim("dx10"), Dim("dx11")),
+                (Dim("dx20"), Dim("dx21")),
+            ),
+            "y": {
+                "a": (Dim("dya0"), Dim("dya1")),
+                "b": (Dim("dyb0"), Dim("dyb1")),
+            },
+        }
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(
+            new_shapes["x"][0]["data"][0], new_shapes["x"][1][0]
+        )  # dx10 = dx00
+        self.assertEqual(
+            new_shapes["x"][2][0].root, new_shapes["x"][0]["data"][0]
+        )  # dx20 = dx00 + 2
+        self.assertEqual(new_shapes["x"][2][0].fn(10), 12)
+        self.assertEqual(
+            new_shapes["x"][0]["data"][1], new_shapes["x"][1][1]
+        )  # dx11 = dx01
+        self.assertEqual(new_shapes["y"]["a"][1], 4)
+        self.assertEqual(new_shapes["y"]["b"][1], 6)
+        self.assertEqual(new_shapes["y"]["b"][0].__name__, "dyb0")  # unchanged
 
     def test_dynamic_shapes_spec_with_pytree(self):
         from torch.export import Dim, export
