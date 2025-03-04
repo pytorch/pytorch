@@ -11,11 +11,7 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    make_dynamo_test,
-    parametrize,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class CustomException(Exception):
@@ -557,56 +553,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "exception cause must be"):
             fn(t, e)
 
-    @unittest.expectedFailure
-    @parametrize(
-        "ex",
-        [TypeError, CustomException],
-        name_fn=lambda x: x.__name__,
-    )
-    @make_dynamo_test
-    def test_set___cause__(self, ex):
-        def fn():
-            try:
-                raise ex
-            except ex:
-                raise TypeError from None
-
-        try:
-            fn()
-        except TypeError as e:
-            assert isinstance(e.__context__, ex)
-            assert e.__cause__ is None
-            assert e.__suppress_context__ is True
-
-    @unittest.expectedFailure
-    @parametrize(
-        "ex",
-        [RuntimeError, CustomException],
-        name_fn=lambda x: x.__name__,
-    )
-    @make_dynamo_test
-    def test_set___cause___error(self, ex):
-        def fn():
-            try:
-                raise ex
-            except Exception as e:
-                e.__cause__ = 2
-                raise
-
-        z = 0
-
-        try:
-            fn()
-        except TypeError as e:
-            z = 1
-            assert e.args == (
-                "exception cause must be None or derive from BaseException",
-            )
-        except Exception:
-            raise AssertionError from None
-
-        assert z == 1
-
     def test_user_defined_exception_variable(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -883,9 +829,6 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(c.__context__, b)
         self.assertIs(b.__context__, a)
         self.assertIs(a.__context__, c)
-
-
-instantiate_parametrized_tests(ExceptionTests)
 
 
 if __name__ == "__main__":
