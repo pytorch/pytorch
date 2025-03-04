@@ -333,6 +333,7 @@ def mps_ops_modifier(ops):
         'split_with_sizes_copy',
         'splitlist_args',
         'sqrt',
+        'log',
         'squeeze',
         'squeeze_copy',
         'squeezemultiple',

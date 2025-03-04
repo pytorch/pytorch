@@ -40,6 +40,29 @@ kernel void tanh_kernel(
 }
 
 template <typename T0, typename T1>
+kernel void log_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(precise::log(input[index]));
+}
+
+template <typename T0>
+kernel void log_complex_kernel(
+    device vec2type_t<T0>* output [[buffer(0)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  T0 a = input[index].x;
+  T0 b = input[index].y;
+
+  T0 r = T0(precise::sqrt(a * a + b * b));
+  T0 real_part = T0(precise::log(r));
+  T0 imag_part = T0(precise::atan2(b, a));
+
+  output[index] = vec2type_t<T0>(real_part, imag_part);
+}
+
+template <typename T0, typename T1>
 kernel void sqrt_kernel(
     device T0* output [[buffer(0)]],
     constant T1* input [[buffer(1)]],
@@ -126,6 +149,10 @@ kernel void sinc_complex_kernel(
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                    \
+  template [[host_name("log_" #DTYPE0 "_" #DTYPE1)]] kernel void log_kernel(   \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);                                    \
   template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
@@ -156,6 +183,11 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
       uint did [[thread_position_in_grid]]);                            \
   template [[host_name("sqrt_complex_" #DTYPE "_" #DTYPE)]] kernel void \
   sqrt_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("log_complex_" #DTYPE "_" #DTYPE)]] kernel void  \
+  log_complex_kernel<DTYPE>(                                            \
       device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
       constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
       uint did [[thread_position_in_grid]]);                            \
