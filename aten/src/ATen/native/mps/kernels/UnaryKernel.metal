@@ -59,7 +59,7 @@ struct tanh_functor {
 struct sinc_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return sinc(x);
+    return T(sinc(static_cast<float>(x)));
   }
   template <typename T>
   inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
@@ -137,14 +137,6 @@ kernel void tanh_complex_kernel(
     uint index [[thread_position_in_grid]]) {
   tanh_functor f;
   output[index] = f(input[index]);
-}
-
-template <typename T0, typename T1>
-kernel void sinc_kernel(
-    device T0* output [[buffer(0)]],
-    constant T1* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  output[index] = T0(sinc(static_cast<float>(input[index])));
 }
 
 template <typename T0>
