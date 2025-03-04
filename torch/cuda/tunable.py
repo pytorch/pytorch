@@ -144,7 +144,7 @@ It is also possible to take multiple untuned files and distribute the GEMMs for 
 within a single node. In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated.
 Next, the GEMMs are distributed to different GPUs for tuning. After all GEMMs are tuned, the results from
 all the GPUs are then gathered into a single file whose base filename has `_full0` appended to it
-(e.g. `tunableop_results_full0.csv`). Finally, this new file, containing the gathered results, will be
+(for example ``tunableop_results_full0.csv``). Finally, this new file, containing the gathered results, will be
 duplicated N times, once for each GPU as convenience to the user will run the workload with the tuned
 configuration on N GPUs.::
 
