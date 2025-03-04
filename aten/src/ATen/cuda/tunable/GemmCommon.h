@@ -46,58 +46,59 @@ inline char BlasOpToString(BlasOp op) {
 }
 
 template <typename T>
-inline const char* TypeName(T v) {
+inline const char* BLASTypeName(T v) {
   return "unknown";
 }
 
 template <>
-inline const char* TypeName(float v) {
-  return "float";
+inline const char* BLASTypeName(float v) {
+  return "f32_r";
 }
 
 template <>
-inline const char* TypeName(double v) {
-  return "double";
+inline const char* BLASTypeName(double v) {
+  return "f64_r";
 }
 
 template <>
-inline const char* TypeName(BFloat16 v) {
-  return "BFloat16";
+inline const char* BLASTypeName(BFloat16 v) {
+  return "bf16_r";
 }
 
 template <>
-inline const char* TypeName(Half v) {
-  return "Half";
+inline const char* BLASTypeName(Half v) {
+  return "f16_r";
+}
+
+//https://github.com/ROCm/hipBLASLt/blob/develop/library/src/include/auxiliary.hpp#L175
+template <>
+inline const char* BLASTypeName(Float8_e4m3fn v) {
+  return "f8_r";
 }
 
 template <>
-inline const char* TypeName(Float8_e4m3fn v) {
-  return "Float8_e4m3fn";
+inline const char* BLASTypeName(Float8_e5m2 v) {
+  return "bf8_r";
 }
 
 template <>
-inline const char* TypeName(Float8_e5m2 v) {
-  return "Float8_e5m2";
+inline const char* BLASTypeName(Float8_e4m3fnuz v) {
+  return "f8_fnuz_r";
 }
 
 template <>
-inline const char* TypeName(Float8_e4m3fnuz v) {
-  return "Float8_e4m3fnuz";
+inline const char* BLASTypeName(Float8_e5m2fnuz v) {
+  return "bf8_fnuz_r";
 }
 
 template <>
-inline const char* TypeName(Float8_e5m2fnuz v) {
-  return "Float8_e5m2fnuz";
+inline const char* BLASTypeName(c10::complex<double> v) {
+  return "f64_r";
 }
 
 template <>
-inline const char* TypeName(c10::complex<double> v) {
-  return "c10::complex<double>";
-}
-
-template <>
-inline const char* TypeName(c10::complex<float> v) {
-  return "c10::complex<float>";
+inline const char* BLASTypeName(c10::complex<float> v) {
+  return "f32_r";
 }
 
 // Similar to Compute Type in GemmRocblas.h
@@ -112,50 +113,50 @@ inline std::string ComputeTypeFor() {
 template <>
 inline std::string ComputeTypeFor<float>() {
   if (!at::globalContext().allowTF32CuBLAS()) {
-    return "float";
+    return "f32_r";
   } else {
-    return "xfloat";
+    return "xf32_r";
   }
 }
 
 template <>
 inline std::string ComputeTypeFor<double>() {
-  return "double";
+  return "f64_r";
 }
 
 template <>
 inline std::string ComputeTypeFor<Half>() {
-  return "float";
+  return "f32_r";
 }
 
 template <>
 inline std::string ComputeTypeFor<BFloat16>() {
-  return "float";
+  return "f32_r";
 }
 
 template <>
 inline std::string ComputeTypeFor<c10::complex<float>>() {
-  return "float complex";
+  return "f32_c";
 }
 
 template <>
 inline std::string ComputeTypeFor<c10::complex<double>>() {
-  return "double complex";
+  return "f64_c";
 }
 
 template <>
 inline std::string ComputeTypeFor<Float8_e4m3fn>() {
-  return "float";
+  return "f32_r";
 }
 
 template <>
 inline std::string ComputeTypeFor<Float8_e5m2>() {
-  return "float";
+  return "f32_r";
 }
 
 template <>
 inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
-  return "float";
+  return "f32_r";
 }
 #endif
 
