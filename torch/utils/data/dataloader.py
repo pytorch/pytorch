@@ -292,6 +292,12 @@ class DataLoader(Generic[_T_co]):
                 "pin_memory_device is deprecated, the current accelerator will be used as the device,"
                 f"ignore pin_memory_device='{pin_memory_device}'."
             )
+        if pin_memory and not torch.accelerator.is_available():
+            warn_msg = (
+                "'pin_memory' argument is set as true but no accelerator is found, "
+                "then device pinned memory won't be used."
+            )
+            warnings.warn(warn_msg)
 
         self.pin_memory = pin_memory and torch.accelerator.is_available()
         self.pin_memory_device = (
