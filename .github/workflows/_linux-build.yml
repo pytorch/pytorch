@@ -194,7 +194,7 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          python3 -m tools.stats.monitor > "usage_log_build_${JOB_NAME}_${JOB_ID}.txt" 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download pytest cache
@@ -343,6 +343,16 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
+      - name: Upload raw usage log to s3
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 14
+          if-no-files-found: warn
+          path: usage_log_build_*.txt
+
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/upload-sccache-stats
@@ -351,7 +361,7 @@ jobs:
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.build.conclusion && steps.build.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -360,6 +370,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+          artifact_prefix: usage_log_build
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

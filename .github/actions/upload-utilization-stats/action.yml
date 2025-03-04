@@ -23,7 +23,12 @@ inputs:
       type: string
       description: 'the job name of the test'
       required: True
-
+    artifact-prefix:
+      type: string
+      description: |
+          'the prefix of the raw utilization data, for data stored in zip file, this is the prefix of the parent zip file'
+      default: ""
+      required: False
 runs:
   using: composite
   steps:
@@ -54,3 +59,4 @@ runs:
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
           --job-name "${{inputs.job_name}}"
+          --artifact-prefix "${{inputs.artifact-prefix}}"
