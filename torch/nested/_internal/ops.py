@@ -1793,10 +1793,15 @@ def select_int(func, *args, **kwargs):
         inp.dim(), new_kwargs["dim"], inp._ragged_idx, "select", allow_batch_dim=True
     )
 
-    # handle batch dim slicing via unbind() for now
-    # TODO: make this more efficient
     if operating_on_batch:
-        return inp.unbind()[new_kwargs["index"]]
+        index = new_kwargs["index"]
+        begin, end = inp._offsets[[index, index+1]]
+        if inp._lengths is not None:
+            # if the tensor has a hole, we must include the size of the jagged dim for this element
+            index_len = inp._lengths[index]
+            return inp._values[begin:end, :index_len]
+        # if tensor has no holes, we can just select from the start and end pos
+        return inp._values[begin:end]
 
     if inp._lengths is not None:
         raise ValueError(
