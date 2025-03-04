@@ -9754,7 +9754,7 @@ graph():
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_register_constant(self):
-        @dataclass
+        @dataclass(frozen=True)
         class MyInput:
             int_1: int
             int_2: int
