@@ -4,17 +4,17 @@ from __future__ import annotations
 
 __all__ = [
     "VerificationInfo",
+    "VerificationInterpreter",
     "verify_onnx_program",
 ]
 
-import contextlib
 import dataclasses
 import math
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.utils import _pytree
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -139,27 +139,6 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
-@contextlib.contextmanager
-def _set_graph_outputs(
-    graph: ir.Graph,
-    outputs: list[ir.Value],
-):
-    """Temporarily set the outputs of the graph.
-
-    Args:
-        graph: The graph to set the outputs for.
-        outputs: The outputs to set.
-    """
-    original_outputs = graph.outputs.copy()
-    graph.outputs.clear()
-    graph.outputs.extend(outputs)
-    try:
-        yield
-    finally:
-        graph.outputs.clear()
-        graph.outputs.extend(original_outputs)
-
-
 class VerificationInterpreter(torch.fx.Interpreter):
     def __init__(self, onnx_program: torch.onnx.ONNXProgram):
         if onnx_program.exported_program is None:
@@ -206,14 +185,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
         node_name = n.name
         if node_name not in self._onnx_values:
             return result
-        with _set_graph_outputs(
-            self._onnx_program.model.graph,
-            [self._onnx_values[node_name]],
-        ):
-            print(self._onnx_program.model.graph.outputs)
-            # If the node name is in the ONNX values, we need to set the value
-            # in the ONNX program
-            (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
+        (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
         max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
             _compare_tensors(
                 result,
