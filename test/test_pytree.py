@@ -224,9 +224,10 @@ class TestGenericPytree(TestCase):
         ],
     )
     def test_flatten_unflatten_leaf(self, pytree_impl):
-        leafspec = pytree_impl.tree_structure(object())
-
         def run_test_with_leaf(leaf):
+            leafspec = pytree_impl.tree_structure(object())
+            self.assertTrue(leafspec.is_leaf())
+
             values, treespec = pytree_impl.tree_flatten(leaf)
             self.assertEqual(values, [leaf])
             self.assertEqual(treespec, leafspec)
