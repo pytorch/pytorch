@@ -53,8 +53,7 @@ Dynamic shape operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return torch.nonzero(torch.rand([10, 10]))
-""",
+    return torch.nonzero(torch.rand([10, 10]))""",
         )
 
     def test_dynamic_shape_operator_no_meta_kernel(self):
@@ -75,8 +74,7 @@ Dynamic shape operator (no meta kernel)
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
-""",
+    return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))""",
             )
 
     def test_data_dependent_operator(self):
@@ -93,8 +91,7 @@ Tensor.item
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return x.item()
-""",
+    return x.item()""",
         )
 
     def test_data_dependent_operator2(self):
@@ -117,8 +114,7 @@ Data dependent operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return torch.equal(x, x)
-""",
+    return torch.equal(x, x)""",
             )
 
     def test_super_call_method(self):
@@ -142,8 +138,7 @@ Unsupported method call
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return [x + 1 for x in it]
-""",
+    return [x + 1 for x in it]""",
         )
 
     def test_super_call_function(self):
@@ -166,8 +161,7 @@ Unsupported function call
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return [x + 1 for x in it()]
-""",
+    return [x + 1 for x in it()]""",
         )
 
     def test_unsupported_context(self):
@@ -189,8 +183,7 @@ Unsupported context manager
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    with obj:
-""",
+    with obj:""",
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -214,10 +207,7 @@ Backend compiler exception
     Exception:test
     Traceback:
       File "test_graph_break_messages.py", line N, in fn
-        return x + 1
-
-
-""",
+        return x + 1""",
         )
 
     def test_unsupported_builtin(self):
@@ -239,8 +229,7 @@ Failed to trace builtin operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    print("abc")
-""",
+    print("abc")""",
         )
 
     def test_skipfile_call(self):
@@ -265,8 +254,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return unittest.skip("test")
-""",
+    return unittest.skip("test")""",
             post_munge=post_munge,
         )
 
@@ -287,8 +275,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.disable()
-""",
+    torch._dynamo.disable()""",
         )
 
     def test_skipfile_inline(self):
@@ -316,8 +303,7 @@ Attempted to inline function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    Foo().fn()
-""",
+    Foo().fn()""",
             post_munge=post_munge,
         )
 
@@ -349,8 +335,7 @@ Skip calling `torch.compiler.disable()`d function
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return inner()
-""",
+    return inner()""",
             post_munge=post_munge,
         )
 
@@ -371,8 +356,7 @@ Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.graph_break()
-""",
+    torch._dynamo.graph_break()""",
         )
 
     def test_dynamo_graph_break_fn_with_msg(self):
@@ -392,8 +376,7 @@ Call to `torch._dynamo.graph_break()`
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.graph_break(msg="test graph break")
-""",
+    torch._dynamo.graph_break(msg="test graph break")""",
         )
 
     def test_warnings(self):
@@ -414,8 +397,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    warnings.warn("test")
-""",
+    warnings.warn("test")""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
@@ -540,8 +522,7 @@ Dynamic slicing with Tensor arguments
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return x[:y]
-""",
+    return x[:y]""",
         )
 
     def test_observed_exception(self):
@@ -562,8 +543,7 @@ Observed exception
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    raise RuntimeError("test")
-""",
+    raise RuntimeError("test")""",
         )
 
     def test_uninitialized_module(self):
@@ -588,8 +568,7 @@ Uninitialized nn.Module
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return mod(1)
-""",
+    return mod(1)""",
         )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
@@ -617,8 +596,7 @@ Unsupported nn.Module attribute type
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return mod.attr
-""",
+    return mod.attr""",
         )
 
     def test_generic_ctx_mgr_graph_break(self):
@@ -654,8 +632,7 @@ Graph break under GenericContextWrappingVariable
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.graph_break()
-""",
+    torch._dynamo.graph_break()""",
         )
 
         self.assertExpectedInline(
@@ -692,8 +669,7 @@ Missing bytecode handler
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    class Foo:
-""",
+    class Foo:""",
             post_munge=post_munge,
         )
 
@@ -723,8 +699,7 @@ Reconstruction failure
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return Foo().meth
-""",
+    return Foo().meth""",
             post_munge=post_munge,
         )
 
@@ -776,8 +751,7 @@ Reconstruction failure
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    torch._dynamo.graph_break()
-""",
+    torch._dynamo.graph_break()""",
         )
 
     def test_faketensor_nyi(self):
@@ -805,8 +779,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return torch.ops.mylib.foo(x)
-""",
+    return torch.ops.mylib.foo(x)""",
         )
 
     def test_data_dependent_branching_fullgraph(self):
@@ -829,8 +802,7 @@ Data-dependent branching
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    if x.sum() > 0:
-""",
+    if x.sum() > 0:""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -906,7 +878,6 @@ from user code:
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,
-            strip_torchdynamo_verbose_log=False,
         )
 
     @torch._dynamo.config.patch(verbose=True)
