@@ -7,6 +7,7 @@ __all__ = [
     "verify_onnx_program",
 ]
 
+import contextlib
 import dataclasses
 import math
 from typing import Any, TYPE_CHECKING
@@ -94,10 +95,10 @@ def verify_onnx_program(
         rel_diff = rel_diff.flatten()
         bins = torch.tensor(
             [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
-            dtype=abs_diff.dtype,
+            dtype=torch.float,
         )
-        abs_diff_hist = torch.histogram(abs_diff, bins=bins)
-        rel_diff_hist = torch.histogram(rel_diff, bins=bins)
+        abs_diff_hist = torch.histogram(abs_diff.float(), bins=bins)
+        rel_diff_hist = torch.histogram(rel_diff.float(), bins=bins)
         results.append(
             VerificationInfo(
                 name=str(name),
@@ -136,6 +137,27 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
                 continue
             values[value.name] = value
     return values
+
+
+@contextlib.contextmanager
+def _set_graph_outputs(
+    graph: ir.Graph,
+    outputs: list[ir.Value],
+):
+    """Temporarily set the outputs of the graph.
+
+    Args:
+        graph: The graph to set the outputs for.
+        outputs: The outputs to set.
+    """
+    original_outputs = graph.outputs.copy()
+    graph.outputs.clear()
+    graph.outputs.extend(outputs)
+    try:
+        yield
+    finally:
+        graph.outputs.clear()
+        graph.outputs.extend(original_outputs)
 
 
 class VerificationInterpreter(torch.fx.Interpreter):
@@ -179,26 +201,38 @@ class VerificationInterpreter(torch.fx.Interpreter):
             Any: The result of executing ``n``
         """
         result = super().run_node(n)
+        if n.op != "call_function":
+            return result
         node_name = n.name
-        if node_name in self._onnx_values:
+        if node_name not in self._onnx_values:
+            return result
+        with _set_graph_outputs(
+            self._onnx_program.model.graph,
+            [self._onnx_values[node_name]],
+        ):
+            print(self._onnx_program.model.graph.outputs)
             # If the node name is in the ONNX values, we need to set the value
             # in the ONNX program
             (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
-            max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
-                _compare_tensors(
-                    result,
-                    onnx_result,
-                )
+        max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
+            _compare_tensors(
+                result,
+                onnx_result,
             )
-            self.verification_info.append(
-                VerificationInfo(
-                    name=node_name,
-                    max_abs_diff=max_absolute_difference,
-                    max_rel_diff=max_relative_difference,
-                    abs_diff_hist=torch.histogram(abs_diff),
-                    rel_diff_hist=torch.histogram(rel_diff),
-                    expected_dtype=result.dtype,
-                    actual_dtype=onnx_result.dtype,
-                )
+        )
+        bins = torch.tensor(
+            [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
+            dtype=torch.float,
+        )
+        self.verification_info.append(
+            VerificationInfo(
+                name=node_name,
+                max_abs_diff=max_absolute_difference,
+                max_rel_diff=max_relative_difference,
+                abs_diff_hist=torch.histogram(abs_diff.float(), bins=bins),
+                rel_diff_hist=torch.histogram(rel_diff.float(), bins=bins),
+                expected_dtype=result.dtype,
+                actual_dtype=onnx_result.dtype,
             )
+        )
         return result
