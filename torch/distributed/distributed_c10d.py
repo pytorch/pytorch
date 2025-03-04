@@ -2524,7 +2524,7 @@ class _CoalescingManager:
 def _coalescing_manager(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
-    async_ops: Optional[bool] = False,
+    async_ops: bool = False,
 ):
     """
     Context manager used to coalesce collectives or P2P operations when possible.
@@ -2563,6 +2563,7 @@ def _coalescing_manager(
         group._start_coalescing(device)
     cm = _CoalescingManager()
     yield cm
+    work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
         # Collectives supporting "Fast Path" coalescing are captured.
@@ -2607,11 +2608,14 @@ def _coalescing_manager(
         # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
         work = group._end_coalescing(device)
 
+    if work is None:
+        # Nothing captured, or, the backend has sync'ed at CPP level
+        return
+
     if async_ops:
         cm.append(work)  # type: ignore[possibly-undefined]
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    else:  # Backward compatible with backends that don't sync at CPP level
         work.wait()  # type: ignore[possibly-undefined]
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
@@ -2732,7 +2736,9 @@ def broadcast(
     work = group.broadcast([tensor], opts)
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -2829,7 +2835,9 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -2896,7 +2904,9 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     if async_op:
         return work.get_future()
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -2947,7 +2957,9 @@ def reduce(
     work = group.reduce([tensor], opts)
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -3748,7 +3760,9 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -3857,7 +3871,9 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -3975,7 +3991,9 @@ def all_gather_coalesced(
 
     if async_op:
         return work.get_future()
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4070,7 +4088,9 @@ def gather(
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4175,7 +4195,9 @@ def scatter(
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4216,7 +4238,9 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4318,7 +4342,9 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4491,7 +4517,9 @@ def all_to_all_single(
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4609,7 +4637,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
@@ -4656,7 +4686,9 @@ def barrier(
 
     if async_op:
         return work
-    elif work is not None:  # Backward compatible with backends that don't sync at CPP level
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
