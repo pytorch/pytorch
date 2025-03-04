@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -41,6 +42,26 @@ inline long offset_from_thread_index(
   pos_from_thread_index(idx, pos, sizes, ndim);
   return offset_from_coord(pos, strides, ndim);
 }
+
+template <typename T, typename F>
+kernel void unary_dense(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  output[index] = f(input[index]);
+}
+
+#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                               \
+  static_assert(                                                              \
+      ::metal::                                                               \
+          is_same_v<DTYPE1, ::c10::metal::result_of<NAME##_functor, DTYPE0>>, \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0);     \
+  template [[host_name(#NAME "_" #DTYPE1 "_" #DTYPE0)]] kernel void ::c10::   \
+      metal::unary_dense<DTYPE0, NAME##_functor>(                             \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,    \
+          constant DTYPE0 * input,                                            \
+          uint index)
 
 } // namespace metal
 } // namespace c10

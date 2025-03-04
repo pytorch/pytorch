@@ -1,5 +1,5 @@
+#include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
-#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 using namespace c10::metal;
@@ -92,60 +92,6 @@ struct sqrt_functor {
     return T(real_part, imag_part);
   }
 };
-
-template <typename T, typename F>
-kernel void unary_dense(
-    device result_of<F, T>* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  F f;
-  output[index] = f(input[index]);
-}
-
-#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                           \
-  static_assert(                                                          \
-      is_same_v<DTYPE1, result_of<NAME##_functor, DTYPE0>>,               \
-      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0); \
-  template [[host_name(#NAME "_" #DTYPE1 "_" #DTYPE0)]] kernel void       \
-  unary_dense<DTYPE0, NAME##_functor>(                                    \
-      device result_of<NAME##_functor, DTYPE0> * output,                  \
-      constant DTYPE0 * input,                                            \
-      uint tid)
-
-template <typename T0>
-kernel void exp_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  exp_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void sqrt_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  sqrt_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void tanh_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  tanh_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void sinc_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  output[index] = vec2type_t<T0>(sinc(float2(input[index])));
-}
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
