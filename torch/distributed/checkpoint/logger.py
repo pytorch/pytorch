@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 import time
 from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
@@ -7,6 +8,9 @@ from uuid import uuid4
 
 import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
+
+
+logger = logging.getLogger()
 
 
 __all__: list[str] = []
@@ -101,3 +105,14 @@ def _dcp_method_logger(
         return wrapper
 
     return decorator
+
+
+def _init_logger(rank: int):
+    logger.setLevel(logging.INFO)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        f"[{rank}] %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
