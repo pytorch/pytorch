@@ -3869,8 +3869,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     return work;
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
-    return nullptr;
   }
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
