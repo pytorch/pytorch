@@ -1150,7 +1150,10 @@ class GraphLowering(torch.fx.Interpreter):
                     # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
                     # For custom ops, we constrain_to_fx_strides to maintain the
                     # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
-                    if torch._library.utils.is_builtin(target):
+                    #
+                    # For ATen ops, only apply the constraint for backward
+                    # ops since fwd ops should work for any strides.
+                    if torch._library.utils.is_builtin(target) and self.is_backward:
                         decided_constraint = require_contiguous  # type: ignore[assignment]
                     else:
                         # maybe_layout_constraints will decide the layout constraint for the custom op
