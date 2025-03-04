@@ -339,6 +339,15 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
+    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+        )
+
+    if cls.__hash__ is object.__hash__:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
+        )
 
     def _flatten(x):  # type: ignore[no-untyped-def]
         return [], ConstantNode(x)
@@ -477,6 +486,7 @@ def _deregister_pytree_node(
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
+        CONSTANT_NODES.discard(cls)
 
 
 def _private_register_pytree_node(

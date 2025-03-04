@@ -204,6 +204,36 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
+    def test_allow_in_graph_no_id_reuse(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def do_allow_in_graph(x):
+            return x + 1
+
+        torch._dynamo.allow_in_graph(do_allow_in_graph)
+        del do_allow_in_graph
+
+        # `id(dont_allow_in_graph)` would likely match `id(do_allow_in_graph)`
+        # We want to make sure Dynamo always trace through
+        # `dont_allow_in_graph`, by checking for the explicit graph break.
+        def dont_allow_in_graph(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend=cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = dont_allow_in_graph(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        fn(torch.randn(10))
+
+        # Check for graph break
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
 
@@ -441,66 +471,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
-    def test_nonstrict_trace_pre_existing_register_constant_type(self):
-        class State:
-            def get_num(self):
-                torch._dynamo.graph_break()
-                return 42
-
-        # Assume `State` is implemented in C, and the author didn't bother to
-        # provide a pytree decomposition for it, and its instances are safe to
-        # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
-
-        @torch._dynamo.nonstrict_trace
-        def trace_me(x, s):
-            return x * s.get_num()
-
-        def fn(x, s):
-            res = trace_me(x, s)
-            return res
-
-        x, s = torch.ones(10), State()
-        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
-
-        ref = fn(x, s)
-        res = opt_fn(x, s)
-        self.assertEqual(ref, res)
-
-    def test_nonstrict_trace_pre_existing_register_constant_type_guard_default_eq(self):
-        class State:
-            def get_num(self):
-                torch._dynamo.graph_break()
-                return 42
-
-        # Assume `State` is implemented in C, and the author didn't bother to
-        # provide a pytree decomposition for it, and its instances are safe to
-        # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
-
-        @torch._dynamo.nonstrict_trace
-        def trace_me(x, s):
-            return x * s.get_num()
-
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
-        @torch.compile(fullgraph=True, backend=cnts)
-        def fn(x, s):
-            res = trace_me(x, s)
-            return res
-
-        x, s = torch.ones(10), State()
-        # Make sure recompilation didn't happen.
-        self.assertEqual(cnts.frame_count, 0)
-        fn(x, s)
-        fn(x, s)
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Make sure recompilation did happen.
-        fn(x, State())
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_nonstrict_trace_pre_existing_register_constant_type_guard_custom_eq(self):
+    def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
         class State:
             def __init__(self, n):
                 self.n = n
@@ -511,6 +482,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             def __eq__(self, other):
                 return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
 
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
@@ -761,9 +735,18 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
         class State:
+            def __init__(self, n):
+                self.n = n
+
             def get_num(self):
                 torch._dynamo.graph_break()
-                return 42
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
 
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
@@ -776,7 +759,7 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
 
         @torch.compile(fullgraph=True, backend="aot_eager")
         def fn(x):
-            s = State()
+            s = State(10)
             res = trace_me(x, s)
             return res
 

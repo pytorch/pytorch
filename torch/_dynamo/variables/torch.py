@@ -650,9 +650,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             assert not extra, "Expect 1 input to cudnn.is_acceptable"
-            assert isinstance(tensor, TensorVariable), (
-                "Expect input to cudnn.is_acceptable to be a tensor"
-            )
+            assert isinstance(
+                tensor, TensorVariable
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
