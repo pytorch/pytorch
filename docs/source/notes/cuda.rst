@@ -655,13 +655,16 @@ Using :class:`torch.cuda.MemPool`, you can enable several features, such as:
   happens over NVLinks, which otherwise would have happened over bandwidth-limited, Network Interface
   Card (NIC) links. Such an accelerated all-gather can in turn speed up model checkpointing.
 * If you are crafting a model and don't want to think about the optimal memory placements of a memory
-  intensive module at first (e.g. an embedding table), you could allocate that module with
+  intensive module at first (e.g. an embedding table), or perhaps you have a module which is not
+  performance sensitive and doesn't fit in the GPU, then you could just allocate that module with
   ``cudaMallocManaged`` with preferred CPU location and get your model working first.
-  .. note::
-   While ``cudaMallocManaged`` offers convenient automatic memory management using CUDA Unified Virtual Memory (UVM),
-   it is not recommended for DL workloads. For DL workloads that fit in GPU memory, explicit placement consistently
-   outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
-   saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
+
+.. note::
+
+    While ``cudaMallocManaged`` offers convenient automatic memory management using CUDA Unified Virtual Memory (UVM),
+    it is not recommended for DL workloads. For DL workloads that fit in GPU memory, explicit placement consistently
+    outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
+    saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
 
 Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
 
