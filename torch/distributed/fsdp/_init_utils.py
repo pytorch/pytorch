@@ -243,9 +243,9 @@ def _init_inter_node_process_group(
         if local_rank == my_local_rank:
             inter_node_pg = grp
 
-    assert (
-        inter_node_pg is not None
-    ), f"{my_local_rank} expected to assign inter-node pg, but did not"
+    assert inter_node_pg is not None, (
+        f"{my_local_rank} expected to assign inter-node pg, but did not"
+    )
     return inter_node_pg
 
 
@@ -549,7 +549,7 @@ def _verify_managed_params(module: nn.Module, params: list[nn.Parameter]) -> Non
                     break
             assert param_name
             raise ValueError(
-                "FSDP doesn't support salar parameters. "
+                "FSDP doesn't support scalar parameters. "
                 f"Change {param_name} to a 1D tensor with numel equal to 1."
             )
 
