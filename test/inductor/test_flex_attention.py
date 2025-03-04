@@ -135,7 +135,7 @@ else:
     )
 
     test_dtypes = (
-        [torch.float32, torch.bfloat16]
+        [torch.float32, torch.bfloat16, torch.float16]
         if torch.backends.mkldnn.is_available()
         and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
@@ -2133,10 +2133,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
-    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_non_pow_2_headdim(self, dtype, head_dim):
-        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+        self.run_test(_rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim)
 
     @supported_platform
     def test_GQA_causal_mask(self):
@@ -3381,6 +3381,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
 
     @supported_platform
+    def test_zero_length_sequence_error(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 0, 64),  # Zero in sequence dimension
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        # Test compiled mode - should also raise assertion error
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError, "Query length must be greater than 0"
+        ):
+            flex_compile(query, key, value)
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
@@ -3660,23 +3677,6 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
-    @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
-    def test_validate_cpu_dtype_error_message(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.half,
-            requires_grad=False,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            r"`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. Found input tensors are `torch.float16`.",
-        ):
-            attention(query, key, value)
-
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self):
         class TestModule(torch.nn.Module):
@@ -3697,6 +3697,31 @@ class GraphModule(torch.nn.Module):
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
+    @supported_platform
+    def test_validate_small_embedding_size_error_message(self):
+        # eager support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled cpu support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled gpu kernel does not support small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "NYI: embedding dimension of the query, key, and value must be "
+            "at least 16 but got E=8 and Ev=8",
+        ):
+            compiled_fa(q, k, v)
+
+        # compiled gpu kernel supports large embedding size
+        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
 
 
 class TestBlockMask(InductorTestCase):

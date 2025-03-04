@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
+import unittest
+
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -151,7 +154,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    # TODO(anijain2305) - does not work with fullgraph=True
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -165,8 +168,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         ref = fn(x)
-        # Cant use fullgraph=True because WITH_EXCEPT_START is not supported
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
@@ -333,7 +335,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_call = torch.compile(lambda x: m(x), backend="eager")
         self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
         metrics = torch._dynamo.utils.get_compilation_metrics()
-        self.assertEqual(metrics[0].fail_reason, "Observed exception")
+        self.assertIn("Observed exception", metrics[0].fail_reason)
 
     def test_key_error(self):
         def fn(x, d):

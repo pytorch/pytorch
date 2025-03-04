@@ -19,8 +19,6 @@ TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
 
 namespace torch::jit {
 
-std::ostream& operator<<(std::ostream& out, Instruction inst);
-
 namespace interpreter {
 
 template <class Ttarget, class Tsource>
@@ -62,10 +60,10 @@ struct WithCurrentNode {
 };
 
 struct NodeSourceInfo {
-  const char* func_name_;
-  const char* file_name_;
-  size_t line_;
-  NodeSourceInfo() : func_name_(nullptr), file_name_(nullptr), line_(0) {}
+  const char* func_name_{nullptr};
+  const char* file_name_{nullptr};
+  size_t line_{0};
+  NodeSourceInfo() {}
 };
 
 struct CodeImpl {

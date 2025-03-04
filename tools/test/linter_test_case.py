@@ -19,7 +19,7 @@ class LinterTestCase(TestCase):
 
     def replace(self, s: str):
         linter = self.LinterClass("dummy")
-        pf = self.LinterClass.python_file_class()(linter.linter_name, contents=s)
+        pf = self.LinterClass.make_file(contents=s)
         replacement, _results = linter._replace(pf)
         return replacement
 
@@ -46,7 +46,7 @@ class LinterTestCase(TestCase):
         replacement, results = "(no replacement)", "(no results)"
         with self.subTest("from-lintrunner"):
             linter = self.LinterClass(["--lintrunner", str(path), *args])
-            pf = self.LinterClass.python_file_class()(linter.linter_name, path)
+            pf = self.LinterClass.make_file(path)
             replacement, results = linter._replace(pf)
 
             actual = [json.loads(d) for d in linter._display(pf, results)]
