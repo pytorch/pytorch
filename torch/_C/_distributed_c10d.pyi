@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload, Optional
+from typing import Any, Optional, overload
 
 import torch
 from torch import Tensor
