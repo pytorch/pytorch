@@ -199,7 +199,7 @@ class GlobalWeakRefSource(Source):
 @dataclasses.dataclass(frozen=True)
 class WeakRefCallSource(ChainedSource):
     def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: self.base.reconstruct(codegen))
+        codegen.add_push_null(lambda: codegen(self.base))
         codegen.extend_output(create_call_function(0, False))
 
     def guard_source(self):
@@ -228,7 +228,7 @@ class AttrSource(ChainedSource):
             object.__setattr__(self, "member", member_parts[-1])
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
     def guard_source(self):
@@ -268,7 +268,7 @@ class GradSource(ChainedSource):
     member: str = "grad"
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
     def guard_source(self):
@@ -348,7 +348,7 @@ class TensorPropertySource(ChainedSource):
                 utils.__name__, f"call_{self.prop.method_name()}"
             )
         )
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
         if self.idx is not None:
             codegen.append_output(codegen.create_load_const(self.idx))
@@ -410,7 +410,7 @@ class ConvertIntSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -425,7 +425,7 @@ class FlattenScriptObjectSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -440,7 +440,7 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -451,7 +451,7 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
 
 class AttrProxySource(ChainedSource):
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -468,9 +468,9 @@ class DefaultsSource(ChainedSource):
     _name: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        assert (
-            self.base
-        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        assert self.base, (
+            "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        )
         if self.is_kw:
             assert isinstance(self.idx_key, str)
             object.__setattr__(self, "field", "__kwdefaults__")
@@ -485,7 +485,7 @@ class DefaultsSource(ChainedSource):
             )
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.field))
         codegen.append_output(codegen.create_load_const(self.idx_key))
         codegen.append_output(create_instruction("BINARY_SUBSCR"))
@@ -510,7 +510,7 @@ class GetItemSource(ChainedSource):
             super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         if self.index_is_slice:
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
         else:
@@ -547,7 +547,7 @@ class ConstDictKeySource(ChainedSource):
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
         )
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
@@ -586,11 +586,11 @@ class DictGetItemSource(ChainedSource):
         )
 
         # Load dict
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
         # Load key
         if isinstance(self.index, Source):
-            self.index.reconstruct(codegen)
+            codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
 
@@ -619,7 +619,7 @@ class ListGetItemSource(GetItemSource):
         )
 
         # Load the list
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
         # Load the index
         if self.index_is_slice:
@@ -650,7 +650,7 @@ class TupleIteratorGetItemSource(GetItemSource):
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
         )
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
@@ -665,7 +665,7 @@ class TypeSource(ChainedSource):
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
     def guard_source(self):
@@ -678,7 +678,7 @@ class TypeSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class OptimizerSource(ChainedSource):
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -690,7 +690,7 @@ class OptimizerSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
+        codegen(self.base)
 
     def guard_source(self):
         return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
@@ -778,7 +778,7 @@ class NumpyTensorSource(ChainedSource):
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
-        self.base.reconstruct(codegen)
+        codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
 
