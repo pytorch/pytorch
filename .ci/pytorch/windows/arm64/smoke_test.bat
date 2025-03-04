@@ -12,6 +12,9 @@ exit /b 1
 :wheel
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
+echo Running import test...
+python -c "import torch"
+
 echo Running python rnn_smoke.py...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
