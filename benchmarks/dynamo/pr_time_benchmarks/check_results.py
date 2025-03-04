@@ -210,9 +210,19 @@ def main():
             writer.writerow([])
             writer.writerow([])
 
-    print("new expected results file content if needed:")
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
+    print("To update expected results, run the following command:")
+    print()
+    print("cat > benchmarks/dynamo/pr_time_benchmarks/expected_results.csv << EOF")
     with open(reference_expected_results_path) as f:
-        print(f.read())
+        print(f.read().rstrip())
+    print("EOF")
+    print()
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
 
     if fail:
         print(
