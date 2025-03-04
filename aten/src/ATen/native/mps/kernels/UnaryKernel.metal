@@ -123,25 +123,25 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE0, DTYPE1)                    \
-  template [[host_name("exp_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void  \
-  exp_complex_kernel<DTYPE0>(                                             \
-      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
-      uint did [[thread_position_in_grid]]);                              \
-  template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
-  tanh_complex_kernel<DTYPE0>(                                            \
-      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
-      uint did [[thread_position_in_grid]]);                              \
-  template [[host_name("sqrt_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
-  sqrt_complex_kernel<DTYPE0>(                                            \
-      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)                           \
+  template [[host_name("exp_complex_" #DTYPE "_" #DTYPE)]] kernel void  \
+  exp_complex_kernel<DTYPE>(                                            \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("tanh_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  tanh_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("sqrt_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sqrt_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
       uint did [[thread_position_in_grid]]);
 
-INSTANTIATE_UNARY_KERNELS_VEC2(half, half);
-INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
+INSTANTIATE_UNARY_KERNELS_VEC2(half);
+INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
 template <typename T0, typename T1>
 kernel void sinc_kernel(
