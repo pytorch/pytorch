@@ -58,16 +58,12 @@ struct tanh_functor {
 
 struct sinc_functor {
   template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(sinc(static_cast<float>(x)));
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
+    return sinc(x);
   }
   template <typename T>
   inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
     return sinc(static_cast<float>(x));
-  }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    return T(sinc(static_cast<float2>(x)));
   }
 };
 
