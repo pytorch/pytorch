@@ -1691,7 +1691,15 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
-            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented_v2(
+                gb_type="Attempted to guard on uninitialized nn.Module",
+                context="",
+                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
+                f"nn.Module subclass `{type(val)}`.",
+                hints=[
+                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
+                ],
+            )
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -2234,9 +2242,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert (
-            func_name in self.__class__.__dict__
-        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        assert func_name in self.__class__.__dict__, (
+            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        )
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
