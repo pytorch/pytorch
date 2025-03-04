@@ -3029,6 +3029,10 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       enableTiming_.load(),
       cudaEventCacheEnabled_.load(),
       dist_debug_level_);
+
+  // other functions expect an initialized ptr
+  r->stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+
   if (record) {
     bool isP2P = isP2POp(opType);
     // Ideally record every work that we enqueue, rather than every work we
@@ -3204,10 +3208,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
 
-  // other functions expect an initialized ptr
-  work->stashed_for_allocator_safety_ =
-      std::make_shared<std::vector<at::Tensor>>();
-
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
@@ -3301,8 +3301,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_ =
-        std::make_shared<std::vector<at::Tensor>>(inputs);
+    work->stashed_for_allocator_safety_->insert(
+        work->stashed_for_allocator_safety_->end(),
+        inputs.begin(),
+        inputs.end());
     work->stashed_for_allocator_safety_->insert(
         work->stashed_for_allocator_safety_->end(),
         outputs.begin(),
@@ -3487,8 +3489,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_ =
-        std::make_shared<std::vector<at::Tensor>>(inputs);
+    work->stashed_for_allocator_safety_->insert(
+        work->stashed_for_allocator_safety_->end(),
+        inputs.begin(),
+        inputs.end());
     work->stashed_for_allocator_safety_->insert(
         work->stashed_for_allocator_safety_->end(),
         outputs.begin(),
