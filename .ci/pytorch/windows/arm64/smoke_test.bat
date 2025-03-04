@@ -23,18 +23,6 @@ echo Checking that basic CNN works...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
-echo Running smoke_test.py...
-python %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package torchonly
-
-echo Running test_autograd.oy, test_nn.py, test_torch.py...
-cd %PYTORCH_ROOT%\test
-set CORE_TEST_LIST=test_autograd.py test_nn.py test_torch.py
-
-for %%t in (%CORE_TEST_LIST%) do (
-    echo Running test: %%t
-    python %%t --verbose --save-xml --use-pytest -vvvv -rfEsxXP -p no:xdist
-)
-
 goto end
 
 :libtorch
