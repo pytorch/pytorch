@@ -45,21 +45,6 @@ struct tanh_functor {
   }
 };
 
-struct sinc_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(sinc(static_cast<float>(x)));
-  }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return sinc(static_cast<float>(x));
-  }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    return T(sinc(static_cast<float2>(x)));
-  }
-};
-
 struct sqrt_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -83,6 +68,7 @@ struct sqrt_functor {
 };
 
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
+DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
