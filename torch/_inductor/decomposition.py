@@ -1,3 +1,4 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 # mypy: allow-untyped-decorators
 import functools
 import logging
@@ -33,8 +34,8 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.symbolic_shapes import (
     definitely_true,
-    guard_else_false,
-    guard_else_true,
+    guard_or_false,
+    guard_or_true,
 )
 
 from . import config, inductor_prims
@@ -265,15 +266,11 @@ def bmm(
     batch2: torch.Tensor,
 ) -> torch.Tensor:
     if config.coordinate_descent_tuning and self.device.type != "cpu":
-        if guard_else_false(self.shape[1] == 1) or guard_else_false(
-            batch2.shape[2] == 1
-        ):
+        if guard_or_false(self.shape[1] == 1) or guard_or_false(batch2.shape[2] == 1):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if guard_else_false(self.size(1) == 1) and guard_else_false(
-            batch2.size(-1) == 1
-        ):
+        if guard_or_false(self.size(1) == 1) and guard_or_false(batch2.size(-1) == 1):
             counters["inductor"]["decompose_bmm"] += 1
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
@@ -291,14 +288,14 @@ def addmm(
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if self.device.type == "cpu":
-        if guard_else_false(mat1.size(0) == 1) and guard_else_false(mat2.size(-1) == 1):
+        if guard_or_false(mat1.size(0) == 1) and guard_or_false(mat2.size(-1) == 1):
             counters["inductor"]["decompose_addmm"] += 1
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
         if (
-            guard_else_false(mat1.size(0) == 1)
+            guard_or_false(mat1.size(0) == 1)
             and definitely_true(mat2.size(0) <= 16)
             and definitely_true(mat2.size(1) <= 16)
         ):
@@ -317,23 +314,19 @@ def mm(
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning and self.device.type != "cpu":
-        if guard_else_false(self.shape[0] == 1) or guard_else_false(
-            input2.shape[1] == 1
-        ):
+        if guard_or_false(self.shape[0] == 1) or guard_or_false(input2.shape[1] == 1):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
-            guard_else_false(self.size(-1) == 1)
-            and guard_else_true(self.size(0) > 0)
-            and guard_else_false(input2.size(0) == 1)
+            guard_or_false(self.size(-1) == 1)
+            and guard_or_true(self.size(0) > 0)
+            and guard_or_false(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
             and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if guard_else_false(self.size(0) == 1) and guard_else_false(
-            input2.size(-1) == 1
-        ):
+        if guard_or_false(self.size(0) == 1) and guard_or_false(input2.size(-1) == 1):
             counters["inductor"]["decompose_mm"] += 1
             return torch.sum(
                 self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
@@ -367,10 +360,10 @@ def cat(
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        if len(x.shape) == 1 and guard_else_false(x.shape[0] == 0):
+        if len(x.shape) == 1 and guard_or_false(x.shape[0] == 0):
             return False
 
-        if dim < len(x.shape) and guard_else_false(x.shape[dim] == 0):
+        if dim < len(x.shape) and guard_or_false(x.shape[dim] == 0):
             return False
 
         return True
