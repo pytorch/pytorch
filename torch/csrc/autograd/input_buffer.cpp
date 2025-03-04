@@ -126,6 +126,23 @@ static void accumulate(
   }
 }
 
+inline void sync_streams(
+    std::optional<c10::Stream>& stream_be_synced,
+    std::optional<c10::Stream>& sync_stream,
+    Variable& var,
+    const c10::DeviceType device_type) {
+  TORCH_INTERNAL_ASSERT(sync_stream.has_value());
+  if (!stream_be_synced) {
+    return;
+  }
+  c10::OptionalDeviceGuard device_guard{stream_be_synced->device()};
+  auto event = c10::Event{device_type};
+  event.record(*stream_be_synced);
+  sync_stream->wait(event);
+  const auto guard = c10::impl::VirtualGuardImpl(device_type);
+  record_stream_any_impl(var, *sync_stream);
+}
+
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
@@ -138,31 +155,35 @@ void InputBuffer::add(
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) var is not a CUDA/privateuse1 variable. Accumulation happens on var's
-  //  device. (2) var is a CUDA/privateuse1 variable and it, the consumer, and
-  //  the producer share the same device:
+  //  (1) var is not an accelerator variable. Accumulation happens on
+  //  var's device. (2) var is an accelerator variable and it, the
+  //  consumer, and the producer share the same device:
   //       (2a) Uses the consumer's stream as the accumulation stream
   //       (2b) Syncs the accumulation stream with the producer's stream (if
   //       different) (2c) Accumulates.
-  //  (3) var is a CUDA/privateuse1 variable and it shares a device with the
+  //  (3) var is an accelerator variable and it shares a device with the
   //  consumer but not the producer:
   //       (3a) Uses the consumer's stream as the accumulation stream
-  //       (3b) Syncs the accumulation stream with the consumer device's default
-  //       stream (3c) Accumulates.
-  //  (4) var is a CUDA/privateuse1 variable and it shares a device with the
+  //       (3b) Syncs the accumulation stream with the producer's stream if it
+  //       is not null (3c) Accumulates.
+  //  (4) var is an accelerator variable and it shares a device with the
   //  producer but not the consumer:
-  //       (4a) Uses the producer device's default stream as the accumulation
-  //       stream (4b) Syncs the accumulation stream with the producer's
-  //       stream (4c) Accumulates.
-  //  (5) var is a CUDA/privateuse1 variable and it does not share a device with
-  //  the consumer or producer.
-  //      Accumulation happens on the var device's default stream.
+  //       (4a) Uses the producer stream as the accumulation stream
+  //       (4b) Accumulates
+  //       (4c) Syncs the consumer's stream with the accumulation stream if it
+  //       is not null
+  //  (5) var is an accelerator variable and it does not share a device
+  //  with the consumer or producer.
+  //      Accumulation happens on the var device's stream.
+  //      (5a) Syncs the accumulation stream with the producer's stream
+  //      (5b) Accumulates
+  //      (5c) Syncs the consumer's stream with the accumulation stream
 
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
   const auto device_type = device->type();
-  if (device->is_cuda() || device->is_privateuseone()) {
+  if (at::isAccelerator(device_type)) {
     const auto on_producer =
         opt_producer_stream && device == opt_producer_stream->device();
     const auto on_consumer =
@@ -180,28 +201,53 @@ void InputBuffer::add(
       }
     } else {
       std::optional<c10::Stream> opt_sync_stream = std::nullopt;
-      const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)
         opt_accumulate_stream = opt_consumer_stream;
-        opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
+        opt_sync_stream = opt_producer_stream;
+        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+
+        // (3b)
+        if (buffer[pos].defined()) {
+          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
+          accumulate(buffer, pos, std::move(var));
+        } else {
+          buffer[pos] = std::move(var);
+        }
+        return;
       } else if (on_producer && !on_consumer) {
         // (4a)
-        opt_accumulate_stream =
-            guard.getDefaultStream(opt_producer_stream->device());
-        opt_sync_stream = opt_producer_stream;
+        opt_accumulate_stream = opt_producer_stream;
+        opt_sync_stream = opt_consumer_stream;
+        if (buffer[pos].defined()) {
+          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
+          accumulate(buffer, pos, std::move(var));
+        } else {
+          buffer[pos] = std::move(var);
+        }
+
+        // (4b)
+        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+        return;
       } else {
-        // (5)
-        opt_accumulate_stream = guard.getDefaultStream(*device);
-      }
-      if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
-        // (3b), (4b)
-        c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
-        auto event = c10::Event{device_type};
-        event.record(*opt_sync_stream);
-        opt_accumulate_stream->wait(event);
-        const auto guard = c10::impl::VirtualGuardImpl(device_type);
-        record_stream_any_impl(var, *opt_accumulate_stream);
+        // (5a)
+        opt_accumulate_stream = getStreamForDeviceIdx(device.value());
+        opt_sync_stream = opt_producer_stream;
+        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+
+        // (5b)
+        if (buffer[pos].defined()) {
+          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
+          accumulate(buffer, pos, std::move(var));
+        } else {
+          buffer[pos] = std::move(var);
+        }
+
+        // (5c)
+        opt_sync_stream = opt_accumulate_stream;
+        opt_accumulate_stream = opt_consumer_stream;
+        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+        return;
       }
     }
   }
@@ -214,7 +260,7 @@ void InputBuffer::add(
       c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
       accumulate(buffer, pos, std::move(var));
     } else {
-      // (1) non-CUDA/privateuse1 variable
+      // (1) non-accelerator variable
       //     Accumulation happens on variable's device
       c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
@@ -225,6 +271,18 @@ void InputBuffer::add(
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
   return result;
+}
+
+c10::Stream InputBuffer::getStreamForDeviceIdx(c10::Device device) {
+  auto it = device_streams.find(device.index());
+  if (it == device_streams.end()) {
+    // Lazily initialize the stream for this device index
+    const auto guard = c10::impl::VirtualGuardImpl{device.type()};
+    c10::Stream stream = guard.getNewStream(device);
+    device_streams.emplace(device.index(), stream);
+    return stream;
+  }
+  return it->second;
 }
 
 } // namespace torch::autograd
