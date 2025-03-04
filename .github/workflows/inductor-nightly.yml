@@ -1,10 +1,9 @@
 name: inductor-nightly
 
 on:
-  push:
-      tags:
-      # for debug
-        - ciflow/inductor-periodic/*
+  pull_request:
+    paths:
+      - .github/workflows/inductor-nightly.yml
   workflow_dispatch:
   schedule:
     # Run every day at 7:00 AM UTC
