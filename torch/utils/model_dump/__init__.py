@@ -75,7 +75,6 @@ import sys
 import urllib.parse
 import zipfile
 from pathlib import Path
-from typing import Dict
 import warnings
 
 import torch.utils.show_pickle

@@ -54,15 +54,6 @@ namespace {
 
 using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
-RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
-  void* data_ptr = std::malloc(num_bytes);
-  if (!data_ptr) {
-    throw std::bad_alloc();
-  }
-  auto deleter = [](void* ptr) { std::free(ptr); };
-  return RAIIDataPtr(data_ptr, deleter);
-}
-
 #ifdef USE_CUDA
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
@@ -72,9 +63,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_CUDA
-
-#ifdef USE_XPU
+#elif defined(USE_XPU)
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
@@ -84,7 +73,18 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_XPU
+#else
+
+RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  void* data_ptr = std::malloc(num_bytes);
+  if (!data_ptr) {
+    throw std::bad_alloc();
+  }
+  auto deleter = [](void* ptr) { std::free(ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#endif // USE_CUDA
 
 } // anonymous namespace
 
