@@ -433,9 +433,15 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
-        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
-        if matrix_instr_nonkdim != 0:
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
+        waves_per_eu = self.meta.get("waves_per_eu", None)
+        kpack = self.meta.get("kpack", None)
+        if matrix_instr_nonkdim:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+        if waves_per_eu:
+            triton_meta["waves_per_eu"] = waves_per_eu
+        if kpack:
+            triton_meta["kpack"] = kpack
 
         self.triton_meta = triton_meta
 
@@ -1215,6 +1221,8 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
+            waves_per_eu=kwargs.get("waves_per_eu", 0),
+            kpack=kwargs.get("kpack", 2),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
             workspace_arg=workspace_arg,
@@ -1325,14 +1333,27 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         if log_info is None:
             log_info = {}
         self.log_info: dict[str, Any] = log_info
-        self.log_info.update(
-            {
-                "backend": "Triton",
-                "grid": str(self.bmreq.grid),
-                "num_stages": self.bmreq.num_stages,
-                "num_warps": self.bmreq.num_warps,
-            }
-        )
+        if torch.version.hip is None:
+            self.log_info.update(
+                {
+                    "backend": "Triton",
+                    "grid": str(self.bmreq.grid),
+                    "num_stages": self.bmreq.num_stages,
+                    "num_warps": self.bmreq.num_warps,
+                }
+            )
+        else:
+            self.log_info.update(
+                {
+                    "backend": "Triton",
+                    "grid": str(self.bmreq.grid),
+                    "num_stages": self.bmreq.num_stages,
+                    "num_warps": self.bmreq.num_warps,
+                    "matrix_instr_nonkdim": self.bmreq.matrix_instr_nonkdim,
+                    "waves_per_eu": self.bmreq.waves_per_eu,
+                    "kpack": self.bmreq.kpack,
+                }
+            )
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
         self.allowed_prologue_inps = (
