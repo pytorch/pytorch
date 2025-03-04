@@ -1041,7 +1041,8 @@ class WhileLoopTests(TestCase):
                     "haha tensor_hash",
                     hash(cloned_inputs[1]),
                     f" rand_seed {torch.initial_seed()}",
-                    f" cuda initial_seed {torch.cuda.initial_seed()}. tensor value: {cloned_inputs[1]}",
+                    f" cuda initial_seed {torch.cuda.initial_seed() if torch.cuda.is_initialized() else None}."
+                    f"tensor value: {cloned_inputs[1]}",
                 )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
