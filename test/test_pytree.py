@@ -1191,6 +1191,18 @@ if "optree" in sys.modules:
         self.assertEqual(elements, [])
         self.assertEqual(spec.context.value, config)
 
+    def test_constant_default_eq_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+            self.assertIn(msg, str(e))
+
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
