@@ -326,6 +326,9 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
+  auto overload_name = config_.experimental_config.capture_overload_names
+      ? fn.overload_name()
+      : "";
   auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
       torch::profiler::impl::TorchOpBasicFields{
           fn.seqNr(),
@@ -335,7 +338,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.handle(),
           fn.debugHandle(),
           fn.name(),
-          fn.overload_name()});
+          overload_name});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());

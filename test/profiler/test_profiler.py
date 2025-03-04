@@ -2933,10 +2933,16 @@ aten::mm""",
 
         with _scoped_library("aten", "IMPL") as my_lib:
             my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
-            with profile(activities=[ProfilerActivity.CPU]) as prof:
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                capture_overload_names=True
+            )
+            with profile(
+                experimental_config=experimental_config,
+                activities=[ProfilerActivity.CPU],
+            ) as prof:
                 torch.add(1, 5)
 
-            # Expected format
+            # The following execution trace is expected
             #
             # Dispatch trace:
             # [call] op=[aten::add.Tensor], key=[AutogradCPU]
@@ -2967,7 +2973,7 @@ aten::mm""",
             ]
             assert len(aten_add_out_event) == 1
 
-            # Without group_by_overload_name, the overload name is ignored in the key key averages
+            # Without group_by_overload_name, the overload name is ignored in the key averages
             key_averages = prof.key_averages()
             assert len(key_averages) == 2
             assert "Overload Name" not in key_averages.table()
