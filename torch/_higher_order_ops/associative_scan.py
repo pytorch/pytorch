@@ -81,6 +81,11 @@ class AssociativeScanOp(HigherOrderOperator):
         assert isinstance(
             additional_inputs, (tuple, list)
         ), "additional_inputs must be a tuple."
+        additional_inputs = (
+            tuple(additional_inputs)
+            if isinstance(additional_inputs, list)
+            else additional_inputs
+        )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 

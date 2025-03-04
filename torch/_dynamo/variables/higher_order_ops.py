@@ -1374,7 +1374,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ).unpack_var_sequence(tx)
 
         # Check whether the combine_fn returns one child tree for the output.
-        if len(results.items) < 1:
+        # if len(results.items) < 1:
+        if _combine_treespec.as_python_constant().num_leaves < 1:
             unimplemented(
                 f"combine_fn needs to produce one pytree for the output "
                 f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
@@ -1384,8 +1385,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            isinstance(xs_treespec.as_python_constant(), pytree.TreeSpec)
-            is not isinstance(_combine_treespec.as_python_constant(), pytree.TreeSpec)
+            isinstance(xs_treespec.as_python_constant(), pytree.LeafSpec)
+            != isinstance(_combine_treespec.as_python_constant(), pytree.LeafSpec)
         ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
             xs_treespec, _combine_treespec
         ).as_python_constant():
@@ -1468,7 +1469,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = tuple(
                 inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
-        
+
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.associative_scan,
@@ -1491,7 +1492,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         import functools
 
-        from torch._higher_order_ops.scan import first_slice_copy, stack_y
+        from torch._higher_order_ops.scan import stack_y
+        from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
