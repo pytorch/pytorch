@@ -592,6 +592,10 @@ def get_exc_message(
     return filename, lineno
 
 
+def get_stack_above_dynamo():
+    return filter_stack(extract_stack())
+
+
 def get_real_stack(
     exc: Exception, frame: Optional[DynamoFrameType] = None
 ) -> Optional[StackSummary]:
@@ -617,7 +621,7 @@ def get_real_stack(
         # from where we are right now and rely on filter_stack to
         # get rid of all the dynamo frames.  For ease of testing
         # we apply this behavior to ALL Python versions
-        stack_above_dynamo = filter_stack(extract_stack())
+        stack_above_dynamo = get_stack_above_dynamo()
     else:
         stack_above_dynamo = StackSummary()
 

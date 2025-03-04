@@ -959,6 +959,53 @@ from user code:
 """,
         )
 
+    @make_logging_test(graph_breaks=True)
+    def test_nested_compile_user_frames(self, records):
+        def fn(x):
+            gn(x + 1)
+
+        def gn(x):
+            hn(x + 1)
+
+        def hn(x):
+            torch._dynamo.graph_break()
+            torch._dynamo.graph_break()
+
+        torch.compile(fn, backend="eager")(torch.randn(3))
+
+        def post_munge(s):
+            return re.sub(
+                r"torch_dynamo_resume_in_(\w+)_at_\d+",
+                "torch_dynamo_resume_in_\\1_at_N",
+                s,
+            )
+
+        # get the 2nd torch._dynamo.graph_break() (actually 4rd logged graph break because of lack of
+        # nested graph break support)
+        self.assertExpectedInline(
+            post_munge(munge_exc(records[3].getMessage(), skip=0)),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_nested_compile_user_frames
+    torch.compile(fn, backend="eager")(torch.randn(3))
+  File "test_error_messages.py", line N, in fn
+    def fn(x):
+  File "test_error_messages.py", line N, in gn
+    def gn(x):
+  File "test_error_messages.py", line N, in hn
+    def hn(x):
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_hn_at_N
+    torch._dynamo.graph_break()
+""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

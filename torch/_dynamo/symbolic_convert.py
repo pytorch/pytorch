@@ -85,6 +85,7 @@ from .exc import (
     ArgsMismatchError,
     BackendCompilerFailed,
     format_graph_break_message,
+    get_stack_above_dynamo,
     unimplemented_v2,
     Unsupported,
 )
@@ -489,7 +490,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
     if user_stack is None:
         user_stack = torch._guards.TracingContext.extract_stack()
 
-    # TODO: Also report the traceback from the parent frame
     try:
         frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
     except IndexError:
@@ -498,6 +498,8 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_filename"],
             code_options["co_firstlineno"],
         )
+
+    user_stack = get_stack_above_dynamo() + user_stack
 
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
