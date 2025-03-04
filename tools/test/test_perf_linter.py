@@ -333,7 +333,7 @@ None:11:18: list()/dict() is slow! Use []/{} instead.
    12 |     if x in (1, 2, 3):
    13 |         pass
 
-None:12:13: `in (...)` is slower than `in {...}` for constant sets.
+None:12:13: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    10 |     x = list  (  )
    11 |     x = dict  (  )
    12 |     if x in (1, 2, 3):
@@ -341,7 +341,7 @@ None:12:13: `in (...)` is slower than `in {...}` for constant sets.
    13 |         pass
    14 |     if x in [1, 2, 3]:
 
-None:12:21: `in (...)` is slower than `in {...}` for constant sets.
+None:12:21: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    10 |     x = list  (  )
    11 |     x = dict  (  )
    12 |     if x in (1, 2, 3):
@@ -349,7 +349,7 @@ None:12:21: `in (...)` is slower than `in {...}` for constant sets.
    13 |         pass
    14 |     if x in [1, 2, 3]:
 
-None:14:13: `in (...)` is slower than `in {...}` for constant sets.
+None:14:13: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    12 |     if x in (1, 2, 3):
    13 |         pass
    14 |     if x in [1, 2, 3]:
@@ -357,7 +357,7 @@ None:14:13: `in (...)` is slower than `in {...}` for constant sets.
    15 |         pass
    16 |     if x in [1, 2, y]:
 
-None:14:21: `in (...)` is slower than `in {...}` for constant sets.
+None:14:21: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    12 |     if x in (1, 2, 3):
    13 |         pass
    14 |     if x in [1, 2, 3]:
@@ -365,7 +365,7 @@ None:14:21: `in (...)` is slower than `in {...}` for constant sets.
    15 |         pass
    16 |     if x in [1, 2, y]:
 
-None:16:13: `in {...}` is slower than `in (...)` for non-constant sets.
+None:16:13: `in {...}` is slower than `in (...)` for non-constant sets, set must be built every time.
    14 |     if x in [1, 2, 3]:
    15 |         pass
    16 |     if x in [1, 2, y]:
@@ -373,7 +373,7 @@ None:16:13: `in {...}` is slower than `in (...)` for non-constant sets.
    17 |         pass
    18 |     if x in {1, OrderedSet, 3}:
 
-None:16:21: `in {...}` is slower than `in (...)` for non-constant sets.
+None:16:21: `in {...}` is slower than `in (...)` for non-constant sets, set must be built every time.
    14 |     if x in [1, 2, 3]:
    15 |         pass
    16 |     if x in [1, 2, y]:
@@ -381,7 +381,7 @@ None:16:21: `in {...}` is slower than `in (...)` for non-constant sets.
    17 |         pass
    18 |     if x in {1, OrderedSet, 3}:
 
-None:18:13: `in {...}` is slower than `in (...)` for non-constant sets.
+None:18:13: `in {...}` is slower than `in (...)` for non-constant sets, set must be built every time.
    16 |     if x in [1, 2, y]:
    17 |         pass
    18 |     if x in {1, OrderedSet, 3}:
@@ -389,7 +389,7 @@ None:18:13: `in {...}` is slower than `in (...)` for non-constant sets.
    19 |         pass
    20 |     if node.op in ("placeholder", "get_attr", "output"):
 
-None:18:30: `in {...}` is slower than `in (...)` for non-constant sets.
+None:18:30: `in {...}` is slower than `in (...)` for non-constant sets, set must be built every time.
    16 |     if x in [1, 2, y]:
    17 |         pass
    18 |     if x in {1, OrderedSet, 3}:
@@ -397,14 +397,14 @@ None:18:30: `in {...}` is slower than `in (...)` for non-constant sets.
    19 |         pass
    20 |     if node.op in ("placeholder", "get_attr", "output"):
 
-None:20:19: `in (...)` is slower than `in {...}` for constant sets.
+None:20:19: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    18 |     if x in {1, OrderedSet, 3}:
    19 |         pass
    20 |     if node.op in ("placeholder", "get_attr", "output"):
                           ^
    21 |         pass
 
-None:20:55: `in (...)` is slower than `in {...}` for constant sets.
+None:20:55: `in (...)` is slower than `in {...}` for constant sets, set becomes a code constant.
    18 |     if x in {1, OrderedSet, 3}:
    19 |         pass
    20 |     if node.op in ("placeholder", "get_attr", "output"):

@@ -1099,9 +1099,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            assert (
-                acc_grad_node is not None
-            ), "post_acc_grad_hook must have corresponding acc grad node"
+            assert acc_grad_node is not None, (
+                "post_acc_grad_hook must have corresponding acc grad node"
+            )
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
