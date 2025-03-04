@@ -1,7 +1,7 @@
 # Owner(s): ["module: pytree"]
 
-from .._pytree import *  # noqa: F403
-from .._pytree import (
+from .._pytree import *  # previously public APIs # noqa: F403
+from .._pytree import (  # non-public internal APIs
     __all__ as __all__,
     _broadcast_to_and_flatten as _broadcast_to_and_flatten,
     arg_tree_leaves as arg_tree_leaves,

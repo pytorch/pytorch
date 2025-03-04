@@ -76,6 +76,30 @@ if cxx is not None:
 else:
     del cxx
 
+    from types import ModuleType
+
+    class CxxModule(ModuleType):
+        def __getattr__(self, name: str) -> _Any:
+            if name == "__name__":
+                return f"{__name__}.cxx"
+            if name == "__file__":
+                return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
+
+            # Lazy import
+            import torch.utils._cxx_pytree as cxx
+
+            # Replace the temporary module object (`self`) in sys.modules
+            _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+            return getattr(cxx, name)
+
+    # This allows the following statements to work properly:
+    #
+    #     from torch.utils.pytree.cxx import tree_map
+    #
+    _sys.modules[f"{__name__}.cxx"] = CxxModule(f"{__name__}.cxx")
+
+    del ModuleType, CxxModule
+
 
 if not PYTORCH_USE_CXX_PYTREE:
     from torch.utils._pytree import (
@@ -179,8 +203,11 @@ def __getattr__(name: str) -> _Any:
         # Lazy import
         import torch.utils._cxx_pytree as cxx  # noqa: F811
 
-        globals()["cxx"] = cxx
-        _sys.modules[f"{__name__}.cxx"] = cxx
+        # This allows the following statements to work properly:
+        #
+        #     from torch.utils.pytree import cxx
+        #
+        _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
         return cxx
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
