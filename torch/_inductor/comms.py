@@ -218,9 +218,9 @@ def _schedule_for_comm(
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
-        assert (
-            len(deps) == 0
-        ), f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+        assert len(deps) == 0, (
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+        )
     return scheduled
 
 

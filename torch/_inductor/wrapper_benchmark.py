@@ -137,9 +137,9 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert (
-                len(triton_kernel.launchers) == 1
-            ), "Autotuner should have selected the best config"
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -255,9 +255,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert OrderedSet(all_events.keys()).issubset(
-            OrderedSet(category_list)
-        ), f"{[*all_events.keys()]}"
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{[*all_events.keys()]}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0
