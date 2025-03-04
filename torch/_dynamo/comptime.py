@@ -209,9 +209,9 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert (
-            not val.is_dynamic()
-        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        assert not val.is_dynamic(), (
+            "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        )
 
     def print_graph(self, *, verbose=True, file=None):
         """
