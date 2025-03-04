@@ -587,13 +587,13 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
@@ -643,6 +643,37 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
   for (int i = 0; i < len; i++){
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
+}
+
+template <typename T, bool atomic_add>
+struct transpose_mxn_helper;
+
+template <typename T>
+struct transpose_mxn_helper<T, true> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        for (int i = 0; i < M; i++) {
+          for (int j = 0; j < N; j++) {
+            atomic_add(&dst[j*ld_dst + i], src[i*ld_src + j]);
+          }
+        }
+    }
+};
+
+template <typename T>
+struct transpose_mxn_helper<T, false> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        at::vec::transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
+    }
+};
+
+template <typename T, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+  transpose_mxn_helper<T, atomic_add>::call(src, ld_src, dst, ld_dst, M, N);
+}
+
+template <typename T, int M, int N, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T, atomic_add>(src, ld_src, dst, ld_dst, M, N);
 }
 #endif
 

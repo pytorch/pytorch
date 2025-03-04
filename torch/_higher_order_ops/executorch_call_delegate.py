@@ -74,7 +74,7 @@ def trace_call_delegate(proxy_mode, func_overload, lowered_module, *args):
 # pyre-ignore
 def call_delegate_cpu(lowered_module, *args):
     # FX creates this immutable_dict/list concept. Get rid of this.
-    map_types = {
+    map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }

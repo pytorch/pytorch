@@ -1,8 +1,31 @@
 # mypy: ignore-errors
 
+"""
+This module implements CUDA graphs support for TorchDynamo backends.
+
+CUDA graphs allow for capturing and replaying GPU operations, which can significantly
+reduce CPU overhead in GPU-accelerated PyTorch models. This module provides:
+
+- CUDA graph creation and management for both forward and backward passes
+- Input mutation detection and handling
+- Device compatibility checking
+- Stack trace management for debugging
+- Integration with TorchInductor's cudagraph trees
+
+The backend supports two main modes:
+1. cudagraphs: Full CUDA graph support with both forward and backward pass optimization
+2. cudagraphs_inner: Lower-level CUDA graph implementation used for benchmarking
+
+Key components:
+- CudagraphsBackend: Main backend class for CUDA graph integration
+- Mutation detection utilities to ensure graph safety
+- Device mapping and compatibility checks
+- Stack trace collection for debugging
+"""
+
 import functools
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 from torch._dynamo import config
@@ -68,7 +91,7 @@ def find_input_mutations(g):
 
 
 def get_device_node_mapping(gm: torch.fx.GraphModule):
-    device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
+    device_node_mapping: dict[torch.device, torch.fx.Node] = {}
     for n in gm.graph.nodes:
         t = n.meta.get("val", None)
         if isinstance(t, torch.Tensor) and t.device not in device_node_mapping:
@@ -111,7 +134,7 @@ def get_device_index(gm) -> int:
     return device.index
 
 
-def get_stack_traces(gm) -> List[Optional[str]]:
+def get_stack_traces(gm) -> list[Optional[str]]:
     output = output_node(gm)
     assert len(output.args) == 1
     return [

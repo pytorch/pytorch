@@ -1,5 +1,6 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+from collections import OrderedDict
+from typing import cast, TypedDict
 
 import numpy as np
 
@@ -15,10 +16,10 @@ from torch.distributed._tools.sac_estimator import SACEstimator, SACTradeOffStat
 
 
 class ModOrder(TypedDict):
-    fw_pre_order: List[str]
-    bw_pre_order: List[str]
-    fw_post_order: List[str]
-    bw_post_order: List[str]
+    fw_pre_order: list[str]
+    bw_pre_order: list[str]
+    fw_post_order: list[str]
+    bw_post_order: list[str]
 
 
 class ModRuntime(TypedDict):
@@ -60,18 +61,18 @@ class ModStats(TypedDict):
     # Number of piecewise-linear functions used for approximating ac tradeoff curve
     n_segments: int
     # Slopes of the of piecewise-linear functions
-    slopes: List[float]
+    slopes: list[float]
     # Intercepts of the of piecewise-linear functions
-    intercepts: List[float]
+    intercepts: list[float]
     # X breakpoints of the of piecewise-linear functions
-    breakpoints: List[float]
+    breakpoints: list[float]
     # Original trade-off curves
     tradeoff_curve: OrderedDict[float, float]
 
 
 class ModuleInfo(TypedDict):
     mod_order: ModOrder
-    mod_stats: List[ModStats]
+    mod_stats: list[ModStats]
 
 
 def aggregate_stats(
@@ -96,12 +97,12 @@ def aggregate_stats(
     """
 
     # Memory stats
-    mod_mem_stats: Dict[torch.nn.Module, _ModMemStats] = dict(
+    mod_mem_stats: dict[torch.nn.Module, _ModMemStats] = dict(
         copy.deepcopy(mem_tracker.memory_tracking)
     )
 
     # Runtime stats
-    mod_runtime_stats: Dict[str, ModRuntime] = {
+    mod_runtime_stats: dict[str, ModRuntime] = {
         fqn: {"fw": v["fw"], "bw": v["bw"]}
         for fqn, v in runtime_estimator.mod_runtimes.items()
     }
@@ -116,7 +117,7 @@ def aggregate_stats(
 
     # Selective Activation Checkpointing stats
     sac_estimator.pwlf_sac_tradeoff_curve()
-    mod_sac_tradeoff_stats: Dict[str, SACTradeOffStats] = copy.deepcopy(
+    mod_sac_tradeoff_stats: dict[str, SACTradeOffStats] = copy.deepcopy(
         sac_estimator.sac_mod_tradeoff_stats
     )
 
@@ -192,10 +193,10 @@ class Node(ModStats):
 
 class Graph:
     def __init__(self, n: int) -> None:
-        self.nodes: List[Node] = []
-        self.name2node: Dict[str, Node] = {}
+        self.nodes: list[Node] = []
+        self.name2node: dict[str, Node] = {}
         self.ad_matrix = np.zeros((n, n))
-        self.fw_post_order: List[str] = []
+        self.fw_post_order: list[str] = []
 
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)
@@ -257,15 +258,15 @@ def display_bytes(b: int, unit: str = "MiB") -> str:
     return a string that represent the number of bytes in a desired unit
     """
     if unit == "KiB":
-        return f"{b/2**10:.2f} KiB"
+        return f"{b / 2**10:.2f} KiB"
     if unit == "MiB":
-        return f"{b/2**20:.2f} MiB"
+        return f"{b / 2**20:.2f} MiB"
     if unit == "GiB":
-        return f"{b/2**30:.2f} GiB"
+        return f"{b / 2**30:.2f} GiB"
     return f"{b:.2f} bytes"
 
 
-def get_peak_memory_runtime_baseline(graph: Graph) -> Tuple[int, float]:
+def get_peak_memory_runtime_baseline(graph: Graph) -> tuple[int, float]:
     """
     Get the baseline peak memory and runtime.
     Baseline here means there is no FSDP or AC.

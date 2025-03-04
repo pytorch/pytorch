@@ -404,7 +404,7 @@ inline Tensor smooth_l1_loss(
   TORCH_CHECK(
       !options.beta().has_value(),
       "expected beta not to be provided in 'options', but got ",
-      options.beta().value());
+      options.beta());
   return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 

@@ -19,7 +19,7 @@ def bench(name, fn, requires_grad):
     end = time.perf_counter()
 
     results = timeit.repeat(lambda: fn(x), number=1000, repeat=1000)
-    print(f"{name} {np.median(results)*1000:.1f}us (warmup={end-start:.1f}s)")
+    print(f"{name} {np.median(results) * 1000:.1f}us (warmup={end - start:.1f}s)")
 
 
 def main():

@@ -5,6 +5,7 @@ import pprint
 import re
 import unittest
 import warnings
+from copy import deepcopy
 
 import functorch.experimental.control_flow as control_flow
 import torch
@@ -26,11 +27,17 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
 from torch.testing._internal.common_utils import (
     munge_exc,
+    parametrize,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -987,25 +994,25 @@ class GraphModule(torch.nn.Module):
             out_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_y_: "f32[s0, s1]", s2: "Sym(s2)", L_x_: "f32[s2, s0]"):
-        l_y_ = L_y_
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_x_: "f32[s0, s1]", s2: "Sym(s2)", L_y_: "f32[s1, s2]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, s2, s0, l_x_, s1, l_y_);  wrap_body_1 = s2 = s0 = l_x_ = s1 = l_y_ = None
-        getitem: "f32[s2, s1]" = wrap[0];  wrap = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, s0, s1, l_x_, s2, l_y_);  wrap_body_1 = s0 = s1 = l_x_ = s2 = l_y_ = None
+        getitem: "f32[s0, s2]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, s2: "Sym(s2)", s0: "Sym(s0)", l_x_: "f32[s2, s0]", s1: "Sym(s1)", l_y_: "f32[s0, s1]"):
+        def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", l_x_: "f32[s0, s1]", s2: "Sym(s2)", l_y_: "f32[s1, s2]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, s2, s0, l_x_, s1, l_y_);  wrap_body_0 = s2 = s0 = l_x_ = s1 = l_y_ = None
-            getitem: "f32[s2, s1]" = wrap[0];  wrap = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, s0, s1, l_x_, s2, l_y_);  wrap_body_0 = s0 = s1 = l_x_ = s2 = l_y_ = None
+            getitem: "f32[s0, s2]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, s2: "Sym(s2)", s0: "Sym(s0)", l_x_: "f32[s2, s0]", s1: "Sym(s1)", l_y_: "f32[s0, s1]"):
-                matmul: "f32[s2, s1]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+            def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", l_x_: "f32[s0, s1]", s2: "Sym(s2)", l_y_: "f32[s1, s2]"):
+                matmul: "f32[s0, s2]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
                 return (matmul,)
 """,
         )
@@ -1810,8 +1817,8 @@ def forward(self, L_x_ : torch.Tensor):
     getitem_4 = map_impl[3]
     getitem_5 = map_impl[4]
     getitem_6 = map_impl[5]
-    getitem_7 = map_impl[6];  map_impl = None
-    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, getitem_7)""",
+    value = map_impl[6];  map_impl = None
+    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, value)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -2276,7 +2283,8 @@ def forward(self):
 
         res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         # There is graph break right when we enter body of map
-        self.assertEqual(len(backend.graphs), 0)
+        # Since we are tracing through the Python dispatch logic, it ends up 8 graphs.
+        self.assertEqual(len(backend.graphs), 8)
         self.assertEqual(
             res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         )
@@ -2312,7 +2320,8 @@ def forward(self):
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
-        self.assertEqual(len(backend.graphs), 0)
+        # Since we are tracing through the Python dispatch logic, it ends up 9 graphs.
+        self.assertEqual(len(backend.graphs), 9)
         self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
@@ -2561,7 +2570,9 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors only": 1},
+            {
+                ".*HigherOrderOperator body's output must consist of tensors or ints only but got": 1
+            },
         )
 
     def test_nested_tuple_output(self):
@@ -2630,8 +2641,8 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem: "f32[3]" = wrap[0];  wrap = None
-        return (getitem,)
+        value: "f32[3]" = wrap[0];  wrap = None
+        return (value,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
@@ -4207,8 +4218,8 @@ class GraphModule(torch.nn.Module):
         child_1: "f32[5]" = child.sin()
         child_2: "f32[5]" = child.cos();  child = None
 
-        _unwrap_for_grad: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
-        _unwrap_for_grad_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
+        value: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
+        value_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
@@ -4217,7 +4228,7 @@ class GraphModule(torch.nn.Module):
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_1, child_2], [child_3], [l_v_, child_4], retain_graph = True, create_graph = True);  child_1 = child_2 = child_3 = l_v_ = child_4 = None
         getitem: "f32[5]" = _autograd_grad[0];  _autograd_grad = None
-        return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
+        return (value, value_1, getitem)
 """,
         )
 
@@ -6950,11 +6961,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.cond(x.sum() > 0, true_fn, false_fn)
 
         x = torch.randn(2, 3)
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            output_mismatch_test(x)
+        output_mismatch_test(x)
 
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            torch.compile(output_mismatch_test)(x)
+        torch.compile(output_mismatch_test, backend="eager")(x)
 
     def test_non_aliasing_util(self):
         from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
@@ -6968,6 +6977,54 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
+
+xfail_hops_compile = {
+    # aot_eager
+    "map",  # assert type(args[1].realize()) is TensorVariable
+    "scan",  # scan is not an OpOverload
+    # inductor
+    "while_loop",  # LoweringException: AssertionError
+    "flex_attention",  # LoweringException: AssertionError
+    "flex_attention_backward",  # AssertionError: Input shapes should have M >= 16, N >= 16 and K >= 16
+}
+
+
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+    @requires_cuda
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @ops(
+        list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
+        allowed_dtypes=(torch.float,),
+    )
+    def test_hops_compile(self, device, dtype, op, backend):
+        # Ensure HOPs can be compiled
+
+        if backend == "aot_eager" and op.name == "invoke_quant":
+            raise unittest.SkipTest(
+                "TODO: partitioner fails. migrate canonicalization to aot eager backend"
+            )
+
+        sample_inputs_itr = op.sample_inputs(
+            device, dtype, requires_grad=op.supports_autograd
+        )
+        for inp in sample_inputs_itr:
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            eager_args = (*input, *inp.args)
+            eager_kwargs = inp.kwargs
+            compiled_args = deepcopy(eager_args)
+            compiled_kwargs = deepcopy(eager_kwargs)
+
+            def fn(args, kwargs):
+                return op.op(*args, **(kwargs))
+
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            eager_out = fn(eager_args, eager_kwargs)
+            compiled_out = compiled_fn(compiled_args, compiled_kwargs)
+            self.assertEqual(eager_out, compiled_out)
+
+
+instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

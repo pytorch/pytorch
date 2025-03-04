@@ -44,7 +44,7 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(Path(__file__).absolute().parent.parent / "autograd")
+    autograd_dir = os.fspath(Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -212,12 +212,12 @@ def main() -> None:
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
 
-        assert os.path.isfile(
-            ts_backend_yaml
-        ), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
-        assert os.path.isfile(
-            ts_native_functions
-        ), f"Unable to access {ts_native_functions}"
+        assert os.path.isfile(ts_backend_yaml), (
+            f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        )
+        assert os.path.isfile(ts_native_functions), (
+            f"Unable to access {ts_native_functions}"
+        )
         from torchgen.dest.lazy_ir import GenTSLazyIR
         from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 

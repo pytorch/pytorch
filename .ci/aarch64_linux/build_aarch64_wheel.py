@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import boto3
 
@@ -24,10 +24,12 @@ os_amis = {
     "ubuntu22_04": "ami-0c6c29c5125214c77",  # login_name: ubuntu
     "redhat8": "ami-0698b90665a2ddcf1",  # login_name: ec2-user
 }
+
 ubuntu18_04_ami = os_amis["ubuntu18_04"]
+ubuntu20_04_ami = os_amis["ubuntu20_04"]
 
 
-def compute_keyfile_path(key_name: Optional[str] = None) -> Tuple[str, str]:
+def compute_keyfile_path(key_name: Optional[str] = None) -> tuple[str, str]:
     if key_name is None:
         key_name = os.getenv("AWS_KEY_NAME")
         if key_name is None:
@@ -57,7 +59,7 @@ def ec2_instances_by_id(instance_id):
 
 
 def start_instance(
-    key_name, ami=ubuntu18_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
+    key_name, ami=ubuntu20_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
 ):
     inst = ec2.create_instances(
         ImageId=ami,
@@ -96,7 +98,7 @@ class RemoteHost:
         self.keyfile_path = keyfile_path
         self.login_name = login_name
 
-    def _gen_ssh_prefix(self) -> List[str]:
+    def _gen_ssh_prefix(self) -> list[str]:
         return [
             "ssh",
             "-o",
@@ -108,13 +110,13 @@ class RemoteHost:
         ]
 
     @staticmethod
-    def _split_cmd(args: Union[str, List[str]]) -> List[str]:
+    def _split_cmd(args: Union[str, list[str]]) -> list[str]:
         return args.split() if isinstance(args, str) else args
 
-    def run_ssh_cmd(self, args: Union[str, List[str]]) -> None:
+    def run_ssh_cmd(self, args: Union[str, list[str]]) -> None:
         subprocess.check_call(self._gen_ssh_prefix() + self._split_cmd(args))
 
-    def check_ssh_output(self, args: Union[str, List[str]]) -> str:
+    def check_ssh_output(self, args: Union[str, list[str]]) -> str:
         return subprocess.check_output(
             self._gen_ssh_prefix() + self._split_cmd(args)
         ).decode("utf-8")
@@ -157,7 +159,7 @@ class RemoteHost:
     def using_docker(self) -> bool:
         return self.container_id is not None
 
-    def run_cmd(self, args: Union[str, List[str]]) -> None:
+    def run_cmd(self, args: Union[str, list[str]]) -> None:
         if not self.using_docker():
             return self.run_ssh_cmd(args)
         assert self.container_id is not None
@@ -178,7 +180,7 @@ class RemoteHost:
         if rc != 0:
             raise subprocess.CalledProcessError(rc, docker_cmd)
 
-    def check_output(self, args: Union[str, List[str]]) -> str:
+    def check_output(self, args: Union[str, list[str]]) -> str:
         if not self.using_docker():
             return self.check_ssh_output(args)
         assert self.container_id is not None
@@ -230,7 +232,7 @@ class RemoteHost:
             )
         self.download_file(remote_file, local_file)
 
-    def list_dir(self, path: str) -> List[str]:
+    def list_dir(self, path: str) -> list[str]:
         return self.check_output(["ls", "-1", path]).split("\n")
 
 
@@ -327,7 +329,7 @@ def build_ArmComputeLibrary(host: RemoteHost, git_clone_flags: str = "") -> None
         ]
     )
     host.run_cmd(
-        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v24.09 {git_clone_flags}"
+        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v25.02 {git_clone_flags}"
     )
 
     host.run_cmd(f"cd ComputeLibrary && scons Werror=1 -j8 {acl_build_flags}")
@@ -358,7 +360,7 @@ def checkout_repo(
     branch: str = "main",
     url: str,
     git_clone_flags: str,
-    mapping: Dict[str, Tuple[str, str]],
+    mapping: dict[str, tuple[str, str]],
 ) -> Optional[str]:
     for prefix in mapping:
         if not branch.startswith(prefix):
@@ -681,7 +683,7 @@ def build_domains(
     branch: str = "main",
     use_conda: bool = True,
     git_clone_flags: str = "",
-) -> Tuple[str, str, str, str]:
+) -> tuple[str, str, str, str]:
     vision_wheel_name = build_torchvision(
         host, branch=branch, use_conda=use_conda, git_clone_flags=git_clone_flags
     )
@@ -708,7 +710,7 @@ def start_build(
     pytorch_build_number: Optional[str] = None,
     shallow_clone: bool = True,
     enable_mkldnn: bool = False,
-) -> Tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     git_clone_flags = " --depth 1 --shallow-submodules" if shallow_clone else ""
     if host.using_docker() and not use_conda:
         print("Auto-selecting conda option for docker images")
@@ -759,7 +761,7 @@ def start_build(
         version = host.check_output("cat pytorch/version.txt").strip()[:-2]
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1"
     if branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
     if enable_mkldnn:
@@ -932,9 +934,9 @@ def parse_arguments():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--test-only", type=str)
-    parser.add_argument(
-        "--os", type=str, choices=list(os_amis.keys()), default="ubuntu20_04"
-    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--os", type=str, choices=list(os_amis.keys()))
+    group.add_argument("--ami", type=str)
     parser.add_argument(
         "--python-version",
         type=str,
@@ -964,7 +966,13 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
-    ami = os_amis[args.os]
+    ami = (
+        args.ami
+        if args.ami is not None
+        else os_amis[args.os]
+        if args.os is not None
+        else ubuntu20_04_ami
+    )
     keyfile_path, key_name = compute_keyfile_path(args.key_name)
 
     if args.list_instances:

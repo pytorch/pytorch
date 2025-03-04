@@ -758,11 +758,10 @@ const auto sinc_string = jiterator_stringify(
   T sinc(T a) {
     if (a == T(0)) {
       return T(1);
-    } else {
-      constexpr T pi = T(3.14159265358979323846L);
-      T product = pi * a;
-      return std::sin(product) / product;
     }
+    constexpr T pi = T(3.14159265358979323846L);
+    T product = pi * a;
+    return std::sin(product) / product;
   }
 ); // sinc_string
 
