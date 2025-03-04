@@ -525,15 +525,11 @@ struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
 
   std::string BLASSignature() const override {
-    std::string a_dtype_str = c10::toString(a_dtype);
-    std::string b_dtype_str = c10::toString(b_dtype);
-    std::string c_dtype_str = c10::toString(c_dtype);
-    std::string bias_dtype_str = c10::toString(bias_dtype);
-
     // Excluding use_fast_accum and use_rowise booleans for now
     return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0,  stride_c: 0, stride_d: 0, "
       "transA: %c, transB: %c, batch_count: 1, scaleA: s, scaleB: s, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
-      m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str, ComputeTypeFor<T>(), ComputeTypeFor<T>());
+      m, n, k, lda, ldb, ldc, ldc, transa, transb,
+      BLASTypeName(a_dtype), BLASTypeName(b_dtype), BLASTypeName(c_dtype), BLASTypeName(bias_dtype), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
