@@ -1028,10 +1028,10 @@
   "torch.types": [
     "Any",
     "Device",
+    "FileLike",
     "List",
     "Number",
     "Sequence",
-    "Tuple",
     "Union"
   ],
   "torch.utils.benchmark.utils.compare": [
@@ -2391,8 +2391,7 @@
     "Set",
     "Tuple",
     "Union",
-    "defaultdict",
-    "Path"
+    "defaultdict"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",

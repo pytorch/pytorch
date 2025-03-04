@@ -1,7 +1,7 @@
 import sys
 import time
-from functools import lru_cache
-from typing import Any, List
+from functools import cache
+from typing import Any
 
 from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import get_s3_resource
@@ -11,7 +11,7 @@ from tools.stats.upload_test_stats import get_tests
 BUCKET_PREFIX = "workflows_failing_pending_upload"
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_bucket() -> Any:
     return get_s3_resource().Bucket("gha-artifacts")
 
@@ -41,7 +41,7 @@ def do_upload(workflow_id: int) -> None:
     upload_additional_info(workflow_id, workflow_attempt, test_cases)
 
 
-def get_workflow_ids(pending: bool = False) -> List[int]:
+def get_workflow_ids(pending: bool = False) -> list[int]:
     prefix = f"{BUCKET_PREFIX}/{'pending/' if pending else ''}"
     objs = get_bucket().objects.filter(Prefix=prefix)
     return [int(obj.key.split("/")[-1].split(".")[0]) for obj in objs]

@@ -9,32 +9,21 @@ import keyword
 import math
 import os
 import re
+import typing
 import warnings
 from collections import defaultdict
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    Iterable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 if TYPE_CHECKING:
@@ -46,12 +35,13 @@ __all__ = ["PythonCode", "CodeGen", "Graph"]
 
 
 # Mapping of builtins to their `typing` equivalent.
+# (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: List,
-    dict: Dict,
-    set: Set,
-    frozenset: FrozenSet,
-    tuple: Tuple,
+    list: typing.List,  # noqa: UP006
+    dict: typing.Dict,  # noqa: UP006
+    set: typing.Set,  # noqa: UP006
+    frozenset: typing.FrozenSet,  # noqa: UP006
+    tuple: typing.Tuple,  # noqa: UP006
 }
 
 _legal_ops = dict.fromkeys(
@@ -61,7 +51,7 @@ _legal_ops = dict.fromkeys(
 
 # Signature for functions thattransforms the body (`list[str]`) of the
 # generated code
-TransformCodeFunc = Callable[[List[str]], List[str]]
+TransformCodeFunc = Callable[[list[str]], list[str]]
 
 
 class _CustomBuiltin(NamedTuple):
@@ -78,7 +68,7 @@ class _CustomBuiltin(NamedTuple):
     obj: Any
 
 
-_custom_builtins: Dict[str, _CustomBuiltin] = {}
+_custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: Any):
@@ -144,10 +134,10 @@ class _Namespace:
     """
 
     def __init__(self):
-        self._obj_to_name: Dict[Any, str] = {}
+        self._obj_to_name: dict[Any, str] = {}
         self._unassociated_names = set()
-        self._used_names: Set[str] = set()
-        self._base_count: Dict[str, int] = defaultdict(int)
+        self._used_names: set[str] = set()
+        self._base_count: dict[str, int] = defaultdict(int)
 
         self._illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
         self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
@@ -261,10 +251,10 @@ class PythonCode:
     # Python source code for the forward function definition.
     src: str
     # Values in global scope during execution of `src_def`.
-    globals: Dict[str, Any]
+    globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index.
-    _lineno_map: Optional[Dict[int, Optional[int]]]
+    _lineno_map: Optional[dict[int, Optional[int]]]
 
 
 def _format_target(base: str, target: str) -> str:
@@ -291,8 +281,8 @@ class _InsertPoint:
 
 
 class _node_list:
-    def __init__(self, graph: "Graph", direction: str = "_next"):
-        assert direction in ["_next", "_prev"]
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
+        assert direction in ("_next", "_prev")
         self.graph = graph
         self.direction = direction
 
@@ -300,8 +290,7 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        assert self.direction == "_prev" or self.direction == "_next"
-        yield from _NodeIter(self.graph._root, self.direction == "_prev")
+        return _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
@@ -312,7 +301,7 @@ class _PyTreeInfo(NamedTuple):
     Contains extra info stored when we're using Pytrees
     """
 
-    orig_args: List[str]
+    orig_args: list[str]
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
@@ -360,7 +349,7 @@ class CodeGen:
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
-    def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
+    def gen_fn_def(self, free_vars: list[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
@@ -399,7 +388,7 @@ class CodeGen:
         """
         return outputs
 
-    def additional_globals(self) -> List[Tuple[str, Any]]:
+    def additional_globals(self) -> list[tuple[str, Any]]:
         """
         If your codegen uses extra global values, add tuples of (identifier,reference to the value) here.
         For example, return ['List', typing.List] if you need ``List`` in the global context.
@@ -417,13 +406,13 @@ class CodeGen:
         include_device: bool = False,
         colored: bool = False,
     ) -> PythonCode:
-        free_vars: List[str] = []
-        body: List[str] = []
-        globals_: Dict[str, Any] = {}
-        wrapped_fns: Dict[str, None] = {}
+        free_vars: list[str] = []
+        body: list[str] = []
+        globals_: dict[str, Any] = {}
+        wrapped_fns: dict[str, None] = {}
 
         # Wrap string in list to pass by reference
-        maybe_return_annotation: List[str] = [""]
+        maybe_return_annotation: list[str] = [""]
         include_stride = include_stride or (
             os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1"
         )
@@ -467,9 +456,13 @@ class CodeGen:
 
             typename = _type_repr(o)
 
-            if hasattr(o, "__origin__"):
-                # This is a generic type, e.g. typing.List[torch.Tensor]
-                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+            if origin_type := getattr(o, "__origin__", None):
+                # list[...], typing.List[...], TensorType[...]
+
+                if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
+                    # This is a generic pre-PEP585 type, e.g. typing.List[torch.Tensor]
+                    origin_type = _origin_type_map.get(origin_type, origin_type)
+
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
                 if hasattr(o, "__args__"):
@@ -554,7 +547,7 @@ class CodeGen:
                 return blue(repr(arg))
 
         def _format_args(
-            args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
             args_s = ", ".join(_get_repr(a) for a in args)
             kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
@@ -566,8 +559,8 @@ class CodeGen:
         # of a given node. This represents the *last* use of the node in the
         # execution order of the program, which we will use to free unused
         # values
-        node_to_last_use: Dict[Node, Node] = {}
-        user_to_last_uses: Dict[Node, List[Node]] = {}
+        node_to_last_use: dict[Node, Node] = {}
+        user_to_last_uses: dict[Node, list[Node]] = {}
 
         def register_last_uses(n: Node, user: Node):
             if n not in node_to_last_use:
@@ -783,9 +776,9 @@ class CodeGen:
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: Dict[int, Optional[int]] = {}
+        lineno_map: dict[int, Optional[int]] = {}
         prologue_len = prologue.count("\n") + 1
-        new_lines: List[str] = []
+        new_lines: list[str] = []
         cur_idx = None
         for line in "".join(body).split("\n"):
             counter = re.search(r"# COUNTER: (\d+)", line)
@@ -908,11 +901,11 @@ class _FindNodesLookupTable:
     """
 
     def __init__(self):
-        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(
+        self.table: dict[tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
             dict
         )
 
-    def _key(self, node) -> Tuple[str, Optional[Target]]:
+    def _key(self, node) -> tuple[str, Optional[Target]]:
         return (node.op, node.target if node.op == "call_function" else None)
 
     def __contains__(self, node) -> bool:
@@ -989,14 +982,14 @@ class Graph:
     def __init__(
         self,
         owning_module: Optional["GraphModule"] = None,
-        tracer_cls: Optional[Type["Tracer"]] = None,
-        tracer_extras: Optional[Dict[str, Any]] = None,
+        tracer_cls: Optional[type["Tracer"]] = None,
+        tracer_extras: Optional[dict[str, Any]] = None,
     ):
         """
         Construct an empty Graph.
         """
         self._root: Node = Node(self, "", "root", "", (), {})
-        self._used_names: Dict[str, int] = {}  # base name -> number
+        self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
@@ -1004,7 +997,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
-        self._co_fields: Dict[str, Any] = {}
+        self._co_fields: dict[str, Any] = {}
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
@@ -1064,7 +1057,7 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(
-        self, g: "Graph", val_map: Dict[Node, Node], return_output_node=False
+        self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
     ) -> "Optional[Argument]":
         """
         Copy all nodes from a given graph into ``self``.
@@ -1117,8 +1110,8 @@ class Graph:
         self,
         op: str,
         target: "Target",
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -1377,8 +1370,8 @@ class Graph:
     def call_module(
         self,
         module_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1427,8 +1420,8 @@ class Graph:
     def call_method(
         self,
         method_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1466,8 +1459,8 @@ class Graph:
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1672,10 +1665,10 @@ class Graph:
         Return a human-readable (not machine-readable) string representation
         of this Graph
         """
-        placeholder_names: List[str] = []
+        placeholder_names: list[str] = []
         # This is a one-element array just so ``format_node`` can modify the closed
         # over value
-        maybe_return_typename: List[str] = [""]
+        maybe_return_typename: list[str] = [""]
 
         node_strs = [node.format_node(placeholder_names) for node in self.nodes]
         param_str = ", ".join(placeholder_names)
@@ -1733,8 +1726,8 @@ class Graph:
                     f"defined! Please check that Nodes in the graph are topologically ordered\n{self}"
                 )
 
-        seen_names: Set[str] = set()
-        seen_values: Set[Node] = set()
+        seen_names: set[str] = set()
+        seen_values: set[Node] = set()
         for node in self.nodes:
             if node.op not in [
                 "placeholder",
@@ -1987,20 +1980,18 @@ reflectable_magic_methods = {
     "matmul": "{} @ {}",
 }
 
-magic_methods = dict(
-    {
-        "eq": "{} == {}",
-        "ne": "{} != {}",
-        "lt": "{} < {}",
-        "gt": "{} > {}",
-        "le": "{} <= {}",
-        "ge": "{} >= {}",
-        "pos": "+{}",
-        "neg": "-{}",
-        "invert": "~{}",
-    },
+magic_methods = {
+    "eq": "{} == {}",
+    "ne": "{} != {}",
+    "lt": "{} < {}",
+    "gt": "{} > {}",
+    "le": "{} <= {}",
+    "ge": "{} >= {}",
+    "pos": "+{}",
+    "neg": "-{}",
+    "invert": "~{}",
     **reflectable_magic_methods,
-)
+}
 
 inplace_methods = {
     "iadd": "{} += {}",

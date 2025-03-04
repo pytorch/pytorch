@@ -1068,9 +1068,9 @@ inline c10::complex<double> PythonArgs::toComplex(int i) {
 
 inline c10::complex<double> PythonArgs::toComplexWithDefault(
     int i,
-    c10::complex<double> default_value) {
+    c10::complex<double> default_complex) {
   if (!args[i])
-    return default_value;
+    return default_complex;
   return toComplex(i);
 }
 

@@ -193,12 +193,12 @@ C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);
       success_ = C10FlagParser::Parse<type>(content, &FLAGS_##name);    \
     }                                                                   \
   };                                                                    \
-  }                                                                     \
   RegistererC10FlagsRegistry g_C10FlagsRegistry_##name(                 \
       #name,                                                            \
       C10FlagsRegistry(),                                               \
       RegistererC10FlagsRegistry::DefaultCreator<C10FlagParser_##name>, \
       "(" #type ", default " #default_value ") " help_str);             \
+  }                                                                     \
   }
 
 #define C10_DEFINE_int(name, default_value, help_str) \

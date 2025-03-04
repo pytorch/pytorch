@@ -2,14 +2,14 @@
 import functools
 import logging
 import os
-from pathlib import Path
-from typing import Any, List
+import pathlib
+from typing import Any
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash, get_path, TritonFuture
+from ..codecache import code_hash, CodeCacheFuture, get_path
 from ..runtime.benchmarking import benchmarker
 from ..runtime.triton_heuristics import (
     cooperative_reduction_grid,
@@ -26,16 +26,16 @@ log = logging.getLogger(__name__)
 
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
-    return arg_defs
+    return [x.name for x in arg_defs]
 
 
 def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert OrderedSet(args).issubset(
-            OrderedSet(all_args)
-        ), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(OrderedSet(all_args)), (
+            f"{args} v.s. {all_args}"
+        )
 
     return all_args, arg_types
 
@@ -149,7 +149,9 @@ class MultiKernel:
     Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
     The generated definition for the multi-kernel will looks like:
     ```
-    multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2], multi_kernel_definition_code)
+    multi_kernel_kernel1 = MultiKernelCall(
+        [kernel1, kernel2], multi_kernel_definition_code
+    )
     ```
 
     Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
@@ -168,7 +170,7 @@ class MultiKernel:
         self.args = object()
 
     @staticmethod
-    def _merge_workspace_args(left: List[WorkspaceArg], right: List[WorkspaceArg]):
+    def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
         if left == right:
             return left
         result = {x.inner_name: x for x in left}
@@ -220,7 +222,7 @@ class MultiKernel:
             assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: List[Any] = []
+        grid: list[Any] = []
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
@@ -322,7 +324,7 @@ class MultiKernelCall:
             )
         )
         _, _, path = get_path(key, "picked_kernel")
-        return Path(path)
+        return pathlib.Path(path)
 
     def load_cache(self):
         assert self.picked_kernel is None
@@ -356,7 +358,7 @@ class MultiKernelCall:
         it may slow down the parallel compilation.
         """
         for i, kernel in enumerate(self._kernels):
-            if isinstance(kernel, TritonFuture):
+            if isinstance(kernel, CodeCacheFuture):
                 self._kernels[i] = kernel.result()
 
         return self._kernels

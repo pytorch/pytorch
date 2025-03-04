@@ -277,7 +277,9 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident
+                                  secondaryTensor:castMPSTensor(mpsGraph, divisor, divident.dataType)
+                                             name:@"divisionTensor"];
   // Replace NaNs with 0 for divident elements equal to 0
   return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
                          truePredicateTensor:div
@@ -698,7 +700,10 @@ static void smooth_l1_loss_template(const Tensor& input,
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
-
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
+    return;
+  }
   MPSShape* mpsInputShape = nil;
   MPSShape* mpsOutputShape = nil;
 

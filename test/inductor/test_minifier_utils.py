@@ -80,7 +80,7 @@ class MinifierUtilsTests(TestCase):
 
 
 #     def forward(self, x, flag):
-#         x, flag, = fx_pytree.tree_flatten_spec(([x, flag], {}), self._in_spec)
+#         x, flag, = fx_pytree.tree_flatten_spec(((x, flag), {}), self._in_spec)
 #         item = torch.ops.aten.item.default(flag);  flag = None
 #         gt = item > 0;  item = None
 #         true_graph_0 = self.true_graph_0

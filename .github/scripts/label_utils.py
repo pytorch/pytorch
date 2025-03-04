@@ -2,7 +2,7 @@
 
 import json
 from functools import lru_cache
-from typing import Any, List, Tuple, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 from github_utils import gh_fetch_url_and_headers, GitHubComment
 
@@ -28,14 +28,14 @@ https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for
 """
 
 
-def request_for_labels(url: str) -> Tuple[Any, Any]:
+def request_for_labels(url: str) -> tuple[Any, Any]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     return gh_fetch_url_and_headers(
         url, headers=headers, reader=lambda x: x.read().decode("utf-8")
     )
 
 
-def update_labels(labels: List[str], info: str) -> None:
+def update_labels(labels: list[str], info: str) -> None:
     labels_json = json.loads(info)
     labels.extend([x["name"] for x in labels_json])
 
@@ -56,16 +56,16 @@ def get_last_page_num_from_header(header: Any) -> int:
 
 
 @lru_cache
-def gh_get_labels(org: str, repo: str) -> List[str]:
+def gh_get_labels(org: str, repo: str) -> list[str]:
     prefix = f"https://api.github.com/repos/{org}/{repo}/labels?per_page=100"
     header, info = request_for_labels(prefix + "&page=1")
-    labels: List[str] = []
+    labels: list[str] = []
     update_labels(labels, info)
 
     last_page = get_last_page_num_from_header(header)
-    assert (
-        last_page > 0
-    ), "Error reading header info to determine total number of pages of labels"
+    assert last_page > 0, (
+        "Error reading header info to determine total number of pages of labels"
+    )
     for page_number in range(2, last_page + 1):  # skip page 1
         _, info = request_for_labels(prefix + f"&page={page_number}")
         update_labels(labels, info)
@@ -74,7 +74,7 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: Union[str, List[str]], dry_run: bool
+    org: str, repo: str, pr_num: int, labels: Union[str, list[str]], dry_run: bool
 ) -> None:
     if dry_run:
         print(f"Dryrun: Adding labels {labels} to PR {pr_num}")
@@ -97,7 +97,7 @@ def gh_remove_label(
     )
 
 
-def get_release_notes_labels(org: str, repo: str) -> List[str]:
+def get_release_notes_labels(org: str, repo: str) -> list[str]:
     return [
         label
         for label in gh_get_labels(org, repo)

@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import expecttest
@@ -289,8 +289,7 @@ class TestProfiler(TestCase):
                     )
                 )
 
-        # TODO: https://github.com/pytorch/kineto/issues/617
-        if kineto_available() and not IS_WINDOWS:
+        if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
                 p.export_chrome_trace(fname)
                 with open(fname) as f:
@@ -845,7 +844,7 @@ class TestProfiler(TestCase):
                 super().__init__(*args, **kwargs)
 
         def train():
-            for _, data in enumerate(dataloader):
+            for data in dataloader:
                 x, y = data[0], data[1]
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
@@ -950,6 +949,8 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
         called_num = [0]
 
@@ -1034,6 +1035,8 @@ class TestProfiler(TestCase):
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_multiple_steppers(self):
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -1356,11 +1359,7 @@ class TestProfiler(TestCase):
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
-    # This test is broken on Windows, the likely reason is that kineto/CUPTI
-    # is not supported that particular environment. Once the CI stabilizes
-    # we can narrow the condition so Windows is checked as well (TODO)
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
@@ -2277,7 +2276,7 @@ class MockProfilerEvent:
     start_time_ns: int
     duration_time_ns: int
     correlation_id: int = 0
-    children: List["MockProfilerEvent"] = field(default_factory=list)
+    children: list["MockProfilerEvent"] = field(default_factory=list)
     parent: Optional["MockProfilerEvent"] = None
 
     @property
@@ -2301,7 +2300,7 @@ class MockNode:
 
 @unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestExperimentalUtils(TestCase):
-    def make_tree(self) -> List[MockNode]:
+    def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
                 "1": {"2": {}},

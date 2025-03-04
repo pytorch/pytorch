@@ -8,7 +8,7 @@ import shutil
 import unittest
 from collections import defaultdict
 from threading import Lock
-from typing import Dict, IO, List, Optional
+from typing import IO, Optional
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -49,12 +49,12 @@ def _strip_filename(msg: str) -> str:
     return tail.split(":", 1)[-1]
 
 
-def _run_mypy() -> Dict[str, List[str]]:
+def _run_mypy() -> dict[str, list[str]]:
     """Clears the cache and run mypy before running any of the typing tests."""
     if os.path.isdir(CACHE_DIR):
         shutil.rmtree(CACHE_DIR)
 
-    rc: Dict[str, List[str]] = {}
+    rc: dict[str, list[str]] = {}
     for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
         # Run mypy
         stdout, stderr, _ = api.run(
@@ -119,10 +119,10 @@ def _construct_format_dict():
 
 #: A dictionary with all supported format keys (as keys)
 #: and matching values
-FORMAT_DICT: Dict[str, str] = _construct_format_dict()
+FORMAT_DICT: dict[str, str] = _construct_format_dict()
 
 
-def _parse_reveals(file: IO[str]) -> List[str]:
+def _parse_reveals(file: IO[str]) -> list[str]:
     """Extract and parse all ``"  # E: "`` comments from the passed file-like object.
 
     All format keys will be substituted for their respective value from `FORMAT_DICT`,
@@ -160,10 +160,10 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
 @unittest.skipIf(NO_MYPY, reason="Mypy is not installed")
 class TestTyping(TestCase):
     _lock = Lock()
-    _cached_output: Optional[Dict[str, List[str]]] = None
+    _cached_output: Optional[dict[str, list[str]]] = None
 
     @classmethod
-    def get_mypy_output(cls) -> Dict[str, List[str]]:
+    def get_mypy_output(cls) -> dict[str, list[str]]:
         with cls._lock:
             if cls._cached_output is None:
                 cls._cached_output = _run_mypy()
@@ -192,7 +192,7 @@ class TestTyping(TestCase):
         with open(path) as fin:
             lines = fin.readlines()
 
-        errors = defaultdict(lambda: "")
+        errors = defaultdict(str)
 
         output_mypy = self.get_mypy_output()
         self.assertIn(path, output_mypy)

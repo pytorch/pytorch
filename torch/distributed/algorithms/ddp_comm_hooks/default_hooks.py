@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, Tuple
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
@@ -61,7 +61,7 @@ def _compress_hook(
     world_size = group_to_use.size()
 
     buffer = (
-        cast(Tuple[torch.Tensor, ...], bucket)[0]
+        cast(tuple[torch.Tensor, ...], bucket)[0]
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )
@@ -129,7 +129,7 @@ def bf16_compress_hook(
 
 
 def fp16_compress_wrapper(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
     Cast input tensor to ``torch.float16``, cast result of hook back to input dtype.
@@ -167,7 +167,7 @@ def fp16_compress_wrapper(
 
 
 def bf16_compress_wrapper(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
     Warning: This API is experimental, and it requires NCCL version later than 2.9.6.
