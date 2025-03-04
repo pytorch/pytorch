@@ -3,13 +3,23 @@
 import inspect
 import os
 import warnings
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
+from enum import Enum
 from typing import cast, Optional, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed.checkpoint._async_executor import (  # noqa: TC001
+    _AsyncCheckpointExecutor,
+)
+from torch.distributed.checkpoint._async_process_executor import (
+    _ProcessBasedAsyncCheckpointExecutor,
+)
+from torch.distributed.checkpoint._async_thread_executor import (
+    _ThreadBasedAsyncCheckpointExecutor,
+)
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -23,7 +33,14 @@ from torch.distributed.distributed_c10d import _get_default_group
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
-__all__ = ["save_state_dict", "save", "async_save"]
+__all__ = ["save_state_dict", "save", "async_save", "AsyncCheckpointerType"]
+
+
+class AsyncCheckpointerType(Enum):
+    """Enum for async checkpointer type."""
+
+    THREAD = "thread"
+    PROCESS = "process"
 
 
 @deprecated(
@@ -173,6 +190,7 @@ def async_save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.THREAD,
 ) -> Future:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
@@ -242,16 +260,19 @@ def async_save(
         staged_state_dict = _create_cpu_state_dict(state_dict)
         _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
-    executor = ThreadPoolExecutor(max_workers=1)
-    f: Future = executor.submit(
-        save,
+    executor: _AsyncCheckpointExecutor = (
+        _ProcessBasedAsyncCheckpointExecutor()
+        if async_checkpointer_type == AsyncCheckpointerType.PROCESS
+        else _ThreadBasedAsyncCheckpointExecutor()
+    )
+
+    f: Future = executor.execute_save(
         staged_state_dict,
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
-    f.add_done_callback(lambda f: executor.shutdown(wait=False))
 
     if (
         isinstance(storage_writer, AsyncStager)
