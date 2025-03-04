@@ -329,7 +329,7 @@ def register_constant(cls: type[Any]) -> None:
         >>> from dataclasses import dataclass
         >>> import torch.utils._pytree as pytree
         >>>
-        >>> @dataclass
+        >>> @dataclass(frozen=True)
         >>> class Config:
         >>>     norm: str
         >>>
