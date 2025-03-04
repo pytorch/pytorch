@@ -805,9 +805,9 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(
-            eps == group_epss[0] for eps in group_epss
-        ), "all epsilon values must be equal"
+        assert all(eps == group_epss[0] for eps in group_epss), (
+            "all epsilon values must be equal"
+        )
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]

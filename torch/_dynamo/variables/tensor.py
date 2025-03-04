@@ -543,9 +543,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert (
-                len(idxes) == length
-            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            assert len(idxes) == length, (
+                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            )
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
