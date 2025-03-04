@@ -204,6 +204,36 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
+    def test_allow_in_graph_no_id_reuse(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def do_allow_in_graph(x):
+            return x + 1
+
+        torch._dynamo.allow_in_graph(do_allow_in_graph)
+        del do_allow_in_graph
+
+        # `id(dont_allow_in_graph)` would likely match `id(do_allow_in_graph)`
+        # We want to make sure Dynamo always trace through
+        # `dont_allow_in_graph`, by checking for the explicit graph break.
+        def dont_allow_in_graph(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend=cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = dont_allow_in_graph(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        fn(torch.randn(10))
+
+        # Check for graph break
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
 
