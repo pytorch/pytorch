@@ -463,13 +463,13 @@ def gen_2d_view_of_epilogue_buf(
             #       size (324, 512), stride (512, 1)
             #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
             #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-            stride_order = list(
-                ir.get_stride_order(
+            stride_order = [
+                *ir.get_stride_order(
                     V.graph.sizevars.size_hints(epilogue_node.get_stride())
                 )
-            )
+            ]
             fill_order = ir.stride_order2fill_order(stride_order)
-            reversed_fill_order = list(reversed(fill_order))
+            reversed_fill_order = [*reversed(fill_order)]
             size_with_stride_ordered_decreasingly = [
                 epilogue_node.get_size()[i] for i in reversed_fill_order
             ]
@@ -581,9 +581,9 @@ class CppGemmTemplate(CppTemplate):
             thread_block_m = math.ceil(m_blocks / m_factor)
             return GemmBlocking(thread_block_m, thread_block_n, thread_block_k)
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine thread blocking for dynamic M."
-        )
+        assert (
+            not self.is_dynamic_M
+        ), "Unable to determine thread blocking for dynamic M."
         register_blocking = self.register_blocking
         m_blocks = math.ceil(self.m / register_blocking.block_m)
         n_blocks = math.ceil(self.n / register_blocking.block_n)
@@ -697,17 +697,17 @@ class CppGemmTemplate(CppTemplate):
             L1_cache_size = (
                 torch._C._cpu._L1d_cache_size()
             )  # per core cache size in Bytes
-            assert L1_cache_size > 0, (
-                f"Expect L1_cache_size > 0 but got {L1_cache_size}"
-            )
+            assert (
+                L1_cache_size > 0
+            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
             L1 = L1_cache_size * L1_limit_factor
 
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
-            assert L2_cache_size > 0, (
-                f"Expect L2_cache_size > 0 but got {L2_cache_size}"
-            )
+            assert (
+                L2_cache_size > 0
+            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
             L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
@@ -768,9 +768,9 @@ class CppGemmTemplate(CppTemplate):
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine cache blocking for dynamic M."
-        )
+        assert (
+            not self.is_dynamic_M
+        ), "Unable to determine cache blocking for dynamic M."
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
 
@@ -826,7 +826,7 @@ class CppGemmTemplate(CppTemplate):
         act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
         if input_indices is None:
-            input_indices = list(range(len(input_nodes)))
+            input_indices = [*range(len(input_nodes))]
         only_one_input = (
             input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
         )
@@ -868,14 +868,14 @@ class CppGemmTemplate(CppTemplate):
         view_offset = new_inputs[1].layout.offset
 
         def maybe_to_dense(inputs, layout_or_out):
-            new_inputs = list(inputs)
+            new_inputs = [*inputs]
             if isinstance(inputs[1], torch.Tensor):
                 W = inputs[1]
                 new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
-            new_inputs = list(inputs)
+            new_inputs = [*inputs]
             if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
                 if has_free_symbols(view_size):
                     # If batch size B is dynamic, we need to set the batch size and possibly stride
@@ -1025,7 +1025,7 @@ class CppGemmTemplate(CppTemplate):
         an additional dimension for the batch size and to determine if the weight tensor should be blocked.
         """
         W = inputs[1]
-        new_inputs = list(inputs)
+        new_inputs = [*inputs]
         if cls.is_woq_int4():
             assert (
                 len(W.get_size()) == 2
@@ -1090,9 +1090,9 @@ class CppGemmTemplate(CppTemplate):
             else:
                 if not isinstance(W, ir.TensorBox):
                     W = ir.TensorBox(W)
-                permute_dims = list(range(len(new_size)))
+                permute_dims = [*range(len(new_size))]
                 permute_dims[-2], permute_dims[-3] = permute_dims[-3], permute_dims[-2]
-                permute_size = list(new_size)
+                permute_size = [*new_size]
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
@@ -1102,7 +1102,7 @@ class CppGemmTemplate(CppTemplate):
         else:
             assert isinstance(W, torch.Tensor)
             # Pad the weight tensor and reshape it into a 3D blocked shape
-            blocked_size = list(new_size)
+            blocked_size = [*new_size]
             blocked_size[-2], blocked_size[-3] = blocked_size[-3], blocked_size[-2]
             blocked_w = (
                 torch.nn.functional.pad(W, (0, padding))  # type: ignore[assignment]
@@ -1122,10 +1122,10 @@ class CppGemmTemplate(CppTemplate):
             if not isinstance(W, ir.TensorBox):
                 W = ir.TensorBox(W)
             if micro_gemm.get_b_layout() != LayoutType.NORMAL:
-                permute_dims = list(range(len(new_size) + 1))
+                permute_dims = [*range(len(new_size) + 1)]
                 permute_dims[-1], permute_dims[-2] = permute_dims[-2], permute_dims[-1]
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                vnni_view_size = list(new_size)
+                vnni_view_size = [*new_size]
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
                 W = L.view(
@@ -1151,10 +1151,10 @@ class CppGemmTemplate(CppTemplate):
                     LayoutType.VNNI4,
                 ], f"We only support {layout_str} for now"
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                assert k % vnni_size == 0, (
-                    f"k should be divisible by vnni_size for {layout_str} layout"
-                )
-                vnni_view_size = list(new_size)
+                assert (
+                    k % vnni_size == 0
+                ), f"k should be divisible by vnni_size for {layout_str} layout"
+                vnni_view_size = [*new_size]
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
                 W = W.view(vnni_view_size).transpose(-1, -2).contiguous().view(new_size)

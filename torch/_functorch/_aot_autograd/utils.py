@@ -79,7 +79,7 @@ def partial_flatten_asdict(obj: Any) -> Any:
 
 def normalize_as_list(x):
     if isinstance(x, tuple):
-        return list(x)
+        return [*x]
     elif isinstance(x, list):
         return x
     return [x]
@@ -117,7 +117,7 @@ def call_func_at_runtime_with_args(
     f, args: Union[tuple[Any], list[Any]], steal_args=False, disable_amp=False
 ):
     if not steal_args:
-        args = list(args)
+        args = [*args]
     assert isinstance(args, list)
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -279,7 +279,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             new_token_node.meta["val"] = torch.tensor([])
             new_token_node.meta["tensor_meta"] = torch.tensor([])
 
-            args = list(node.args)
+            args = [*node.args]
             args[0] = new_token_node
             node.args = tuple(args)
 

@@ -360,7 +360,7 @@ def optimize_for_inference(
     # If the op is in `mkldnn_supported` then we always treat it as a MKLDNN node.
     # However, if it's in `mkldnn_supported_unknown`, then we only treat it as
     # a MKLDNN node if its inputs are MKLDNN nodes.
-    for node in list(fx_graph.nodes):
+    for node in [*fx_graph.nodes]:
         supports_mkldnn = MklSupport.NO
         if node.op == "call_module":
             cur_module = modules[node.target]
@@ -397,14 +397,14 @@ def optimize_for_inference(
                 dense_x.args = (node,)
 
     # Does pre-conversion of all modules into MKLDNN (when possible)
-    old_modules = modules_to_mkldnn(list(fx_graph.nodes), modules)
+    old_modules = modules_to_mkldnn([*fx_graph.nodes], modules)
     fx_graph.old_modules = old_modules  # type: ignore[attr-defined]
 
     # optimizes all a -> to_dense -> to_mkldnn -> b patterns into a -> b
     for node in fx_graph.nodes:
         if node.op == "call_method" and node.target == "to_dense":
             prv_node = node.args[0]
-            users = list(node.users)
+            users = [*node.users]
             for user in users:
                 if user.op == "call_method" and user.target == "to_mkldnn":
                     user.replace_all_uses_with(prv_node)

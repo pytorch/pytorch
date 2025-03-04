@@ -180,9 +180,9 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
-            "Symbolic IndexPropVar must contain a TypedExpr"
-        )
+        assert not self.is_symbolic or isinstance(
+            self.value, TypedExpr
+        ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
 IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
@@ -230,7 +230,7 @@ class IndexPropagation(DefaultHandler):
 
     def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
         if isinstance(a, (list, tuple)):
-            return tuple(self.unwrap(v) for v in a)
+            return tuple([self.unwrap(v) for v in a])
 
         if not isinstance(a, IndexPropVar):
             return a
@@ -243,7 +243,7 @@ class IndexPropagation(DefaultHandler):
 
     def wrap(self, a) -> IndexPropResult:
         if isinstance(a, (list, tuple)):
-            return tuple(self.wrap(v) for v in a)
+            return tuple([self.wrap(v) for v in a])
         return IndexPropVar(a)
 
     @overload

@@ -186,7 +186,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
-    nodes = list(graph.nodes)
+    nodes = [*graph.nodes]
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
@@ -328,7 +328,7 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
+                    failed_tensorify_ops.update([str(key) for key in node.users.keys()])
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)

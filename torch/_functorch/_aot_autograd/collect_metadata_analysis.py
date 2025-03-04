@@ -766,7 +766,7 @@ from a multi-output view call"
         # inference and training paths decide which inputs/output to ask for subclass info on.
         # However, we currently stash indexing information on each SubclassMeta about its order
         # in the graph outputs list.
-        f_fw_graph_outs = list(flat_f_outs)
+        f_fw_graph_outs = [*flat_f_outs]
         if is_train or not keep_input_mutations:
             f_fw_graph_outs = f_mutated_inputs + f_fw_graph_outs
         else:

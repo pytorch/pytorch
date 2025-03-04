@@ -23,7 +23,7 @@ class SubclassCreationMeta:
 
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: list[torch.Tensor] = list(tensors)
+        todo: list[torch.Tensor] = [*tensors]
 
         def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
             if subclass_meta is None:
@@ -89,8 +89,8 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
 
     """
     for name, tensor in itertools.chain(
-        list(module.named_parameters(recurse=False)),
-        list(module.named_buffers(recurse=False)),
+        [*module.named_parameters(recurse=False)],
+        [*module.named_buffers(recurse=False)],
     ):
         if is_traceable_wrapper_subclass(tensor):
             torch.nn.utils.parametrize.register_parametrization(

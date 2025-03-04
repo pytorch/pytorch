@@ -177,7 +177,7 @@ def _fx_compile_mode_default() -> FxCompileMode:
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
-            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
+            ", ".join(sorted([repr(x) for x in FxCompileMode.__members__.keys()])),
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
@@ -202,7 +202,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     # like we do for normal inputs on each run, we will re-record a cudagraph if these
     # parameter locations change.
     context = torch._guards.TracingContext.try_get()
-    fixed = list(range(num_fixed))
+    fixed = [*range(num_fixed)]
     if not context or not context.fw_metadata:
         return fixed
 
@@ -290,7 +290,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
+    outputs = [*gm.graph.nodes][-1].args[0]
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -661,9 +661,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -1102,7 +1102,9 @@ class _InProcessFxCompile(FxCompile):
                             ):
                                 # Convert to string for eval on the load path
                                 output_strides.append(
-                                    tuple(p.doprint(s) for s in out.get_layout().stride)
+                                    tuple(
+                                        [p.doprint(s) for s in out.get_layout().stride]
+                                    )
                                 )
                             else:
                                 output_strides.append(None)
@@ -1125,9 +1127,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
                             code, linemap = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug("Output code: \n%s", code)
 
@@ -1586,7 +1588,7 @@ def cudagraphify_impl(
     stream.wait_stream(torch.cuda.current_stream())
     # copy static_inputs because it will be cleared in model
     with torch.cuda.stream(stream):
-        model(list(static_inputs))
+        model([*static_inputs])
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
@@ -1594,7 +1596,7 @@ def cudagraphify_impl(
     # record
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
-        static_outputs = model(list(static_inputs))
+        static_outputs = model([*static_inputs])
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
@@ -1741,7 +1743,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = [*range(num_fixed)]
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1828,18 +1830,23 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
+        [
+            node.meta["val"].device
+            for node in placeholder_nodes
+            if isinstance(node.meta.get("val"), torch.Tensor)
+        ]
     )
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
-        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
+        [
+            arg.meta["val"].device
+            for arg in output_node(gm).args[0]  # type: ignore[union-attr]
+            if isinstance(arg, fx.Node)
+            and isinstance(arg.meta.get("val"), torch.Tensor)
+        ]
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in (input_devices | out_devices) if device.type == "cuda"
+        [device for device in (input_devices | out_devices) if device.type == "cuda"]
     )
 
     return (
@@ -2159,7 +2166,7 @@ def compile_fx(
                     return inner_compile(
                         gm,
                         example_inputs,
-                        static_input_idxs=list(range(fixed)),
+                        static_input_idxs=[*range(fixed)],
                         cudagraphs=cudagraphs,
                         is_backward=True,
                         graph_id=graph_id,

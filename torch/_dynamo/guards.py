@@ -512,7 +512,7 @@ def get_key_index(dct, key):
     # overridden keys method). In the C++ guards, we relied on PyDict_Next
     # to traverse the dictionary, which uses the internal data structure and
     # does not call the overridden keys method.
-    return list(builtin_dict_keys(dct)).index(key)
+    return [*builtin_dict_keys(dct)].index(key)
 
 
 def get_key_index_source(source, index):
@@ -550,7 +550,7 @@ def getitem_on_dict_manager(
     # overridden keys method). In the C++ guards, we relied on PyDict_Next
     # to traverse the dictionary, which uses the internal data structure and
     # does not call the overridden keys method.
-    key_example_value = list(builtin_dict_keys(base_example_value))[index]
+    key_example_value = [*builtin_dict_keys(base_example_value)][index]
     if isinstance(key_example_value, (int, str)):
         value_source = f"{base_source_name}[{key_example_value!r}]"
     else:
@@ -595,7 +595,7 @@ class GuardManagerType(enum.Enum):
 
 @functools.lru_cache(None)
 def code_framelocals_names_reversed_cached(code: types.CodeType):
-    return list(reversed(code_framelocals_names(code)))
+    return [*reversed(code_framelocals_names(code))]
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -1822,7 +1822,7 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
 
         code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        code.append(f"list({ref}.keys()) == {[*value.keys()]}")
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
 
@@ -1843,7 +1843,7 @@ class GuardBuilder(GuardBuilderBase):
         # overridden keys method). In the C++ guards, we relied on PyDict_Next
         # to traverse the dictionary, which uses the internal data structure and
         # does not call the overridden keys method.
-        code.append(f"list(dict.keys({ref})) == {list(builtin_dict_keys(value))!r}")
+        code.append(f"list(dict.keys({ref})) == {[*builtin_dict_keys(value)]!r}")
         self._set_guard_export_info(guard, code)
 
         if self.requires_key_order_guarding(guard.originating_source):
@@ -1928,7 +1928,7 @@ class GuardBuilder(GuardBuilderBase):
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
                 derived_equalities=derived_equalities,
-                phantom_symbols=list(phantom_symbols.values()),
+                phantom_symbols=[*phantom_symbols.values()],
                 relaxed_sources=relaxed_sources,
                 warn_only=False,
             )
@@ -2012,12 +2012,16 @@ class GuardBuilder(GuardBuilderBase):
                     ]
 
                     int_symbols_str = ", ".join(
-                        f"{symbol} = int_values[{i}]"
-                        for i, (_, symbol) in enumerate(int_source_to_symbol)
+                        [
+                            f"{symbol} = int_values[{i}]"
+                            for i, (_, symbol) in enumerate(int_source_to_symbol)
+                        ]
                     )
                     float_symbols_str = ", ".join(
-                        f"{symbol} = float_values[{i}]"
-                        for i, (_, symbol) in enumerate(float_source_to_symbol)
+                        [
+                            f"{symbol} = float_values[{i}]"
+                            for i, (_, symbol) in enumerate(float_source_to_symbol)
+                        ]
                     )
 
                     if int_symbols_str:
@@ -2242,9 +2246,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in self.__class__.__dict__, (
-            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
-        )
+        assert (
+            func_name in self.__class__.__dict__
+        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -2668,8 +2672,8 @@ class CheckFunctionManager:
                 ]
                 code_part = (
                     """check_overlapping("""
-                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
-                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                    f"""overlapping=[{", ".join([s.name() for s in guard.overlapping_sources])}], """
+                    f"""non_overlapping=[{", ".join([s.name() for s in guard.non_overlapping_sources])}])"""
                 )
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
@@ -2965,8 +2969,10 @@ def get_and_maybe_log_recompilation_reasons(
     if do_recompiles_log or config.error_on_recompile:
         if is_recompiles_verbose_enabled():
             failures = "\n\n".join(
-                f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
-                for i, reason in enumerate(reasons)
+                [
+                    f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
+                    for i, reason in enumerate(reasons)
+                ]
             )
         else:
             failures = textwrap.indent("\n".join(reasons), "- ")

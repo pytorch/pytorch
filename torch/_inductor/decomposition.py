@@ -231,7 +231,7 @@ def convolution_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
-    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    grad_bias = aten.sum(grad_output, [0] + [*range(2, grad_output.dim())])
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
@@ -375,7 +375,7 @@ def cat(
 
         return True
 
-    filtered_tensors = list(filter(non_empty_tensor, tensors))
+    filtered_tensors = [*filter(non_empty_tensor, tensors)]
 
     if len(filtered_tensors) == 1:
         return filtered_tensors[0].clone()
@@ -388,7 +388,7 @@ def cat(
         t is filtered_tensors[0] for t in filtered_tensors
     ):
         inp = filtered_tensors[0]
-        shape = list(inp.shape)
+        shape = [*inp.shape]
         dim = dim + len(inp.shape) if dim < 0 else dim
         shape.insert(dim, len(filtered_tensors))
         return inp.unsqueeze(dim).expand(*shape).flatten(dim, dim + 1).clone()

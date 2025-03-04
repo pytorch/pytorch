@@ -29,7 +29,9 @@ ignore =
     TOR102,
     # TODO(kit1980): resolve all TOR003 issues
     # pass `use_reentrant` explicitly to `checkpoint`.
-    TOR003
+    TOR003,
+    # tuple(generator) is a performance regression
+    C416
 per-file-ignores =
     __init__.py: F401
     test/**: F821

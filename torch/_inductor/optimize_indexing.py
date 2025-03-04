@@ -88,7 +88,7 @@ def try_to_reduce_precision(
         if not range_expressable_in_32_bits(bounds[dominated]):
             return
 
-    args = list(node.args)
+    args = [*node.args]
     args[2] = torch.int32
     node.args = tuple(args)
 

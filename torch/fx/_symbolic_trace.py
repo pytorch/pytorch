@@ -295,7 +295,7 @@ class Tracer(TracerBase):
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
-        self._autowrap_search: list[ModuleType] = list(autowrap_modules)
+        self._autowrap_search: list[ModuleType] = [*autowrap_modules]
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[dict[torch.nn.Module, str]] = None
@@ -384,7 +384,7 @@ class Tracer(TracerBase):
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, "_fields"):
-            args = tuple(self.create_arg(elem) for elem in a)
+            args = tuple([self.create_arg(elem) for elem in a])
             return self.create_node("call_function", a.__class__, args, {})
 
         # Tensors do not have a reliable string repr() from which they can be
@@ -614,7 +614,7 @@ class Tracer(TracerBase):
         fn_for_analysis = inspect.unwrap(root_fn)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
-        orig_args = list(co.co_varnames)
+        orig_args = [*co.co_varnames]
         names_iter = iter(co.co_varnames)
         args: list[Any] = []
         skip_arg_idx = 0
@@ -666,7 +666,7 @@ class Tracer(TracerBase):
         def proxy_placeholder(name):
             return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
 
-        args.extend(proxy_placeholder(names) for names in arg_names)
+        args.extend([proxy_placeholder(names) for names in arg_names])
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -686,7 +686,7 @@ class Tracer(TracerBase):
             )
 
             def flatten_fn(*args):
-                tree_args = pytree.tree_unflatten(list(args), in_spec)
+                tree_args = pytree.tree_unflatten([*args], in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
                 assert isinstance(self.graph._codegen, _PyTreeCodeGen)

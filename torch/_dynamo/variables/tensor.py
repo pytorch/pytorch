@@ -543,9 +543,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert len(idxes) == length, (
-                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
-            )
+            assert (
+                len(idxes) == length
+            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -591,7 +591,7 @@ class TensorVariable(VariableTracker):
             is_base_tensor_method = False
 
         if (
-            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            can_dispatch_torch_function(tx, tuple([self] + [*args]), kwargs)
             and is_base_tensor_method
         ):
             if self.source:
@@ -602,7 +602,7 @@ class TensorVariable(VariableTracker):
                 func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
 
             return dispatch_torch_function(
-                tx, func_var, tuple([self] + list(args)), kwargs
+                tx, func_var, tuple([self] + [*args]), kwargs
             )
 
         """
@@ -679,7 +679,7 @@ class TensorVariable(VariableTracker):
                 if not has_free_symbols(fake_r):
                     # int conversion for safety, in case a SymInt refined
                     # to constant
-                    return RetVariable(tuple(int(r) for r in fake_r))
+                    return RetVariable(tuple([int(r) for r in fake_r]))
             else:
                 fake_r = getattr(fake, name)(dim)
                 if not has_free_symbols(fake_r):
@@ -900,7 +900,7 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function",
             fn,
-            *proxy_args_kwargs([self] + list(args), kwargs),
+            *proxy_args_kwargs([self] + [*args], kwargs),
         )
 
         return wrap_fx_proxy(tx, proxy)
@@ -1336,7 +1336,7 @@ class NumpyNdarrayVariable(TensorVariable):
             return ConstantVariable.create(getattr(example_ndarray, name))
         elif name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
-                return ConstantVariable.create(tuple(int(r) for r in r))
+                return ConstantVariable.create(tuple([int(r) for r in r]))
             return insert_into_graph()
         elif name == "size":
             if not has_free_symbols(r := example_ndarray.size):
@@ -1376,7 +1376,7 @@ class NumpyNdarrayVariable(TensorVariable):
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
-            *proxy_args_kwargs([self] + list(args), kwargs),
+            *proxy_args_kwargs([self] + [*args], kwargs),
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 

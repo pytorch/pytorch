@@ -61,9 +61,9 @@ remove_split_with_size_one_pass_aten = PatternMatcherPass()
 
 def save_inductor_dict(pass_to_compare=None):
     if not pass_to_compare:
-        pass_to_compare = list(config.pre_grad_fusion_options.keys()) + list(
-            config.post_grad_fusion_options.keys()
-        )
+        pass_to_compare = [*config.pre_grad_fusion_options.keys()] + [
+            *config.post_grad_fusion_options.keys()
+        ]
     return {p: dict(counters["inductor"]).get(p, 0) for p in pass_to_compare}
 
 
@@ -484,7 +484,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
                 bn_args_is_constant = all(
                     n.op == "get_attr"
-                    and (len(n.users) == 1 or _used_by_same_conv_module(list(n.users)))
+                    and (len(n.users) == 1 or _used_by_same_conv_module([*n.users]))
                     for n in node.args[1:5]
                 )
                 if not bn_args_is_constant:
@@ -613,7 +613,7 @@ def check_permute(node: torch.fx.Node) -> bool:
         permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[operator, union-attr]
     else:
         return False
-    allowed_permutation = list(range(ranks))
+    allowed_permutation = [*range(ranks)]
     allowed_permutation[-1] = ranks - 2
     allowed_permutation[-2] = ranks - 1
     return permutation == allowed_permutation
@@ -621,7 +621,7 @@ def check_permute(node: torch.fx.Node) -> bool:
 
 def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     def one_user(node):
-        users = list(node.users)
+        users = [*node.users]
         return users[0] if len(users) == 1 else None
 
     def is_view(node):

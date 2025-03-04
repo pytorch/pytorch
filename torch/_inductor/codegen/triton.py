@@ -380,7 +380,7 @@ class BlockPtrOptions:
         result = BlockPtrOptions(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            order=list(reversed(range(len(params.shape)))),
+            order=[*reversed(range(len(params.shape)))],
             mask_vars=mask_vars,
             final_shape=final_shape,
             broadcast_shape=broadcast_shape,
@@ -629,7 +629,7 @@ class TritonPrinter(PythonPrinter):
 
         # Use a macro so we can propagate constexprs.
         # https://github.com/triton-lang/triton/issues/3815
-        a, b = tuple(f"({x})" for x in (a, b))
+        a, b = tuple([f"({x})" for x in (a, b)])
         assert cmp in (">", "<"), f"Unexpected comparator: '{cmp}'"
         return f"({a} * ({a} {cmp}= {b}) + {b} * ({b} {cmp} {a}))"
 
@@ -1489,7 +1489,7 @@ class BlockParameters:
         Concatenates block parameters.
         """
         cls = type(self)
-        a, b = tuple(dataclasses.asdict(x) for x in (self, other))
+        a, b = tuple([dataclasses.asdict(x) for x in (self, other)])
         return cls(**{key: a[key] + b[key] for key in a})
 
 
@@ -1950,7 +1950,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ]
 
                 # Match each range tree's subexpression separately.
-                range_symbols = OrderedSet(tree.symbol() for tree in range_trees)
+                range_symbols = OrderedSet([tree.symbol() for tree in range_trees])
                 block_params = BlockParameters()
                 for tree, subexpr in zip(range_trees, index_subexprs):
                     # Reject mixed terms, e.g. xindex * r0_index.
@@ -2052,9 +2052,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert block_ptr not in advancements, (
-                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
-                )
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -2405,7 +2405,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dtype = torch.promote_types(dtype, torch.float32)
 
         assert self.inside_reduction
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet([f"{tree.prefix}mask" for tree in self.range_trees])
         self.filter_masks(masks)
         masks = sorted(masks)
         if self._load_mask:
@@ -2487,7 +2487,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         torch_acc_type = upcast_acc_dtype(src_dtype)
         result_var: Any = self.cse.newvar(dtype=torch_acc_type)
         result_var.mask_vars = OrderedSet(
-            var for var in masks if not prefix_is_reduction(var[0])
+            [var for var in masks if not prefix_is_reduction(var[0])]
         )
         cond = " & ".join(masks)
 
@@ -2540,10 +2540,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
                 result_var = tuple(
-                    self.cse.generate(self.compute, value, dtype=dtype)
-                    for value in self._welford(
-                        self.compute, mean, m2, weight, dim, dtype
-                    )
+                    [
+                        self.cse.generate(self.compute, value, dtype=dtype)
+                        for value in self._welford(
+                            self.compute, mean, m2, weight, dim, dtype
+                        )
+                    ]
                 )
             else:
                 assert isinstance(masked_value, CSEVariable)
@@ -2708,7 +2710,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         welford_results = [str(self.cse.newvar(dtype=dtype)) for _ in range(3)]
         buffer.writeline(f"{', '.join(welford_results)} = {welford}")
 
-        result_values = tuple(self.reduction_resize(value) for value in welford_results)
+        result_values = tuple(
+            [self.reduction_resize(value) for value in welford_results]
+        )
         return result_values
 
     def welford_reduce(
@@ -2872,10 +2876,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         cse = CSE()
 
         args = [
-            tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
+            tuple(
+                [cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args)]
+            )
             for i in range(2)
         ]
-        signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
+        signature = ", ".join([str(x) for x in itertools.chain.from_iterable(args)])
         helper.writeline(f"def {{name}}({signature}):")
 
         overrides = TritonOverrides()
@@ -2910,7 +2916,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
-            outputs = ", ".join(str(output) for output in outputs)
+            outputs = ", ".join([str(output) for output in outputs])
             helper.writeline(f"return {outputs}")
 
         return self.helper_functions.add(helper.getvalue(), base_name=helper_name)
@@ -2925,7 +2931,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet([f"{tree.prefix}mask" for tree in self.range_trees])
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
@@ -2933,7 +2939,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         broadcasted_values = []
         accumulators = []
 
-        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        dtypes = tuple([upcast_compute_type(dtype) for dtype in dtypes])
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, len(values), dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -3035,18 +3041,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet([f"{tree.prefix}mask" for tree in self.range_trees])
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert self.persistent_reduction, (
-            "ops.sort is only supported in persistent reductions"
-        )
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
-        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        dtypes = tuple([upcast_compute_type(dtype) for dtype in dtypes])
         assert len(dtypes) == len(values)
         broadcasted_values = [
             cse_compute(
@@ -3566,7 +3572,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
         code.splice(heuristics_line)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join([x.full_name() for x in argdefs])}):"
         )
         with code.indent():
             self.codegen_static_numels(code)
@@ -3817,7 +3823,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def get_reduction_prefixes(self) -> list[str]:
         return [
             prefix_str[symt]
-            for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
+            for symt in [*TritonSymbols.reduction_types][: self.num_reduction_dims]
         ]
 
     def codegen_reduction_numels(self, buffer: IndentedBuffer) -> None:
@@ -3826,7 +3832,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         # rnumel = r0_numel * ... * r(n-1)_numel
         reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-        rnumel = " * ".join(sorted(f"{tree.prefix}numel" for tree in reduction_trees))
+        rnumel = " * ".join(sorted([f"{tree.prefix}numel" for tree in reduction_trees]))
         buffer.splice(f"rnumel = {self.kexpr(rnumel)}")
 
         # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
@@ -4036,7 +4042,9 @@ class TritonScheduling(SIMDScheduling):
         src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
         mod = PyCodeCache.load(src_code)
         return self.benchmark_codegened_module(
-            mod, n_spills_threshold, node_names=OrderedSet(n.get_name() for n in nodes)
+            mod,
+            n_spills_threshold,
+            node_names=OrderedSet([n.get_name() for n in nodes]),
         )
 
     def benchmark_codegened_module(
@@ -4227,7 +4235,7 @@ class TritonScheduling(SIMDScheduling):
             path = cache_file_path()
             if os.path.exists(path):
                 with open(path) as fd:
-                    return tuple(float(e) for e in fd.read().split())
+                    return tuple([float(e) for e in fd.read().split()])
             return (None, None)
 
         def store_cache():
@@ -4294,7 +4302,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
-                OrderedSet(n.get_name() for n in node_group),
+                OrderedSet([n.get_name() for n in node_group]),
                 ms,
                 ms_clone,
             )
@@ -4321,9 +4329,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
-            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        )
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.

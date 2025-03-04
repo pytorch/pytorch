@@ -951,15 +951,19 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     @staticmethod
     def scan(dtypes, combine_fn, values):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
-            for i in range(len(values))
+            [
+                f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+                for i in range(len(values))
+            ]
         )
 
     @staticmethod
     def sort(dtypes, values, stable, descending):
         return tuple(
-            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
-            for i in range(len(values))
+            [
+                f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
+                for i in range(len(values))
+            ]
         )
 
     @staticmethod

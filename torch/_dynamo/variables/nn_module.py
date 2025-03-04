@@ -400,9 +400,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert not is_lazy, (
-                    "Expected lazy sequential isn't a valid combination?"
-                )
+                assert (
+                    not is_lazy
+                ), "Expected lazy sequential isn't a valid combination?"
                 assert not kwargs
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -709,7 +709,7 @@ class NNModuleVariable(VariableTracker):
                 src = AttrSource(AttrSource(self.source, name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=src),
-                    [self] + list(args),
+                    [self] + [*args],
                     kwargs,
                 )
 
@@ -723,7 +723,7 @@ class NNModuleVariable(VariableTracker):
                     result = []
 
                     # Turn the slice into the list of integers
-                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    keys = [*range(len(module))][args[0].as_python_constant()]
                     for idx, submod in enumerate(module[args[0].as_python_constant()]):
                         key = keys[idx]
                         src = NNModuleSource(GetItemSource(self.source, key))
@@ -950,7 +950,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
     def call_method(
@@ -968,7 +968,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 source = None
 
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -1103,7 +1103,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+                [
+                    build_key_value(i, k, v)
+                    for i, (k, v) in enumerate(hooks_dict.items())
+                ]
             )
 
             return variables.NNModuleHooksDictVariable(
@@ -1154,9 +1157,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
-        assert source is not None, (
-            "FSDPManagedNNModule depends on having an accurate source to control guarding."
-        )
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
         self.source = source

@@ -297,7 +297,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     def get_size_hint(self) -> int:
         if not self.allocations:
             return 0
-        return max(x.get_size_hint() for x in self.allocations)
+        return max([x.get_size_hint() for x in self.allocations])
 
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:

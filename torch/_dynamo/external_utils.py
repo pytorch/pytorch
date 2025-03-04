@@ -140,7 +140,7 @@ def call_backward(
 
 def normalize_as_list(x: Any) -> list[Any]:
     if isinstance(x, tuple):
-        return list(x)
+        return [*x]
     elif isinstance(x, list):
         return x
     return [x]

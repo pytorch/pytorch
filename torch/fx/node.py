@@ -172,7 +172,7 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
         return arg._custom_fx_repr_fn()
     elif isinstance(arg, list):
         items = ", ".join(
-            _format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len
+            [_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len]
         )
         maybe_len = (
             "" if len(arg) < max_list_len + 1 else f", ...[total_len={len(arg)}]"
@@ -180,7 +180,7 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
         return f"[{items}{maybe_len}]"
     elif isinstance(arg, tuple):
         items = ", ".join(
-            _format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len
+            [_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len]
         )
         maybe_len = (
             "" if len(arg) < max_list_len + 1 else f", ...[total_len={len(arg)}]"
@@ -188,7 +188,7 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
         maybe_comma = "," if len(arg) == 1 else ""
         return f"({items}{maybe_comma}{maybe_len})"
     elif isinstance(arg, dict):
-        items_str = ", ".join(f"{k}: {_format_arg(v)}" for k, v in arg.items())
+        items_str = ", ".join([f"{k}: {_format_arg(v)}" for k, v in arg.items()])
         return f"{{{items_str}}}"
 
     if isinstance(arg, Node):
@@ -446,7 +446,7 @@ class Node(_NodeBase):
             List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
             ``Node``, in that order.
         """
-        return list(self._input_nodes.keys())
+        return [*self._input_nodes.keys()]
 
     @compatibility(is_backward_compatible=True)
     def update_arg(self, idx: int, arg: Argument) -> None:
@@ -459,7 +459,7 @@ class Node(_NodeBase):
             idx (int): The index into ``self.args`` of the element to update
             arg (Argument): The new argument value to write into ``args``
         """
-        args = list(self.args)
+        args = [*self.args]
         args[idx] = arg
         self.args = tuple(args)
 
@@ -648,7 +648,7 @@ class Node(_NodeBase):
             )
             for k, v in self.meta.items():
                 replace_with.meta[k] = v
-        to_process = list(self.users)
+        to_process = [*self.users]
         skipped = []
         m = self.graph.owning_module
         for use_node in to_process:

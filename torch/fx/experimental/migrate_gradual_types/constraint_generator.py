@@ -979,7 +979,7 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
     for arg in n.args[0]:
         dim = arg if isinstance(arg, int) else symbols[arg]
         res.append(dim)
-    c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
+    c = BinConstraintT(full, TensorType([*res]), op_eq)  # type: ignore[arg-type]
     return [c], counter
 
 
@@ -1195,7 +1195,7 @@ def gen_layer_norm_constraints(n: Node, normalized_shape, symbols, counter):
                 BinConstraintT(input, TensorType(new_dims_rhs), op_eq),
                 BinConstraintT(output, TensorType(new_dims_rhs), op_eq),
             ]
-            + add_layer_norm_constraints(new_dims_rhs, list(normalized_shape))
+            + add_layer_norm_constraints(new_dims_rhs, [*normalized_shape])
             + nat_constraints
         )
         c2.append(c_tensor_i)
@@ -1544,7 +1544,7 @@ class ConstraintGenerator:
 
             if isinstance(t, torch.Tensor):
                 if len(t.shape) > 0:
-                    res = list(t.shape)
+                    res = [*t.shape]
                     attr_type = TensorType(res)
                     output, counter = gen_tvar(counter)
                     self.symbol_dict[n] = output

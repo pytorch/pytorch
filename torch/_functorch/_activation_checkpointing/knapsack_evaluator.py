@@ -54,7 +54,7 @@ class KnapsackEvaluator:
             (peak_memory_after_forward_pass, "Initial Peak/Current Memory")
         ]
         already_computed = set()
-        sorted_nodes = list(reversed(list(nx.topological_sort(node_graph))))
+        sorted_nodes = [*reversed([*nx.topological_sort(node_graph)])]
         dependencies_computed = set()
 
         for node in sorted_nodes:
@@ -146,10 +146,12 @@ class KnapsackEvaluator:
             saved_nodes_idxs, recomputable_node_idxs
         )
         recomputation_runtime = sum(
-            self._graph_info_provider.all_node_runtimes[
-                self._graph_info_provider.all_recomputable_banned_nodes[node]
+            [
+                self._graph_info_provider.all_node_runtimes[
+                    self._graph_info_provider.all_recomputable_banned_nodes[node]
+                ]
+                for node in recomputable_node_idxs
             ]
-            for node in recomputable_node_idxs
         )
         if account_for_backward_pass:
             memory_list = self._get_backward_memory_from_topologically_sorted_graph(
@@ -160,19 +162,23 @@ class KnapsackEvaluator:
                 },
                 node_memories=self._graph_info_provider.all_node_memories,
                 peak_memory_after_forward_pass=sum(
-                    self._graph_info_provider.all_node_memories[
-                        self._graph_info_provider.all_recomputable_banned_nodes[i]
+                    [
+                        self._graph_info_provider.all_node_memories[
+                            self._graph_info_provider.all_recomputable_banned_nodes[i]
+                        ]
+                        for i in saved_nodes_idxs
                     ]
-                    for i in saved_nodes_idxs
                 ),
             )
             peak_memory = max(memory_list, key=lambda x: x[0])[0]
         else:
             peak_memory = sum(
-                self._graph_info_provider.all_node_memories[
-                    self._graph_info_provider.all_recomputable_banned_nodes[node]
+                [
+                    self._graph_info_provider.all_node_memories[
+                        self._graph_info_provider.all_recomputable_banned_nodes[node]
+                    ]
+                    for node in saved_nodes_idxs
                 ]
-                for node in saved_nodes_idxs
             )
         return {
             "peak_memory": peak_memory,
@@ -198,7 +204,7 @@ class KnapsackEvaluator:
             knapsack_algo (Callable): The knapsack algorithm to use for evaluation.
             memory_budget_values (List[float]): A list of memory budgets to evaluate.
         """
-        results = list()
+        results = []
         for memory_budget in memory_budget_values:
             _, saved_nodes, recomputed_nodes = knapsack_algo(
                 self._graph_info_provider.get_knapsack_memory_input(),

@@ -100,7 +100,7 @@ class FxNetAccFusionsFinder:
 
     def __init__(self, module: torch.fx.GraphModule, acc_nodes: NodeSet):
         self.module = module
-        self.nodes = list(module.graph.nodes)
+        self.nodes = [*module.graph.nodes]
         self.acc_nodes = acc_nodes
 
     @dataclass
@@ -175,7 +175,7 @@ class FxNetAccFusionsFinder:
 
     def __call__(self) -> dict[torch.fx.Node, NodeSet]:
         result: dict[torch.fx.Node, NodeSet] = {}
-        acc_nodes = list(self.acc_nodes)
+        acc_nodes = [*self.acc_nodes]
 
         for node in acc_nodes:
             if node in result:

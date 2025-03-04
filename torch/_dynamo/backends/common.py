@@ -141,7 +141,7 @@ def fake_tensor_unsupported(fn):
     @functools.wraps(fn)
     def wrapper(model, inputs, **kwargs):
         with _disable_current_modes():
-            inputs = list(map(defake, inputs))
+            inputs = [*map(defake, inputs)]
             return fn(model, inputs, **kwargs)
 
     return wrapper

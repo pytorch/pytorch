@@ -219,7 +219,7 @@ def tabulate(
         return tabulate.tabulate(rows, headers=headers)
     except ImportError:
         return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+            [", ".join(map(str, row)) for row in itertools.chain([headers], rows)]
         )
 
 
@@ -755,7 +755,7 @@ def compile_times(repr="str", aggregate: bool = False):
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
             for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_time_metrics.keys())
+        headers = [*compilation_time_metrics.keys()]
         return headers, values
     return None
 
@@ -1107,7 +1107,7 @@ def make_cell(val=None):
 
 def proxy_args_kwargs(args, kwargs):
     try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
+        proxy_args = tuple([arg.as_proxy() for arg in args])
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
@@ -1116,7 +1116,7 @@ def proxy_args_kwargs(args, kwargs):
 
         unimplemented_v2(
             gb_type="Failed to convert args/kwargs to proxy",
-            context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            context=f"call_function args: {typestr(*args)} {typestr(*[*kwargs.values()])}",
             explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
             hints=[],
             from_exc=e,
@@ -1247,7 +1247,7 @@ class CompilationMetrics:
             if not isinstance(metric, (set, list)):
                 return "<unknown>"
 
-            return ",".join(safe_str(item) for item in sorted(metric))
+            return ",".join([safe_str(item) for item in sorted(metric)])
 
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
@@ -1335,15 +1335,13 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
+        non_compliant_ops=[*c.non_compliant_ops]
         if c.non_compliant_ops is not None
         else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
+        compliant_custom_ops=[*c.compliant_custom_ops]
         if c.compliant_custom_ops is not None
         else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        restart_reasons=[*c.restart_reasons] if c.restart_reasons is not None else None,
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -1410,7 +1408,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
                     keys_to_scrub.add(key)
                 # Convert set() to list for json.dumps()
                 if isinstance(val, set):
-                    inductor_config_copy[key] = list(val)
+                    inductor_config_copy[key] = [*val]
             # Evict unwanted keys
             for key in keys_to_scrub:
                 del inductor_config_copy[key]
@@ -1483,7 +1481,7 @@ def record_compilation_metrics(
     torch._logging.trace_structured(
         name,
         lambda: {
-            k: list(v) if isinstance(v, set) else v
+            k: [*v] if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
         },
         # NB: Because compilation metrics *includes* the logging overhead time,
@@ -1524,7 +1522,7 @@ def clear_compilation_metrics() -> None:
 
 
 def get_compilation_metrics() -> list[CompilationMetrics]:
-    return list(_compilation_metrics)
+    return [*_compilation_metrics]
 
 
 class ChromiumEventLogger:
@@ -1962,7 +1960,7 @@ def clone_input(x, *, dtype=None):
             )
 
         needed_size = sum(
-            (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
+            [(shape - 1) * stride for shape, stride in zip(x.size(), x.stride())]
         )
         if x.is_quantized:
             result = torch.empty_quantized((needed_size + 32,), x)
@@ -2002,7 +2000,7 @@ def clone_inputs(example_inputs):
                 res[key] = clone_input(value)
         return res
 
-    res = list(example_inputs)
+    res = [*example_inputs]
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):
             res[i] = clone_input(res[i])
@@ -2093,7 +2091,7 @@ def is_namedtuple_cls(cls):
                 getattr(cls, "_make", None)
             ):
                 # The subclassing style namedtuple can have an extra base `typing.Generic`
-                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                bases = tuple([t for t in cls.__bases__ if t is not Generic])
                 if bases == (tuple,):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
@@ -2539,7 +2537,7 @@ def const_repr(x, *, local) -> str:
     from .trace_rules import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
-        elems_repr = ",".join(const_repr(s, local=local) for s in x)
+        elems_repr = ",".join([const_repr(s, local=local) for s in x])
         if isinstance(x, list):
             return f"[{elems_repr}]"
         else:
@@ -2569,7 +2567,7 @@ def const_repr(x, *, local) -> str:
 
 
 def dict_keys_repr(const_keys, *, local) -> str:
-    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
+    keys_str = ",".join([const_repr(s, local=local) for s in const_keys])
     return "[" + keys_str + "]"
 
 
@@ -2661,9 +2659,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2704,9 +2702,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -3092,10 +3090,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
-            for arg in args
+            [
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+                for arg in args
+            ]
         )
 
     try:
@@ -3356,13 +3356,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        assert not is_fake(
+            buffer
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        assert not is_fake(
+            param
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fqn(obj: Any):
@@ -3975,7 +3975,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         markers = [marker.replace("~", "^") for marker in markers]
     else:
         # make markers mutable
-        mutable_markers: list[list[str]] = [list(marker) for marker in markers]
+        mutable_markers: list[list[str]] = [[*marker] for marker in markers]
 
         # anchor positions do not take start_offset into account
         if anchors.left_end_lineno == 0:
@@ -4160,7 +4160,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
-        args: list[Any] = list(args)
+        args: list[Any] = [*args]
         return self.gm(*self.unflatten_fn(args))
 
 
@@ -4184,7 +4184,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         boxed_inputs_count = len(inputs[0])
 
         def flatten_fn(args):
-            return args[0] + list(args[1:])
+            return args[0] + [*args[1:]]
 
         def unflatten_fn(flat_args):
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
@@ -4445,7 +4445,7 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
     return mode

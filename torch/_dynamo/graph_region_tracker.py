@@ -114,7 +114,7 @@ def _normalize_args(
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return (sorted_keys, tuple(_extract_tensor_arg(arg) for arg in all_args))
+    return (sorted_keys, tuple([_extract_tensor_arg(arg) for arg in all_args]))
 
 
 def get_global_state_key() -> GlobalStateKey:
@@ -350,7 +350,7 @@ def fully_expand_region_group(
             for region, region_it, node in zip(regions, region_iters, nodes_to_add):
                 region.append(node)
                 debug_log("adding %s's children", node)
-                debug_log("%s %s", node.args, list(node.kwargs.items()))
+                debug_log("%s %s", node.args, [*node.kwargs.items()])
                 region_it.add_children(node)
                 seen_nodes.add(node)
 

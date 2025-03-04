@@ -513,7 +513,7 @@ class Proxy:
         assert frame is not None
         calling_frame = frame.f_back
         assert calling_frame is not None
-        inst_list = list(dis.get_instructions(calling_frame.f_code))
+        inst_list = [*dis.get_instructions(calling_frame.f_code)]
         if sys.version_info >= (3, 11):
             from bisect import bisect_left
 
@@ -539,7 +539,7 @@ class Proxy:
             assert frame is not None
             calling_frame = frame.f_back
             assert calling_frame is not None
-            insts = list(dis.get_instructions(calling_frame.f_code))
+            insts = [*dis.get_instructions(calling_frame.f_code)]
             if sys.version_info >= (3, 11):
                 from bisect import bisect_left
 
@@ -590,7 +590,7 @@ class Proxy:
 
         if len(tracers) > 1:
             raise RuntimeError(
-                f"Found multiple different tracers {list(tracers.keys())} while "
+                f"Found multiple different tracers {[*tracers.keys()]} while "
                 f"trying to trace operations {orig_method}"
             )
         tracer = next(iter(tracers.keys()))

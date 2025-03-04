@@ -712,7 +712,7 @@ class OutputGraph:
         return count_calls(self.graph)
 
     def is_empty_graph(self):
-        return len(list(self.graph.nodes)) == 0
+        return len([*self.graph.nodes]) == 0
 
     def get_submodule(self, keys):
         assert keys
@@ -1030,9 +1030,9 @@ class OutputGraph:
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
-        assert not (self.pregraph_bytecode and self.export), (
-            "export does not support pregraph_bytecode"
-        )
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(tx)
         prefix_insts.extend(alias_insts)
@@ -1046,7 +1046,7 @@ class OutputGraph:
 
         self.cleanup_graph()
         tx.prune_dead_locals()
-        stack_values = list(tx.stack)
+        stack_values = [*tx.stack]
 
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
@@ -1139,7 +1139,7 @@ class OutputGraph:
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(
-                    tx, list(reversed(stack_values)), root, output_replacements
+                    tx, [*reversed(stack_values)], root, output_replacements
                 )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
@@ -1242,7 +1242,7 @@ class OutputGraph:
             torch._C._set_grad_enabled(True)
         """
         assert self.should_exit
-        nodes = list(self.graph.nodes)
+        nodes = [*self.graph.nodes]
         for node in nodes:
             node.meta.pop("creation_timestamp", None)
 
@@ -1359,7 +1359,7 @@ class OutputGraph:
             output_node = self.create_node(
                 "output",
                 "output",
-                (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
+                (self.current_tracer.create_arg(tuple([x.as_proxy() for x in rv])),),
                 {},
             )
 
@@ -1559,7 +1559,7 @@ class OutputGraph:
         if torch._dynamo.config.use_graph_deduplication:
             return apply_graph_deduplication(self)
         else:
-            return dict()
+            return {}
 
     def install_subgraph(self, name, sub_gm):
         next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
@@ -1576,7 +1576,7 @@ class OutputGraph:
 
     def remove_unused_get_attr_nodes(self) -> None:
         for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):
-            if len(list(node.users)) == 0:
+            if len([*node.users]) == 0:
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
@@ -1642,8 +1642,8 @@ class OutputGraph:
 
         from torch.fx.experimental.symbolic_shapes import is_accessor_node
 
-        for node in reversed(list(self.graph.nodes)):
-            if len(list(node.users)) == 0:
+        for node in reversed([*self.graph.nodes]):
+            if len([*node.users]) == 0:
                 if (
                     node.op == "get_attr"
                     or (node.op == "call_function" and node.target is operator.getitem)
@@ -1757,7 +1757,7 @@ class OutputGraph:
                     example_value.item_memo.node._expr.name
                 )
             ):
-                for u in list(node.users):
+                for u in [*node.users]:
                     u.replace_all_uses_with(guard_scalar(example_value.item_memo))
                     self.remove_node(u)
                 self.remove_node(node)
@@ -2230,9 +2230,9 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                assert arg.graph == self.graph, (
-                    "create_node using arg not from this SubgraphTracer"
-                )
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
@@ -2250,7 +2250,7 @@ class SubgraphTracer(fx.Tracer):
                     # This is a nested graph, which needs to be deleted.
                     # If we do not do this, we will raise on attempting to remove this.
                     # As we only get here during restoration cleanup, this is sound.
-                    user_graph_nodes.extend(reversed(list(user.graph.nodes)))
+                    user_graph_nodes.extend(reversed([*user.graph.nodes]))
             for other_graph_node in user_graph_nodes:
                 other_graph_node.graph.erase_node(other_graph_node)
         self.graph.erase_node(node)
@@ -2274,9 +2274,9 @@ class SubgraphTracer(fx.Tracer):
             before,
         )
         if source is None:
-            assert self.parent is not None, (
-                f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
-            )
+            assert (
+                self.parent is not None
+            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
 
         # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
@@ -2356,9 +2356,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None, (
-            "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
-        )
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
 
         example_value = proxy.node.meta["example_value"]
 
@@ -2668,9 +2668,9 @@ class SubgraphTracer(fx.Tracer):
             if isinstance(proxy, LazyProxy):
                 proxy = proxy()
                 self.bound_symbols[s0] = proxy
-            assert isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self, (
-                f"The proxy of symbol {s0} doesn't belong to current tracer."
-            )
+            assert (
+                isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
+            ), f"The proxy of symbol {s0} doesn't belong to current tracer."
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 

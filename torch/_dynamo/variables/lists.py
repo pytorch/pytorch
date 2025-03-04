@@ -89,7 +89,7 @@ class BaseListVariable(VariableTracker):
         return self.as_python_constant()
 
     def debug_repr_helper(self, prefix, suffix):
-        return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
+        return prefix + ", ".join([i.debug_repr() for i in self.items]) + suffix
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
@@ -118,7 +118,7 @@ class BaseListVariable(VariableTracker):
             return self.items[index]
 
     def unpack_var_sequence(self, tx):
-        return list(self.items)
+        return [*self.items]
 
     def call_method(
         self,
@@ -147,7 +147,7 @@ class BaseListVariable(VariableTracker):
         elif name == "index":
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
-                [self] + list(args),
+                [self] + [*args],
                 kwargs,
             )
         elif name in cmp_name_to_op_mapping:
@@ -393,7 +393,7 @@ class CommonListMethodsVariable(BaseListVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                self.items[key.as_python_constant()] = list(value.items)
+                self.items[key.as_python_constant()] = [*value.items]
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -401,7 +401,7 @@ class CommonListMethodsVariable(BaseListVariable):
             # List copy() doesn't have args and kwargs
             assert not kwargs
             assert not args
-            items = list(self.items)
+            items = [*self.items]
             return self.modified(items, mutation_type=ValueMutationNew())
         elif name == "reverse" and self.is_mutable():
             assert not kwargs
@@ -477,12 +477,14 @@ class ListVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
                 (
-                    (
-                        x,
-                        k.as_python_constant(),
-                        -i if reverse else i,  # extra key to ensure stable sort
-                    )
-                    for i, (k, x) in enumerate(zip(keys, self.items))
+                    [
+                        (
+                            x,
+                            k.as_python_constant(),
+                            -i if reverse else i,  # extra key to ensure stable sort
+                        )
+                        for i, (k, x) in enumerate(zip(keys, self.items))
+                    ]
                 ),
                 key=operator.itemgetter(1, 2),
                 reverse=reverse,
@@ -524,11 +526,11 @@ class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert maxlen.is_python_constant(), (
-            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
-        )
+        assert (
+            maxlen.is_python_constant()
+        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         self.maxlen = maxlen
-        items = list(items)
+        items = [*items]
         if self.maxlen.as_python_constant() is not None:
             items = items[-maxlen.as_python_constant() :]
         super().__init__(items, **kwargs)
@@ -759,7 +761,7 @@ class SizeVariable(TupleVariable):
         codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
-        return list(self.items)
+        return [*self.items]
 
     def numel(self, tx):
         from .builtin import BuiltinVariable
@@ -1062,7 +1064,7 @@ class ListIteratorVariable(IteratorVariable):
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return list(self.items[self.index :])
+        return [*self.items[self.index :]]
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)

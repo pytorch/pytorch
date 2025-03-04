@@ -101,8 +101,8 @@ def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> dict[str, Any
     else:
         metadata["device_index"] = input.device.index
     metadata["dtype"] = f"{input.dtype}"
-    metadata["sizes"] = list(input.size())
-    metadata["strides"] = list(input.stride())
+    metadata["sizes"] = [*input.size()]
+    metadata["strides"] = [*input.stride()]
     metadata["requires_grad"] = input.requires_grad
     metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
     return metadata
@@ -182,7 +182,7 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
-    flattened_inputs = list(args) + list(kwargs.values())
+    flattened_inputs = [*args] + [*kwargs.values()]
     if not all(
         isinstance(
             input,

@@ -290,7 +290,7 @@ class LocalState:
 
     def render(self) -> str:
         return "\n".join(
-            f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
+            [f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()]
         )
 
 
@@ -1248,9 +1248,9 @@ class InstructionTranslatorBase(
                     self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(val, VariableTracker), (
-            f"push expects VariableTracker, got {typestr(val)}"
-        )
+        assert val is None or isinstance(
+            val, VariableTracker
+        ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]):
@@ -2160,9 +2160,9 @@ class InstructionTranslatorBase(
         if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, (
-                f"Mutating module attribute {inst.argval} during export."
-            )
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
 
         try:
             BuiltinVariable(setattr).call_function(
@@ -2413,7 +2413,7 @@ class InstructionTranslatorBase(
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
         if seq.has_force_unpack_var_sequence(self):
-            vals = list(seq.force_unpack_var_sequence(self))
+            vals = [*seq.force_unpack_var_sequence(self)]
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2963,7 +2963,7 @@ class InstructionTranslatorBase(
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
+                [self.frame_summary()] + [*reversed(additional_stack_frames)]
             )
         )
 
@@ -3179,9 +3179,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             if self.export:
-                assert self.one_graph, (
-                    "Export without one graph - something has gone wrong."
-                )
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
@@ -3334,14 +3334,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         # NOTE: do not use isinstance, since it realizes lazy VT's
         argnames = tuple(
-            k
-            for k in all_argnames
-            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            [
+                k
+                for k in all_argnames
+                if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            ]
         )
         argnames_null = tuple(
-            k
-            for k in all_argnames
-            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            [
+                k
+                for k in all_argnames
+                if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            ]
         )
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
@@ -3409,11 +3413,11 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code,
             self.lineno,
             inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
+            tuple([b.target.offset for b in self.block_stack]),
             stack_len,
             argnames,
             argnames_null,
-            tuple(b.resume_fn() for b in self.block_stack),
+            tuple([b.resume_fn() for b in self.block_stack]),
             tuple(stack_ctx_vars),
             tuple(argnames_ctx_vars),
             tuple(null_idxes),

@@ -235,7 +235,7 @@ def insert_subgm(
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
         module_node.meta["val"] = tuple(
-            orig_output.meta.get("val", None) for orig_output in orig_outputs
+            [orig_output.meta.get("val", None) for orig_output in orig_outputs]
         )
     return gm
 
@@ -255,7 +255,7 @@ def fuse_by_partitions(
     always_return_tuple: bool = False,
 ) -> GraphModule:
     for partition_id, partition in enumerate(partitions):
-        sorted_nodes = topo_sort(list(partition))
+        sorted_nodes = topo_sort([*partition])
 
         submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(

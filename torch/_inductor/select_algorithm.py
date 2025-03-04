@@ -168,9 +168,9 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not None, (
-            "hook_key can only be called once"
-        )
+        assert (
+            self.replacement_hooks[hook_key] is not None
+        ), "hook_key can only be called once"
         self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = None
 
@@ -257,9 +257,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         This is used by flex_attention's backwards grad for captured buffers, see
         zeros_and_scatter lowering
         """
-        assert self.mask is not None, (
-            "Mask is required for inner stores in modifications"
-        )
+        assert (
+            self.mask is not None
+        ), "Mask is required for inner stores in modifications"
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
@@ -460,7 +460,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            return f"{', '.join(x.full_name() for x in arg_defs)}"
+            return f"{', '.join([x.full_name() for x in arg_defs])}"
 
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
@@ -531,7 +531,7 @@ class TritonTemplateKernel(TritonKernel):
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
-                f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
+                f"def {self.kernel_name}({', '.join([x.full_name() for x in arg_defs])}):"
             )
             with code.indent():
                 code.splice(self.defines)
@@ -573,12 +573,12 @@ class TritonTemplateKernel(TritonKernel):
     def _get_subgraph(self, subgraph_number: int):
         assert isinstance(subgraph_number, int)
         assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(self.subgraphs), (
-            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        )
-        assert self.body.getvalue() == "", (
-            "Body should be clear before adding a modification"
-        )
+        assert (
+            subgraph_number < len(self.subgraphs)
+        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        assert (
+            self.body.getvalue() == ""
+        ), "Body should be clear before adding a modification"
         return self.subgraphs[subgraph_number]
 
     def _handle_scatter_graph(self, scatter_graph):
@@ -587,14 +587,14 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             scatter_graph: The scatter graph to process
         """
-        assert isinstance(scatter_graph, ir.ComputedBuffer), (
-            f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
-        )
+        assert isinstance(
+            scatter_graph, ir.ComputedBuffer
+        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
             return sum(
-                x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
+                [x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())]
             )
 
         return scatter_graph.data.store_output(  # type: ignore[attr-defined]
@@ -628,9 +628,9 @@ class TritonTemplateKernel(TritonKernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_ops_handler(modification_handler):
-                assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
-                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
-                )
+                assert isinstance(
+                    subgraph, (ir.ComputedBuffer, list)
+                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
@@ -697,7 +697,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             self.range_trees = range_trees
             self.numels = {k: V.graph.sizevars.simplify(v) for k, v in groups.items()}
-            indices = list(map(OpOverrides.paren, indices))
+            indices = [*map(OpOverrides.paren, indices)]
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
 
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
@@ -858,7 +858,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
-            indices = list(map(OpOverrides.paren, indices))
+            indices = [*map(OpOverrides.paren, indices)]
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
@@ -932,10 +932,10 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(name, str)
         assert isinstance(mask, str)
         stride = self.named_input_nodes[name].get_stride()
-        indices = list(map(OpOverrides.paren, indices))
+        indices = [*map(OpOverrides.paren, indices)]
         assert len(indices) == len(stride)
         index = " + ".join(
-            f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
+            [f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)]
         )
         return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
@@ -1446,9 +1446,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert self.choice.op_overload is not None, (
-                "Please provide an op_overload to use ir.FallbackKernel"
-            )
+            assert (
+                self.choice.op_overload is not None
+            ), "Please provide an op_overload to use ir.FallbackKernel"
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
@@ -2002,7 +2002,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
                 for i, x in enumerate(input_nodes)
             }
-            example_inputs = list(unique_example_inputs.values())
+            example_inputs = [*unique_example_inputs.values()]
             example_inputs_extern = [
                 (
                     unique_example_inputs[input_node.get_name()]

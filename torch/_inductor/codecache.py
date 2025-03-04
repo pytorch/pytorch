@@ -417,9 +417,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(content, (str, bytes)), (
-        "Only strings and byte arrays can be saved in the cache"
-    )
+    assert isinstance(
+        content, (str, bytes)
+    ), "Only strings and byte arrays can be saved in the cache"
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -782,8 +782,12 @@ class FxGraphHashDetails:
                         if kernel.configs:
                             configs = str(
                                 sorted(
-                                    sorted(str(kv) for kv in c.all_kwargs().items())
-                                    for c in kernel.configs
+                                    [
+                                        sorted(
+                                            [str(kv) for kv in c.all_kwargs().items()]
+                                        )
+                                        for c in kernel.configs
+                                    ]
                                 )
                             )
                         kernel = kernel.fn
@@ -975,9 +979,9 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> Generator[
-            tuple[CompiledFxGraph, bytes], None, None
-        ]:
+        def iterate_over_candidates() -> (
+            Generator[tuple[CompiledFxGraph, bytes], None, None]
+        ):
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
@@ -1009,7 +1013,7 @@ class FxGraphCache:
         # their guards to determine whether there's a hit.
         graph = None
         pickled_content = None
-        cache_info: dict[str, Any] = dict()
+        cache_info: dict[str, Any] = {}
 
         for candidate, pickled_content in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1123,9 +1127,9 @@ class FxGraphCache:
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(compiled_graph, CompiledFxGraph), (
-            f"serialization for {type(compiled_graph)} NYI"
-        )
+        assert isinstance(
+            compiled_graph, CompiledFxGraph
+        ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -1555,9 +1559,9 @@ class AotCodeCompiler:
                 cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(v, (str)), (
-                    "Metadata must only contain strings"
-                )
+                assert isinstance(k, str) and isinstance(
+                    v, (str)
+                ), "Metadata must only contain strings"
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
@@ -1828,7 +1832,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
 
     # convert any kwarg-only arguments to kwargs
-    kwargs = dict()
+    kwargs = {}
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2108,8 +2112,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             A python version of ENTRY_FUNCTION()
         """
         parseargs = ", ".join(
-            f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
-            for n, argtype in enumerate(argtypes)
+            [
+                f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
+                for n, argtype in enumerate(argtypes)
+            ]
         )
         suffix = cls.suffix_template % (
             cls.entry_function,
@@ -2346,9 +2352,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             ),
             headerfile=headerfile,
             argdefs=", ".join(
-                f"{a.bindings_type()} {a.name}"
-                for a in meta.argtypes
-                if a.alias_of is None
+                [
+                    f"{a.bindings_type()} {a.name}"
+                    for a in meta.argtypes
+                    if a.alias_of is None
+                ]
             ),
             buffers=buffers,
             buffer_names=", ".join(buffer_names),
@@ -2643,7 +2651,7 @@ class PyCodeCache:
         mod = _reload_python_module(key, path)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        cls.linemaps[path] = [*zip(*linemap)]
 
         if attrs is not None:
             for k, v in attrs.items():

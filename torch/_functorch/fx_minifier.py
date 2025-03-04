@@ -106,7 +106,7 @@ def _convert_node_to_placeholder(graph, node, inps):
 
     elif concrete_val is is_tuple:
         r = False
-        for tuple_user in list(node.users):
+        for tuple_user in [*node.users]:
             r = _convert_node_to_placeholder(graph, tuple_user, inps) or r
         # NB: We must not erase the node at this point, because
         # we are iterating over the nodes and this would change
@@ -237,7 +237,7 @@ def minifier(
                 file=sys.stderr,
             )
             new_state = strategy(
-                deepcopy_fx_graph(old_state.graph), list(old_state.inps), granularity
+                deepcopy_fx_graph(old_state.graph), [*old_state.inps], granularity
             )
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
@@ -406,7 +406,7 @@ def minifier(
             new_inps = cur_inps[:]
             end_range = min(num_nodes, start_range + granularity)
             for idx in range(start_range, end_range):
-                new_node = list(new_graph.nodes)[idx]
+                new_node = [*new_graph.nodes][idx]
                 if _convert_node_to_placeholder(new_graph, new_node, new_inps):
                     is_removing = True
             if not is_removing:

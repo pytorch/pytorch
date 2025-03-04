@@ -382,8 +382,8 @@ class ReadWrites:
 
     def rename(self, renames: dict[str, str]) -> "ReadWrites":
         return ReadWrites(
-            OrderedSet(dep.rename(renames) for dep in self.reads),
-            OrderedSet(dep.rename(renames) for dep in self.writes),
+            OrderedSet([dep.rename(renames) for dep in self.reads]),
+            OrderedSet([dep.rename(renames) for dep in self.writes]),
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -575,7 +575,7 @@ def index_vars_no_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str
 ) -> tuple[list[list[sympy.Symbol]], VarRanges]:
     var_ranges, add_var = var_builder(prefix)
-    args: list[list[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
+    args: list[list[sympy.Symbol]] = [[*map(add_var, size)] for size in argsizes]
     return args, var_ranges
 
 
@@ -590,7 +590,7 @@ def index_vars_squeeze(
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
-        args.append(reindex(list(map(add_var, new_size))))
+        args.append(reindex([*map(add_var, new_size)]))
     return args, var_ranges
 
 

@@ -986,9 +986,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert funcname not in cls.__dict__, (
-                    f"multiple definitions of {funcname} on {cls.__name__}"
-                )
+                assert (
+                    funcname not in cls.__dict__
+                ), f"multiple definitions of {funcname} on {cls.__name__}"
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1471,9 +1471,7 @@ class KernelArgs:
         if value in self.sizevars:
             return self.sizevars[value]
         if name in self.sizevars.values():
-            name = (
-                f"{name}{sum(1 for v in self.sizevars.values() if v.startswith(name))}"
-            )
+            name = f"{name}{sum([1 for v in self.sizevars.values() if v.startswith(name)])}"
         self.sizevars[value] = name
         return name
 
@@ -2386,7 +2384,7 @@ class CSEProxy(DefaultHandler):
                 else:
                     return x
 
-            arg_bounds = list(map(arg_to_bound, args))
+            arg_bounds = [*map(arg_to_bound, args)]
             return getattr(self.vr_analysis, name)(*arg_bounds)
         return ValueRanges.unknown()
 
