@@ -982,7 +982,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            bool can_use_smem = static_cast<size_t>(dim_size) < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
@@ -1061,7 +1061,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            bool can_use_smem = static_cast<size_t>(dim_size) < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
@@ -1125,10 +1125,10 @@ void dispatch_host_softmax_backward(int64_t dim_size, dim3 grid, Tensor &grad, T
   size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
   auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
     smem_reduction_sz) / sizeof(output_t);
-  bool can_use_smem = dim_size < max_elements_per_smem;
-  can_use_smem &= (!(reinterpret_cast<const uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
-  can_use_smem &= (!(reinterpret_cast<const uintptr_t>(output.const_data_ptr<output_t>()) % ALIGN_BYTES));
-  can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<output_t>()) % ALIGN_BYTES);
+  bool can_use_smem = static_cast<size_t>(dim_size) < max_elements_per_smem;
+  can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
+  can_use_smem &= (!(reinterpret_cast<uintptr_t>(output.const_data_ptr<output_t>()) % ALIGN_BYTES));
+  can_use_smem &= !(reinterpret_cast<uintptr_t>(grad.const_data_ptr<output_t>()) % ALIGN_BYTES);
   can_use_smem &= !(dim_size % ILP);
   // This should not be needed on current generation GPUs because the size of shared memory is so low.
   // But we add this check to be defensive and future-proof just in case shared memory size goes up

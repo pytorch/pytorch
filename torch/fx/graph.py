@@ -19,11 +19,11 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
@@ -36,11 +36,11 @@ if TYPE_CHECKING:
 # Mapping of builtins to their `typing` equivalent.
 # (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: typing.List,
-    dict: typing.Dict,
-    set: typing.Set,
-    frozenset: typing.FrozenSet,
-    tuple: typing.Tuple,
+    list: typing.List,  # noqa: UP006
+    dict: typing.Dict,  # noqa: UP006
+    set: typing.Set,  # noqa: UP006
+    frozenset: typing.FrozenSet,  # noqa: UP006
+    tuple: typing.Tuple,  # noqa: UP006
 }
 
 _legal_ops = dict.fromkeys(

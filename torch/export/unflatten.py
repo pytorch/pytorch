@@ -300,6 +300,7 @@ class UnflattenedModule(torch.nn.Module):
         self.flat_args_adapter = flat_args_adapter
 
         self.meta = export_module.graph_module.meta
+        self.meta["unflattened_module"] = self
 
         # Flag to indicate whether args have been adapted.
         self.adapted = False
@@ -1227,10 +1228,8 @@ class _ModuleFrame:
         self.seen_nodes[node.name] = node
 
     def run_outer(self):
-        i = 0
-        for node in self.flat_graph.nodes:
+        for i, node in enumerate(self.flat_graph.nodes):
             self.print(i, node.meta.get("nn_module_stack"), node.format_node())
-            i += 1
 
         # Copy all graph inputs
         node_idx: int = 0

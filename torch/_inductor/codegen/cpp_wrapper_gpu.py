@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import functools
 import os
 from itertools import chain, count, zip_longest
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -13,8 +12,14 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import IRNode, TensorBox
-from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
+from ..ir import GraphPartitionSignature, IRNode, TensorBox
+from ..utils import (
+    cache_on_self,
+    DeferredLineBase,
+    get_gpu_type,
+    GPU_ALIGN_BYTES,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -25,6 +30,8 @@ from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
     from ..graph import GraphLowering
 
 
@@ -53,13 +60,13 @@ class DeferredGpuKernelLine(DeferredLineBase):
             # MultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
         for key in self.keys:
-            assert (
-                key in params
-            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            assert key in params, (
+                f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            )
             if key == get_cpp_wrapper_cubin_path_name():
                 assert os.path.exists(params[key]), f"{params[key]} does not exist"
                 self.additional_files.append(params[key])
@@ -115,9 +122,9 @@ class DeferredGpuDefaultGrid:
             grid_fn = self.grid_callable(*grid, **self.grid_extra_kwargs)
 
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
         return grid_fn(params["meta"])
 
 
@@ -146,9 +153,9 @@ class DeferredGpuGridLine(DeferredLineBase):
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        assert params is not None, (
+            f"{self.kernel_name} not found in CudaKernelParamCache"
+        )
 
         if self.autotune_configs is not None:
             # This indicates the Triton kernel is a user-defined one.
@@ -188,12 +195,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+        self._load_kernel_cache: dict[Hashable, str] = {}
 
     @staticmethod
     def create(
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -209,7 +218,7 @@ class CppWrapperGpu(CppWrapperCpu):
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
 
-    @functools.lru_cache(None)  # noqa: B019
+    @cache_on_self
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
@@ -239,13 +248,13 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.aot_mode and V.graph.inputs_to_check:
             for idx in V.graph.inputs_to_check:
                 input_name = V.graph.graph_input_names[idx]
-                assert (
-                    input_name in V.graph.graph_inputs
-                ), f"{input_name} not found in graph inputs"
+                assert input_name in V.graph.graph_inputs, (
+                    f"{input_name} not found in graph inputs"
+                )
                 value = V.graph.graph_inputs[input_name]
-                assert isinstance(
-                    value, TensorBox
-                ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                assert isinstance(value, TensorBox), (
+                    f"{input_name} is expected to be tensor but found as {type(value)}"
+                )
                 warn_msg = (
                     f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
                     "but it is not aligned at run time. Copying to an aligned tensor "
@@ -324,12 +333,13 @@ class CppWrapperGpu(CppWrapperCpu):
                 constexprs,
             )
 
-        # in C++ wrapper, we don't pass constexpr args, as they don't
-        # get added as parameters to the PTX code compiled from the
-        # user-defined Triton kernel (only non-constexpr args do)
-        raw_args = [
-            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
-        ]
+        if not triton_version_uses_attrs_dict():
+            # in C++ wrapper, we don't pass constexpr args, as they don't
+            # get added as parameters to the PTX code compiled from the
+            # user-defined Triton kernel (only non-constexpr args do)
+            raw_args = [
+                raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
+            ]
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
@@ -374,14 +384,18 @@ class CppWrapperGpu(CppWrapperCpu):
         args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
         self.writeline(f"{fn}({args});")
 
-    @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
     ):
-        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
+        cache_key = (kernel_name, graph)
+        if cache_key in self._load_kernel_cache:
+            return self._load_kernel_cache[cache_key]
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+        self._load_kernel_cache[cache_key] = kernel_var_name
+
+        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
         deferred_gpu_kernel_line = DeferredGpuKernelLine(
             kernel_name,
@@ -452,6 +466,15 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args, arg_types, arg_signatures
         ):
             process_args(arg, arg_type, arg_signature)
+
+        if (
+            global_scratch := self.device_codegen.cpp_global_scratch(
+                next(self.arg_var_id)
+            )
+        ) is not None:
+            global_scratch_def, global_scratch_var = global_scratch
+            self.writeline(global_scratch_def)
+            new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
 
@@ -549,27 +572,46 @@ class CppWrapperGpu(CppWrapperCpu):
                 device_index, call_args
             )
             kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
-
-            # args with value 1 are added into equal_to_1 and constants
-            # in triton_meta (in the Python codegen) which makes them
-            # inlined in the PTX and compiled CUBIN
             arg_signatures = []
             if (
                 triton_meta is not None
                 and triton_meta.get("configs")
                 and triton_meta.get("signature")
             ):
-                equal_to_1 = triton_meta["configs"][0].equal_to_1
-                call_args = [
-                    arg for i, arg in enumerate(call_args) if i not in equal_to_1
-                ]
-                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-                # extract the arg signatures from triton_meta
-                arg_signatures = triton_meta["signature"].values()
-                arg_signatures = [
-                    v for i, v in enumerate(arg_signatures) if i not in equal_to_1
-                ]
-
+                if triton_version_uses_attrs_dict():
+                    signatures = triton_meta["signature"]
+                    arg_signatures = [
+                        val for val in signatures.values() if val != "constexpr"
+                    ]
+                    call_args = [
+                        call_arg
+                        for call_arg, arg_name in zip(call_args, signatures)
+                        if signatures[arg_name] != "constexpr"
+                    ]
+                    arg_types = [
+                        arg_type
+                        for arg_type, arg_name in zip(arg_types, signatures)
+                        if signatures[arg_name] != "constexpr"
+                    ]
+                    assert len(call_args) == len(arg_signatures), (
+                        f"len of the following lists do not match: {call_args=} {arg_signatures=}"
+                    )
+                else:
+                    # args with value 1 are added into equal_to_1 and constants
+                    # in triton_meta (in the Python codegen) which makes them
+                    # inlined in the PTX and compiled CUBIN
+                    equal_to_1 = triton_meta["configs"][0].equal_to_1
+                    call_args = [
+                        arg for i, arg in enumerate(call_args) if i not in equal_to_1
+                    ]
+                    arg_types = [
+                        t for i, t in enumerate(arg_types) if i not in equal_to_1
+                    ]
+                    # extract the arg signatures from triton_meta
+                    arg_signatures = triton_meta["signature"].values()
+                    arg_signatures = [
+                        v for i, v in enumerate(arg_signatures) if i not in equal_to_1
+                    ]
             call_args_str = self.generate_args_decl(
                 call_args, arg_types, arg_signatures
             )
