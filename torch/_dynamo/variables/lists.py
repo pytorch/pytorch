@@ -312,6 +312,13 @@ class RangeVariable(BaseListVariable):
             return self.apply_index(index)
 
     def as_proxy(self):
+        if not self.is_python_constant():
+            unimplemented_v2(
+                gb_type="range(...) with non-integer args",
+                context=f"RangeVariable({self.items})",
+                explanation="Cannot create a proxy for a RangeVariable with non-integer arguments",
+                hints=[*graph_break_hints.FUNDAMENTAL],
+            )
         return self.python_type()(*self._as_proxy())
 
     def unpack_var_sequence(self, tx=None):

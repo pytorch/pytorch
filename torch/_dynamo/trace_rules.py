@@ -3415,7 +3415,7 @@ MOD_SKIPLIST = [
     "torch.sparse",
     "torch.special",
     "torch.storage",
-    "torch.testing",
+    # "torch.testing",
     "torch.types",
     "torch.utils",
     "torch.xpu",
