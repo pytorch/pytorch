@@ -122,7 +122,7 @@ the GEMMs for the workload once and then tune repeatedly with different tuning p
 Workflow
 --------
 There are basically two steps:
-1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned0.csv`::
+1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``::
 
   PYTORCH_TUNABLEOP_ENABLED=1
   PYTORCH_TUNABLEOP_TUNING=0
