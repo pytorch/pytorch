@@ -73,13 +73,18 @@ completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
 variable PYTORCH_TUNABLEOP_VEROBSE=1.
 
-A Note on Tuning Behavior
-=========================
+A Note on Tuning Behavior, Warmup, and Cache Effects
+====================================================
 
 Tuning an operator consists of iterating through the list or registered
 implementations and profiling each one. The profile is established by running a
 single implementation in a loop multiple times and taking the average execution
-time.
+time. There is also an optional warmup phase prior to tuning that can help with
+reaching stable power states by the hardware. During tuning of a workload the
+various hardware caches will more likely produce hits than when not tuning.
+There are options for flushing the instruction cache and rotate the input tensors
+which might help produce a more faithful profile of the tuned operator as if the
+operator were run within a larger workload instead of in a tight, repetitive loop.
 
 By default, each possible solution for a given operator will be run for either
 100 iterations or as many iterations that can be run within 30ms, whichever is
@@ -107,9 +112,14 @@ Tuning Context
 
 The behavior of TunableOp is currently manipulated through environment
 variables, the C++ interface of at::cuda::tunable::getTuningContext(), or the
-torch.cuda.tunable python interfaces that wrap the C++ TuningContext. The
-environment variables take precedence over any setting you manipulate using the
-C++ or Python APIs.
+torch.cuda.tunable python interfaces. The environment variables take precedence
+over any setting you manipulate using the C++ or Python APIs.
+
+Environment Variable Interface
+------------------------------
+Environment variables are cached the first time they are read. You cannot use the
+environment variable interface programmatically since the settings become fixed.
+Use the C++ or Python APIs instead.
 
 """
 import concurrent.futures
