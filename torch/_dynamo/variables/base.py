@@ -485,7 +485,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
                 unimplemented_v2(
-                    gb_type="Builtin operator.* comparison with constant self failed",
+                    gb_type="Builtin `operator.*` comparison with constant `self` failed",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation=f"Failed to compare {self} with {other}, "
                     + f"because {other} is not a Python constant or its mutation check fails.",
