@@ -114,7 +114,7 @@ def _normalize_args(
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return (sorted_keys, tuple(_extract_tensor_arg(arg) for arg in all_args))
+    return (sorted_keys, tuple([_extract_tensor_arg(arg) for arg in all_args]))
 
 
 def get_global_state_key() -> GlobalStateKey:

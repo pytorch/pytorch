@@ -135,7 +135,7 @@ class DebugInterpreter(fx.Interpreter):
             return int(r)
 
         def subst_symint_tuple(nis):
-            return tuple(subst_symint(ni) for ni in nis)
+            return tuple([subst_symint(ni) for ni in nis])
 
         def check_significant_strides(a, b):
             if subst_symint(a.numel()) > 0:

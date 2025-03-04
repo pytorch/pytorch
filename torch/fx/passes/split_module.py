@@ -406,7 +406,7 @@ def split_module(
                 new_node = partition.graph.create_node(
                     op=node.op,
                     target=node.target,
-                    args=tuple(arg for arg in node.args),
+                    args=tuple([arg for arg in node.args]),
                     kwargs={},
                     type_expr=node.type,
                 )
@@ -544,7 +544,7 @@ def split_module(
 
         # Set correct output values
         output_vals = tuple(
-            partition.environment[orig_nodes[name]] for name in partition.outputs
+            [partition.environment[orig_nodes[name]] for name in partition.outputs]
         )
 
         # skip output node generation if there are no output values
@@ -589,7 +589,7 @@ def split_module(
         # Emit call in base graph to this submodule
         output_val = base_mod_graph.call_module(
             partition.submod_name,
-            tuple(base_mod_env[name] for name in partition.inputs),
+            tuple([base_mod_env[name] for name in partition.inputs]),
         )
 
         num_outputs = len(partition.outputs)

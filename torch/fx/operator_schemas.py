@@ -444,7 +444,7 @@ def normalize_function(
                     # Matched more than one schema. In this situation, the caller must provide the types of
                     # the arguments of the overload they expect.
                     schema_printouts = "\n".join(
-                        str(schema) for schema in matched_schemas
+                        [str(schema) for schema in matched_schemas]
                     )
                     raise RuntimeError(
                         f"Tried to normalize arguments to {torch.typename(target)} but "

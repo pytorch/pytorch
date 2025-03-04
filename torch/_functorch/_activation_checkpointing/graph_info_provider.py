@@ -134,14 +134,18 @@ class GraphInfoProvider:
 
     def get_non_ac_peak_memory(self) -> float:
         return sum(
-            self.all_node_memories[node_name]
-            for node_name in self.all_recomputable_banned_nodes_set
+            [
+                self.all_node_memories[node_name]
+                for node_name in self.all_recomputable_banned_nodes_set
+            ]
         )
 
     def get_theoretical_max_runtime(self) -> float:
         return sum(
-            self.all_node_runtimes[node_name]
-            for node_name in self.all_recomputable_banned_nodes_set
+            [
+                self.all_node_runtimes[node_name]
+                for node_name in self.all_recomputable_banned_nodes_set
+            ]
         )
 
     def get_knapsack_memory_input(self) -> list[float]:

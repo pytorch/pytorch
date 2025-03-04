@@ -203,7 +203,7 @@ def add_needs_realized_inputs(fn):
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
-            getattr(fn, overload) for overload in fn.overloads()
+            [getattr(fn, overload) for overload in fn.overloads()]
         )
 
 
@@ -344,7 +344,7 @@ def transform_args(
                 if isinstance(a, (Number, sympy.Basic)) or hasattr(a, "dtype")
             ]
             # only consider tensor kwargs for promotion, for now
-            promoting_args.extend(a for a in kwargs.values() if hasattr(a, "dtype"))
+            promoting_args.extend([a for a in kwargs.values() if hasattr(a, "dtype")])
             dtype = get_promoted_dtype(
                 *promoting_args,
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
@@ -449,9 +449,9 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(
+                x == "out" for x in kwargs.keys()
+            ), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -518,9 +518,9 @@ def broadcast_symbolic_shapes(a, b):
 
 
 def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
-    assert override_return_dtype is None or type_promotion_kind is None, (
-        "only one of override_return_dtype or type_promotion_kind may be given"
-    )
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
 
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -675,9 +675,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if isinstance(input, (list, tuple)):
                 a_list_input = input
                 break
-        assert a_list_input is not None, (
-            "at least one input must be a list to a foreach op"
-        )
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
 
         # broadcast scalar inputs to match length of list inputs
         broadcast_inputs = []
@@ -1008,7 +1008,7 @@ def squeeze(x, dim=None):
     dim = (
         V.graph.sizevars.evaluate_static_shape(dim)
         if isinstance(dim, (int, sympy.Expr))
-        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+        else tuple([V.graph.sizevars.evaluate_static_shape(d) for d in dim])
     )
     dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
@@ -1322,12 +1322,12 @@ def quantized_decomposed_quantize_per_channel(
 
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
-    assert input.get_dtype() == torch.float32, (
-        f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
-    )
-    assert axis < len(input.get_size()), (
-        f"Expecting axis to be < {len(input.get_size())}"
-    )
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
 
     input_loader = input.make_loader()
     scales_loader = scales.make_loader()
@@ -1374,12 +1374,12 @@ def quantized_decomposed_dequantize_per_channel(
 ) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
-    assert input.get_dtype() == dtype, (
-        f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
-    )
-    assert axis < len(input.get_size()), (
-        f"Expecting axis to be < {len(input.get_size())}"
-    )
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
 
     if out_dtype is None:
         out_dtype = torch.float32
@@ -1424,9 +1424,9 @@ def quantized_decomposed_quantize_per_tensor_default(
 ) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
-    assert input.get_dtype() == torch.float32, (
-        f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
-    )
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
 
     input_loader = input.make_loader()
 
@@ -1463,9 +1463,9 @@ def quantized_decomposed_dequantize_per_tensor_default(
     *,
     out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
-    assert input.get_dtype() == dtype, (
-        f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
-    )
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
 
     if out_dtype is None:
         out_dtype = torch.float32
@@ -1502,9 +1502,9 @@ def quantized_decomposed_quantize_per_tensor_tensor(
 ) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
-    assert input.get_dtype() == torch.float32, (
-        f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
-    )
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -1556,9 +1556,9 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     assert len(zero_point.get_size()) == 0 or (
         len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
     ), "expect zero_point as scalar tensor"
-    assert input.get_dtype() == dtype, (
-        f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
-    )
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
 
     if out_dtype is None:
         out_dtype = torch.float32
@@ -1974,9 +1974,9 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert op not in decompositions or override_decomp, (
-        f"both a fallback and a decomp for same op: {op}"
-    )
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -2087,9 +2087,9 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device("cpu"), (
-        "this should be handled in decomps unless config.fallback_random or the device is CPU"
-    )
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     op_overload = (
         aten.bernoulli_.float
@@ -2102,9 +2102,9 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device("cpu"), (
-        "this should be handled in decomps unless config.fallback_random or the device is CPU"
-    )
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 
 
@@ -2433,7 +2433,7 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
         return arg
 
     args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+        [apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)]
     )
     kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
@@ -2451,7 +2451,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
         return arg
 
     args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+        [apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)]
     )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
@@ -2584,8 +2584,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
     args = tuple(
-        apply_constraint(idx, arg, fx_arg)
-        for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args))
+        [
+            apply_constraint(idx, arg, fx_arg)
+            for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args))
+        ]
     )
     kwargs = {k: apply_constraint(-1, v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
@@ -3377,9 +3379,7 @@ def check_and_broadcast_indices(indices, device):
         i.get_dtype() in (torch.int64, torch.int32, torch.bool, torch.uint8)
         for i in indices
         if i is not None
-    ), (
-        f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
-    )
+    ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
     if any(
         i.get_dtype() in (torch.bool, torch.uint8) for i in indices if i is not None
     ):
@@ -4060,7 +4060,7 @@ def _upsample_nearest_exact3d(
 
 
 def _create_constants(*args, dtype):
-    return tuple(ops.constant(a, dtype) for a in args)
+    return tuple([ops.constant(a, dtype) for a in args])
 
 
 @register_lowering(prims.rev.default)
@@ -4572,12 +4572,16 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-        for h in range(kernel_size[0] * 2)
+        [
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+            for h in range(kernel_size[0] * 2)
+        ]
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-        for w in range(kernel_size[1] * 2)
+        [
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+            for w in range(kernel_size[1] * 2)
+        ]
     )
 
     window_size = h_window_size * w_window_size
@@ -5319,12 +5323,16 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-        for h in range(kernel_size[0] * 2)
+        [
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+            for h in range(kernel_size[0] * 2)
+        ]
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-        for w in range(kernel_size[1] * 2)
+        [
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+            for w in range(kernel_size[1] * 2)
+        ]
     )
 
     window_size = h_window_size * w_window_size
@@ -5495,8 +5503,10 @@ def avg_pool3d_backward(
 
     d_window_size, h_window_size, w_window_size = (
         max(
-            max(d // stride[i] - max(0, (d - kernel_size[i]) // stride[i]), 1)
-            for d in range(kernel_size[i] * 2)
+            [
+                max(d // stride[i] - max(0, (d - kernel_size[i]) // stride[i]), 1)
+                for d in range(kernel_size[i] * 2)
+            ]
         )
         for i in range(3)
     )
@@ -5867,7 +5877,7 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         if use_two_step_variance(x, axis=axis, keepdim=keepdim)
         else var_mean_welford_(**kwargs)
     )
-    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
+    output = tuple([to_dtype(x, out_dtype, copy=False) for x in output])
     return output[0] if not return_mean else output
 
 
@@ -6887,8 +6897,8 @@ def associative_scan(
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
-    kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
-    kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
+    kwargs["dtypes"] = tuple([x.get_dtype() for x in xs])
+    kwargs["inner_fns"] = tuple([x.make_loader() for x in xs])
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,
@@ -6958,9 +6968,9 @@ def force_fallback(op: torch._ops.OpOverload):
     A context manager to force fallback an op. Used in unit test
     for FallbackKernel.
     """
-    assert isinstance(op, torch._ops.OpOverload), (
-        "Only OpOverload to make the clean up easier"
-    )
+    assert isinstance(
+        op, torch._ops.OpOverload
+    ), "Only OpOverload to make the clean up easier"
     old_handler = lowerings.get(op)
     try:
         register_lowering(op)(fallback_handler(op))

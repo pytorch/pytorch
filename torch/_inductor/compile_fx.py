@@ -177,7 +177,7 @@ def _fx_compile_mode_default() -> FxCompileMode:
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
-            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
+            ", ".join(sorted([repr(x) for x in FxCompileMode.__members__.keys()])),
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
@@ -661,9 +661,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -1102,7 +1102,9 @@ class _InProcessFxCompile(FxCompile):
                             ):
                                 # Convert to string for eval on the load path
                                 output_strides.append(
-                                    tuple(p.doprint(s) for s in out.get_layout().stride)
+                                    tuple(
+                                        [p.doprint(s) for s in out.get_layout().stride]
+                                    )
                                 )
                             else:
                                 output_strides.append(None)
@@ -1125,9 +1127,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
                             code, linemap = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug("Output code: \n%s", code)
 
@@ -1828,18 +1830,23 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
+        [
+            node.meta["val"].device
+            for node in placeholder_nodes
+            if isinstance(node.meta.get("val"), torch.Tensor)
+        ]
     )
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
-        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
+        [
+            arg.meta["val"].device
+            for arg in output_node(gm).args[0]  # type: ignore[union-attr]
+            if isinstance(arg, fx.Node)
+            and isinstance(arg.meta.get("val"), torch.Tensor)
+        ]
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in (input_devices | out_devices) if device.type == "cuda"
+        [device for device in (input_devices | out_devices) if device.type == "cuda"]
     )
 
     return (

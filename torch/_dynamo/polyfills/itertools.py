@@ -132,7 +132,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
         except StopIteration:
             return
 
-    return tuple(_tee(shared_link) for _ in range(n))
+    return tuple([_tee(shared_link) for _ in range(n)])
 
 
 @overload

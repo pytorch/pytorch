@@ -863,9 +863,11 @@ def has_free_unbacked_symbols(x: IterateExprs) -> bool:
 def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
     # NB: keep synced with is_unbacked_symint
     return OrderedSet(
-        s
-        for s in free_symbols(x)
-        if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+        [
+            s
+            for s in free_symbols(x)
+            if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+        ]
     )
 
 
@@ -2578,9 +2580,11 @@ class DimConstraints:
                     s: modulus * sympy.Symbol("tmp", integer=True) + remainder
                 }
                 reduced_congruences[s].update(
-                    congruence
-                    for congruence in congruences_to_check
-                    if not sympy.checksol(congruence, substitution)
+                    [
+                        congruence
+                        for congruence in congruences_to_check
+                        if not sympy.checksol(congruence, substitution)
+                    ]
                 )
             else:
                 reduced_congruences[s] = congruences_to_check
@@ -3877,10 +3881,10 @@ class ShapeEnv:
         """
 
         ex_size = tuple(
-            self._maybe_specialize_sym_int_with_hint(sz) for sz in ex.size()
+            [self._maybe_specialize_sym_int_with_hint(sz) for sz in ex.size()]
         )
         ex_stride = tuple(
-            self._maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride()
+            [self._maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride()]
         )
         ex_storage_offset = self._maybe_specialize_sym_int_with_hint(
             ex.storage_offset()
@@ -5376,7 +5380,7 @@ class ShapeEnv:
                 **self.co_fields,
                 **self.counter,
                 "num_guards": len(all_exprs[0]),
-                "free_symbols": sum(1 for v in symbol_to_source.values() if v),
+                "free_symbols": sum([1 for v in symbol_to_source.values() if v]),
                 # The keys are meaningless from an aggregate perspective, so
                 # don't include them.  Biggest first.
                 "symbol_guard_counts": sorted(
@@ -5562,8 +5566,10 @@ class ShapeEnv:
         """Format this shape env's guard expressions with optional traceback info if verbose"""
 
         return "\n".join(
-            f" - {guard.expr}{' ' + str(guard.sloc) if verbose else ''}"
-            for guard in self.guards
+            [
+                f" - {guard.expr}{' ' + str(guard.sloc) if verbose else ''}"
+                for guard in self.guards
+            ]
         )
 
     def bound_sympy(
@@ -5729,13 +5735,15 @@ class ShapeEnv:
             var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            _SymbolInfo(
-                s,
-                var_ranges.get(s),
-                self.var_to_val.get(s),
-                s in self.size_like,
-            )
-            for s in sorted(fs, key=str)  # TODO: speed up sort?
+            [
+                _SymbolInfo(
+                    s,
+                    var_ranges.get(s),
+                    self.var_to_val.get(s),
+                    s in self.size_like,
+                )
+                for s in sorted(fs, key=str)  # TODO: speed up sort?
+            ]
         )
 
         r = _maybe_evaluate_static_worker(
@@ -6987,7 +6995,13 @@ class ShapeEnv:
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
-                (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
+                (
+                    [
+                        s
+                        for s in expr.free_symbols
+                        if symbol_is_type(s, SymT.UNBACKED_INT)
+                    ]
+                ),
                 key=lambda s: int(s.name[1:]),
             )
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
@@ -7171,8 +7185,10 @@ def _suggest_torch_checks(
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i + 1}. {fix}"
     src_mapped = ", ".join(
-        f"`{s}` with {' or '.join(src_map[s])}"
-        for s in sorted(s.name for s in cond.free_symbols)
+        [
+            f"`{s}` with {' or '.join(src_map[s])}"
+            for s in sorted([s.name for s in cond.free_symbols])
+        ]
     )
     msg += f"\n\n(These suggested fixes were derived by replacing {src_mapped} in {cond} and its negation.)"
     e.args = (msg,)

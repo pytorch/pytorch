@@ -144,9 +144,9 @@ def convert_arg_type(arg: torch.Argument) -> str:
         container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
         if len(container_match) == 1:
             contained_type = container_match[0]
-            assert contained_type in PYTHON_TO_CPP, (
-                f"unsupported {py_container} type in convert_arg_type: {contained_type}"
-            )
+            assert (
+                contained_type in PYTHON_TO_CPP
+            ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
             cpp_contained_type = PYTHON_TO_CPP[contained_type]
             return f"{cpp_container}<{cpp_contained_type}>"
 
@@ -219,14 +219,16 @@ def user_defined_kernel_grid_fn_code(
             # return as-is when used in eager mode or when grid is callable
             return grid, grid
         # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
-        sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        sympy_grid = tuple([_convert_to_sympy_expr(g) for g in grid])
         return (
             wrapper.codegen_python_shape_tuple(sympy_grid),
             (
                 wrapper.codegen_python_shape_tuple(
                     tuple(
-                        wrapper.generate_example_arg_value(g, type(g))
-                        for g in sympy_grid
+                        [
+                            wrapper.generate_example_arg_value(g, type(g))
+                            for g in sympy_grid
+                        ]
                     )
                 )
                 if config.triton.autotune_at_compile_time
@@ -304,9 +306,11 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
         # are matched with the co_names and __globals__ below to codegen
         # the respective imports necessary for the kernel compilation
         unqualified_loads = OrderedSet(
-            inst.argval
-            for inst in dis.Bytecode(cur_kernel.fn)
-            if inst.opname == "LOAD_GLOBAL"
+            [
+                inst.argval
+                for inst in dis.Bytecode(cur_kernel.fn)
+                if inst.opname == "LOAD_GLOBAL"
+            ]
         )
         global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
         for symbol_name in cur_kernel.fn.__code__.co_names:
@@ -437,9 +441,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                         f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                     )
                 else:
-                    assert self.last_seen_device_guard_index == self.device_idx, (
-                        "AOTInductor only supports running on one CUDA device"
-                    )
+                    assert (
+                        self.last_seen_device_guard_index == self.device_idx
+                    ), "AOTInductor only supports running on one CUDA device"
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
@@ -1175,16 +1179,18 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
+            dims = tuple([V.graph.sizevars.atomically_apply_size_hint(d) for d in dims])
             block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
+                [V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims]
             )
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
-        dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
+        dims = ", ".join(
+            [PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims]
+        )
         block_dims = ", ".join(
-            PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in block_dims
+            [PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in block_dims]
         )
         element_size = PythonWrapperCodegen.val_to_arg_str(self, desc.element_size)
         prefix = "triton.tools.experimental_descriptor"
@@ -1390,7 +1396,7 @@ class PythonWrapperCodegen(CodeGen):
         # in potentially nested scopes as the total allocated size
         # FIXME(rec): not used
         _total_allocated_buffer_size = sum(
-            s.total_allocated_buffer_size for s in past_planning_states
+            [s.total_allocated_buffer_size for s in past_planning_states]
         )
 
     def codegen_input_symbol_assignment(
@@ -2059,32 +2065,38 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
-                assert raw_arg is not None, (
-                    "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
-                )
+                assert (
+                    raw_arg is not None
+                ), "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                 buf_name = f"tmp_arg_{index}"
                 buf = raw_arg
 
             size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_size()
+                [
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        e,
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    for e in buf.get_size()
+                ]
             )
             allocation_size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in V.graph.get_allocation_size(buf)
+                [
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        e,
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    for e in V.graph.get_allocation_size(buf)
+                ]
             )
             stride = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_stride()
+                [
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        e,
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    for e in buf.get_stride()
+                ]
             )
             device = buf.get_device()
             dtype = buf.get_dtype()
@@ -2128,14 +2140,16 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
         elif isinstance(arg, list):
-            return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
+            return f"[{', '.join([self.generate_example_arg_value(a, type(a)) for a in arg])}]"
         else:
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def _grid_dim_str(self, grid_per_dim):
         if isinstance(grid_per_dim, list):
             return (
-                "[" + ", ".join(self._grid_dim_str(item) for item in grid_per_dim) + "]"
+                "["
+                + ", ".join([self._grid_dim_str(item) for item in grid_per_dim])
+                + "]"
             )
         else:
             return pexpr(grid_per_dim)
@@ -2188,9 +2202,9 @@ class PythonWrapperCodegen(CodeGen):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Create example args for autotune in a separate epilogue
-            assert arg_types is not None and len(call_args) == len(arg_types), (
-                "call_args and arg_types do not match"
-            )
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
 
             tensor_args = {}
             all_args = []
@@ -2198,9 +2212,9 @@ class PythonWrapperCodegen(CodeGen):
                 # create a dummy raw_args for uniform behavior in the following loop
                 raw_args = [None] * len(call_args)
             else:
-                assert len(raw_args) == len(call_args), (
-                    "call_args and raw_args do not match"
-                )
+                assert len(raw_args) == len(
+                    call_args
+                ), "call_args and raw_args do not match"
 
             for i, (arg, arg_type, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_args)
@@ -2231,7 +2245,7 @@ class PythonWrapperCodegen(CodeGen):
                 grid_str = grid_fn
             else:
                 grid_str = ", ".join(
-                    self.generate_example_arg_value(g, type(g)) for g in grid
+                    [self.generate_example_arg_value(g, type(g)) for g in grid]
                 )
                 if grid_extra_kwargs:
                     grid_str = f"{grid_str}, {grid_extra_kwargs}"
@@ -2240,7 +2254,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
-                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+                f"del {', '.join([arg for arg in tensor_args.values()])}\n",
             )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
@@ -2251,7 +2265,7 @@ class PythonWrapperCodegen(CodeGen):
             grid_str = grid_fn
         else:
             grid_str = ", ".join(
-                PythonWrapperCodegen._grid_dim_str(self, item) for item in grid
+                [PythonWrapperCodegen._grid_dim_str(self, item) for item in grid]
             )
             if grid_extra_kwargs:
                 grid_str = f"{grid_str}, {grid_extra_kwargs}"
@@ -2358,7 +2372,7 @@ class PythonWrapperCodegen(CodeGen):
         return f"del {buffer.get_name()}"
 
     def make_free_by_names(self, names_to_del: list[str]):
-        return f"del {', '.join(name for name in names_to_del)}"
+        return f"del {', '.join([name for name in names_to_del])}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
@@ -2418,9 +2432,9 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(layout, ir.NoneLayout):
             return
         if isinstance(layout, ir.NonOwningLayout):
-            assert isinstance(layout.view, ir.ReinterpretView), (
-                f"unexpected {type(layout.view)}: {layout.view}"
-            )
+            assert isinstance(
+                layout.view, ir.ReinterpretView
+            ), f"unexpected {type(layout.view)}: {layout.view}"
             assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
@@ -2622,9 +2636,9 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
         # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
-        assert len(outer_inputs) == len(subgraph.graph.graph_input_names), (
-            f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
-        )
+        assert (
+            len(outer_inputs) == len(subgraph.graph.graph_input_names)
+        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
         for inner_input, outer_input in zip(
             subgraph.graph.graph_input_names, outer_inputs
         ):

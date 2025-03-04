@@ -564,7 +564,7 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        return tuple([self.size_hint(x, fallback=fallback) for x in exprs])
 
     def _lru_cache(self, fn, maxsize=None):
         """

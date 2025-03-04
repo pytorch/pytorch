@@ -54,9 +54,11 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     The first num_in_out_args arguments are in out tensors.
     """
     return sum(
-        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
-        for i, arg in enumerate(args)
-        if isinstance(arg, torch.Tensor)
+        [
+            arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
+            for i, arg in enumerate(args)
+            if isinstance(arg, torch.Tensor)
+        ]
     )
 
 
@@ -77,9 +79,9 @@ def validate_triton_config(cfg: Config) -> None:
     # right now, if a pre-hook is attached to the config, it will not be saved;
     # and then it won't be used when the config is loaded from cache.
     # So we assert - if we do get a pre_hook, it might get ignored after caching.
-    assert getattr(cfg, "pre_hook", None) is None, (
-        "triton configs with pre_hooks not supported"
-    )
+    assert (
+        getattr(cfg, "pre_hook", None) is None
+    ), "triton configs with pre_hooks not supported"
 
 
 def create_bandwidth_info_str(

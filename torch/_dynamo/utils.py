@@ -219,7 +219,7 @@ def tabulate(
         return tabulate.tabulate(rows, headers=headers)
     except ImportError:
         return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+            [", ".join(map(str, row)) for row in itertools.chain([headers], rows)]
         )
 
 
@@ -1107,7 +1107,7 @@ def make_cell(val=None):
 
 def proxy_args_kwargs(args, kwargs):
     try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
+        proxy_args = tuple([arg.as_proxy() for arg in args])
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
@@ -1247,7 +1247,7 @@ class CompilationMetrics:
             if not isinstance(metric, (set, list)):
                 return "<unknown>"
 
-            return ",".join(safe_str(item) for item in sorted(metric))
+            return ",".join([safe_str(item) for item in sorted(metric)])
 
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
@@ -1962,7 +1962,7 @@ def clone_input(x, *, dtype=None):
             )
 
         needed_size = sum(
-            (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
+            [(shape - 1) * stride for shape, stride in zip(x.size(), x.stride())]
         )
         if x.is_quantized:
             result = torch.empty_quantized((needed_size + 32,), x)
@@ -2093,7 +2093,7 @@ def is_namedtuple_cls(cls):
                 getattr(cls, "_make", None)
             ):
                 # The subclassing style namedtuple can have an extra base `typing.Generic`
-                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                bases = tuple([t for t in cls.__bases__ if t is not Generic])
                 if bases == (tuple,):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
@@ -2539,7 +2539,7 @@ def const_repr(x, *, local) -> str:
     from .trace_rules import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
-        elems_repr = ",".join(const_repr(s, local=local) for s in x)
+        elems_repr = ",".join([const_repr(s, local=local) for s in x])
         if isinstance(x, list):
             return f"[{elems_repr}]"
         else:
@@ -2569,7 +2569,7 @@ def const_repr(x, *, local) -> str:
 
 
 def dict_keys_repr(const_keys, *, local) -> str:
-    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
+    keys_str = ",".join([const_repr(s, local=local) for s in const_keys])
     return "[" + keys_str + "]"
 
 
@@ -2661,9 +2661,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2704,9 +2704,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -3092,10 +3092,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
-            for arg in args
+            [
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+                for arg in args
+            ]
         )
 
     try:
@@ -3356,13 +3358,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        assert not is_fake(
+            buffer
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        assert not is_fake(
+            param
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fqn(obj: Any):
@@ -4445,7 +4447,7 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
     return mode

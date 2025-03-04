@@ -315,7 +315,7 @@ isolate_fails_code_str = None
 
     # get hint shape/stride when dynamic shape enabled
     def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+        return tuple([i.node.hint if isinstance(i, torch.SymInt) else i for i in x])
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
@@ -701,7 +701,7 @@ def repro_analyze(options, mod, load_args):
         if not diff_values:
             return None
         else:
-            return " and ".join(f"{a} != {b}" for a, b in diff_values)
+            return " and ".join([f"{a} != {b}" for a, b in diff_values])
 
     def check_hook(name, val):
         meta = writer.compute_tensor_metadata(val)

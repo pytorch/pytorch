@@ -473,7 +473,7 @@ def transpose_stack(
 ) -> tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(
-        torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors
+        [torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors]
     )
     return results
 
@@ -556,12 +556,12 @@ def functional_init(
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
         models = tuple(
-            model_class(*args, **kwargs).to(device) for _ in range(num_models)
+            [model_class(*args, **kwargs).to(device) for _ in range(num_models)]
         )
         _, fn, names = make_functional_deprecated_v1(model_class(*args, **kwargs))
-        weights = tuple(make_functional_deprecated_v1(model)[0] for model in models)
+        weights = tuple([make_functional_deprecated_v1(model)[0] for model in models])
         weights = tuple(zip(*weights))
-        weights = tuple(torch.stack(shards).detach() for shards in weights)
+        weights = tuple([torch.stack(shards).detach() for shards in weights])
         return weights, fn, names
 
     return wrapped
@@ -583,7 +583,7 @@ def functional_init_with_buffers(
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
         models = tuple(
-            model_class(*args, **kwargs).to(device) for _ in range(num_models)
+            [model_class(*args, **kwargs).to(device) for _ in range(num_models)]
         )
         (
             _,
@@ -594,14 +594,16 @@ def functional_init_with_buffers(
         ) = make_functional_with_buffers_deprecated_v1(model_class(*args, **kwargs))
         weights, buffers = zip(
             *tuple(
-                make_functional_with_buffers_deprecated_v1(model)[:2]
-                for model in models
+                [
+                    make_functional_with_buffers_deprecated_v1(model)[:2]
+                    for model in models
+                ]
             )
         )
         weights = tuple(zip(*weights))
-        weights = tuple(torch.stack(shards).detach() for shards in weights)
+        weights = tuple([torch.stack(shards).detach() for shards in weights])
         buffers = tuple(zip(*buffers))
-        buffers = tuple(torch.stack(shards).detach() for shards in buffers)
+        buffers = tuple([torch.stack(shards).detach() for shards in buffers])
         return weights, buffers, fn, weight_names, buffer_names
 
     return wrapped

@@ -228,9 +228,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     output_tensor_ids = {
         id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
     }
-    assert input_tensor_ids.isdisjoint(output_tensor_ids), (
-        "inputs to function body cannot alias outputs"
-    )
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
 
 
 def _check_supported_callable_arg(
@@ -676,9 +676,9 @@ def speculate_subgraph(
                     ][-len(lifted_freevars) :]
                     assert len(after_phs) == len(lifted_freevars)
                     for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
 
                     graph.lint()
 
@@ -826,9 +826,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1053,9 +1053,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1394,7 +1394,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with tx.fake_mode:
             out_meta = tuple(
-                inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
+                [inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy]
             )
         return wrap_fx_proxy(
             tx=tx,
@@ -1681,7 +1681,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         lowered_node = make_attr(tx, args[0].module_key)
 
-        p_args = tuple(arg.as_proxy() for arg in args[1:])
+        p_args = tuple([arg.as_proxy() for arg in args[1:]])
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args
         )
@@ -1782,7 +1782,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple([arg for arg in body_lifted_freevars.keys()])
 
         proxy_args = (body_node,) + lifted_args
         example_value = pytree.tree_map_only(
@@ -2032,7 +2032,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple([arg for arg in body_lifted_freevars.keys()])
         p_args = (body_node, lifted_args, {})
 
         p_kwargs = {}
@@ -2062,7 +2062,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if len(kwargs) > 0:
             unimplemented("out_dtype does not handle kwargs")
 
-        p_args = tuple(arg.as_proxy() for arg in args)
+        p_args = tuple([arg.as_proxy() for arg in args])
         op = p_args[0]
         output_dtype = p_args[1]
         fake_sub_args = pytree.tree_map_only(
@@ -2130,7 +2130,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         strict_mode_node = make_attr(tx, strict_mode_name)
         p_args = (
             strict_mode_node,
-            tuple(arg for arg in ret_lifted_freevars.keys()),
+            tuple([arg for arg in ret_lifted_freevars.keys()]),
         )
 
         flat_example_value = pytree.tree_map_only(
@@ -2231,7 +2231,7 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args = tuple(arg.as_proxy() for arg in args)
+        p_args = tuple([arg.as_proxy() for arg in args])
         p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return wrap_fx_proxy(
             tx=tx,
@@ -2254,7 +2254,7 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args = tuple(arg.as_proxy() for arg in args)
+        p_args = tuple([arg.as_proxy() for arg in args])
         p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return wrap_fx_proxy(
             tx=tx,
@@ -2274,7 +2274,7 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args = tuple(arg.as_proxy() for arg in args)
+        p_args = tuple([arg.as_proxy() for arg in args])
         p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return wrap_fx_proxy(
             tx=tx,
@@ -2312,7 +2312,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         try:
-            p_args = tuple(self.to_proxy(tx, arg) for arg in args)
+            p_args = tuple([self.to_proxy(tx, arg) for arg in args])
             p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
         except (NotImplementedError, Unsupported) as err:
             raise Unsupported(
@@ -2423,7 +2423,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
         # We then need to create proxies for this + the inputs.
 
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple([arg for arg in body_lifted_freevars.keys()])
 
         proxy_args = (body_node, lifted_args)
 
@@ -2738,9 +2738,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(x, torch.fx.Proxy):
                 return x.node
             else:
-                assert variables.ConstantVariable.is_literal(x), (
-                    f"Only constant is allowed. Got {x}"
-                )
+                assert variables.ConstantVariable.is_literal(
+                    x
+                ), f"Only constant is allowed. Got {x}"
                 return x
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)

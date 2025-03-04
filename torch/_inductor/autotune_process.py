@@ -534,7 +534,7 @@ class BenchmarkRequest:
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
-            input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+            input_tensors = tuple([x.to_tensor() for x in self.input_tensor_meta])
             output_tensor = self.output_tensor_meta.to_tensor()
 
         if debug:
@@ -591,11 +591,13 @@ class GPUDeviceBenchmarkMixin:
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
         device_idx_set = OrderedSet(
-            tensor.device.index
-            for tensor in [*input_tensors, output_tensor]
-            if isinstance(tensor, torch.Tensor)
-            and is_gpu(tensor.device.type)
-            and tensor.device.index is not None
+            [
+                tensor.device.index
+                for tensor in [*input_tensors, output_tensor]
+                if isinstance(tensor, torch.Tensor)
+                and is_gpu(tensor.device.type)
+                and tensor.device.index is not None
+            ]
         )
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
         device_type = next(

@@ -403,9 +403,12 @@ def valid_vec_isa_list() -> list[VecISA]:
         """
         _cpu_supported_x86_isa = x86_isa_checker()
         isa_list.extend(
-            isa
-            for isa in supported_vec_isa_list
-            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa
+            [
+                isa
+                for isa in supported_vec_isa_list
+                if all(flag in _cpu_supported_x86_isa for flag in str(isa).split())
+                and isa
+            ]
         )
 
     return isa_list

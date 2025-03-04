@@ -284,8 +284,10 @@ def _create_runtime_wrapper(
 
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
-            make_output_handler(info, runtime_metadata, trace_joint)
-            for info in runtime_metadata.output_info
+            [
+                make_output_handler(info, runtime_metadata, trace_joint)
+                for info in runtime_metadata.output_info
+            ]
         )
 
     def runtime_wrapper(args: list[Any]):
@@ -1320,7 +1322,7 @@ def merge_view_inputs(
             for inpt_idx in aliased_input_indices
         ):
             other_args.extend(
-                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+                [fwd_inputs[curr_idx] for curr_idx in aliased_input_indices]
             )
             continue
 
@@ -1335,7 +1337,7 @@ def merge_view_inputs(
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
-                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+                [fwd_inputs[curr_idx] for curr_idx in aliased_input_indices]
             )
             continue
 

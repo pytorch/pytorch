@@ -200,7 +200,7 @@ class FrameStateSizeEntry:
                 return str(s)
 
         def render_tuple(ss: tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
-            return "[" + ", ".join(render_single(s) for s in ss) + "]"
+            return "[" + ", ".join([render_single(s) for s in ss]) + "]"
 
         # Common cases
         if self.size is auto_dynamic and self.stride is auto_dynamic:
@@ -259,7 +259,7 @@ class FrameStateSizeEntry:
 
     @staticmethod
     def _munge_symint(xs: tuple[int, ...]) -> tuple[Union[AutoDynamic, int], ...]:
-        return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
+        return tuple([auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs])
 
     @classmethod
     def make_scalar(cls, x: int) -> FrameStateSizeEntry:
@@ -307,7 +307,7 @@ class FrameStateSizeEntry:
             return auto_dynamic
         if len(xs) != len(ys):
             return auto_dynamic
-        return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
+        return tuple([cls._merge_atom(x, y) for x, y in zip(xs, ys)])
 
     def __ior__(self, other: Self) -> Self:
         self.scalar = self._merge_atom(self.scalar, other.scalar)
@@ -544,11 +544,13 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
-        + "\n".join(
-            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
-        )
-        for k, v in cs.items()
+        [
+            f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+            + "\n".join(
+                [f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()]
+            )
+            for k, v in cs.items()
+        ]
     )
 
 

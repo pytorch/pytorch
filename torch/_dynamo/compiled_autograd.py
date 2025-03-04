@@ -1099,9 +1099,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            assert acc_grad_node is not None, (
-                "post_acc_grad_hook must have corresponding acc grad node"
-            )
+            assert (
+                acc_grad_node is not None
+            ), "post_acc_grad_hook must have corresponding acc grad node"
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
@@ -1134,13 +1134,15 @@ class AutogradCompilerInstance:
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
                 input_nodes_and_users.extend(
-                    user
-                    for user in list(input_node.users.keys())
-                    if not (
-                        user.op == "call_function"
-                        and user.target == call_hook
-                        and node.kwargs.get("hook_type", None) == "post_hook"
-                    )
+                    [
+                        user
+                        for user in list(input_node.users.keys())
+                        if not (
+                            user.op == "call_function"
+                            and user.target == call_hook
+                            and node.kwargs.get("hook_type", None) == "post_hook"
+                        )
+                    ]
                 )
 
             arg = max(input_nodes_and_users)  # last input users
@@ -1173,7 +1175,7 @@ class AutogradCompilerInstance:
         if isinstance(t, list):
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
-            return tuple(self.to_proxy(x) for x in t)
+            return tuple([self.to_proxy(x) for x in t])
         if isinstance(t, (torch.SymInt, torch.SymFloat)):
             return self.symnode_proxy_lookup[t.node]
         if not isinstance(t, torch.Tensor):

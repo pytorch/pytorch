@@ -543,9 +543,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert len(idxes) == length, (
-                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
-            )
+            assert (
+                len(idxes) == length
+            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -679,7 +679,7 @@ class TensorVariable(VariableTracker):
                 if not has_free_symbols(fake_r):
                     # int conversion for safety, in case a SymInt refined
                     # to constant
-                    return RetVariable(tuple(int(r) for r in fake_r))
+                    return RetVariable(tuple([int(r) for r in fake_r]))
             else:
                 fake_r = getattr(fake, name)(dim)
                 if not has_free_symbols(fake_r):
@@ -1336,7 +1336,7 @@ class NumpyNdarrayVariable(TensorVariable):
             return ConstantVariable.create(getattr(example_ndarray, name))
         elif name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
-                return ConstantVariable.create(tuple(int(r) for r in r))
+                return ConstantVariable.create(tuple([int(r) for r in r]))
             return insert_into_graph()
         elif name == "size":
             if not has_free_symbols(r := example_ndarray.size):

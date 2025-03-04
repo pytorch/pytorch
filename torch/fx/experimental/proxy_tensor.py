@@ -135,7 +135,7 @@ pytree.register_pytree_node(
 
 def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
     """FX gets confused by varargs, de-confuse it"""
-    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    argnames = ",".join([f"arg{i}" for i in range(nargs)])
     return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 
@@ -1411,18 +1411,22 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             n_args = (
                 tuple(
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                    for a in args[0]
+                    [
+                        get_proxy_slot(a, self.tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                        for a in args[0]
+                    ]
                 ),
             )
         else:
             n_args = tuple(
-                get_proxy_slot(a, self.tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-                for a in args
+                [
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                    for a in args
+                ]
             )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so

@@ -235,7 +235,7 @@ def insert_subgm(
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
         module_node.meta["val"] = tuple(
-            orig_output.meta.get("val", None) for orig_output in orig_outputs
+            [orig_output.meta.get("val", None) for orig_output in orig_outputs]
         )
     return gm
 

@@ -477,7 +477,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())
+                fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -1953,7 +1953,7 @@ def fx_to_pattern(
                 def process_arg_fn_impl(
                     x: T,
                     ignore_types_override: Optional[Sequence[type[Any]]] = tuple(
-                        t for t in ignore_types if t is not int
+                        [t for t in ignore_types if t is not int]
                     ),
                 ) -> Union[T, KeywordArg, Ignored]:
                     return process_arg(x, ignore_types_override)

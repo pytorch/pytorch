@@ -721,9 +721,11 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.block_vars = block_vars
         self.extra_sizevars = list(
             OrderedSet(
-                val
-                for val in self.kernel_input_name_to_buffer.values()
-                if isinstance(val, sympy.Symbol)
+                [
+                    val
+                    for val in self.kernel_input_name_to_buffer.values()
+                    if isinstance(val, sympy.Symbol)
+                ]
             )
         )
         self.other_buf_start_idx = 5
@@ -789,7 +791,7 @@ class CppFlexAttentionTemplate(CppTemplate):
                 )
 
         return "\n".join(
-            f"auto {ptr} = {name};" for ptr, (name, _) in self.other_ptr_data.items()
+            [f"auto {ptr} = {name};" for ptr, (name, _) in self.other_ptr_data.items()]
         )
 
     def modification(self, subgraph_buffer, output_name, output_idx):
@@ -859,9 +861,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         assert all(
             mem.buffer_name in kernel_group.args.input_buffers
             for mem in body.memory_usage[MemoryUsageType.LOAD]
-        ), (
-            "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
-        )
+        ), "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
 
         bodies.append(body)
         var_sizes_list.append((var_sizes, ()))

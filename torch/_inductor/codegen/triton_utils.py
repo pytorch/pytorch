@@ -163,7 +163,7 @@ def equal_1_arg_indices(
     if indices is None:
         indices = list(range(len(args)))
 
-    equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
+    equal_to_1 = tuple([i for i, arg in zip(indices, args) if _arg_equals_1(arg)])
 
     return equal_to_1
 
@@ -209,9 +209,11 @@ def config_of(
 
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
-            i
-            for i, arg in zip(indices, args)
-            if is_aligned(arg, alignment=16, include_tensor=True)
+            [
+                i
+                for i, arg in zip(indices, args)
+                if is_aligned(arg, alignment=16, include_tensor=True)
+            ]
         )
     else:
         divisible_by_16 = ()

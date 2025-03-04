@@ -53,7 +53,7 @@ def _find_ancestors(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
                     ancestors.add(inp)
                     new_nodes.append(inp)
         cur_nodes = new_nodes
-    return OrderedSet(node for node in ancestors if node.op != "placeholder")
+    return OrderedSet([node for node in ancestors if node.op != "placeholder"])
 
 
 def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
@@ -401,18 +401,18 @@ class _ScaledMatmul(_Matmul):
             Returns the new reshape node.
             """
             # ensure the given node matches the pattern described in the docstring
-            assert node.target == aten.reciprocal.default, (
-                "Node must be a aten.reciprocal.default op"
-            )
+            assert (
+                node.target == aten.reciprocal.default
+            ), "Node must be a aten.reciprocal.default op"
             assert len(node.all_input_nodes) == 1, "Node must have exactly one parent"
 
             parent_node = node.all_input_nodes[0]
-            assert parent_node.target == aten.reshape.default, (
-                "Parent node must be a aten.reshape.default op"
-            )
-            assert len(parent_node.all_input_nodes) == 1, (
-                "Parent node must have exactly one input node"
-            )
+            assert (
+                parent_node.target == aten.reshape.default
+            ), "Parent node must be a aten.reshape.default op"
+            assert (
+                len(parent_node.all_input_nodes) == 1
+            ), "Parent node must have exactly one input node"
 
             parent_input_node = parent_node.all_input_nodes[0]
             parent_input_shape = list(_get_tensor(parent_input_node).shape)

@@ -216,7 +216,9 @@ def assign_memory_planning_info_for_scheduler_nodes(
     from .scheduler import SchedulerBuffer
 
     for index, node in enumerate(nodes):
-        size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
+        size_alloc = sum(
+            [buffer.mpi_buffer.size_alloc for buffer in node.get_outputs()]
+        )
         pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
         for dep in node.read_writes.reads:
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
@@ -224,9 +226,11 @@ def assign_memory_planning_info_for_scheduler_nodes(
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
-            name_to_fused_node[pred_buffer.defining_op_name()]
-            for pred_buffer in pred_buffers
-            if (isinstance(pred_buffer, SchedulerBuffer))
+            [
+                name_to_fused_node[pred_buffer.defining_op_name()]
+                for pred_buffer in pred_buffers
+                if (isinstance(pred_buffer, SchedulerBuffer))
+            ]
         )
         succ_nodes = OrderedSet(
             succ_node
@@ -279,7 +283,10 @@ def estimate_peak_memory(
             len(nodes) - 1
             if buf_name in graph_outputs
             else max(
-                node_to_step[succ_node] for succ_node in input_buf.mpi_buffer.succ_nodes
+                [
+                    node_to_step[succ_node]
+                    for succ_node in input_buf.mpi_buffer.succ_nodes
+                ]
             )
         )
         buf_info_list.append(
@@ -395,8 +402,10 @@ def topological_sort_lpmf(
 
     # initialize memory estimations
     live_memory = sum(
-        input_buf.mpi_buffer.size_free
-        for input_buf in name_to_freeable_input_buf.values()
+        [
+            input_buf.mpi_buffer.size_free
+            for input_buf in name_to_freeable_input_buf.values()
+        ]
     )
 
     # this is the total output memory, which is a lower bound for peak memory
@@ -495,7 +504,10 @@ def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
         assert node_info[node]["indegree"] == 0
         exec_orders = sorted(
             OrderedSet(
-                node_info[pred_node]["order"] for pred_node in node.mpi_node.pred_nodes
+                [
+                    node_info[pred_node]["order"]
+                    for pred_node in node.mpi_node.pred_nodes
+                ]
             )
         )
         return exec_orders
@@ -570,7 +582,7 @@ def topological_sort_dfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
 
     for node in nodes:
         size_with_reads[node] = node.mpi_node.size + sum(
-            pred_buf.mpi_buffer.size_free for pred_buf in node.mpi_node.pred_buffers
+            [pred_buf.mpi_buffer.size_free for pred_buf in node.mpi_node.pred_buffers]
         )
     for node in sorted(nodes, key=lambda n: (size_with_reads[n], n.mpi_node.index)):
         visit(node)

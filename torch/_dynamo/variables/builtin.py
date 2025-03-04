@@ -208,7 +208,9 @@ class BuiltinVariable(VariableTracker):
         from .tensor import supported_comparison_ops
 
         fns.update(supported_comparison_ops.values())
-        fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
+        fns.update(
+            [x for x in math.__dict__.values() if isinstance(x, type(math.sqrt))]
+        )
         return fns
 
     def can_constant_fold_through(self):
@@ -262,9 +264,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> dict[
-        Callable[..., object], tuple[list[str], Callable[..., object]]
-    ]:
+    def _binops() -> (
+        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
+    ):
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -1419,7 +1421,7 @@ class BuiltinVariable(VariableTracker):
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = tuple(
-                variables.ConstantVariable.create(guard_if_dyn(arg)) for arg in args
+                [variables.ConstantVariable.create(guard_if_dyn(arg)) for arg in args]
             )
             return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed

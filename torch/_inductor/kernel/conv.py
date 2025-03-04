@@ -74,9 +74,11 @@ kernel_configs = [
 
 # Create filtered list of configs based on conv
 platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in kernel_configs
+        if config["cond"]
+    ]
 )
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit

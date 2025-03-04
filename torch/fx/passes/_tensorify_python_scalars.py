@@ -328,7 +328,7 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
+                    failed_tensorify_ops.update([str(key) for key in node.users.keys()])
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)

@@ -88,7 +88,7 @@ def _prepare_convolution_fusion_create(
             weight_size = []
             weight_size.append(prepacked_weight_size[1] * groups)
             weight_size.append(prepacked_weight_size[0] / groups)
-            weight_size.extend(prepacked_weight_size[d] for d in range(2, dim))
+            weight_size.extend([prepacked_weight_size[d] for d in range(2, dim)])
         else:
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
@@ -751,9 +751,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert binary_attr == "sum", (
-            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
-        )
+        assert (
+            binary_attr == "sum"
+        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(

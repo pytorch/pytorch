@@ -658,7 +658,7 @@ class InputWriter:
         r = [
             "def load_args(reader):",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend([f"    {l}" for l in self._lines])
         # In case we need to change the internal format of load_args
         # in an FC-breaking way
         r.append("load_args._version = 0")
@@ -717,7 +717,7 @@ class InputWriter:
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
-            args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+            args.extend([f"{k}={v!r}" for k, v in tensor_metadata.items()])
         if _requires_grad_or_default(None) != t.requires_grad:
             args.append(f"requires_grad={t.requires_grad!r}")
         is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)

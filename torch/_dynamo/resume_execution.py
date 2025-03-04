@@ -263,7 +263,7 @@ def _filter_iter(l1, l2, cond):
 def _load_tuple_and_call(tup):
     insts: list[Instruction] = []
     _initial_push_null(insts)
-    insts.extend(create_load_const(val) for val in tup)
+    insts.extend([create_load_const(val) for val in tup])
     insts.extend(create_call_function(len(tup), False))
     return insts
 
@@ -545,7 +545,7 @@ class ContinueExecutionCache:
                     )
                     # offsets into old bytecode
                     old_inst_offsets = sorted(
-                        n for n in setup_fn_target_offsets if n > old_start_offset
+                        [n for n in setup_fn_target_offsets if n > old_start_offset]
                     )
                     targets = _filter_iter(
                         instructions, old_inst_offsets, lambda inst, o: inst.offset == o
@@ -562,7 +562,7 @@ class ContinueExecutionCache:
 
             # if offset is not in setup_fn_target_offsets, it is an error
             setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[n] for n in setup_fn_target_offsets
+                [meta.block_target_offset_remap[n] for n in setup_fn_target_offsets]
             )
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args

@@ -382,8 +382,8 @@ class ReadWrites:
 
     def rename(self, renames: dict[str, str]) -> "ReadWrites":
         return ReadWrites(
-            OrderedSet(dep.rename(renames) for dep in self.reads),
-            OrderedSet(dep.rename(renames) for dep in self.writes),
+            OrderedSet([dep.rename(renames) for dep in self.reads]),
+            OrderedSet([dep.rename(renames) for dep in self.writes]),
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
