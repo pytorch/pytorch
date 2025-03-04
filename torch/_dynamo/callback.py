@@ -1,3 +1,30 @@
+"""
+This module provides callback management functionality for TorchDynamo's compilation process.
+
+It implements a thread-safe system for registering, managing and executing callbacks that run
+at the start and end of TorchDynamo compilations. Key features include:
+
+- Registration and deregistration of compilation callbacks
+- Thread-safe callback handling with proper locking mechanisms
+- Prevention of duplicate callback execution when configured
+- Decorator utilities for easy callback registration
+- Context manager for controlled callback lifecycle
+
+The module centers around the CompilationCallbackHandler class which maintains separate
+lists for start and end callbacks, manages their execution order, and ensures thread-safety.
+Utility decorators @on_compile_start and @on_compile_end provide a convenient way to
+register compilation hooks.
+
+Example usage:
+    @on_compile_start
+    def my_start_callback():
+        print("Starting compilation")
+
+    @on_compile_end
+    def my_end_callback():
+        print("Compilation complete")
+"""
+
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -96,9 +123,9 @@ class CompilationCallbackHandler:
                 yield
             finally:
                 with self.__pending_callbacks_counter_lock:
-                    assert (
-                        self.__pending_callbacks_counter > 0
-                    ), "Pending callbacks counter cannot become negative."
+                    assert self.__pending_callbacks_counter > 0, (
+                        "Pending callbacks counter cannot become negative."
+                    )
                     if self.__pending_callbacks_counter == 1:
                         self.run_end_callbacks()
                     self.__pending_callbacks_counter -= 1
