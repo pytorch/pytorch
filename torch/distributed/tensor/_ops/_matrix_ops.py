@@ -579,9 +579,7 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     ) = op_schema.args_schema
     return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[0]
     has_attn_bias = attn_bias_strategy is not None
-    debug_attn_mask_sharding: Optional[Placement] = (
-        Replicate() if return_debug_mask else None
-    )
+    debug_attn_mask_sharding: Optional[Placement] = Replicate()
 
     assert isinstance(query_strategy, OpStrategy)
     # assuming q/k/v have the same shape
@@ -600,7 +598,7 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
         None,  # max_k
         None,  # philox_seed
         None,  # philox_offset
-        # TODO: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # NOTE: debug_attn_mask is not supproted by pytorch and is always an empty tensor
         # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
         debug_attn_mask_sharding,  # debug_attn_mask
         Replicate(),  # q
@@ -617,11 +615,7 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     qkv_sharding = Shard(1)  # num head dim
     output_sharding = Shard(1)  # num head dim
     logsumexp_sharding = Shard(1)  # num head dim
-    if return_debug_mask:
-        debug_attn_mask_sharding: Placement = Shard(1)  # num head dim
-    else:
-        # empty debug mask, replicated
-        debug_attn_mask_sharding = Replicate()
+    debug_attn_mask_sharding = Shard(1) if return_debug_mask else None  # num head dim
 
     num_heads_dim_sharding: PlacementList = [
         output_sharding,
@@ -640,11 +634,7 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
-    if return_debug_mask:
-        debug_attn_mask_sharding: Placement = Shard(2)  # seq dim
-    else:
-        # empty debug mask, replicated
-        debug_attn_mask_sharding = Replicate()
+    debug_attn_mask_sharding = Shard(2) if return_debug_mask else None  # seq dim
 
     single_mesh_dim_strategies.append(
         [

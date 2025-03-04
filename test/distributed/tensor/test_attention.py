@@ -194,7 +194,9 @@ class RingAttentionTest(DTensorTestBase):
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 1e-3 * self.world_size
             )
-            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
+            print(f"out={out}, cp_out={cp_out}")
+            # self.assertTrue(torch.allclose(out, cp_out, atol=atol))
+            self.assertEqual(out, cp_out)
 
             if not test_forward_only:
                 cp_dq, cp_dk, cp_dv = context_parallel_unshard(
