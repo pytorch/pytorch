@@ -70,6 +70,10 @@ jobs:
             repo-owner: pytorch
             branch: main
             pin-folder: .ci/docker/ci_commit_pins
+          - repo-name: triton
+            repo-owner: triton-lang
+            branch: main
+            pin-folder: .ci/docker/ci_commit_pins
     if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: "${{ matrix.repo-owner }}/${{ matrix.repo-name }} update-commit-hash"
