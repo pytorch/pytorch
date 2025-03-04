@@ -667,9 +667,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
 
         return new_ranges, return_getters_groups
 
