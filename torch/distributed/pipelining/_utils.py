@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Union
 
 import torch
 from torch import fx
@@ -90,7 +90,7 @@ def validate_tensors_metadata(
 
 def generate_stage_to_rank_mapping(
     pp_size: int, num_stages: int, style: str = "loop"
-) -> Dict[int, int]:
+) -> dict[int, int]:
     """
     Compute the stage id to rank mapping for either a looped or V-style schedule.
 

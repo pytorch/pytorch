@@ -15,11 +15,12 @@ from typing import Any, Callable, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._C import _fx_map_aggregate as map_aggregate
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
-from .node import Argument, base_types, map_aggregate, Node, Target
+from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -114,6 +115,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "arg_kwarg_vals",
 ]
 
 
@@ -289,6 +291,17 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        # IMPORTANT: Are you here because you are trying to proxy a new type into
+        # the graph? Please Please Please contact someone on the PyTorch Compiler team;
+        # the considerations are subtle.
+        #
+        # 1) When you add a new type, all of the downstream consumers and pass writers
+        # need to handle the new type. torch.fx is intended to be easy to write
+        # passes for, so we will push back against new types.
+        # 2) In torch.compile's IR, there are only specific operations that go
+        # into the graph. In particular, Tensor operations should go into the graph,
+        # but non-Tensor operations shouldn't. What that means is that constructors
+        # for new types *SHOULD NOT* become nodes in the FX graph.
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
         elif hasattr(a, "__fx_create_arg__"):
@@ -572,8 +585,8 @@ class Proxy:
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        torch.fx.node.map_aggregate(args, find_tracer)
-        torch.fx.node.map_aggregate(kwargs, find_tracer)
+        map_aggregate(args, find_tracer)
+        map_aggregate(kwargs, find_tracer)
 
         if len(tracers) > 1:
             raise RuntimeError(

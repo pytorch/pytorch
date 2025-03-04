@@ -24,9 +24,9 @@ from typing import Optional, TYPE_CHECKING
 import torch
 import torch.fx
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -524,9 +524,9 @@ class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert (
-            maxlen.is_python_constant()
-        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        assert maxlen.is_python_constant(), (
+            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        )
         self.maxlen = maxlen
         items = list(items)
         if self.maxlen.as_python_constant() is not None:
@@ -955,7 +955,7 @@ class NamedTupleVariable(TupleVariable):
         )
 
 
-class SliceVariable(BaseListVariable):
+class SliceVariable(VariableTracker):
     def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
@@ -972,15 +972,24 @@ class SliceVariable(BaseListVariable):
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
         ):
-            unimplemented("Dynamic slicing on data-dependent value is not supported")
+            unimplemented_v2(
+                gb_type="Dynamic slicing with Tensor arguments",
+                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
+                explanation="Creating slices with Tensor arguments is not supported. "
+                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        self.items = (start, stop, step)
 
-        super().__init__([start, stop, step], **kwargs)
+        super().__init__(**kwargs)
 
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
 
     def as_proxy(self):
-        return slice(*self._as_proxy())
+        return slice(*[x.as_proxy() for x in self.items])
 
     def python_type(self):
         return slice

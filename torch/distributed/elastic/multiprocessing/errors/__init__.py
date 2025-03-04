@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -318,14 +318,14 @@ def record(
      error_handler = get_error_handler()
      error_handler.initialize()
      try:
-        foobar()
+         foobar()
      except ChildFailedError as e:
-        _, failure = e.get_first_failure()
-        error_handler.dump_error_file(failure.error_file, failure.exitcode)
-        raise
+         _, failure = e.get_first_failure()
+         error_handler.dump_error_file(failure.error_file, failure.exitcode)
+         raise
      except Exception as e:
-        error_handler.record_exception(e)
-        raise
+         error_handler.record_exception(e)
+         raise
 
     .. important:: use this decorator once per process at the top level method,
                    typically this is the main method.
@@ -338,8 +338,9 @@ def record(
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     if not error_handler:
