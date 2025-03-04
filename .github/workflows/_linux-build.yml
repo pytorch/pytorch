@@ -76,7 +76,7 @@ on:
         type: string
       disable-monitor:
         description: |
-          Disable utilization monitoring for builds.
+          Disable utilization monitoring for build job.
         required: false
         type: boolean
         default: false
