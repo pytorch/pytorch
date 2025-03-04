@@ -803,7 +803,7 @@ class FrozensetVariable(SetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+        if name in {"add", "pop", "update", "remove", "discard", "clear"}:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
         return super().call_method(tx, name, args, kwargs)
 
@@ -845,7 +845,7 @@ class DictKeySetVariable(SetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+        if name in {"add", "pop", "update", "remove", "discard", "clear"}:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
         return super().call_method(tx, name, args, kwargs)
 

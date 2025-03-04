@@ -1071,7 +1071,7 @@ class ReplacementPatternEntry(PatternEntry):
             get_attr = None  # type: ignore[assignment]
 
             def run_node(self, node: torch.fx.Node) -> Any:
-                if node.op in ("placeholder", "output"):
+                if node.op in {"placeholder", "output"}:
                     return super().run_node(node)
                 if node.op == "call_function":
                     target = node.target

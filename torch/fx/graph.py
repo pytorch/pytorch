@@ -1727,14 +1727,14 @@ class Graph:
         seen_names: set[str] = set()
         seen_values: set[Node] = set()
         for node in self.nodes:
-            if node.op not in [
+            if node.op not in {
                 "placeholder",
                 "call_method",
                 "call_module",
                 "call_function",
                 "get_attr",
                 "output",
-            ]:
+            }:
                 raise RuntimeError(f"Node {node} had unknown opcode {node.op}!")
             if node.graph is not self:
                 raise RuntimeError(f"Node '{node}' does not belong to this Graph!")
@@ -1765,7 +1765,7 @@ class Graph:
                             f"Node {node} target {node.target} has type {torch.typename(node.target)} but "
                             "a str is expected"
                         )
-                if node.op in ["get_attr", "call_module"]:
+                if node.op in {"get_attr", "call_module"}:
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

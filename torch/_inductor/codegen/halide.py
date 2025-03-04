@@ -1202,7 +1202,7 @@ class HalideKernel(SIMDKernel):
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
         acc_type = halide_acc_type(dtype)
 
-        if reduction_type in ("argmax", "argmin"):
+        if reduction_type in {"argmax", "argmin"}:
             index = f"{result_var.name}_{reduction_type}"
             self.body.writeline(f"{index} = hl.{reduction_type}(rdom, {value_str})")
             # turn the N-D argmax index into a 1-D one

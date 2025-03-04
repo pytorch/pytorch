@@ -126,7 +126,7 @@ class CppTemplateKernel(CppKernel):
         return DTYPE_TO_CPP[node.get_dtype()]
 
     def acc_dtype(self, node: ir.Buffer) -> str:
-        if node.get_dtype() in [torch.float32, torch.bfloat16, torch.half]:
+        if node.get_dtype() in (torch.float32, torch.bfloat16, torch.half):
             return "float"
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")

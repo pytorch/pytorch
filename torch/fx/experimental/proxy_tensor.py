@@ -794,11 +794,11 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
+    if not pre_dispatch and func not in (
         torch.ops.aten.size.default,
         torch.ops.aten.stride.default,
         torch.ops.aten.storage_offset.default,
-    ]:
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1312,11 +1312,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
             if func == torch.amp.autocast_mode._enter_autocast:
                 self.enter_autocast_nodes.append(node)
-            if func in [
+            if func in (
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
-            ]:
+            ):
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
@@ -1825,7 +1825,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         node = super().create_node(*args, **kwargs)  # type: ignore[arg-type]
 
         # nn_module_stack
-        if node.op not in ["placeholder", "output"]:
+        if node.op not in {"placeholder", "output"}:
             if "nn_module_stack" not in node.meta:
                 node.meta["nn_module_stack"] = self.module_stack
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
@@ -1848,7 +1848,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             )
 
         # stack_trace
-        if "stack_trace" not in node.meta and node.op not in ["placeholder", "output"]:
+        if "stack_trace" not in node.meta and node.op not in {"placeholder", "output"}:
             user_frame_summary = CapturedTraceback.extract().summary()
             if user_frame_summary:
                 # we retain frames from forward() calls, or ops

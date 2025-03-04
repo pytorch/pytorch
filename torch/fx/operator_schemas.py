@@ -324,7 +324,7 @@ def type_matches(signature_type: Any, argument_type: Any):
     if signature_type is int and argument_type is torch.dtype:
         return True
 
-    if signature_type is numbers.Number and argument_type in {int, float}:
+    if signature_type is numbers.Number and argument_type in (int, float):
         return True
     if inspect.isclass(argument_type) and inspect.isclass(signature_type):
         return issubclass(argument_type, signature_type)

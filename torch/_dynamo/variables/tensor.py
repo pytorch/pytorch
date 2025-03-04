@@ -844,12 +844,12 @@ class TensorVariable(VariableTracker):
                         sub_proxy.item(),
                     )
 
-            if tensor.dtype not in [
+            if tensor.dtype not in (
                 torch.int8,
                 torch.int16,
                 torch.int32,
                 torch.int64,
-            ]:
+            ):
                 unimplemented("Input tensor for tolist must be an integer tensor")
 
             if tensor.dim() == 0:
@@ -1310,7 +1310,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 ),
             )
 
-        if name in ["T", "real", "imag"]:
+        if name in {"T", "real", "imag"}:
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_attr_wrapper,
@@ -1332,9 +1332,9 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        elif name in ("ndim", "itemsize"):
+        elif name in {"ndim", "itemsize"}:
             return ConstantVariable.create(getattr(example_ndarray, name))
-        elif name in ("shape", "stride"):
+        elif name in {"shape", "stride"}:
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return ConstantVariable.create(tuple([int(r) for r in r]))
             return insert_into_graph()
@@ -1342,7 +1342,7 @@ class NumpyNdarrayVariable(TensorVariable):
             if not has_free_symbols(r := example_ndarray.size):
                 return ConstantVariable.create(int(r))
             return insert_into_graph()
-        elif name in ["base", "flags", "dtype"]:
+        elif name in {"base", "flags", "dtype"}:
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
@@ -1368,10 +1368,10 @@ class NumpyNdarrayVariable(TensorVariable):
 
         args, kwargs = self.patch_args(name, args, kwargs)
 
-        if name in ["__len__", "size", "tolist"]:
+        if name in {"__len__", "size", "tolist"}:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes"):
+        if name in {"tostring", "tobytes"}:
             unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",

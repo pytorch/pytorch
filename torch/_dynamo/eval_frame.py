@@ -156,7 +156,7 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
-        if _stance.backend is not None and callback not in (False, None):
+        if _stance.backend is not None and callback not in {False, None}:
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
                 convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -174,7 +174,7 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
-        if callback in (False, None):
+        if callback in {False, None}:
             return callback
 
         def fail_callback(*args, **kwargs):
@@ -615,7 +615,7 @@ class _TorchDynamoContext:
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
-        if callback not in (None, False):
+        if callback not in {None, False}:
             if not hasattr(fn, "__code__"):
                 raise RuntimeError(
                     textwrap.dedent(

@@ -603,7 +603,7 @@ def command_line_usage() -> None:
         bisection_manager.initialize_system()
         sys.exit(0)
 
-    if command not in ["good", "bad"]:
+    if command not in {"good", "bad"}:
         print("Invalid command. Must be 'good', 'bad', 'start', or 'end'.")
         sys.exit(1)
 

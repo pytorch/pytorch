@@ -1358,7 +1358,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
 
         data_node = data.as_proxy().node
-        if data_node.op not in ("placeholder", "get_attr"):
+        if data_node.op not in {"placeholder", "get_attr"}:
             unimplemented(
                 "Unexpected type of data placeholder op for parameter construction"
             )
@@ -1458,7 +1458,7 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
                 [self] + args,
                 kwargs,
             )
-        elif name in ["level", "batch_size", "randomness"]:
+        elif name in {"level", "batch_size", "randomness"}:
             return variables.ConstantVariable.create(getattr(self.value, name)())
         elif name == "lower":
             assert not args and not kwargs

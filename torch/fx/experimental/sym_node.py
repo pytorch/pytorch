@@ -1674,7 +1674,7 @@ def _make_user_magic(method, user_type):
         # need to handle them specially too.
         # Also, note that int_truediv doesn't go through this path: both
         # arguments are "int" so there isn't any promotion
-        if method not in [
+        if method not in {
             "add",
             "sub",
             "mul",
@@ -1691,7 +1691,7 @@ def _make_user_magic(method, user_type):
             "lt",
             "le",
             "ge",
-        ]:
+        }:
             return self, other
         f_self = isinstance(self, (float, torch.SymFloat))
         f_other = isinstance(other, (float, torch.SymFloat))

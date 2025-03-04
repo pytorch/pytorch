@@ -304,7 +304,7 @@ def split_module(
         ):
             symbol_to_node[val.node.expr] = node
 
-        if node.op in ["placeholder", "get_attr", "output"]:
+        if node.op in {"placeholder", "get_attr", "output"}:
             continue
 
         instantiate_node_partition_mapping(node)
@@ -351,7 +351,7 @@ def split_module(
 
         # TODO currently placeholders/parameters aren't put into random partitions,
         # rather they're added to the graphs where they are used down below
-        if node.op in ["placeholder", "get_attr"]:
+        if node.op in {"placeholder", "get_attr"}:
             continue
         if node.op == "output":
             torch.fx.graph.map_arg(
@@ -459,7 +459,7 @@ def split_module(
                 node.kwargs, lambda n: environment[n]
             )
 
-            if node.op not in ["call_module", "get_attr"]:
+            if node.op not in {"call_module", "get_attr"}:
                 target = node.target
             else:
                 target_attr = _get_attr_from_qualname(m, node.target)

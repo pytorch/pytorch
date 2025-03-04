@@ -108,7 +108,7 @@ def tensorify_python_scalars(
 
     knob = True
     if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
-        if env in ("0", "FALSE"):
+        if env in {"0", "FALSE"}:
             knob = False
     else:
         knob = justknobs_check("pytorch/compiler:tensorify_python_scalars")

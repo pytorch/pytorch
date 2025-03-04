@@ -360,7 +360,7 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
     # Special case cpu and cuda as using the method below
     # to determine if the scheduler is a triton scheduler subclass
     # requires instantiating a scheduler for them
-    if device in ["cpu", "cuda"]:
+    if device in {"cpu", "cuda"}:
         if getattr(config, f"{device}_backend") == "triton":
             return True
         return False
@@ -989,7 +989,7 @@ def get_reduction_combine_fn(
     if reduction_type in REDUCTION_COMBINE_FN:
         return REDUCTION_COMBINE_FN[reduction_type]
 
-    elif reduction_type in ("argmax", "argmin"):
+    elif reduction_type in {"argmax", "argmin"}:
 
         def argmax_combine_fn(
             a: tuple[object, object], b: tuple[object, object]
@@ -1303,7 +1303,7 @@ class Reduction(Loops):
             )
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in {"argmin", "argmax"}:
             flatten_index = FixedLayout(
                 None,  # type: ignore[arg-type]
                 None,  # type: ignore[arg-type]
@@ -1378,7 +1378,7 @@ class Reduction(Loops):
 
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            if reduction_type in ("argmin", "argmax"):
+            if reduction_type in {"argmin", "argmax"}:
 
                 def fn(index: int) -> OpsValue:
                     return ops.constant(0, dst_dtype)
@@ -1477,14 +1477,14 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> Union[_NumLike, Sequence[_NumLike]]:
-        if reduction_type in ("max", "argmax"):
+        if reduction_type in {"max", "argmax"}:
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return False
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin"):
+        if reduction_type in {"min", "argmin"}:
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):

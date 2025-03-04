@@ -461,7 +461,7 @@ def _chunked_vmap(
 
 # Vmap refactored helper functions:
 def _check_randomness_arg(randomness):
-    if randomness not in ["error", "different", "same"]:
+    if randomness not in {"error", "different", "same"}:
         raise RuntimeError(
             f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}"
         )

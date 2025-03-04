@@ -59,7 +59,7 @@ def try_to_reduce_precision(
     # we reduce the precision here, e.g. add(int64, int64) one of the args can be reduced to
     # int32 without changing the output precision of the node. this case hasn't shown up
     for dominated in dominated_nodes([node], skip_filter):
-        if dominated.target in ["store", "output"]:
+        if dominated.target in {"store", "output"}:
             continue
 
         if isinstance(dominated.target, str) and "set_indirect" in dominated.target:

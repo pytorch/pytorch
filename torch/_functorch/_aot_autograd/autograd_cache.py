@@ -190,7 +190,7 @@ def check_node_safe(node: Node):
                 f"Unsupported call_method method {node.target}: {method_name}"
             )
     # Cache safe
-    elif node.op in ("placeholder", "get_attr", "call_module", "output"):
+    elif node.op in {"placeholder", "get_attr", "call_module", "output"}:
         # Assumption today for call_module being a safe op:
         # (1) today the only call_module ops that can show up in a graph come from "built-in-nn-modules"
         # that dynamo assumes are safe to trace. If dynamo assumes they are safely to blindly trace, then

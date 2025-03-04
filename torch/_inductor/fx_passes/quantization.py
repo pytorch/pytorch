@@ -348,7 +348,7 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
 def _is_valid_quantized_conv2d_optimization_pattern():
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
-        if output_dtype in [torch.float32, torch.bfloat16]:
+        if output_dtype in (torch.float32, torch.bfloat16):
             # Only keep matched pattern with same output_dtype
             qconv_node_after_weight_prepack = filter_nodes(
                 match.nodes, torch.ops.onednn.qconv2d_pointwise
@@ -454,7 +454,7 @@ def _register_quantized_conv_lowering(
 def _is_valid_quantized_linear_optimization_pattern():
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
-        if output_dtype in [torch.float32, torch.bfloat16]:
+        if output_dtype in (torch.float32, torch.bfloat16):
             # Only keep matched pattern with same output_dtype
             qlinear_node_after_weight_prepack = filter_nodes(
                 match.nodes, torch.ops.onednn.qlinear_pointwise
@@ -661,7 +661,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
         assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-        if output_dtype in [torch.float32, torch.bfloat16]:
+        if output_dtype in (torch.float32, torch.bfloat16):
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
                 if arg != compute_node:
@@ -1229,12 +1229,12 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     def _inner(match):
         assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
-        if dequant_pattern_end_node.target not in [
+        if dequant_pattern_end_node.target not in (
             quantized_decomposed.dequantize_per_tensor.default,
             quantized_decomposed.dequantize_per_tensor.tensor,
             prims.convert_element_type.default,
             aten.reshape.default,
-        ]:
+        ):
             return False
 
         if dequant_pattern_end_node.target is aten.reshape.default:
@@ -1336,10 +1336,10 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * OPT(prims.convert_element_type.default) (to_bf16)
         # * dequantize_per_tensor
         def _find_first_node_in_dequant_pattern(_node):
-            if _node.target in [
+            if _node.target in (
                 quantized_decomposed.dequantize_per_tensor.default,
                 quantized_decomposed.dequantize_per_tensor.tensor,
-            ]:
+            ):
                 # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
@@ -2485,7 +2485,7 @@ def _register_smooth_quant_int_mm_pattern():
     )
 
     def _validate_pattern(match: Match):
-        if len(match.nodes) not in [4, 5, 6, 7, 10]:
+        if len(match.nodes) not in {4, 5, 6, 7, 10}:
             return False
         # Make sure weight is a constant
         aten_int_mm_node = filter_nodes(match.nodes, aten._int_mm.default)[0]

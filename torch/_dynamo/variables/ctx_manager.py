@@ -834,10 +834,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if key == "device_type" and func in [
+            if key == "device_type" and func in (
                 torch.cuda.amp.autocast,
                 torch.cpu.amp.autocast,
-            ]:
+            ):
                 arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
             else:
                 arg = bound_args.arguments[key]
@@ -1186,9 +1186,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device.type, (
-            "stream value is not equal to the passed device"
-        )
+        assert (
+            value.device.type == device.type
+        ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -1209,7 +1209,7 @@ class StreamVariable(VariableTracker):
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait_stream", "synchronize", "wait_event"):
+        if name in {"wait_stream", "synchronize", "wait_event"}:
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
@@ -1278,7 +1278,7 @@ class EventVariable(VariableTracker):
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait", "record", "synchronize"):
+        if name in {"wait", "record", "synchronize"}:
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )

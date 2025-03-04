@@ -1001,10 +1001,10 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
 def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     from torch.fx.operator_schemas import normalize_function
 
-    if node.target not in [
+    if node.target not in (
         torch.ops.aten.index_put.default,
         torch.ops.aten.index_put_.default,
-    ]:
+    ):
         return False
     # Inductor falls back to aten.index_put_.
     # index_put_ will will call nonzero() and perform a H2D sync if
@@ -1017,7 +1017,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
-        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+        if i is not None and i.meta["val"].dtype in (torch.bool, torch.int8):
             any_byte_bool_indices = True
 
     val = args_[2].meta["val"]

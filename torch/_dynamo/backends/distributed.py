@@ -435,7 +435,7 @@ class DDPOptimizer:
         buckets = [Bucket()]  # (size, param_names)
         processed_modules = set()
         for node in reversed(gm.graph.nodes):
-            if node.op in ("output", "placeholder"):
+            if node.op in {"output", "placeholder"}:
                 continue
 
             if (

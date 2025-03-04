@@ -1074,7 +1074,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
     new_insts = []
     for inst in instructions:
         new_insts.append(inst)
-        if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
+        if inst.opname in {"BINARY_SLICE", "STORE_SLICE"}:
             # new instruction
             subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:

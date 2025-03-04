@@ -598,7 +598,7 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
         and node.target in ["size", "stride", "storage_offset", "item"]
     ):
         return True
-    if node.op == "call_function" and node.target in [
+    if node.op == "call_function" and node.target in (
         torch.ops.aten.sym_size,
         torch.ops.aten.sym_size.default,
         torch.ops.aten.sym_size.int,
@@ -608,7 +608,7 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
         torch.ops.aten.sym_storage_offset,
         torch.ops.aten.sym_storage_offset.default,
         torch.ops.aten.sym_numel.default,
-    ]:
+    ):
         return True
     return False
 
@@ -3467,7 +3467,7 @@ class ShapeEnv:
         # and the stack when it was added to the set of guards. In order to compare
         # it, we throw away the stack information.
         def map_value(key: str, value: Any) -> Any:
-            if key in ("unbacked_symfloat_counter", "unbacked_symint_counter"):
+            if key in {"unbacked_symfloat_counter", "unbacked_symint_counter"}:
                 from copy import copy
 
                 # For itertools.count(), we compare the next integer returned
@@ -3483,11 +3483,11 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
-            elif key in (
+            elif key in {
                 "symbol_guard_counter",
                 "pending_fresh_unbacked_symbols",
                 "fake_tensor_cache",
-            ):
+            }:
                 # Skip this for comparisons
                 return None
             return value
@@ -4556,10 +4556,10 @@ class ShapeEnv:
                 sympy_expr
             ) in config.extended_debug_create_symbol.split(",")
             maybe_more_info = ""
-            if not is_debug and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE", "1") not in (
+            if not is_debug and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE", "1") not in {
                 "0",
                 "",
-            ):
+            }:
                 maybe_more_info = (
                     ", for more info run with "
                     f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}" '
@@ -4819,7 +4819,7 @@ class ShapeEnv:
             symbol_to_source, source_ref, self.var_to_sources
         )
         for lang in langs:
-            if lang in ["python", "verbose_python"]:
+            if lang in {"python", "verbose_python"}:
                 printers.append(py_printer)
             elif lang == "cpp":
                 printers.append(
@@ -4944,7 +4944,7 @@ class ShapeEnv:
                             i = int(s)
                             # Don't complain about 0/1 specialization, we
                             # expect to have to compile in this case anyway
-                            if i not in (0, 1):
+                            if i not in {0, 1}:
                                 constraint_violated = True
                     if constraint_violated:
                         assert constraint is not None
@@ -4980,7 +4980,7 @@ class ShapeEnv:
                 elif isinstance(constraint, RelaxedUnspecConstraint):
                     # Don't complain about 0/1 specialization, we
                     # expect to have to compile in this case anyway
-                    if val not in (0, 1):
+                    if val not in {0, 1}:
                         constraint_violated = True
                 if constraint_violated:
                     assert constraint is not None

@@ -2262,7 +2262,7 @@ if (custom_op_wrapper.get() == NULL) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("ScalarType", "Layout"):
+        ) or repr(type_) in {"ScalarType", "Layout"}:
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"

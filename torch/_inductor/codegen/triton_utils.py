@@ -48,7 +48,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
-            if new_tye in ["fp16", "bf16"]:
+            if new_tye in {"fp16", "bf16"}:
                 return "fp32"
             else:
                 return new_tye

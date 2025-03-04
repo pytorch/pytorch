@@ -1889,10 +1889,10 @@ class BuiltinVariable(VariableTracker):
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
 
-        elif istype(obj, variables.UserFunctionVariable) and name in (
+        elif istype(obj, variables.UserFunctionVariable) and name in {
             "__name__",
             "__module__",
-        ):
+        }:
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
@@ -2117,7 +2117,7 @@ class BuiltinVariable(VariableTracker):
 
         op = self.fn
 
-        if op in [operator.is_, operator.is_not]:
+        if op in (operator.is_, operator.is_not):
             is_result = (
                 isinstance(left, TensorVariable)
                 and isinstance(right, TensorVariable)

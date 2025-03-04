@@ -477,7 +477,7 @@ class AllocationPools:
     def allocate_output(self, block: Allocation):
         """Outputs get different pools so memory gets freed properly"""
         pools = self.get_pools(block)
-        if pools and config.memory_pool in ("outputs", "combined"):
+        if pools and config.memory_pool in {"outputs", "combined"}:
             pools[-1].allocate_at_end(block)
         else:
             # create a new pool

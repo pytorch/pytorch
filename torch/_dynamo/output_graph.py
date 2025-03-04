@@ -1488,7 +1488,7 @@ class OutputGraph:
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
-            if node.op in ("call_function", "call_method", "call_module"):
+            if node.op in {"call_function", "call_method", "call_module"}:
                 tot += 1
             if node.op == "placeholder":
                 placeholders.append(node)
@@ -2098,11 +2098,11 @@ class SubgraphTracer(fx.Tracer):
         tx = self.output_graph.current_tx
 
         # log detailed location of line of code in 3.11
-        if sys.version_info >= (3, 11) and kind in (
+        if sys.version_info >= (3, 11) and kind in {
             "call_function",
             "call_method",
             "call_module",
-        ):
+        }:
             cur_inst = tx.current_instruction
             if (
                 cur_inst is not self.prev_inst
@@ -2505,10 +2505,10 @@ class SubgraphTracer(fx.Tracer):
             elif example_value.layout is torch.sparse_coo:
                 self.track_unbacked_symbols(example_value._indices(), e_proxy)
                 self.track_unbacked_symbols(example_value._values(), e_proxy)
-            elif example_value.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            elif example_value.layout in (torch.sparse_csr, torch.sparse_bsr):
                 self.track_unbacked_symbols(example_value.crow_indices(), e_proxy)
                 self.track_unbacked_symbols(example_value.col_indices(), e_proxy)
-            elif example_value.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            elif example_value.layout in (torch.sparse_csc, torch.sparse_bsc):
                 self.track_unbacked_symbols(example_value.ccol_indices(), e_proxy)
                 self.track_unbacked_symbols(example_value.row_indices(), e_proxy)
             if is_traceable_wrapper_subclass(example_value):
@@ -2632,10 +2632,10 @@ class SubgraphTracer(fx.Tracer):
             elif example_value.layout is torch.sparse_coo:
                 self._lift_basic_symbols(example_value._indices(), src)
                 self._lift_basic_symbols(example_value._values(), src)
-            elif example_value.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            elif example_value.layout in (torch.sparse_csr, torch.sparse_bsr):
                 self._lift_basic_symbols(example_value.crow_indices(), src)
                 self._lift_basic_symbols(example_value.col_indices(), src)
-            elif example_value.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            elif example_value.layout in (torch.sparse_csc, torch.sparse_bsc):
                 self._lift_basic_symbols(example_value.ccol_indices(), src)
                 self._lift_basic_symbols(example_value.row_indices(), src)
             if is_traceable_wrapper_subclass(example_value):

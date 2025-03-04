@@ -522,7 +522,7 @@ class NNModuleVariable(VariableTracker):
                 ),
             )
 
-        if name in ["_call_impl", "_wrapped_call_impl"]:
+        if name in {"_call_impl", "_wrapped_call_impl"}:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
@@ -960,7 +960,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name in ["_call_impl", "_wrapped_call_impl"]:
+        if name in {"_call_impl", "_wrapped_call_impl"}:
             fn = getattr(self.value_type, name)
             if self.source:
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
@@ -1052,12 +1052,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         # Allow skipping of empty hook dict guards on inbuilt nn modules
-        if name in (
+        if name in {
             "_backward_hooks",
             "_backward_pre_hooks",
             "_forward_hooks",
             "_forward_pre_hooks",
-        ):
+        }:
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):

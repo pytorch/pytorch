@@ -292,7 +292,7 @@ def minifier(
         env = {}
         for idx, node in enumerate(cur_graph.nodes):
             new_node = new_graph.node_copy(node, lambda x: env[x])
-            if node.op not in ["placeholder", "output"]:
+            if node.op not in {"placeholder", "output"}:
                 # If idx is divisible by (granularity * 2), it would have been checked already.
                 if (
                     idx % granularity == 0

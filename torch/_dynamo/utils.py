@@ -1945,7 +1945,7 @@ def clone_input(x, *, dtype=None):
                 is_coalesced=x.is_coalesced(),
             )
         elif is_sparse_compressed(x):
-            if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            if x.layout in (torch.sparse_csr, torch.sparse_bsr):
                 compressed_indices = x.crow_indices()
                 plain_indices = x.col_indices()
             else:
@@ -2085,7 +2085,7 @@ def is_namedtuple_cls(cls):
     try:
         if issubclass(cls, tuple):
             module = getattr(cls, "__module__", None)
-            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+            if module in {"torch.return_types", "torch.autograd.forward_ad"}:
                 return True
             if isinstance(getattr(cls, "_fields", None), tuple) and callable(
                 getattr(cls, "_make", None)
@@ -2909,7 +2909,7 @@ def same(
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
-    elif type(ref).__name__ in (
+    elif type(ref).__name__ in {
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
@@ -2921,7 +2921,7 @@ def same(
         "TanhTransform",
         "Foo",
         "Variable",
-    ):
+    }:
         assert type(ref) is type(res)
         return all(
             same(

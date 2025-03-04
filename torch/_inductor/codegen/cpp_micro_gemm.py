@@ -93,7 +93,7 @@ inline void {{kernel_name}}(
         self.pack_vnni_B_locally = False
 
     def get_common_options(self):
-        if self.input_dtype in [torch.uint8, torch.int8]:
+        if self.input_dtype in (torch.uint8, torch.int8):
             assert self.compute_dtype == torch.int32
             assert self.output_dtype == torch.int32
             assert self.input2_dtype == torch.int8
@@ -1174,7 +1174,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         block_m, block_n, block_k = self.register_blocking
         assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
         assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
-        if self.input_dtype in [torch.uint8, torch.int8]:
+        if self.input_dtype in (torch.uint8, torch.int8):
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
@@ -1221,7 +1221,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         return ["amx_state,"]
 
     def get_b_layout(self):
-        if self.input_dtype in [torch.uint8, torch.int8]:
+        if self.input_dtype in (torch.uint8, torch.int8):
             return LayoutType.VNNI4
         else:
             return LayoutType.VNNI2

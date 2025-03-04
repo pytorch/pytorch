@@ -676,7 +676,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        if name in ["save_for_backward", "mark_non_differentiable"]:
+        if name in {"save_for_backward", "mark_non_differentiable"}:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )

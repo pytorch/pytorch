@@ -746,12 +746,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
-        if inner in [
+        if inner in {
             "builtin_function_or_method",
             "getset_descriptor",
             "method_descriptor",
             "method",
-        ]:
+        }:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
@@ -1275,7 +1275,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and not tx.output.export
         ):
             # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
+            if name in {"_buffers", "_parameters"}:
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
 

@@ -2344,7 +2344,7 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-        if device.type in ("cpu", "cuda", "xpu"):
+        if device.type in {"cpu", "cuda", "xpu"}:
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("

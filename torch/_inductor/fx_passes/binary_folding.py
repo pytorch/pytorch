@@ -297,7 +297,7 @@ def binary_folding_init():
             has_reshape = False
         if computation_node.target == aten.convolution.default:
             return _check_conv_and_broadcast_op(computation_node, other)
-        elif computation_node.target in [aten.addmm.default, aten.mm.default]:
+        elif computation_node.target in (aten.addmm.default, aten.mm.default):
             return (
                 config.enable_linear_binary_folding
                 and _check_linear_and_broadcast_op(computation_node, other, has_reshape)
@@ -348,7 +348,7 @@ def binary_folding_init():
         conv_args = [*conv_node.args]
         weight_meta_value = conv_node.args[1].meta.get("val")
         bias = conv_args[2]
-        if binary_node.target in [aten.add.Tensor, aten.sub.Tensor]:
+        if binary_node.target in (aten.add.Tensor, aten.sub.Tensor):
             other_reshape = resize_scalar_or_tensor_to_shape(
                 graph,
                 other,
@@ -406,7 +406,7 @@ def binary_folding_init():
             linear_node.args[0] if linear_node.target is aten.addmm.default else None
         )
         weight_meta_value = weight_node.meta.get("val")
-        if binary_node.target in [aten.add.Tensor, aten.sub.Tensor]:
+        if binary_node.target in (aten.add.Tensor, aten.sub.Tensor):
             other_reshape = resize_scalar_or_tensor_to_shape(
                 graph,
                 other,

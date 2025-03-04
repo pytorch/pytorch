@@ -396,10 +396,10 @@ Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` c
                 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
-            if FSDPState is not None and self.fn in [
+            if FSDPState is not None and self.fn in (
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
-            ]:
+            ):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)

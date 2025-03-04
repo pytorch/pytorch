@@ -143,12 +143,12 @@ class MetricTable:
             return
 
         row_dict = row_fn()
-        assert len(self.column_names) == len(row_dict), (
-            f"{len(self.column_names)} v.s. {len(row_dict)}"
-        )
-        assert OrderedSet(self.column_names) == OrderedSet(row_dict.keys()), (
-            f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
-        )
+        assert len(self.column_names) == len(
+            row_dict
+        ), f"{len(self.column_names)} v.s. {len(row_dict)}"
+        assert OrderedSet(self.column_names) == OrderedSet(
+            row_dict.keys()
+        ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
 
         bn = get_benchmark_name()
         # assert bn is not None
@@ -310,7 +310,7 @@ def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> Optional
 def _parse_reduction_hint(
     kernel_category: str, kernel_module_code: str
 ) -> Optional[str]:
-    if kernel_category not in ("reduction", "persistent_reduction"):
+    if kernel_category not in {"reduction", "persistent_reduction"}:
         return None
     m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
     assert m, "reduction_hint not found in kernel source code!"
@@ -438,9 +438,9 @@ def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
         name = name.strip()
         if not name:
             continue
-        assert name in REGISTERED_METRIC_TABLES, (
-            f"Metric table name {name} is not registered"
-        )
+        assert (
+            name in REGISTERED_METRIC_TABLES
+        ), f"Metric table name {name} is not registered"
         enabled.add(name)
     return enabled
 

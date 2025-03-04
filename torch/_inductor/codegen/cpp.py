@@ -167,13 +167,13 @@ def reduction_init(reduction_type, dtype):
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
-    if reduction_type in ("xor_sum", "sum", "any"):
+    if reduction_type in {"xor_sum", "sum", "any"}:
         return 0
     if reduction_type == "prod":
         return 1
-    if reduction_type in ("max", "argmax", "min", "argmin"):
+    if reduction_type in {"max", "argmax", "min", "argmin"}:
         cdtype = DTYPE_TO_CPP[dtype]
-        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
+        if dtype == torch.bool and reduction_type in {"argmin", "argmax"}:
             cdtype = DTYPE_TO_CPP[torch.float]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
@@ -200,7 +200,7 @@ def reduction_acc_type(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in {"argmin", "argmax"}:
         if dtype == torch.bool:
             scalar_type = DTYPE_TO_CPP[torch.float]
         return f"IndexValue<{scalar_type}>"
@@ -224,7 +224,7 @@ def reduction_combine(
         return f"{var} ^ {next_value}"
     if reduction_type == "any":
         return f"{var} || {next_value}"
-    if reduction_type in ("min", "max"):
+    if reduction_type in {"min", "max"}:
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
@@ -234,7 +234,7 @@ def reduction_combine(
         else:
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in {"argmin", "argmax"}:
         if (
             hasattr(next_value, "dtype")
             and next_value.dtype == torch.bool
@@ -256,7 +256,7 @@ def reduction_combine(
 def reduction_project(reduction_type, acc):
     if is_welford_reduction(reduction_type):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
-    elif reduction_type in ("argmin", "argmax"):
+    elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
 
@@ -1166,10 +1166,10 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in [
+            if getattr(method, "__class__", None) == staticmethod and name not in {
                 "masked",
                 "index_expr",
-            ]:
+            }:
                 setattr(self, name, wrap(method.__func__))
 
         return self
@@ -2908,11 +2908,11 @@ class CppVecKernel(CppKernel):
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
-                if reduction_type in (
+                if reduction_type in {
                     "any",
                     "sum",
                     "max",
-                ):
+                }:
                     next_value = f"!{acc_vec}.all_zero()"
                 else:
                     assert reduction_type == "min"
@@ -3021,7 +3021,7 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in {"argmin", "argmax"}:
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
@@ -3053,7 +3053,7 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in {"argmin", "argmax"}:
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
@@ -3145,7 +3145,7 @@ class CppVecKernel(CppKernel):
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {cexpr_index(self.tail_size)})"
             else:
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-        elif reduction_type in ("argmin", "argmax"):
+        elif reduction_type in {"argmin", "argmax"}:
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
             if src_dtype == torch.bool:
@@ -3463,20 +3463,20 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]
     _use_fp32 = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
-            if _node.op == "placeholder" or _node.target in (
+            if _node.op == "placeholder" or _node.target in {
                 "get_index",
                 "index_expr",
-            ):
+            }:
                 continue
 
             # Fast path if all operations can support bf16/fp16 without converting to fp32
-            if _node.target not in [
+            if _node.target not in {
                 "load",
                 "store",
                 "abs",
                 "neg",
                 "output",
-            ]:
+            }:
                 _use_fp32 = True
 
             if hasattr(_node, "meta") and _node.meta:
@@ -3586,7 +3586,7 @@ class TilingSelect:
                     sub_blocks = [_body.root_block] + [*_body.subblocks.values()]
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+                            if _node.target in {"index_expr", "load", "store"}:
                                 # get the index and replace prefix from z to x
                                 arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
@@ -3770,7 +3770,7 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                elif node.target in {"to_dtype", "constant", "index_expr"}:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -3986,7 +3986,7 @@ class CppKernelProxy(CppKernel):
                 ]
                 for sub_block in sub_blocks:
                     for fx_node in sub_block.graph.nodes:
-                        if fx_node.target in ["load", "store"]:
+                        if fx_node.target in {"load", "store"}:
                             assert fx_node.meta
                             assert OptimizationContext.key in fx_node.meta
                             opt_ctx: OptimizationContext = fx_node.meta[
@@ -4024,10 +4024,10 @@ class CppKernelProxy(CppKernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
             in_suffix = False
             for fn, var_sizes in zip(fn_list, var_sizes_list):
-                if var_sizes in [
+                if var_sizes in (
                     (group, reduction_group),
                     (tuple(itertools.chain(group, reduction_group)), ()),
-                ]:
+                ):
                     assert not in_suffix
                     fn(vars, reduction_vars)
                 else:

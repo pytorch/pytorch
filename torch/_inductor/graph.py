@@ -1821,7 +1821,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodegenError("C++ codegen is disabled")
 
-        if sys.platform not in ("linux", "darwin", "win32"):
+        if sys.platform not in {"linux", "darwin", "win32"}:
             raise CppWrapperCodegenError(f"Unsupported platform {sys.platform}")
 
     def init_wrapper_code(

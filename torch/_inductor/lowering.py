@@ -2502,7 +2502,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         )
 
         assert isinstance(arg, TensorBox)
-        if len(arg.get_size()) not in (3, 4):
+        if len(arg.get_size()) not in {3, 4}:
             return arg
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):

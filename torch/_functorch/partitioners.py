@@ -1059,7 +1059,7 @@ def solve_min_cut(
             return True
         if config.recompute_views and op_types.is_view(node):
             return False
-        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+        if node.target in (aten.lift_fresh_copy.default, aten.lift_fresh.default):
             return False
 
         if min_cut_options.ban_if_not_in_allowlist:

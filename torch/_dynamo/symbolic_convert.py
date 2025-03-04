@@ -464,7 +464,7 @@ def _detect_and_normalize_assert_statement(
         # (PRECALL for Python 3.11, CALL for Python 3.12+)
         current_instruction_pointer += 1
         inst = self.instructions[current_instruction_pointer]
-        if inst.opname not in ("CALL_FUNCTION", "PRECALL", "CALL"):
+        if inst.opname not in {"CALL_FUNCTION", "PRECALL", "CALL"}:
             return False
 
         # for Python 3.11, PRECALL should be followed by CALL, then RAISE_VARARGS
@@ -987,7 +987,7 @@ class InstructionTranslatorBase(
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
-            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+            if inst.opname in {"RETURN_VALUE", "RETURN_CONST"}:
                 return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
@@ -1174,7 +1174,7 @@ class InstructionTranslatorBase(
                 # an exception table entry, so we also assume that we
                 # are still in the same block. It is probably safe to do
                 # this in 3.11, even though we haven't encountered this case before.
-                if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
+                if self.block_stack and inst.opname not in {"NOP", "JUMP_BACKWARD"}:
                     # If we really escape from a block and the current
                     # instruction is not in another block, then there
                     # should be no other nested blocks that we are in.
@@ -3546,9 +3546,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in (
                 produce_trampoline_autograd_apply,
-            ]:
+            ):
                 # Known sound
                 return trace_rules.SkipResult(
                     False, "allowlist in dynamo known function"

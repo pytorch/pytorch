@@ -2443,7 +2443,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             module = "triton_helpers" if use_helper else "tl"
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
-            if reduction_type in ("max", "min"):
+            if reduction_type in {"max", "min"}:
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
@@ -2511,7 +2511,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 masked_value = _mask_value(value, default)
 
-            if reduction_type in ("argmax", "argmin"):
+            if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
@@ -2563,7 +2563,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
                 )
 
-            if reduction_type in ("argmax", "argmin"):
+            if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 index_dtype = self.features.select_index_dtype()
                 self.body.writeline(
@@ -2623,7 +2623,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 buf.writeline("if HAS_RSPLIT:")
                 exit_stack.enter_context(buf.indent())
 
-            if reduction_type in ("argmax", "argmin"):
+            if reduction_type in {"argmax", "argmin"}:
                 self.post_loop_combine.writeline(
                     f"{result_var}_bval = {self.reduction_resize(f'{result_var}_val')}"
                 )

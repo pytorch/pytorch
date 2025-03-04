@@ -103,7 +103,7 @@ def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Modu
                 bn = modules[node.target]
                 if not bn.track_running_stats:
                     continue
-                if pattern[0] in [nn.Conv1d, nn.Conv2d, nn.Conv3d]:
+                if pattern[0] in (nn.Conv1d, nn.Conv2d, nn.Conv3d):
                     fused_layer = fuse_conv_bn_eval(first_layer, bn)
                 else:  # nn.Linear
                     fused_layer = fuse_linear_bn_eval(first_layer, bn)

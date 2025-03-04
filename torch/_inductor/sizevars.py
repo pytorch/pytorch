@@ -34,7 +34,7 @@ def evaluate_expr(
     axioms: Optional[tuple[sympy.Expr]] = None,
     var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
 ) -> bool:
-    if expr in (True, False):
+    if expr in {True, False}:
         return bool(expr)
 
     try:

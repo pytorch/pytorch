@@ -540,7 +540,7 @@ class CKGemmTemplate(CKTemplate):
             version = int(version_str[1:])  # Assuming the format is always 'vX'
         except ValueError as e:
             raise ValueError(f"Invalid version string: {version_str}") from e
-        if version not in [1, 2, 3, 4, 5]:
+        if version not in {1, 2, 3, 4, 5}:
             raise ValueError(
                 f"unknown prefetch stages for {op.block_gemm_pipeline_version}"
             )

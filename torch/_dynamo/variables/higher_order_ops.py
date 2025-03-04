@@ -732,7 +732,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CondHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "while_loop":
             return WhileLoopHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in ("map", "map_impl"):
+        elif value.__name__ in {"map", "map_impl"}:
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
@@ -744,10 +744,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return HintsWrapperHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
             return FlexAttentionHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in (
+        elif value.__name__ in {
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
-        ):
+        }:
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
