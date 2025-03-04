@@ -46,8 +46,8 @@ like so::
   Validator,ROCM_VERSION,6.0.0.0-12969-1544e39
   Validator,HIPBLASLT_VERSION,0.6.0-a9c5cc7
   Validator,ROCBLAS_VERSION,4.0.0-72e57364-dirty
-  GemmTunableOp_float_NT,nt_25088_4096_64,1219,1.262
-  GemmTunableOp_float_NT,nt_4096_4096_64,1216,0.033
+  GemmTunableOp_float_NT,nt_25088_4096_64,Gemm_Hipblaslt_1219,1.262
+  GemmTunableOp_float_NT,nt_4096_4096_64,Gemm_Rocblas_1216,0.033
 
 Note the "Validator" lines. If you change a library version, or ROCm version, or
 PyTorch version, TunableOp will detect this and reject the tunings file because
