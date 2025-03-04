@@ -448,7 +448,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--artifact-prefix",
         type=str,
-        default=JOB_TEST_ARTIFACT_PREFIX,
         required=False,
         help="artifact prefix to download raw utilizarion data from s3",
     )
@@ -477,10 +476,10 @@ if __name__ == "__main__":
     )
 
     artifact_prefix = JOB_TEST_ARTIFACT_PREFIX
-    if args.artifact_prefix != "":
+    if args.artifact_prefix:
         artifact_prefix = args.artifact_prefix
+    print(f"args.artifact_prefix: {args.artifact_prefix}")
     print(f"artifact_prefix: {artifact_prefix}")
-
     ud = UploadUtilizationData(
         info=workflow_info,
         dry_run=args.dry_run,
