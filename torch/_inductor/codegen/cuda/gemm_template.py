@@ -1313,7 +1313,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         else:
             # Reorder them as Bias, A, B
             if self.input_reorder is not None:
-                arg_names[0:len(self.input_reorder)] = [
+                arg_names[0 : len(self.input_reorder)] = [
                     arg_names[i] for i in self.input_reorder
                 ]
         return arg_names
