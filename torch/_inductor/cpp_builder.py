@@ -1633,8 +1633,8 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(
-            cmake_path
-        ), f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+        assert os.path.exists(cmake_path), (
+            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+        )
         with open(cmake_path, "a") as f:
             f.write(contents)
