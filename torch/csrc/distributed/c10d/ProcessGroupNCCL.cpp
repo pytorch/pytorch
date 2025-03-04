@@ -518,6 +518,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
       store_(w.store_),
+      // Note: the `work` returned to user and the `work` enqueued to watchdog
+      // share the pointer to the tensor stash.  At least one of them should
+      // clean the tensor stash, the earlier the better, i.e. user calling
+      // `work.wait` than watchdog detecting work completion.
+      stashed_for_allocator_safety_(w.stashed_for_allocator_safety_),
       futureWorkResult_(w.futureWorkResult_),
       timingEnabled_(w.timingEnabled_),
       trace_id_(w.trace_id_),
@@ -711,13 +716,25 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   }
 }
 
+void ProcessGroupNCCL::WorkNCCL::stashTensors(
+    std::vector<at::Tensor>& tensors) {
+  std::lock_guard<std::mutex> lock(stashMutex_);
+  stashed_for_allocator_safety_->insert(
+      stashed_for_allocator_safety_->end(), tensors.begin(), tensors.end());
+}
+
+void ProcessGroupNCCL::WorkNCCL::unstashTensors() {
+  std::lock_guard<std::mutex> lock(stashMutex_);
+  stashed_for_allocator_safety_->clear();
+}
+
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
   auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
   // Block the current stream on the NCCL stream
   ncclEndEvent_->block(currentStream);
-
   // Unstage the stashed tensors so that CachingAllocator can recycle them
-  stashed_for_allocator_safety_->clear();
+  // THIS MUST HAPPEN AFTER THE BLOCKING CALL ABOVE
+  unstashTensors();
 }
 
 // Same as calling synchronize() when blockingWait_ is false
@@ -2322,6 +2339,12 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        // In case user didn't call `work.wait()` with async collectives,
+        // watchdog would unstage the stashed tensors when detecting completion
+        // of the collective, to prevent ProcessGroupNCCL from holding reference
+        // to those tensors forever.
+        work.unstashTensors();
+
         // Work status logging for desync debug
         desyncDebugger_.logWorkEnd(work);
 
@@ -3031,7 +3054,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       dist_debug_level_);
 
   // other functions expect an initialized ptr
-  r->stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+  r->stashed_for_allocator_safety_ =
+      std::make_shared<std::vector<at::Tensor>>();
 
   if (record) {
     bool isP2P = isP2POp(opType);
@@ -3283,7 +3307,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? ncclStreams_.at(key) : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+                            : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -3301,14 +3326,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_->insert(
-        work->stashed_for_allocator_safety_->end(),
-        inputs.begin(),
-        inputs.end());
-    work->stashed_for_allocator_safety_->insert(
-        work->stashed_for_allocator_safety_->end(),
-        outputs.begin(),
-        outputs.end());
+    work->stashTensors(inputs);
+    work->stashTensors(outputs);
   }
 
   if (nanCheck) {
@@ -3466,7 +3485,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? ncclStreams_.at(key) : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+                            : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -3489,14 +3509,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_->insert(
-        work->stashed_for_allocator_safety_->end(),
-        inputs.begin(),
-        inputs.end());
-    work->stashed_for_allocator_safety_->insert(
-        work->stashed_for_allocator_safety_->end(),
-        outputs.begin(),
-        outputs.end());
+    work->stashTensors(inputs);
+    work->stashTensors(outputs);
   }
 
   // Start event should only be recorded before the ncclGroupStart() (which
@@ -4377,8 +4391,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           // which can cause an early recyle by the CachingAllocator, which can
           // lead to segfault or data corruption.
           if (opts.asyncOp) {
-            auto& v = work->stashed_for_allocator_safety_;
-            v->insert(v->end(), outputTensors_.begin(), outputTensors_.end());
+            work->stashTensors(outputTensors_);
           }
           // Copy the flattened output tensors to the outputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
@@ -4520,10 +4533,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           //  collective(), and should also be held by the user until after
           //  waiting on work_.
           if (opts.asyncOp) {
-            auto& v = work->stashed_for_allocator_safety_;
-            v->insert(v->end(), inputTensors_.begin(), inputTensors_.end());
+            work->stashTensors(inputTensors_);
           }
-
           // Copy the input tensors to the flattened inputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
           for (const auto j : c10::irange(inputTensors_.size())) {
