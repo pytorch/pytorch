@@ -114,7 +114,7 @@ class DecorateInfo:
 
         # Validate device_type
         if self.device_type is not None:
-            if isinstance(self.device_type, str) == False:
+            if not isinstance(self.device_type, str):
                 assert isinstance(self.device_type, list)
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
