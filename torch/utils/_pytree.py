@@ -302,9 +302,10 @@ def register_constant(cls: type[Any]) -> None:
 
     1. if the instance object existed before the :func:`torch.compile` region,
     we _assume_ no mutation will happen to it inside the :func:`torch.compile`
-    region, and we guard on the instance based on its `__eq__` method, i.e., if
-    a new instance fails to match any instances from the previous compilations,
-    :func:`torch.compile` will recompile the function using the new instance.
+    region, require that it has a non-default `__eq__` method, and we guard on
+    the instance based on its `__eq__` method, i.e., if a new instance fails to
+    match any instances from the previous compilations, :func:`torch.compile`
+    will recompile the function using the new instance.
 
     2. else if the instance object is created inside the :func:`torch.compile`
     region, we currently don't support using it in a
@@ -342,11 +343,6 @@ def register_constant(cls: type[Any]) -> None:
     if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
         raise TypeError(
             "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
-        )
-
-    if cls.__hash__ is object.__hash__:  # type: ignore[comparison-overlap]
-        raise TypeError(
-            "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
         )
 
     def _flatten(x):  # type: ignore[no-untyped-def]
