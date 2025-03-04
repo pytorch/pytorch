@@ -1,0 +1,30 @@
+name: docker-cache-mi300
+
+on:
+  # run every 6 hours
+  schedule:
+    - cron: 0 0,6,12,18 * * *
+  workflow_dispatch:
+
+concurrency:
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  docker-cache:
+    runs-on: linux.rocm.gpu.mi300.2
+    steps:
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: pytorch-linux-focal-rocm-n-py3
+          push: false
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      # Steps to save the docker cache as a snapshot
