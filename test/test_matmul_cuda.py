@@ -1165,6 +1165,40 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    def grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
+        for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
+            out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
+                                       out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
+            self.assertEqual(out, out_ref)
+
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("fast_accum", [False, True])
+    @parametrize("strided", [False, True])
+    def test_grouped_gemm_2d_2d(self, fast_accum, strided):
+        device = "cuda"
+        m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
+        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
+        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
+        scale_a = torch.arange(m * n_groups, device=device, dtype=torch.float32) / 4
+        scale_b = torch.arange(n * n_groups, device=device, dtype=torch.float32) / 4
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        out = torch._scaled_grouped_mm(a, b.t(), scale_a, scale_b, offs_a=offs, offs_b=offs,
+                                       out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+        offs_cpu = offs.cpu()
+        alist, blist, ascalelist, bscalelist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[:, start:offs_cpu[i]])
+            blist.append(b[:, start:offs_cpu[i]])
+            ascalelist.append(scale_a[i * m : (i + 1) * m])
+            bscalelist.append(scale_b[i * n : (i + 1) * n])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
+
+
+
+
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")

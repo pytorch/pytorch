@@ -126,11 +126,11 @@ __global__ void prepare_gemm_data(
     lda = tensor_StrideA.strides[0];
     ldb = tensor_StrideB.strides[1]; // B is transposed
     ldoutput = tensor_StrideOutput.strides[1];
-    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * tensor_StrideA.strides[1];
+    A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
-    inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
-    inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
-    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0] * ldoutput;
+    inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + tid * M;
+    inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + tid * N;
+    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0];
   } else {
     // A, B, output are 3D
     lda = tensor_StrideA.strides[1];
@@ -140,7 +140,7 @@ __global__ void prepare_gemm_data(
     B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
     inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
     inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
-    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0] * ldoutput;
+    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0];
   }
   problem_sizes[tid] = ProblemShape(M, N, K);
 
