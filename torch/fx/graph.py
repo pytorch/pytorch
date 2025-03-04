@@ -850,6 +850,8 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
 
             class StrReprNoQuotes(str):
+                __slots__ = ()
+
                 def __repr__(self) -> str:
                     return self
 
