@@ -592,7 +592,7 @@ def get_exc_message(
     return filename, lineno
 
 
-def get_stack_above_dynamo():
+def get_stack_above_dynamo() -> StackSummary:
     return filter_stack(extract_stack())
 
 

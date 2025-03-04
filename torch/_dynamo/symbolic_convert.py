@@ -499,17 +499,16 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
-    user_stack = get_stack_above_dynamo() + user_stack
-
+    stack_above_dynamo_formatted = "".join(
+        traceback.format_list(get_stack_above_dynamo())
+    )
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        "Graph break in user code at %s:%s\nGraph Break Reason: %s\nUser code traceback:\n%s"  # noqa: UP031
-        % (
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-            user_stack_formatted,
-        )
+        f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
+        f"Graph Break Reason: {reason}\n"
+        f"User code traceback:\n{stack_above_dynamo_formatted}\n"
+        "========== `torch.compile` tracing started here ==========\n\n"
+        f"{user_stack_formatted}"
     )
     torch._logging.trace_structured(
         "artifact",

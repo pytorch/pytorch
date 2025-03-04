@@ -185,9 +185,7 @@ torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tens
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))
-
-""",  # noqa: B950
+    output = output.add(torch.ones(10, 10))""",  # noqa: B950
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -231,9 +229,7 @@ LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))
-
-""",
+  ))""",
         )
 
         exitstack.close()
