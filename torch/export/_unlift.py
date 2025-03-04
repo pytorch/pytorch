@@ -78,7 +78,9 @@ def _unlift_inputs_as_getattr(
 
         else:
             with gm.graph.inserting_after(input_node):
-                getattr_node = gm.graph.get_attr(lifted_node)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    getattr_node = gm.graph.get_attr(lifted_node)
                 input_node.replace_all_uses_with(getattr_node)
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
