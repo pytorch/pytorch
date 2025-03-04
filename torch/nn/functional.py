@@ -3659,6 +3659,29 @@ def smooth_l1_loss(
     element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
+
+    Args:
+        input (Tensor): Predicted values.
+        target (Tensor): Ground truth values.
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (str, optional): Specifies the reduction to apply to the output:
+                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
+                                   'sum': the output will be summed. 'none': no reduction will be applied.
+                                   Default: 'mean'.
+        beta (float, optional): Specifies the threshold at which to change from the squared
+            term to the L1 term in the loss calculation. This value must be positive.
+            Default: 1.0.
+
+    Returns:
+        Tensor: L1 loss (optionally weighted).
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3700,15 +3723,15 @@ def huber_loss(
     delta: float = 1.0,
     weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""huber_loss(input, target, reduction='mean', delta=1.0, weight=None) -> Tensor
-
-    Computes the Huber loss, with optional weighting.
+    r"""Computes the Huber loss, with optional weighting.
 
     Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
 
     When delta equals 1, this loss is equivalent to SmoothL1Loss.
     In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
+
+    See :class:`~torch.nn.HuberLoss` for details.
 
     Args:
         input (Tensor): Predicted values.
@@ -3781,11 +3804,32 @@ def l1_loss(
     reduction: str = "mean",
     weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""Compute the L1 loss, with optional weighting.
 
     Function that takes the mean element-wise absolute value difference.
 
     See :class:`~torch.nn.L1Loss` for details.
+
+    Args:
+        input (Tensor): Predicted values.
+        target (Tensor): Ground truth values.
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (str, optional): Specifies the reduction to apply to the output:
+                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
+                                   'sum': the output will be summed. 'none': no reduction will be applied.
+                                   Default: 'mean'.
+        weight (Tensor, optional): Weights for each sample. Default: None.
+
+    Returns:
+        Tensor: L1 loss (optionally weighted).
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
