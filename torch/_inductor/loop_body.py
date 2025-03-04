@@ -388,9 +388,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(
-            v not in self.var_ranges for v in index
-        ), f"{self.var_ranges=}, {indices=}"
+        assert all(v not in self.var_ranges for v in index), (
+            f"{self.var_ranges=}, {indices=}"
+        )
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
