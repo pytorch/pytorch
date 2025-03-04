@@ -7,7 +7,8 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 import dataclasses
 import functools
 import inspect
-from typing import Any, Callable, NamedTuple, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any, Callable, NamedTuple, Optional
 
 import torch
 import torch.utils._pytree as pytree
