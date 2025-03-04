@@ -5750,11 +5750,10 @@ class ExternKernelOut(ExternKernel):
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
         assert isinstance(unwrapped_inputs, Sequence)
-        assert all(isinstance(i, Buffer) for i in unwrapped_inputs)
         super().__init__(
             None,
             layout,
-            cast(Sequence[Buffer], unwrapped_inputs),
+            unwrapped_inputs,
             constant_args,
             kwargs or {},
             None,
