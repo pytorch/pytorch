@@ -36,12 +36,12 @@
     },
     "actionlint": {
         "Darwin": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Darwin_amd64/actionlint",
-            "hash": "b354db83815384d3c3a07f68f44b30cb0a70899757a0d185d7322de9952e8813"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Darwin_amd64/actionlint",
+            "hash": "996affd492c57441c5ecfe00dedaef1fde056872d242c0cf7cc15de058d59d03"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
-            "hash": "025ac157db121b33971ef24af72d73d71cda3cb1e3a94795bb2708ef4032ca76"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Linux_arm64/actionlint",
+            "hash": "446687e63fac45472b0a66bae28975c28678af062670af119c11a7087baf35cc"
         }
     },
     "bazel": {
