@@ -589,6 +589,12 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale.realize()
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
+                assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
 
             if x_zp is None:
                 # If x_zp is None, x is int8 quantized per-tensor and its scale is not reshaped,
@@ -895,6 +901,23 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale.realize()
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
+                assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
+
+            if x_zp is None:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+
+            if w_zp is None:
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
+                )
+
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
                 x_zp = V.graph.add_tensor_constant(
