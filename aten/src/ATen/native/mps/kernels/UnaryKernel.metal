@@ -93,41 +93,6 @@ struct sqrt_functor {
   }
 };
 
-template <typename T0>
-kernel void exp_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  exp_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void sqrt_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  sqrt_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void tanh_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  tanh_functor f;
-  output[index] = f(input[index]);
-}
-
-template <typename T0>
-kernel void sinc_complex_kernel(
-    device vec2type_t<T0>* output [[buffer(0)]],
-    constant vec2type_t<T0>* input [[buffer(1)]],
-    uint index [[thread_position_in_grid]]) {
-  output[index] = vec2type_t<T0>(sinc(float2(input[index])));
-}
-
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \

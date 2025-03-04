@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 #include <c10/metal/utils.h>
 
@@ -69,18 +70,19 @@ kernel void unary_strided(
   output[output_offs] = f(input[input_offs]);
 }
 
-#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
-  static_assert(                                                               \
-      is_same_v<DTYPE1, result_of<NAME##_functor, DTYPE0>>,                    \
-      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0);      \
-  template [[host_name(#NAME "_" #DTYPE1 "_" #DTYPE0)]] kernel void ::c10::    \
-      metal::unary_dense<DTYPE0, NAME##_functor>(                              \
-          device result_of<NAME##_functor, DTYPE0> * output,                   \
-          constant DTYPE0 * input,                                             \
+#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                               \
+  static_assert(                                                              \
+      ::metal::                                                               \
+          is_same_v<DTYPE1, ::c10::metal::result_of<NAME##_functor, DTYPE0>>, \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0);     \
+  template [[host_name(#NAME "_" #DTYPE1 "_" #DTYPE0)]] kernel void ::c10::   \
+      metal::unary_dense<DTYPE0, NAME##_functor>(                             \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,    \
+          constant DTYPE0 * input,                                            \
           uint index);                                                         \
   template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
       c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
-          device result_of<NAME##_functor, DTYPE0> * output,                   \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
           constant DTYPE0 * input,                                             \
           constant long* sizes,                                                \
           constant long* input_strides,                                        \
