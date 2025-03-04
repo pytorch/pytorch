@@ -537,9 +537,9 @@ class CodeGen:
                 if len(arg) == 1:
                     return f"({_get_repr(arg[0])},)"
                 else:
-                    return "(" + ", ".join(_get_repr(a) for a in arg) + ")"
+                    return "(" + ", ".join([_get_repr(a) for a in arg]) + ")"
             elif isinstance(arg, list):
-                return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
+                return "[" + ", ".join([_get_repr(a) for a in arg]) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             else:
@@ -548,8 +548,8 @@ class CodeGen:
         def _format_args(
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
-            args_s = ", ".join(_get_repr(a) for a in args)
-            kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
+            args_s = ", ".join([_get_repr(a) for a in args])
+            kwargs_s = ", ".join([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
             if args_s and kwargs_s:
                 return f"{args_s}, {kwargs_s}"
             return args_s or kwargs_s
@@ -622,7 +622,7 @@ class CodeGen:
                     body.append(f"\n{dim(no_stacktrace_msg)}\n")
 
         def stringify_shape(shape: Iterable) -> str:
-            return f"[{', '.join(str(x) for x in shape)}]"
+            return f"[{', '.join([str(x) for x in shape])}]"
 
         def emit_node(node: Node):
             maybe_type_annotation = (
@@ -788,7 +788,7 @@ class CodeGen:
                 new_lines.append(line)
 
         code = "\n".join(new_lines).lstrip("\n")
-        code = "\n".join("    " + line for line in code.split("\n"))
+        code = "\n".join(["    " + line for line in code.split("\n")])
 
         fn_code = f"""
 {wrap_stmts}
@@ -862,11 +862,13 @@ class _PyTreeCodeGen(CodeGen):
                 fn_kwargs = (
                     "{"
                     + ", ".join(
-                        f"'{k}':{v}"
-                        for k, v in zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
-                            self.pytree_info.orig_args[count_args:],
-                        )
+                        [
+                            f"'{k}':{v}"
+                            for k, v in zip(
+                                self.pytree_info.in_spec.children_specs[1].context,
+                                self.pytree_info.orig_args[count_args:],
+                            )
+                        ]
                     )
                     + "}"
                 )

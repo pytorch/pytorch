@@ -393,7 +393,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     @cache_on_self
     @no_type_check  # https://github.com/python/mypy/issues/17184
     def num_reduction_dims(self) -> int:
-        return sum(prefix_is_reduction(prefix) for prefix in self.numels)
+        return sum([prefix_is_reduction(prefix) for prefix in self.numels])
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
@@ -497,7 +497,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
 
     def triton_tensor_ndim(self) -> int:
-        return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
+        return sum([int(tree.tensor_dim is not None) for tree in self.range_trees])
 
     def indexing_size_str(self, i: int) -> str:
         sizes = ["None"] * self.triton_tensor_ndim()
@@ -667,9 +667,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
-            f"failed to set ranges {remaining} {lengths}"
-        )
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
 
         return new_ranges, return_getters_groups
 
@@ -820,7 +820,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         ]
         if reorder and len(trees) > 1:
             count = sum(t.prefix in "xyz" for t in trees)
-            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
+            assert "".join([t.prefix for t in trees[:count]]) == "zyx"[-count:], [
                 t.prefix for t in trees[:count]
             ]
             trees[:count] = reversed(trees[:count])
@@ -1059,7 +1059,7 @@ class SIMDScheduling(BaseScheduling):
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
     def group_fn(self, sizes):
-        return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
+        return tuple([V.graph.sizevars.simplify(sympy_product(s)) for s in sizes])
 
     def can_fuse(self, node1, node2):
         """

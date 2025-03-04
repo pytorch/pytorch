@@ -33,9 +33,9 @@ def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert OrderedSet(args).issubset(OrderedSet(all_args)), (
-            f"{args} v.s. {all_args}"
-        )
+        assert OrderedSet(args).issubset(
+            OrderedSet(all_args)
+        ), f"{args} v.s. {all_args}"
 
     return all_args, arg_types
 
@@ -109,7 +109,7 @@ class MultiKernelState:
 
         We should name the multi-kernel differently in these 2 cases.
         """
-        kernel_names = tuple(k.kernel_name for k in kernels)
+        kernel_names = tuple([k.kernel_name for k in kernels])
         if kernel_names in self.subkernel_to_kernel_name:
             return self.subkernel_to_kernel_name[kernel_names]
 
@@ -197,7 +197,7 @@ class MultiKernel:
         return workspace_args
 
     def get_grid_fn(self):
-        fns = OrderedSet(kernel._get_grid_fn() for kernel in self.kernels)
+        fns = OrderedSet([kernel._get_grid_fn() for kernel in self.kernels])
         if len(fns) == 1:
             return fns.pop()
         elif len(fns) == 2:

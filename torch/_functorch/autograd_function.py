@@ -422,7 +422,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             # See NOTE: [Why can't we rely on autograd to reduce expanded gradients?]
             # for more details
             input_shapes = tuple(
-                inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
+                [inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs]
             )
             if not hasattr(ctx, "_pt_input_shapes"):
                 ctx._pt_input_shapes = {}
@@ -478,8 +478,10 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             grad_outputs_in_dims = (grad_outputs_in_dims,)
 
         grad_outputs_in_dims = tuple(
-            in_dim if grad_output is not None else None
-            for grad_output, in_dim in zip(grad_outputs_, grad_outputs_in_dims)
+            [
+                in_dim if grad_output is not None else None
+                for grad_output, in_dim in zip(grad_outputs_, grad_outputs_in_dims)
+            ]
         )
 
         def backward_no_context(inputs):
@@ -658,13 +660,15 @@ def reductify(
     if target_shape_without_bdim_to_reduce_to is None:
         target_shape_without_bdim_to_reduce_to = len(grad_input) * (None,)
     result = tuple(
-        reductify_leaf(gi, gi_bdim, i_bdim, batch_size, maybe_ishape)
-        for gi, gi_bdim, i_bdim, maybe_ishape in zip(
-            grad_input,
-            grad_input_bdim,
-            input_bdim,
-            target_shape_without_bdim_to_reduce_to,
-        )
+        [
+            reductify_leaf(gi, gi_bdim, i_bdim, batch_size, maybe_ishape)
+            for gi, gi_bdim, i_bdim, maybe_ishape in zip(
+                grad_input,
+                grad_input_bdim,
+                input_bdim,
+                target_shape_without_bdim_to_reduce_to,
+            )
+        ]
     )
     return result
 

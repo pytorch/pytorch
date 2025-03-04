@@ -143,8 +143,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                 num_children = 0
             else:
                 assert callable(self._unflatten_func)
-                num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
-                num_leaves = sum(spec.num_leaves for spec in self._children)
+                num_nodes = sum(([spec.num_nodes for spec in self._children]), start=1)
+                num_leaves = sum([spec.num_leaves for spec in self._children])
                 num_children = len(self._children)
 
             object.__setattr__(self, "num_nodes", num_nodes)
@@ -350,7 +350,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             )
 
             # Recursively flatten the children
-            subspecs = tuple(helper(child, leaves) for child in children)
+            subspecs = tuple([helper(child, leaves) for child in children])
             return PyTreeSpec(subspecs, type(node), metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
         leaves: list[Any] = []

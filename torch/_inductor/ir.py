@@ -211,9 +211,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     EffectfulKernel,
                     ShapeAsConstantBuffer,
                 ),
-            ), (
-                f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
-            )
+            ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
     # Be picky about the accepted data structure (don't use pytree here)
     _check_tensorbox(node_or_nodes)
@@ -490,7 +488,7 @@ class IRNode:
         self._post_init_setattr("origin_node", None)
 
     def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.get_reads())
+        return OrderedSet([dep.name for dep in self.get_reads()])
 
     def get_traceback(self) -> Optional[list[str]]:
         return self.traceback
@@ -734,7 +732,7 @@ class Operation:
         return name in self.get_read_names()
 
     def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.get_reads())
+        return OrderedSet([dep.name for dep in self.get_reads()])
 
     def get_reads(self) -> OrderedSet[Dep]:
         return self.get_read_writes().reads
@@ -1364,9 +1362,9 @@ class Reduction(Loops):
                 # "all" is desugared to `!any(!val)`
             }
 
-            assert reduction_type in rtypes_to_inits.keys(), (
-                f"{reduction_type} not supported for zero-dimension tensors!"
-            )
+            assert (
+                reduction_type in rtypes_to_inits.keys()
+            ), f"{reduction_type} not supported for zero-dimension tensors!"
 
             def const_fn(index: int) -> OpsValue:
                 return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
@@ -1575,9 +1573,9 @@ class Reduction(Loops):
         new_ranges: Sequence[Integer],
         new_reduction_ranges: Sequence[Integer],
     ) -> Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue]:
-        assert all(r == 1 for r in original_ranges), (
-            f"Only enabled for numel_hint == 1, found {original_ranges=}"
-        )
+        assert all(
+            r == 1 for r in original_ranges
+        ), f"Only enabled for numel_hint == 1, found {original_ranges=}"
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
@@ -1760,7 +1758,7 @@ class WelfordReduction(Reduction):
             def loader(
                 idx: Sequence[Expr], reduction_idx: Sequence[Expr]
             ) -> tuple[OpsValue, ...]:
-                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
+                return tuple([fn(idx, reduction_idx) for fn in inner_fns])
 
         super().__init__(
             device=device,
@@ -1844,7 +1842,7 @@ class WelfordReduction(Reduction):
             if reduction_type == "welford_reduce":
                 return copy(inner_fns[0]), const(0), const(1)
             else:
-                return tuple(copy(fn) for fn in inner_fns)
+                return tuple([copy(fn) for fn in inner_fns])
 
         # TODO: Unrolled reduction
         # if (
@@ -1966,15 +1964,17 @@ class WelfordReduction(Reduction):
             device,
             dtype,
             tuple(
-                cls._multilayer_wrap_loader(
-                    loader,
-                    reduction_ranges,
-                    reduction_numel,
-                    split,
-                    block_size,
-                    default=0,
-                )
-                for loader in inner_fns
+                [
+                    cls._multilayer_wrap_loader(
+                        loader,
+                        reduction_ranges,
+                        reduction_numel,
+                        split,
+                        block_size,
+                        default=0,
+                    )
+                    for loader in inner_fns
+                ]
             ),
             [*ranges, split],
             [block_size],
@@ -1999,8 +1999,10 @@ class WelfordReduction(Reduction):
             device,
             dtype,
             tuple(
-                partial(intermediate_loader_fn, loader=i.make_loader())
-                for i in intermediates
+                [
+                    partial(intermediate_loader_fn, loader=i.make_loader())
+                    for i in intermediates
+                ]
             ),
             ranges,
             [split],
@@ -2046,7 +2048,7 @@ class Scan(Loops):
         scan_vars: Sequence[Symbol],
     ) -> None:
         idx = self.reindex(vars, scan_vars)
-        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        values = tuple([inner_fn(idx) for inner_fn in self.inner_fns])
         result = ops.scan(self.dtypes, self.combine_fn, values)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
@@ -2246,7 +2248,7 @@ class Sort(Loops):
         reduction_vars: Sequence[Expr],
     ) -> None:
         idx = self.reindex(vars, reduction_vars)
-        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        values = tuple([inner_fn(idx) for inner_fn in self.inner_fns])
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
@@ -2571,9 +2573,9 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
-                    "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
-                )
+                assert (
+                    sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0
+                ), "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
         return new_size
 
     @classmethod
@@ -2905,7 +2907,7 @@ class View(GenericView):
         def reindex(index):  # type: ignore[no-untyped-def]
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
-            return tuple(sympy_subs(x, replacements) for x in view_expr)
+            return tuple([sympy_subs(x, replacements) for x in view_expr])
 
         return reindex
 
@@ -3382,9 +3384,9 @@ class Layout(OutputSpec):
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
-        assert FlexibleLayout.allow_indexing, (
-            f"convert {type(self).__name__} to FixedLayout first"
-        )
+        assert (
+            FlexibleLayout.allow_indexing
+        ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
 
     def __eq__(self, other) -> bool:  # type: ignore[no-untyped-def]
@@ -3684,9 +3686,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), (
-            "MutationLayoutSHOULDREMOVE must refer to a buffer"
-        )
+        assert isinstance(
+            result, Buffer
+        ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
     def real_layout(self):  # type: ignore[no-untyped-def]
@@ -4367,9 +4369,9 @@ class TritonTemplateBuffer(TemplateBuffer):
                 torch.ops.higher_order.flex_attention_backward,
             )
             current_node = V.graph.current_node.target
-            assert current_node in allowed_set, (
-                f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
-            )
+            assert (
+                current_node in allowed_set
+            ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
             device = self.inputs[0].get_device()
             self.outputs += [
                 MutationOutput(NoneLayout(device=device), buf, self)
@@ -4564,7 +4566,7 @@ class InputsKernel(OperationBuffer):
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
-                reads.update(StarDep(x.get_name()) for x in input)
+                reads.update([StarDep(x.get_name()) for x in input])
             elif isinstance(input, ShapeAsConstantBuffer):
                 # Skip creating dependncy for symbolics as they're visible globally
                 continue
@@ -5407,9 +5409,9 @@ class ExternKernel(InputsKernel):
             # pass in a list of const arg names for arg_properties lookup.
             name_to_arg_properties = None
             if names and self.arg_properties:
-                assert len(self.constant_args) == len(names), (
-                    "names passed to codegen_const_args does not match self.constant_args"
-                )
+                assert (
+                    len(self.constant_args) == len(names)
+                ), "names passed to codegen_const_args does not match self.constant_args"
                 name_to_arg_properties = {
                     arg.get("name"): arg for arg in self.arg_properties
                 }
@@ -5445,9 +5447,9 @@ class ExternKernel(InputsKernel):
         args = []
         for i, x in enumerate(inputs):
             if V.graph.cpp_wrapper:
-                assert self.arg_properties and i < len(self.arg_properties), (
-                    "Invalid access to ExternKernel.arg_properties"
-                )
+                assert self.arg_properties and i < len(
+                    self.arg_properties
+                ), "Invalid access to ExternKernel.arg_properties"
                 type_ = self.arg_properties[i].get("type")
                 args.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
             else:
@@ -5805,7 +5807,7 @@ class UserDefinedTritonKernel(ExternKernel):
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
                 restore_value_args.extend(
-                    kernel.fn.arg_names[i] for i in kernel.restore_idx
+                    [kernel.fn.arg_names[i] for i in kernel.restore_idx]
                 )
             else:
                 assert hasattr(kernel, "restore_value")
@@ -6538,7 +6540,7 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
-                FallbackKernel.find_device(None, x) for x in example_output
+                [FallbackKernel.find_device(None, x) for x in example_output]
             )
             # Remove None
             devices = [device for device in device_set if device]
@@ -6782,9 +6784,9 @@ class FallbackKernel(ExternKernelAlloc):
             elif isinstance(output, torch.SymInt):
                 return output.node.expr
             else:
-                assert output is None, (
-                    f"FallbackKernel output type {type(output)} is not supported"
-                )
+                assert (
+                    output is None
+                ), f"FallbackKernel output type {type(output)} is not supported"
                 return None
 
         outputs = generate_output(example_output, [])
@@ -7152,7 +7154,7 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
         for buffer in buffers
     ]
     # assuming the same buffer is represented by the same IRNode object
-    return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
+    return len(OrderedSet([id(buffer) for buffer in buffers])) < len(buffers)
 
 
 @ir_dataclass(frozen=False)
@@ -7476,9 +7478,9 @@ class WhileLoop(ExternKernel):
             assert p.get_dtype() == torch.bool, p
             assert len(p.get_size()) == 0, p
 
-        assert len(all_inputs) > 0, (
-            "torch.while_loop is assumed to have at least one operand."
-        )
+        assert (
+            len(all_inputs) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
 
         device = all_inputs[0].get_device()
 
@@ -7649,9 +7651,9 @@ class _CollectiveKernel(FallbackKernel):
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
-        assert type(self.op_overload) is torch._ops.OpOverload, (
-            "Setting cpp kernel needs a valid op_overload"
-        )
+        assert (
+            type(self.op_overload) is torch._ops.OpOverload
+        ), "Setting cpp kernel needs a valid op_overload"
         kernel = self.op_overload
         self.cpp_kernel_name = kernel._schema.name
 

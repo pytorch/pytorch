@@ -25,7 +25,7 @@ def make_prim(
     if isinstance(return_type, tuple):
 
         def meta(*args, **kwargs):
-            return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs))
+            return tuple([_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs)])
 
     else:
 

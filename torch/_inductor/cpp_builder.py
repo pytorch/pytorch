@@ -295,7 +295,7 @@ def get_compiler_version_info(compiler: str) -> str:
 
 # =============================== cpp builder ===============================
 def _append_list(dest_list: list[str], src_list: list[str]) -> None:
-    dest_list.extend(copy.deepcopy(item) for item in src_list)
+    dest_list.extend([copy.deepcopy(item) for item in src_list])
 
 
 def _remove_duplication_in_list(orig_list: list[str]) -> list[str]:
@@ -743,7 +743,7 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]
     build_flags: list[str] = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())
+        macros.extend([copy.deepcopy(x) for x in vec_isa.build_macro()])
 
         build_flags = [vec_isa.build_arch_flags()]
 
@@ -1633,8 +1633,8 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(cmake_path), (
-            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
-        )
+        assert os.path.exists(
+            cmake_path
+        ), f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
         with open(cmake_path, "a") as f:
             f.write(contents)

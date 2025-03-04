@@ -545,9 +545,9 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
         # Find the earliest/first user -- target_node.
-        assert len(allreduce.outputs) >= 1, (
-            f"Found a allreduce that has zero outputs/users -- {allreduce}."
-        )
+        assert (
+            len(allreduce.outputs) >= 1
+        ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31
@@ -579,7 +579,7 @@ def fuse_ddp_communication(
             else:
                 func = pa
             if "bucket_size_mb" in OrderedSet(
-                v.name for v in inspect.signature(func).parameters.values()
+                [v.name for v in inspect.signature(func).parameters.values()]
             ):
                 func(graph, bucket_size_mb=bucket_size_mb)
             else:

@@ -467,7 +467,7 @@ class SymNode:
                 self,
                 handle_sym_dispatch(
                     torch.sym_sum,
-                    (tuple(wrap_node(a) for a in args),),
+                    (tuple([wrap_node(a) for a in args]),),
                     {},
                 ),
             )
@@ -484,7 +484,7 @@ class SymNode:
             out_hint = sum(size_hints)
 
         fx_node, _ = self.shape_env._create_fx_call_function(
-            torch.sym_sum, (tuple(a.fx_node for a in args),)
+            torch.sym_sum, (tuple([a.fx_node for a in args]),)
         )
 
         # NB: Only for integers!

@@ -885,7 +885,7 @@ class CppOverrides(OpOverrides):
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
-            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
+            return tuple([V.kernel.cse.try_get(cache_key) for cache_key in cache_keys])
 
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar(dtype=torch.int32)
@@ -1395,9 +1395,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def remainder(a, b):
-        assert a.dtype == b.dtype, (
-            "remainder vec implementation expect the same inputs' dtype."
-        )
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1499,9 +1499,9 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def floordiv(a, b):
         if is_float_dtype(a.dtype):
-            assert a.dtype == b.dtype, (
-                "div_floor_floating_vec implementation expect the same inputs' dtype."
-            )
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
             return f"div_floor_floating_vec({a}, {b})"
         else:
             assert all(is_integer_dtype(item.dtype) for item in [a, b])
@@ -1711,7 +1711,7 @@ class CppVecOverrides(CppOverrides):
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
-            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
+            return tuple([V.kernel.cse.try_get(cache_key) for cache_key in cache_keys])
 
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
@@ -2139,9 +2139,9 @@ class CppKernel(Kernel):
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
-            assert self.call_ranges == tuple(lengths) + tuple(reduction_lengths), (
-                f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
-            )
+            assert self.call_ranges == tuple(lengths) + tuple(
+                reduction_lengths
+            ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
             assert self.reduction_depth == len(lengths)
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
@@ -4390,7 +4390,7 @@ class CppScheduling(BaseScheduling):
         self._ready_to_flush = status
 
     def group_fn(self, sizes):
-        return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+        return tuple([tuple(map(V.graph.sizevars.simplify, s)) for s in sizes])
 
     def reset_kernel_group(self):
         from .cpp_wrapper_cpu import CppWrapperCpu
@@ -5022,9 +5022,9 @@ class CppScheduling(BaseScheduling):
         # a templated kernel was successfully compiled in a UT
         counters["inductor"]["cpp_templated_kernel_counter"] += 1
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cpp_template(template_node), (
-            "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
-        )
+        assert self.is_cpp_template(
+            template_node
+        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
@@ -5032,9 +5032,9 @@ class CppScheduling(BaseScheduling):
         epilogue_ir_nodes: list[Optional[ir.Operation]] = [
             n.node for n in epilogue_nodes
         ]
-        assert all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes), (
-            "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        )
+        assert all(
+            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
+        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
 
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
@@ -5072,16 +5072,16 @@ class CppScheduling(BaseScheduling):
         if is_multi_outputs_template(template_node.node):
             # For multi outputs template, allocate buffers for each output after the epilogue
             # codegen to which determines if the buffer has been removed.
-            assert len(template_node.outputs) == 1, (
-                "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
-            )
+            assert (
+                len(template_node.outputs) == 1
+            ), "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
             for user in template_node.outputs[0].users:
-                assert isinstance(user.node, ExternKernelSchedulerNode), (
-                    "Multi outputs template should be with ExternKernelSchedulerNode"
-                )
-                assert isinstance(user.node.node, ir.MultiOutput), (
-                    "Multi outputs template has multi users with MultiOutput"
-                )
+                assert isinstance(
+                    user.node, ExternKernelSchedulerNode
+                ), "Multi outputs template should be with ExternKernelSchedulerNode"
+                assert isinstance(
+                    user.node.node, ir.MultiOutput
+                ), "Multi outputs template has multi users with MultiOutput"
                 user.node.mark_run()
 
         kernel.call_kernel(kernel_name, ctb)
@@ -5413,9 +5413,9 @@ class LoopNest:
         return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
     def mark_parallel(self, par_depth):
-        assert par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth, (
-            "Parallel depth cannot exceed the maximal allowed parallel depth"
-        )
+        assert (
+            par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth
+        ), "Parallel depth cannot exceed the maximal allowed parallel depth"
         assert self.loops is not None
         assert len(self.loops) >= par_depth.parallel_depth
         loop = self.loops[par_depth.start_depth]

@@ -88,8 +88,8 @@ def track_dynamism_across_examples(
 
     output: dict[Any, Any] = {}
     for key_path, (dim_sets, _is_tensor) in tracking.items():
-        final_dyn = tuple(len(s) > 1 for s in dim_sets)
-        key_str = "L" + "".join(f"{str(k)}" for k in key_path)
+        final_dyn = tuple([len(s) > 1 for s in dim_sets])
+        key_str = "L" + "".join([f"{str(k)}" for k in key_path])
         key = key_path[0].key  # type: ignore[attr-defined]
         if key not in output:
             output[key] = {}

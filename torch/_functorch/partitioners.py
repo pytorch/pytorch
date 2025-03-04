@@ -94,7 +94,7 @@ class NodeInfo:
     @functools.cached_property
     def required_fw_nodes(self) -> list[fx.Node]:
         return sorted(
-            (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
+            ([n for n in self._required_fw_nodes]), key=lambda n: self.fw_order[n]
         )
 
     def is_required_fw(self, n: fx.Node) -> bool:
@@ -431,7 +431,7 @@ def default_partition(
         joint_module.graph, inputs, fwd_outputs, "forward"
     )
     forward_node_names = OrderedSet(
-        node.name for node in forward_only_graph.nodes if node.op != "output"
+        [node.name for node in forward_only_graph.nodes if node.op != "output"]
     )
     saved_values = []
     saved_sym_nodes = []
@@ -498,9 +498,9 @@ def _size_of(node: fx.Node) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(object_nbytes(n) for n in val)
+            return sum([object_nbytes(n) for n in val])
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for _, n in val.items())
+            return sum([object_nbytes(n) for _, n in val.items()])
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
@@ -811,7 +811,10 @@ def functionalize_rng_ops(
     last_bwd_input = next(reversed(bw_module.graph.find_nodes(op="placeholder")))
 
     devices = OrderedSet(
-        get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
+        [
+            get_device(node_pair["fwd"])
+            for node_pair in recomputable_rng_ops_map.values()
+        ]
     )
     devices.discard(torch.device("cpu"))
     # multiple cuda devices wont work with cudagraphs anyway,
@@ -968,12 +971,15 @@ def solve_min_cut(
 
     if AOT_PARTITIONER_DEBUG:
         joint_module_ops = OrderedSet(
-            str(node.target._overloadpacket)
-            for node in joint_graph.nodes
-            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+            [
+                str(node.target._overloadpacket)
+                for node in joint_graph.nodes
+                if node.op == "call_function"
+                and hasattr(node.target, "_overloadpacket")
+            ]
         )
         ops_ignored = joint_module_ops - OrderedSet(
-            str(i) for i in op_types.recomputable_ops
+            [str(i) for i in op_types.recomputable_ops]
         )
         log.info("Ops banned from re-materialization: %s", ops_ignored)
 
@@ -1088,7 +1094,7 @@ def solve_min_cut(
         # normalizations in the backwards.
         if min_cut_options.ban_if_reduction:
             input_tensors_size = sum(
-                _size_of(i) for i in node.args if isinstance(i, fx.Node)
+                [_size_of(i) for i in node.args if isinstance(i, fx.Node)]
             )
             output_size = _size_of(node)
             return output_size * 4 < input_tensors_size
@@ -1346,7 +1352,7 @@ def solve_min_cut(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_graph.nodes)}
     saved_values = sorted(
-        (name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x]
+        ([name_to_node[node] for node in cut_nodes]), key=lambda x: node_idx[x]
     )
     return saved_values, banned_nodes
 
@@ -1719,7 +1725,7 @@ def choose_saved_values_set(
 
     from torch._inductor.fx_utils import get_node_storage
 
-    input_storages = OrderedSet(get_node_storage(node) for node in node_info.inputs)
+    input_storages = OrderedSet([get_node_storage(node) for node in node_info.inputs])
 
     def get_recomputable_banned_nodes(
         banned_nodes: OrderedSet[fx.Node],
@@ -1922,15 +1928,17 @@ def min_cut_rematerialization_partition(
             joint_module, num_fwd_outputs=num_fwd_outputs
         )
         required_bw_nodes.update(
-            o for o in bwd_outputs if o is not None and o.op != "output"
+            [o for o in bwd_outputs if o is not None and o.op != "output"]
         )
         forward_only_graph = _extract_graph_with_inputs_outputs(
             joint_module.graph, inputs, fwd_outputs, "forward"
         )
         required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
-            name_to_node[node.name]
-            for node in forward_only_graph.nodes
-            if node.op != "output"
+            [
+                name_to_node[node.name]
+                for node in forward_only_graph.nodes
+                if node.op != "output"
+            ]
         )
         unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
             node
@@ -2000,16 +2008,16 @@ def min_cut_rematerialization_partition(
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
 
         # Log total theoretical activations stored
-        total_activations_size_gb = sum(_size_of(i) for i in saved_values) / 1e9
+        total_activations_size_gb = sum([_size_of(i) for i in saved_values]) / 1e9
         log.info("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
 
         # Log theoretical per activation storage sizes
         log.info("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
         fw_module_nodes = OrderedSet(
-            node.name for node in fw_module.graph.nodes if node.op == "call_function"
+            [node.name for node in fw_module.graph.nodes if node.op == "call_function"]
         )
         bw_module_nodes = OrderedSet(
-            node.name for node in bw_module.graph.nodes if node.op == "call_function"
+            [node.name for node in bw_module.graph.nodes if node.op == "call_function"]
         )
         remat_nodes = fw_module_nodes & bw_module_nodes
 

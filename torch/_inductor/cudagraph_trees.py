@@ -1303,9 +1303,9 @@ class CUDAGraphNode:
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
         else:
-            assert len(self.stack_traces) == len(outputs), (
-                "Wrong number of stack traces passed in"
-            )
+            assert len(self.stack_traces) == len(
+                outputs
+            ), "Wrong number of stack traces passed in"
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
@@ -2253,7 +2253,7 @@ class CUDAGraphTreeManager:
             model,
             list(static_input_idxs),
             id,
-            tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
+            tuple([t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda]),
             placeholders,
             mutated_input_idxs,
         )

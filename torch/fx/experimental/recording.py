@@ -152,7 +152,7 @@ class ShapeEnvEvent:
             replacearg(
                 index=2,
                 key="args",
-                fn=lambda args: tuple(maybe_convert_node(a) for a in args),
+                fn=lambda args: tuple([maybe_convert_node(a) for a in args]),
             )
         if self.is_evaluate_expr() or self.is_defer_runtime_assert():
             # ShapeEnv.evaluate_expr and ShapeEnv.defer_runtime_assert:
@@ -433,11 +433,11 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
         if isinstance(value, dict):
             return (
                 "{"
-                + ", ".join(f"{k}: {value[k]}" for k in sorted(value.keys(), key=str))
+                + ", ".join([f"{k}: {value[k]}" for k in sorted(value.keys(), key=str)])
                 + "}"
             )
         if isinstance(value, set):
-            return "{" + ", ".join(f"{v}" for v in sorted(value)) + "}"
+            return "{" + ", ".join([f"{v}" for v in sorted(value)]) + "}"
         return str(value)
 
     # Compares env1_vars with env2_vars.

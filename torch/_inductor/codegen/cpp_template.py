@@ -76,7 +76,7 @@ class CppTemplate(KernelTemplate):
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly
         # since in cpp kernel, we bind it to C long
-        extra_args = tuple(ctypes.c_ulonglong(x) for x in extra_args)
+        extra_args = tuple([ctypes.c_ulonglong(x) for x in extra_args])
 
         kernel_hash_name = f"cpp_{self.name}_{self.index}"
 

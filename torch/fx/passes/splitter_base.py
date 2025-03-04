@@ -500,9 +500,11 @@ class _SplitterBase:
             # Strip None elements at the end.
             arg_dtypes_tuple = tuple(arg_dtypes[:last_index])
             kwarg_dtypes_tuple = tuple(
-                (k, get_dtype(arg))
-                for k, arg in node.kwargs.items()
-                if isinstance(arg, torch.fx.Node)
+                [
+                    (k, get_dtype(arg))
+                    for k, arg in node.kwargs.items()
+                    if isinstance(arg, torch.fx.Node)
+                ]
             )
 
             if self.operator_support.is_node_supported(submodules, node):

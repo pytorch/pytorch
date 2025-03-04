@@ -120,7 +120,9 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
+            results.extend(
+                [inp.grad for inp in example if isinstance(inp, torch.Tensor)]
+            )
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)
@@ -155,7 +157,7 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
         # Mean does not work on integer tensors
         return out.sum() / out.numel()
     elif isinstance(out, (list, tuple)):
-        return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
+        return sum([reduce_to_scalar_loss(x) for x in out]) / len(out)
     elif type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -165,7 +167,7 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     elif type(out).__name__ == "SquashedNormal":
         return out.mean.sum()
     elif isinstance(out, dict):
-        return sum(reduce_to_scalar_loss(value) for value in out.values()) / len(
+        return sum([reduce_to_scalar_loss(value) for value in out.values()]) / len(
             out.keys()
         )
     raise NotImplementedError("Don't know how to reduce", type(out))
@@ -394,7 +396,7 @@ def rand_strided(
     extra_size: int = 0,
 ) -> torch.Tensor:
     needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(size, stride))
+        sum([(shape - 1) * stride for shape, stride in zip(size, stride)])
         + 1
         + extra_size
     )

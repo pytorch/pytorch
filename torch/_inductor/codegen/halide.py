@@ -1088,7 +1088,7 @@ class HalideKernel(SIMDKernel):
         return ordered
 
     def make_index_str(self, dims, replacements=None, zero_vars=False):
-        index_str = ", ".join(d.index_str(replacements, zero_vars) for d in dims)
+        index_str = ", ".join([d.index_str(replacements, zero_vars) for d in dims])
         if len(dims) == 0:
             index_str = "()"
         elif len(dims) == 1:
@@ -1304,9 +1304,9 @@ class HalideKernel(SIMDKernel):
         scan = f"{scan_dom}.x"
         self.body.writeline(f"{scan_dom} = hl.RDom([hl.Range(1, {length})])")
 
-        assert len(self.reduction_renames) == 1, (
-            "multi-dimensional scan not implemented"
-        )
+        assert (
+            len(self.reduction_renames) == 1
+        ), "multi-dimensional scan not implemented"
         (scan_var,) = [*self.reduction_renames]  # type: ignore[misc]
         scan_renames_cur = {scan_var: sympy_index_symbol(scan)}
         scan_renames_pri = {scan_var: sympy_index_symbol(scan) - 1}
@@ -1393,17 +1393,19 @@ class HalideKernel(SIMDKernel):
             if isinstance(arg, TensorArg):
                 assert arg.offset == 0 and arg.alias_of is None
                 result.extend(
-                    (
-                        None,
-                        TensorArg(
-                            alias,
-                            arg.buffer,
-                            arg.dtype,
-                            arg.offset,
-                            alias_of=arg.name,
-                        ),
-                    )
-                    for alias in self.buffer_aliases.get(arg.name, ())
+                    [
+                        (
+                            None,
+                            TensorArg(
+                                alias,
+                                arg.buffer,
+                                arg.dtype,
+                                arg.offset,
+                                alias_of=arg.name,
+                            ),
+                        )
+                        for alias in self.buffer_aliases.get(arg.name, ())
+                    ]
                 )
         return result
 

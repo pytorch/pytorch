@@ -213,7 +213,7 @@ class SamplingMethod(Enum):
         elif type_hint == str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
-                random.choice(characters) for _ in range(random.randint(1, 20))
+                [random.choice(characters) for _ in range(random.randint(1, 20))]
             )
         elif is_type(type_hint, list):
             elem_type = getattr(

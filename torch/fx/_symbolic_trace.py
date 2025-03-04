@@ -384,7 +384,7 @@ class Tracer(TracerBase):
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, "_fields"):
-            args = tuple(self.create_arg(elem) for elem in a)
+            args = tuple([self.create_arg(elem) for elem in a])
             return self.create_node("call_function", a.__class__, args, {})
 
         # Tensors do not have a reliable string repr() from which they can be
@@ -666,7 +666,7 @@ class Tracer(TracerBase):
         def proxy_placeholder(name):
             return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
 
-        args.extend(proxy_placeholder(names) for names in arg_names)
+        args.extend([proxy_placeholder(names) for names in arg_names])
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs

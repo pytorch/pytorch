@@ -765,7 +765,7 @@ def create_node_mapping(
                         pre_to_post[current_node["name"]].add(parent_key)
                         post_to_pre[parent_key].add(current_node["name"])
                     stack.extend(
-                        (n, parent_key) for n in current_node.get("from_node", [])
+                        [(n, parent_key) for n in current_node.get("from_node", [])]
                     )
 
         def convert_sets_to_lists(d: dict[str, Any]) -> None:

@@ -473,7 +473,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if isinstance(mutated_arg, (list, tuple)):
             # TODO Using _overlap here causes a several issues.
-            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
+            unique_storages = OrderedSet([get_node_storage(arg) for arg in mutated_arg])
             if len(unique_storages) != len(mutated_arg):
                 # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)

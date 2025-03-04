@@ -350,10 +350,12 @@ class MetadataKey:
     def make(t):
         is_sparse = is_sparse_any(t)
         return MetadataKey(
-            size=tuple(SymIntEqByExpr(s) for s in t.size()),
+            size=tuple([SymIntEqByExpr(s) for s in t.size()]),
             layout=t.layout,
             is_sparse=is_sparse,
-            stride=None if is_sparse else tuple(SymIntEqByExpr(s) for s in t.stride()),
+            stride=None
+            if is_sparse
+            else tuple([SymIntEqByExpr(s) for s in t.stride()]),
             storage_offset=None if is_sparse else SymIntEqByExpr(t.storage_offset()),
             is_conj=t.is_conj(),
             is_neg=t.is_neg(),

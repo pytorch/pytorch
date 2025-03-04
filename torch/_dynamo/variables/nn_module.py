@@ -400,9 +400,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert not is_lazy, (
-                    "Expected lazy sequential isn't a valid combination?"
-                )
+                assert (
+                    not is_lazy
+                ), "Expected lazy sequential isn't a valid combination?"
                 assert not kwargs
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -1103,7 +1103,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+                [
+                    build_key_value(i, k, v)
+                    for i, (k, v) in enumerate(hooks_dict.items())
+                ]
             )
 
             return variables.NNModuleHooksDictVariable(
@@ -1154,9 +1157,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
-        assert source is not None, (
-            "FSDPManagedNNModule depends on having an accurate source to control guarding."
-        )
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
         self.source = source

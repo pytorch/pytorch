@@ -798,7 +798,7 @@ class SplitCatSimplifier:
     ) -> Optional[list[_Range]]:
         ranges = OrderedSet[Any]()
         for user_inputs in user_inputs_list:
-            ranges.update(u for u in user_inputs if isinstance(u, tuple))
+            ranges.update([u for u in user_inputs if isinstance(u, tuple)])
 
         cumulative_sizes = [0] + torch.cumsum(torch.tensor(split_sections), 0).tolist()
         split_ranges = sorted(

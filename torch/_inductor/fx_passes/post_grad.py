@@ -472,7 +472,7 @@ def is_valid_splitwithsizes_cat(match):
     if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
         return False
     get_item_args = OrderedSet(
-        get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
+        [get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes]
     )
     assert None not in get_item_args
     split_sizes = get_arg_value(split_node, 1, "split_sizes")

@@ -76,10 +76,10 @@ class AHContext:
         return numerical_features, categorical_features
 
     def get_feature_names_csv(self) -> str:
-        return ",".join(feature.name for feature in self.features)
+        return ",".join([feature.name for feature in self.features])
 
     def get_feature_values_csv(self) -> str:
-        return ",".join(str(feature.value) for feature in self.features)
+        return ",".join([str(feature.value) for feature in self.features])
 
     def get_value(self, name: str) -> Value:
         return self.context_dict[name]

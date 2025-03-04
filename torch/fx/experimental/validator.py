@@ -150,7 +150,7 @@ try:
             ):
                 return bool_func(*args)
 
-            wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
+            wrapped_args = tuple([z3.Int2BV(a, 64) for a in args])
             return z3.BV2Int(bitwise_func(*wrapped_args))
 
         return wrapper
@@ -293,9 +293,9 @@ try:
             def wrapper(*args):
                 # Lifts the arguments into a list of Z3 inhabitants.
                 if len(args) == 1 and isinstance(args[0], (list, tuple)):
-                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
+                    wrapped_args = (tuple([wrap(a) for a in args[0]]),)
                 else:
-                    wrapped_args = tuple(wrap(a) for a in args)
+                    wrapped_args = tuple([wrap(a) for a in args])
                 # Run the function on the Z3 expressions.
                 return func(*wrapped_args)
 
@@ -678,7 +678,7 @@ class ValidationException(TorchDynamoException):
             return f"{sym}: {model[sym]}"
 
         def joinlines(xs) -> str:
-            return "\n".join(f"  ==> {x}" for x in xs)
+            return "\n".join([f"  ==> {x}" for x in xs])
 
         model_str = joinlines(sorted(map(symbolstr, model)))
         assertions_str = joinlines(sorted(map(z3str, assertions)))
@@ -761,8 +761,8 @@ def bisect(shape_env):
             return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
-            tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
-            tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
+            tuple([new_with_shape_env(shape_env, s) for s in fake.size()]),
+            tuple([new_with_shape_env(shape_env, s) for s in fake.stride()]),
             new_with_shape_env(shape_env, fake.storage_offset()),
             fake.is_nested,
         )

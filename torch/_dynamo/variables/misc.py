@@ -614,8 +614,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         needs_input_grad = None
         if args and not kwargs:
             needs_input_grad = tuple(
-                isinstance(x, variables.TensorVariable) and x.requires_grad
-                for x in args
+                [
+                    isinstance(x, variables.TensorVariable) and x.requires_grad
+                    for x in args
+                ]
             )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, (), {}
@@ -712,9 +714,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph, (
-                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
-                )
+                assert tx.one_graph, "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 return variables.UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                     source=self.source,
