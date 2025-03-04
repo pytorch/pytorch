@@ -1,4 +1,5 @@
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 
@@ -18,8 +19,16 @@ struct fmin_functor {
 
 struct copysign_functor {
   template <typename T>
-  inline T operator()(const T a, const T b) {
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(
+      const T a,
+      const T b) {
     return static_cast<T>(::metal::copysign(a, b));
+  }
+  template <typename T>
+  inline enable_if_t<!is_floating_point_v<T>, float> operator()(
+      const T a,
+      const T b) {
+    return ::metal::copysign(static_cast<float>(a), static_cast<float>(b));
   }
 };
 
@@ -27,6 +36,13 @@ struct zeta_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(c10::metal::zeta(a, b));
+  }
+};
+
+struct xlog1py_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::xlog1py(a, b));
   }
 };
 
@@ -66,6 +82,21 @@ struct nextafter_functor {
   }
 };
 
+struct polar_functor {
+  template <typename U>
+  using ret_type = c10::metal::vec2type_t<U>;
+  template <typename T>
+  inline ret_type<T> operator()(const T a, const T b) {
+    return ret_type<T>(a * cos(b), a * sin(b));
+  }
+};
+
+// Future BinaryTensorIterator
+template <typename T, typename F>
+using result_of = decltype(::metal::declval<F>()(
+    ::metal::declval<T>(),
+    ::metal::declval<T>()));
+
 template <typename T, typename F>
 kernel void binary_indexing(
     constant void* input_ [[buffer(0)]],
@@ -73,9 +104,9 @@ kernel void binary_indexing(
     device void* out_ [[buffer(2)]],
     constant uint3* offsets [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  auto out = (device result_of<T, F>*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
   F f;
   *out = f(*input, *other);
 }
@@ -84,7 +115,7 @@ template <typename T, typename F>
 kernel void binary_dense(
     constant T* input [[buffer(0)]],
     constant T* other [[buffer(1)]],
-    device T* out [[buffer(2)]],
+    device result_of<T, F>* out [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   out[tid] = f(input[tid], other[tid]);
@@ -102,22 +133,8 @@ kernel void binary_dense(
   binary_dense<DTYPE, NAME##_functor>(                       \
       constant DTYPE * input_,                               \
       constant DTYPE * other_,                               \
-      device DTYPE * out_,                                   \
+      device result_of<DTYPE, NAME##_functor> * out_,        \
       uint tid)
-
-template <typename T>
-kernel void copysign_integral(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device float* out = (device float*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = copysign(static_cast<float>(*input), static_cast<float>(*other));
-}
 
 #define REGISTER_BINARY_OP(NAME, DTYPE)                             \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
@@ -127,17 +144,14 @@ kernel void copysign_integral(
       constant uint3* offsets,                                      \
       uint tid)
 
-#define REGISTER_COPYSIGN_INTEGRAL_OP(DTYPE)             \
-  template [[host_name("copysign_" #DTYPE)]] kernel void \
-  copysign_integral<DTYPE>(                              \
-      constant void* input_ [[buffer(0)]],               \
-      constant void* other_ [[buffer(1)]],               \
-      device void* out_ [[buffer(2)]],                   \
-      constant uint3* offsets [[buffer(3)]],             \
-      uint tid [[thread_position_in_grid]]);
-
+REGISTER_BINARY_INDEXING_OP(copysign, long);
+REGISTER_BINARY_INDEXING_OP(copysign, int);
 REGISTER_BINARY_INDEXING_OP(copysign, float);
 REGISTER_BINARY_INDEXING_OP(copysign, half);
+REGISTER_BINARY_INDEXING_OP(copysign, short);
+REGISTER_BINARY_INDEXING_OP(copysign, uchar);
+REGISTER_BINARY_INDEXING_OP(copysign, char);
+REGISTER_BINARY_INDEXING_OP(copysign, bool);
 REGISTER_BINARY_INDEXING_OP(fmax, float);
 REGISTER_BINARY_INDEXING_OP(fmax, half);
 REGISTER_BINARY_INDEXING_OP(fmin, float);
@@ -146,6 +160,8 @@ REGISTER_BINARY_INDEXING_OP(nextafter, float);
 REGISTER_BINARY_INDEXING_OP(nextafter, half);
 REGISTER_BINARY_INDEXING_OP(zeta, float);
 REGISTER_BINARY_INDEXING_OP(zeta, half);
+REGISTER_BINARY_INDEXING_OP(xlog1py, float);
+REGISTER_BINARY_INDEXING_OP(xlog1py, half);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
@@ -153,31 +169,12 @@ REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
 REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
 REGISTER_BINARY_INDEXING_OP(nextafter, bfloat);
 REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
+REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
 #endif
-REGISTER_COPYSIGN_INTEGRAL_OP(int);
-REGISTER_COPYSIGN_INTEGRAL_OP(long);
-REGISTER_COPYSIGN_INTEGRAL_OP(short);
-REGISTER_COPYSIGN_INTEGRAL_OP(char);
-REGISTER_COPYSIGN_INTEGRAL_OP(uchar);
-REGISTER_COPYSIGN_INTEGRAL_OP(bool);
 
 // Complex binary functions
-template <typename T>
-kernel void polar(
-    constant void* abs_ [[buffer(0)]],
-    constant void* angle_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* angle = (constant T*)((constant uint8_t*)angle_ + offsets[tid].z);
-  constant T* abs = (constant T*)((constant uint8_t*)abs_ + offsets[tid].y);
-  out[0] = abs[0] * cos(angle[0]);
-  out[1] = abs[0] * sin(angle[0]);
-}
-
-REGISTER_BINARY_OP(polar, float);
-REGISTER_BINARY_OP(polar, half);
+REGISTER_BINARY_INDEXING_OP(polar, float);
+REGISTER_BINARY_INDEXING_OP(polar, half);
 
 template <typename T>
 kernel void complex_mul(

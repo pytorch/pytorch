@@ -26,6 +26,7 @@ from torch._export.serde.serialize import (
     deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleSerializer,
     serialize,
     SerializeError,
 )
@@ -419,6 +420,17 @@ def forward(self, x):
         serialized = ExportedProgramSerializer().serialize(exported_module)
         for v in serialized.exported_program.range_constraints.values():
             self.assertEqual(v.max_val, None)
+
+    def test_symint_list(self):
+        # This reflects the behavior from inductor's ExternFallbackNode
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        res = serializer.serialize_inputs(
+            torch.ops.aten.ones.default, ([1, symint, 3],), {}
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].arg._type, "as_sym_ints")
 
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
