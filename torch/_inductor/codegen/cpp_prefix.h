@@ -49,7 +49,7 @@ typedef at::BFloat16 bfloat16;
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
 
-const uint64_t kChunkSize = 16;
+const uint64_t kChunkSize = 4096;
 
 template <typename T>
 struct Welford {
@@ -82,9 +82,6 @@ struct WelfordHelper {
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
-    if (depth <= 4) {
-      depth = 0;
-    }
     welford_stk.assign(depth, Welford<T>());
   }
 };
