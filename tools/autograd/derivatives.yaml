@@ -451,7 +451,7 @@
   self: grad
   result: auto_linear
 
-- name: _lazy_clone(Tensor self) -> Tensor
+- name: _lazy_clone(Tensor self, *, Device? device=None) -> Tensor
   self: grad
   result: auto_linear
 

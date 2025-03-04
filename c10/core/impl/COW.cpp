@@ -4,6 +4,8 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/COWDeleter.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -48,7 +50,9 @@ bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
   return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
 }
 
-c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
+    StorageImpl& storage,
+    c10::optional<c10::Device> device_opt) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -76,7 +80,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   //
   //    No locking is required in this case.
 
-  std::optional<DataPtr> new_data_ptr; // must be set below
+  std::optional<DataPtr> new_data_ptr_opt; // must be set below
 
   if (has_simple_data_ptr(storage)) {
     // Case 1) We have a simple data pointer: wrap it.
@@ -84,30 +88,58 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
         storage._mutable_data_ptr_no_checks().move_context();
 
     // Save this for the result.
-    new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)));
+    new_data_ptr_opt = make_data_ptr(
+        data_ptr,
+        *new cow::COWDeleterContext(std::move(original_ctx), storage.device()));
 
     // Update this storage to the new copy on write context.
-    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
+    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr_opt));
   } else if (is_cow_data_ptr(data_ptr)) {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
-    new_data_ptr = copy_data_ptr(data_ptr);
+    new_data_ptr_opt = copy_data_ptr(data_ptr);
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
     return nullptr;
   }
 
-  TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
+  TORCH_INTERNAL_ASSERT(new_data_ptr_opt.has_value());
+
+  c10::Allocator* allocator = storage.allocator();
+  c10::DeviceType device_type = storage.device_type();
+
+  if (device_opt.has_value()) {
+    DeviceGuard device_guard(device_opt.value());
+    Device device = device_guard.current_device();
+
+    // If a different target device was given, then convert the data pointer to
+    // that device.
+    if (device != storage.device()) {
+      DataPtr& new_data_ptr = new_data_ptr_opt.value();
+      auto* ctx = new_data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(
+          c10::impl::cow::cow_deleter);
+      device_type = device.type();
+
+      if (device_type == c10::kCUDA) {
+        allocator = c10::cuda::CUDACachingAllocator::get();
+      } else {
+        allocator = c10::GetAllocator(device.type());
+      }
+
+      new_data_ptr.release_context();
+      new_data_ptr_opt = c10::DataPtr(
+          new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, device);
+    }
+  }
 
   return make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
-      *std::move(new_data_ptr),
-      storage.allocator(),
+      *std::move(new_data_ptr_opt),
+      allocator,
       storage.resizable(),
-      storage.device_type());
+      device_type);
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
@@ -118,13 +150,14 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
 
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
-
+  bool devices_match = storage.device() == ctx->original_device();
   auto result = ctx->decrement_refcount();
 
   // This must be set by each branch below.
   std::optional<DataPtr> new_data_ptr;
 
-  if (std::holds_alternative<cow::COWDeleterContext::LastReference>(result)) {
+  if (devices_match &&
+      std::holds_alternative<cow::COWDeleterContext::LastReference>(result)) {
     // This is the only reference to the data. If there were any racing writes,
     // the context ensured they finished before giving us the result.
     std::unique_ptr<void, DeleterFnPtr> data =
@@ -133,12 +166,14 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
     new_data_ptr = DataPtr(
         data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
   } else {
-    TORCH_INTERNAL_ASSERT(
-        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
-            result));
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
     new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+    if (!devices_match) {
+      if (storage.device().type() == c10::kCUDA) {
+        c10::cuda::device_synchronize();
+      }
+    }
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());

@@ -5336,6 +5336,53 @@ else:
         run(10, 2, False, True)
         run(10, 2, True, True)
 
+    @onlyCUDA
+    def test_lazy_clone_to_device(self, device):
+        device_pairs = [
+            ('cpu', 'cuda'),
+            ('cpu', 'cuda:0'),
+            ('cpu', 'cuda:1'),
+            ('cuda:1', 'cuda:0'),
+            ('cuda:0', 'cuda:1'),
+            # TODO: Figure out why CUDA to CPU segfaults
+            # ('cuda', 'cpu'),
+        ]
+        for from_device, to_device in device_pairs:
+            from_device_check = torch.empty(0, device=from_device).device
+            to_device_check = torch.empty(0, device=to_device).device
+
+            a = torch.randn(10, device=from_device)
+            orig_data_ptr = a.data_ptr()
+            b = a._lazy_clone(device=to_device)
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertTrue(torch._C._is_cow_tensor(a))
+            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(b))
+            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+
+            a[0] = 1
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(b))
+            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+
+            b[0] = 2
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertFalse(torch._C._is_cow_tensor(b))
+            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
+
+            self.assertEqual(a[0], 1)
+            self.assertEqual(b[0], 2)
+
     # FIXME: move to test distributions
     @skipIfMPS
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
