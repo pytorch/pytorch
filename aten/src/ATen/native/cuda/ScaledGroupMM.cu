@@ -179,28 +179,56 @@ using ProblemShape = cutlass::gemm::GroupProblemShape<
     cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                              // group
 
-template <bool FastAccum>
-struct Schedule;
-
-template <>
-struct Schedule<true> {
-  using KernelSchedule =
+template <
+    bool FastAccum,
+    bool PONG,
+    typename TB_M,
+    typename TB_N,
+    typename TB_K>
+struct Schedule {
+  using FastCooperativeSchedule =
       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperativeFP8FastAccum;
-  using EpilogueSchedule =
+  using CooperativeSchedule =
+      cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
+  using FastPongSchedule =
+      cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpongFP8FastAccum;
+  using PongSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpong;
+  using CooperativeEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
-  using TileShape = cute::Shape<cute::_256, cute::_128, cute::_128>;
+  using PongEpilogueSchedule =
+      cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
+  using KernelSchedule = cute::conditional_t<
+      PONG,
+      cute::conditional_t<FastAccum, FastPongSchedule, PongSchedule>,
+      cute::conditional_t<
+          FastAccum,
+          FastCooperativeSchedule,
+          CooperativeSchedule>>;
+  using EpilogueSchedule = cute::
+      conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
+  using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
 };
 
-template <>
-struct Schedule<false> {
-  using KernelSchedule =
-      cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
-  using EpilogueSchedule =
-      cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
-  using TileShape = cute::Shape<cute::_128, cute::_128, cute::_128>;
-  using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
-};
+// template <>
+// struct Schedule<true> {
+//   using KernelSchedule =
+//       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperativeFP8FastAccum;
+//   using EpilogueSchedule =
+//       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
+//   using TileShape = cute::Shape<cute::_256, cute::_128, cute::_128>;
+//   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
+// };
+
+// template <>
+// struct Schedule<false> {
+//   using KernelSchedule =
+//       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
+//   using EpilogueSchedule =
+//       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
+//   using TileShape = cute::Shape<cute::_128, cute::_128, cute::_128>;
+//   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
+// };
 
 int ceildiv(int a, int b) {
   return (a + b - 1) / b;
@@ -210,7 +238,13 @@ int round_up_to_nearest_multiple(int a, int b) {
   return ceildiv(a, b) * b;
 }
 
-template <typename FastAccum, typename BiasType>
+template <
+    typename FastAccum,
+    typename BiasType,
+    typename Pong,
+    typename TB_M,
+    typename TB_N,
+    typename TB_K>
 void f8f8bf16_grouped_gemm_impl_sm90(
     at::Tensor mat_a, // FP8
     at::Tensor mat_b, // FP8
@@ -233,12 +267,19 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   // Tag indicating the minimum SM that supports the intended feature
   using ArchTag = cutlass::arch::Sm90;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
-  using TileShape = typename Schedule<FastAccum::value>::TileShape;
-  using ClusterShape = typename Schedule<FastAccum::value>::ClusterShape;
-  using KernelSchedule = typename Schedule<FastAccum::value>::KernelSchedule;
+
+  using TileShape =
+      typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
+          TileShape;
+  using ClusterShape =
+      typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
+          ClusterShape;
+  using KernelSchedule =
+      typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
+          KernelSchedule;
   using EpilogueSchedule =
-      typename Schedule<FastAccum::value>::EpilogueSchedule; // Epilogue to
-                                                             // launch
+      typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
+          EpilogueSchedule;
   // Implement rowwise scaling epilogue.
   using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcastPtrArray<
       0,
@@ -484,6 +525,77 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename FastAccum, typename BiasType>
+void dispatch_fp8_grouped_gemm_on_tile_size(
+    at::Tensor mat_a, // FP8
+    at::Tensor mat_b, // FP8
+    at::Tensor scale_a, // FP32
+    at::Tensor scale_b, // FP32
+    std::optional<at::Tensor> offs,
+    std::optional<at::Tensor> bias, // BF16
+    bool use_fast_accum,
+    at::Tensor& out) {
+  int32_t M, N, K, group_count;
+
+  M = mat_a.size(-2);
+  K = mat_a.size(-1);
+  N = mat_b.size(-1);
+
+  // below we assume that gemms are approx same size
+  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
+    // if both inputs are ragged, K is dynamic, M and N come from inputs
+    group_count = offs->size(0);
+    K = K / group_count;
+  } else if (mat_a.dim() == 2) {
+    group_count = mat_b.size(0);
+    M = M / group_count;
+  } else if (mat_b.dim() == 2) {
+    group_count = mat_a.size(0);
+    N = N / group_count;
+  }
+  bool large =
+      ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
+       (K >= 2048 && N >= 2048));
+  bool small = (M <= 128 || N <= 128);
+  if (small) {
+    f8f8bf16_grouped_gemm_impl_sm90<
+        FastAccum,
+        BiasType,
+        /*Pong*/ std::true_type,
+        cute::_64,
+        cute::_128,
+        cute::_128>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+  } else if (large && FastAccum::value) {
+    f8f8bf16_grouped_gemm_impl_sm90<
+        FastAccum,
+        BiasType,
+        /*Pong*/ std::false_type,
+        cute::_256,
+        cute::_128,
+        cute::_128>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+  } else if (large) { // use smaller tile for slow accum to avoid spilling
+    f8f8bf16_grouped_gemm_impl_sm90<
+        FastAccum,
+        BiasType,
+        /*Pong*/ std::false_type,
+        cute::_128,
+        cute::_128,
+        cute::_128>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+
+  } else
+    f8f8bf16_grouped_gemm_impl_sm90<
+        FastAccum,
+        BiasType,
+        /*Pong*/ std::false_type,
+        cute::_128,
+        cute::_256,
+        cute::_64>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+}
+
 template <typename BiasType>
 void dispatch_fp8_grouped_gemm_on_fast_accum(
     at::Tensor mat_a, // FP8
@@ -495,10 +607,10 @@ void dispatch_fp8_grouped_gemm_on_fast_accum(
     bool use_fast_accum,
     at::Tensor& out) {
   if (use_fast_accum) {
-    f8f8bf16_grouped_gemm_impl_sm90<std::true_type, BiasType>(
+    dispatch_fp8_grouped_gemm_on_tile_size<std::true_type, BiasType>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   } else {
-    f8f8bf16_grouped_gemm_impl_sm90<std::true_type, BiasType>(
+    dispatch_fp8_grouped_gemm_on_tile_size<std::false_type, BiasType>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   }
 }

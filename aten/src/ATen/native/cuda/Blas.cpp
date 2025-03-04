@@ -1420,7 +1420,7 @@ namespace {
     }
   }
 
-  void check_scale(const Tensor& mat, const Tensor& scale, const int arg_idx) {
+  void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
     if (mat.dim() == 2) {
       TORCH_CHECK(
           scale.dim() == 1,
@@ -1431,7 +1431,7 @@ namespace {
       TORCH_CHECK(
           scale.is_contiguous(), "scale_a must be contiguous for arg ", arg_idx);
       TORCH_CHECK(
-          scale.size(0) == mat.size(0),
+          scale.size(dim) == mat.size(dim),
           "scale must have the same length as mat for arg ",
           arg_idx);
     } else {
@@ -1450,7 +1450,7 @@ namespace {
           "scale must have the same batch dimension as mat for arg ",
           arg_idx);
       TORCH_CHECK(
-          scale.size(1) == mat.size(1),
+          scale.size(1) == mat.size(1 + dim),
           "scale must have the same first dimension as mat for arg ",
           arg_idx);
     }
@@ -1500,8 +1500,8 @@ bool use_fast_accum) {
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
 
-  check_scale(mat_a, scale_a, 0);
-  check_scale(mat_b, scale_b, 1);
+  check_scale(mat_a, scale_a, 0 ,0);
+  check_scale(mat_b, scale_b, 1, 1);
 
   TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
   at::cuda::detail::f8f8bf16_grouped_mm(
