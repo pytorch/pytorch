@@ -11,39 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ppc64le-UBI-9-Build-and-Test:
-    name: ppc64le-UBI-9-Build-and-Test
-    runs-on: linux.ppc64le
-    env:
-      IMAGE_NAME: docker.io/pytorch/ubippc64le-builder:cpu-ppc64le-main  # Define the image variable
-
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          no-sudo: true
-
-      - name: Execute Build and Tests inside ppc64le Docker Container
-        run: |
-          docker run --rm -v ${GITHUB_WORKSPACE}:/workspace/pytorch $IMAGE_NAME /workspace/pytorch/.github/scripts/ppc64le-build.sh
-      
-      - name: Archive ppc64le artifacts into zip
-        run: |
-          zip -1 -r artifacts.zip dist/
-      
-      - name: Store PyTorch Build Artifacts for ppc64le
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-ppc64le-binary-ubi9
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
-      - name: Cleanup docker
-        if: always()
-        shell: bash
-        run: |
-          # Stop and remove all containers
-          docker ps -q | xargs -r docker stop
-          docker ps -aq | xargs -r docker rm 
-      
+  linux-manylinux-2_28-py3-cpu-ppc64le-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-manylinux-2_28-py3-cpu-ppc64le-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-ppc64le-binary-manywheel
+      docker-image-name: pytorch/manylinuxppc64le-builder:cpu-ppc64le-main
+      runner: linux.ppc64le
+    secrets: inherit

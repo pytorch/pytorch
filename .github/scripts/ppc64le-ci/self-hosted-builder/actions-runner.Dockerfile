@@ -96,7 +96,7 @@ USER runner
 # Set working directory
 WORKDIR /opt/runner
 
-COPY --chown=runner:runner pytorch-ubi-ppc64le.tar /opt/runner/pytorch-ubi-ppc64le.tar
+COPY --chown=runner:runner manywheel-ppc64le.tar /opt/runner/manywheel-ppc64le.tar
 
 # Define entry point and command
 ENTRYPOINT ["/usr/bin/entrypoint"]

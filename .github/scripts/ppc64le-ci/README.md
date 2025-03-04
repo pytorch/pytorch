@@ -3,7 +3,7 @@
 ## Install prerequisites.
 
 ```
-$ sudo dnf install podman podman-docker jq
+$ sudo apt install podman podman-docker jq
 ```
 ## Add services.
 
@@ -14,7 +14,7 @@ $ sudo systemctl daemon-reload
 
 ## Rebuild the image
 
-First build ppc64le builder image `docker.io/pytorch/ubippc64le-builder`,
+First build ppc64le builder image `docker.io/pytorch/manylinuxppc64le-builder`,
 using following commands:
 
 ```
@@ -22,9 +22,9 @@ $ cd ~
 $ git clone https://github.com/pytorch/pytorch
 $ cd pytorch
 $ git submodule update --init --recursive
-$ GPU_ARCH_TYPE=cpu-ppc64le "$(pwd)/.ci/docker/manywheel/build.sh" ubippc64le-builder
-$ docker image tag localhost/pytorch/ubippc64le-builder docker.io/pytorch/ubippc64le-builder:cpu-ppc64le
-$ docker image save -o ~/pytorch-ubi-ppc64le.tar docker.io/pytorch/ubippc64le-builder:cpu-ppc64le
+$ GPU_ARCH_TYPE=cpu-ppc64le "$(pwd)/.ci/docker/manywheel/build.sh" manylinuxppc64le-builder
+$ docker image tag localhost/pytorch/manylinuxppc64le-builder docker.io/pytorch/manylinuxppc64le-builder:cpu-ppc64le
+$ docker image save -o ~/manywheel-ppc64le.tar docker.io/pytorch/manylinuxppc64le-builder:cpu-ppc64le
 ```
 
 Next step is to build `actions-runner` image using:

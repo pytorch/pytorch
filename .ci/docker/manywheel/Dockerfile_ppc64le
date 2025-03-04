@@ -1,31 +1,92 @@
-# Use UBI 9 as base image
-FROM registry.access.redhat.com/ubi9/ubi:9.5 AS base
+# Use the manylinux_2_28 base image for ppc64le
+FROM quay.io/pypa/manylinux_2_28_ppc64le as base
 
-# Install necessary dependencies
+# Language variables
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C.UTF-8
+
+ARG DEVTOOLSET_VERSION=13
+
+# Create symbolic links for Python 3.12
+RUN ln -sf /opt/python/cp312-cp312/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /opt/python/cp312-cp312/bin/python3.12 /usr/bin/python
+
+# Install required system dependencies
+RUN yum -y install epel-release && \
+    yum -y update && \
+    yum install -y \
+      sudo \
+      autoconf \
+      automake \
+      bison \
+      bzip2 \
+      curl \
+      diffutils \
+      file \
+      git \
+      make \
+      patch \
+      perl \
+      unzip \
+      util-linux \
+      wget \
+      which \
+      xz \
+      yasm \
+      less \
+      zstd \
+      libgomp \
+      gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+      gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+      gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+      gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+      cmake \
+      ninja-build \
+      rust \
+      cargo \
+      llvm-devel \
+      libzstd-devel \
+      python3.12-devel \
+      python3.12-setuptools \
+      python3.12-pip \
+      python3-virtualenv \
+      python3.12-pyyaml \
+      python3.12-numpy \
+      python3.12-wheel \
+      python3.12-cryptography \
+      blas-devel \
+      openblas-devel \
+      lapack-devel \
+      atlas-devel \
+      libjpeg-devel \
+      libxslt-devel \
+      libxml2-devel \
+      openssl-devel \
+      valgrind
+  
+
+# Ensure the correct Python version is used
+ENV PATH=/opt/python/cp312-cp312/bin:$PATH
+# Add gcc-toolset to the path
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
+# Configure git to avoid safe directory issues
+RUN git config --global --add safe.directory "*"
+
+# Install required Python packages
+RUN pip install --upgrade pip
+RUN pip install typing_extensions pyyaml setuptools
+ 
+# Install test dependencies
 RUN dnf install -y \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    dnf install -y git cmake ninja-build gcc-toolset-13 rust cargo zip \
-    python3 python3-devel && \
-    dnf clean all
+      protobuf-devel \
+      protobuf-c-devel \
+      protobuf-lite-devel \
+      wget \
+      patch
 
-ENV PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
-ENV MANPATH="/opt/rh/gcc-toolset-13/root/usr/share/man"
-ENV INFOPATH="/opt/rh/gcc-toolset-13/root/usr/share/info"
-ENV PCP_DIR="/opt/rh/gcc-toolset-13/root"
-ENV LD_LIBRARY_PATH="/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib"
-
-# Set Python and pip aliases to use Python 3.9
-RUN ln -sf /usr/bin/python3 /usr/bin/python && \
-    ln -sf /usr/bin/pip3 /usr/bin/pip
-
-COPY requirements.txt .
-# Install Python packages via pip
-RUN pip install wheel 
-RUN pip install -r requirements.txt
-
-RUN mkdir -p /workspace/pytorch
-
+# Set default entrypoint
 ENTRYPOINT []
 CMD ["/bin/bash"]
-
-
