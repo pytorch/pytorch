@@ -214,7 +214,7 @@ def hook_iterator(namespace):
                     else:  # Decided against using `contextlib.nullcontext` for performance reasons
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
-            except StopIteration as e:
+            except StopIteration:
                 return
             except Exception as e:
                 # TODO: Simplify the traceback message to skip over `response = gen.send(None)`

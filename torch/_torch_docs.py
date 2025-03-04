@@ -2,7 +2,6 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
-from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -72,6 +71,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
         If ``None``, all dimensions are reduced.
+"""
+    },
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
 """
     },
 )
@@ -170,7 +174,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes: Dict[str, str] = {
+reproducibility_notes: dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -311,7 +315,7 @@ See :meth:`~Tensor.index_add_` for function description.
 add_docstr(
     torch.index_copy,
     r"""
-index_copy(input, dim, index, source, *, out=None) -> Tensor
+index_copy(input: Tensor, dim: int, index: Tensor, source: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 See :meth:`~Tensor.index_add_` for function description.
 """,
@@ -320,7 +324,7 @@ See :meth:`~Tensor.index_add_` for function description.
 add_docstr(
     torch.index_reduce,
     r"""
-index_reduce(input, dim, index, source, reduce, *, include_self=True, out=None) -> Tensor
+index_reduce(input: Tensor, dim: int, index: Tensor, source: Tensor, reduce: str, *, include_self: bool = True, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 See :meth:`~Tensor.index_reduce_` for function description.
 """,
@@ -396,7 +400,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     out = \beta\ \text{input} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -408,12 +412,12 @@ must be real numbers, otherwise they should be integers.
 {rocm_fp16_note}
 
 Args:
+    input (Tensor): matrix to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
-    input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     {out}
 
@@ -537,7 +541,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -578,11 +582,14 @@ Example::
 add_docstr(
     torch.adjoint,
     r"""
-adjoint(Tensor) -> Tensor
+adjoint(input: Tensor) -> Tensor
 Returns a view of the tensor conjugated and with the last two dimensions transposed.
 
 ``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
 to ``x.transpose(-2, -1)`` for real tensors.
+
+Args:
+    {input}
 
 Example::
     >>> x = torch.arange(4, dtype=torch.float)
@@ -655,7 +662,7 @@ size `m`, then :attr:`input` must be
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat} \mathbin{@} \text{vec})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -697,7 +704,7 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{vec1} \otimes \text{vec2})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -732,12 +739,12 @@ Example::
 add_docstr(
     torch.allclose,
     r"""
-allclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> bool
+allclose(input: Tensor, other: Tensor, rtol: float = 1e-05, atol: float = 1e-08, equal_nan: bool = False) -> bool
 
 This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 
 .. math::
-    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert
 """
     + r"""
 elementwise, for all elements of :attr:`input` and :attr:`other`. The behaviour of this function is analogous to
@@ -766,7 +773,7 @@ Example::
 add_docstr(
     torch.all,
     r"""
-all(input) -> Tensor
+all(input: Tensor) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
@@ -821,7 +828,7 @@ Example::
 add_docstr(
     torch.any,
     r"""
-any(input) -> Tensor
+any(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Tests if any element in :attr:`input` evaluates to `True`.
 
@@ -876,7 +883,7 @@ Example::
 add_docstr(
     torch.angle,
     r"""
-angle(input, *, out=None) -> Tensor
+angle(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
 
@@ -946,7 +953,7 @@ Example::
 add_docstr(
     torch.as_tensor,
     r"""
-as_tensor(data, dtype=None, device=None) -> Tensor
+as_tensor(data: Any, dtype: Optional[dtype] = None, device: Optional[DeviceLikeType]) -> Tensor
 
 Converts :attr:`data` into a tensor, sharing data and preserving autograd
 history if possible.
@@ -1025,7 +1032,7 @@ Example::
 add_docstr(
     torch.arcsin,
     r"""
-arcsin(input, *, out=None) -> Tensor
+arcsin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asin`.
 """,
@@ -1061,7 +1068,7 @@ Example::
 add_docstr(
     torch.arcsinh,
     r"""
-arcsinh(input, *, out=None) -> Tensor
+arcsinh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asinh`.
 """,
@@ -1070,7 +1077,7 @@ Alias for :func:`torch.asinh`.
 add_docstr(
     torch.atan,
     r"""
-atan(input, *, out=None) -> Tensor
+atan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the arctangent of the elements of :attr:`input`.
 
@@ -1097,7 +1104,7 @@ Example::
 add_docstr(
     torch.arctan,
     r"""
-arctan(input, *, out=None) -> Tensor
+arctan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atan`.
 """,
@@ -1106,7 +1113,7 @@ Alias for :func:`torch.atan`.
 add_docstr(
     torch.atan2,
     r"""
-atan2(input, other, *, out=None) -> Tensor
+atan2(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Element-wise arctangent of :math:`\text{{input}}_{{i}} / \text{{other}}_{{i}}`
 with consideration of the quadrant. Returns a new tensor with the signed angles
@@ -1138,7 +1145,7 @@ Example::
 add_docstr(
     torch.arctan2,
     r"""
-arctan2(input, other, *, out=None) -> Tensor
+arctan2(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
 Alias for :func:`torch.atan2`.
 """,
 )
@@ -1146,7 +1153,7 @@ Alias for :func:`torch.atan2`.
 add_docstr(
     torch.atanh,
     r"""
-atanh(input, *, out=None) -> Tensor
+atanh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
 
@@ -1178,7 +1185,7 @@ Example::
 add_docstr(
     torch.arctanh,
     r"""
-arctanh(input, *, out=None) -> Tensor
+arctanh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atanh`.
 """,
@@ -1187,7 +1194,7 @@ Alias for :func:`torch.atanh`.
 add_docstr(
     torch.asarray,
     r"""
-asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
+asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool] = None, requires_grad: bool = False) -> Tensor # noqa: B950
 
 Converts :attr:`obj` to a tensor.
 
@@ -1318,7 +1325,7 @@ same as the scaling factors used in :meth:`torch.addbmm`.
 .. math::
     \text{out}_i = \beta\ \text{input}_i + \alpha\ (\text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -1352,7 +1359,7 @@ Example::
 add_docstr(
     torch.bernoulli,
     r"""
-bernoulli(input, *, generator=None, out=None) -> Tensor
+bernoulli(input: Tensor, *, generator: Optional[Generator], out: Optional[Tensor]) -> Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
@@ -1897,7 +1904,7 @@ Example::
 add_docstr(
     torch.chunk,
     r"""
-chunk(input, chunks, dim=0) -> List of Tensors
+chunk(input: Tensor, chunks: int, dim: int = 0) -> Tuple[Tensor, ...]
 
 Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
@@ -2290,9 +2297,9 @@ and :func:`torch.chunk`.
     :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
-    tensors (sequence of Tensors): any python sequence of tensors of the same type.
-        Non-empty tensors provided must have the same shape, except in the
-        cat dimension.
+    tensors (sequence of Tensors): Non-empty tensors provided must have the same shape,
+        except in the cat dimension.
+
     dim (int, optional): the dimension over which the tensors are concatenated
 
 Keyword args:
@@ -3196,7 +3203,7 @@ elements of :attr:`input` in the dimension :attr:`dim`.
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
     .. math::
-        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{j=0}}^{{i}} \exp(x_{{ij}})
+        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{k=0}}^{{j}} \exp(x_{{ik}})
 
 Args:
     {input}
@@ -3609,13 +3616,20 @@ Examples::
             [ 0.6927, -0.3735, -0.4945]])
 
 
-    >>> torch.diagonal(a, 0)
+    >>> torch.diagonal(a)
     tensor([-1.0854, -0.0905, -0.4945])
 
 
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
+    >>> b = torch.randn(2, 5)
+    >>> b
+    tensor([[-1.7948, -1.2731, -0.3181,  2.0200, -1.6745],
+            [ 1.8262, -1.5049,  0.4114,  1.0704, -1.2607]])
+
+    >>> torch.diagonal(b, 1, 1, 0)
+    tensor([1.8262])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
@@ -5326,7 +5340,7 @@ Returns a new tensor with boolean elements representing if each element of
 Closeness is defined as:
 
 .. math::
-    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{rtol} \times \lvert \text{other}_i \rvert + \texttt{atol}
 """
     + r"""
 
@@ -5338,8 +5352,8 @@ they are equal, with NaNs being considered equal to each other when
 Args:
     input (Tensor): first tensor to compare
     other (Tensor): second tensor to compare
-    atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
+    atol (float, optional): absolute tolerance. Default: 1e-08
     equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
 
 Examples::
@@ -6445,9 +6459,6 @@ max(input) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
 Args:
     {input}
 
@@ -6477,8 +6488,8 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {dim}
-    {keepdim} Default: ``False``.
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
@@ -6493,13 +6504,22 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
+    torch.return_types.max(
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
+    torch.return_types.max(
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
 
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6693,6 +6713,12 @@ add_docstr(
     torch.mean,
     r"""
 mean(input, *, dtype=None) -> Tensor
+
+.. note::
+    If the `input` tensor is empty, ``torch.mean()`` returns ``nan``.
+    This behavior is consistent with NumPy and follows the definition
+    that the mean over an empty set is undefined.
+
 
 Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
@@ -7047,9 +7073,6 @@ add_docstr(
 min(input) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
-
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
 
 Args:
     {input}
@@ -9025,8 +9048,8 @@ Constructs a tensor with no autograd history (also known as a "leaf tensor", see
     When working with tensors prefer using :func:`torch.Tensor.clone`,
     :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    ``t.detach().clone()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.detach().clone().requires_grad_(True)``.
 
 .. seealso::
 
@@ -9086,9 +9109,9 @@ the gap between two values in the tensor.
     Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end).
 
 Args:
-    start (float): the starting value for the set of points. Default: ``0``.
+    start (float, optional): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    step (float, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
@@ -9119,6 +9142,12 @@ Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
+Note: When using floating-point dtypes (especially reduced precision types like ``bfloat16``),
+the results may be affected by floating-point rounding behavior. Some values in the sequence
+might not be exactly representable in certain floating-point formats, which can lead to
+repeated values or unexpected rounding. For precise sequences, it is recommended to use
+integer dtypes instead of floating-point dtypes.
+
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
 comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
@@ -9128,9 +9157,9 @@ in such cases.
 """
     + r"""
 Args:
-    start (Number): the starting value for the set of points. Default: ``0``.
+    start (Number, optional): the starting value for the set of points. Default: ``0``.
     end (Number): the ending value for the set of points
-    step (Number): the gap between each pair of adjacent points. Default: ``1``.
+    step (Number, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
@@ -10589,6 +10618,9 @@ Args:
 Keyword args:
     {dtype}
 
+.. note:: Use the `dtype` argument if you need the result in a specific tensor type.
+          Otherwise, the result type may be automatically promoted (e.g., from `torch.int32` to `torch.int64`).
+
 Example::
 
     >>> a = torch.randn(1, 3)
@@ -11082,8 +11114,8 @@ are designed to work with this function. See the examples below.
 
 Args:
     {input}
-    indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int, optional): dimension to select along.
+    indices (LongTensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int, optional): dimension to select along. Default: 0
 
 Keyword args:
     {out}
@@ -11184,6 +11216,10 @@ given dimension `dim`.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 `k` elements are themselves sorted
+
+.. note::
+    When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
+    and may vary across different invocations.
 
 Args:
     {input}
@@ -12667,14 +12703,14 @@ the default computation is
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{1}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{1}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`dx` is specified the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{\Delta x}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{\Delta x}{2} (y_i + y_{i-1})
     \end{aligned}
 
 effectively multiplying the result by :attr:`dx`. When :attr:`x` is specified,
@@ -12683,7 +12719,7 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
@@ -13193,7 +13229,8 @@ Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
-the correct task sequencing.
+the correct task sequencing. It supports with statement as a context manager to ensure the operators
+within the with block are running on the corresponding stream.
 
 See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
 on the exact semantic that applies to all devices.
@@ -13210,7 +13247,10 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
+    >>> with torch.Stream(device='cuda') as s_cuda:
+    >>>     a = torch.randn(10, 5, device='cuda')
+    >>>     b = torch.randn(5, 10, device='cuda')
+    >>>     c = torch.mm(a, b)
 """,
 )
 
@@ -13826,7 +13866,7 @@ are freshly created instead of aliasing the input.
 add_docstr(
     torch.expand_copy,
     r"""
-Performs the same operation as :func:`torch.expand`, but all output tensors
+Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )

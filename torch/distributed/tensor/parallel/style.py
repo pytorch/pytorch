@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -35,9 +35,10 @@ class ParallelStyle(ABC):
     flexibility for different kind of style implementations.
     """
 
+    src_data_rank: Optional[int] = 0
+
     @abstractmethod
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        ...
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module: ...
 
 
 class ColwiseParallel(ParallelStyle):
@@ -118,13 +119,21 @@ class ColwiseParallel(ParallelStyle):
         # means Colwise as Linear is input * weight^T + bias, where
         # weight would become Shard(1)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     def _partition_embedding_fn(self, name, module, device_mesh):
         # colwise shard embedding.weight is straight forward as Shard(1)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(1)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(1)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     @staticmethod
@@ -225,21 +234,37 @@ class RowwiseParallel(ParallelStyle):
         # weight would become Shard(0)
         module.register_parameter(
             "weight",
-            nn.Parameter(distribute_tensor(module.weight, device_mesh, [Shard(1)])),
+            nn.Parameter(
+                distribute_tensor(
+                    module.weight,
+                    device_mesh,
+                    [Shard(1)],
+                    src_data_rank=self.src_data_rank,
+                )
+            ),
         )
         if getattr(module, "bias", None) is not None:
             # The Linear module has bias
             module.register_parameter(
                 "bias",
                 nn.Parameter(
-                    distribute_tensor(module.bias, device_mesh, [Replicate()])
+                    distribute_tensor(
+                        module.bias,
+                        device_mesh,
+                        [Replicate()],
+                        src_data_rank=self.src_data_rank,
+                    )
                 ),
             )
 
     def _partition_embedding_fn(self, name, module, device_mesh):
         # rowwise shard embedding.weight is Shard(0)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     @staticmethod
@@ -256,7 +281,7 @@ class RowwiseParallel(ParallelStyle):
         if isinstance(module, nn.Linear):
             partition_fn = self._partition_linear_fn
             # rowwise linear runtime sharding requires input tensor shard on last dim
-            self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1),)
+            self.desired_input_layouts: tuple[Placement, ...] = (Shard(-1),)
         elif isinstance(module, nn.Embedding):
             partition_fn = self._partition_embedding_fn
             # rowwise embedding runtime sharding requires input tensor replicated
@@ -423,12 +448,12 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
         desired_input_layouts: Optional[
-            Union[Placement, Tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement]]]
         ] = None,
-        input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
-        desired_input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
+        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         use_local_output: bool = False,
     ):
         self.input_layouts = (
@@ -441,19 +466,21 @@ class PrepareModuleInput(ParallelStyle):
         )
         self.use_local_output = use_local_output
         if self.input_layouts is not None:
-            assert (
-                self.desired_input_layouts is not None
-            ), "desired module inputs should not be None!"
-            assert len(self.input_layouts) == len(
-                self.desired_input_layouts
-            ), "input_layouts and desired_input_layouts should have same length!"
+            assert self.desired_input_layouts is not None, (
+                "desired module inputs should not be None!"
+            )
+            assert len(self.input_layouts) == len(self.desired_input_layouts), (
+                "input_layouts and desired_input_layouts should have same length!"
+            )
         self.with_kwargs = input_kwarg_layouts is not None
         self.input_kwarg_layouts = input_kwarg_layouts or {}
         self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
         if self.with_kwargs:
             assert len(self.input_kwarg_layouts) == len(
                 self.desired_input_kwarg_layouts
-            ), "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+            ), (
+                "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+            )
 
     def _prepare_input_arg(
         self,
@@ -468,9 +495,9 @@ class PrepareModuleInput(ParallelStyle):
                 # assert inp.placements[0] == input_layout
                 dt_inp = input
             else:
-                assert isinstance(
-                    input, torch.Tensor
-                ), "expecting input to be a torch.Tensor!"
+                assert isinstance(input, torch.Tensor), (
+                    "expecting input to be a torch.Tensor!"
+                )
                 dt_inp = DTensor.from_local(
                     input, mesh, (input_layout,), run_check=False
                 )
@@ -491,9 +518,9 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
-        assert (
-            self.desired_input_layouts is not None
-        ), "desired module inputs should not be None!"
+        assert self.desired_input_layouts is not None, (
+            "desired module inputs should not be None!"
+        )
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
         ):
@@ -525,7 +552,9 @@ class PrepareModuleInput(ParallelStyle):
                 with_kwargs=True,
             )  # type: ignore[misc]
         else:
-            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: self._prepare_input_fn(inputs, device_mesh)
+            )  # type: ignore[misc, call-arg]
         return module
 
 
@@ -570,8 +599,8 @@ class PrepareModuleOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        output_layouts: Union[Placement, Tuple[Placement]],
-        desired_output_layouts: Union[Placement, Tuple[Placement]],
+        output_layouts: Union[Placement, tuple[Placement]],
+        desired_output_layouts: Union[Placement, tuple[Placement]],
         use_local_output: bool = True,
     ):
         self.output_layouts = (
@@ -585,9 +614,9 @@ class PrepareModuleOutput(ParallelStyle):
             else desired_output_layouts
         )
         self.use_local_output = use_local_output
-        assert len(self.output_layouts) == len(
-            self.desired_output_layouts
-        ), "output_layouts and desired_output_layouts should have same length!"
+        assert len(self.output_layouts) == len(self.desired_output_layouts), (
+            "output_layouts and desired_output_layouts should have same length!"
+        )
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
@@ -623,5 +652,7 @@ class PrepareModuleOutput(ParallelStyle):
             return tuple(prepared_outputs)
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
+        module.register_forward_hook(
+            lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
+        )  # type: ignore[misc, call-arg]
         return module

@@ -1,4 +1,5 @@
 #include <ATen/ThreadLocalState.h>
+#include <distributed/c10d/ProcessGroup.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
@@ -70,7 +71,12 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
-void Work::synchronize() {}
+void Work::synchronize() {
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
+  }
+}
 
 bool Work::wait(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -141,7 +147,7 @@ uint64_t Work::getSequencenumber() const {
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : Work(), _fut(std::move(fut)) {}
+      : _fut(std::move(fut)) {}
 
   ~FutureWrappingWork() override = default;
 

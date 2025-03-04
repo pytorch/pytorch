@@ -124,8 +124,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   // Alias torch.nn._common_types._size_?_t to BroadcastingList?[int]
   if (expr.kind() == TK_VAR) {
     auto var = Var(expr);
-    auto var_name = var.name();
-    auto& name = var_name.name();
+    auto& name = var.name().name();
     constexpr auto _size_prefix = "_size_";
     constexpr auto _size_suffix = "_t";
     constexpr auto _size_n_len = 9; // strlen("_size_X_t")
@@ -207,8 +206,7 @@ std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     }
     case '.': {
       auto select = Select(expr);
-      auto selector = select.selector();
-      const std::string& name = selector.name();
+      const std::string& name = select.selector().name();
       // Special case for torch.Tensor and its' subclasses
       const std::unordered_set<std::string> tensor_subtypes = {
           "Tensor",
@@ -264,8 +262,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     return subscriptToType(*value_name, subscript);
 
   } else if (expr.kind() == TK_STRINGLITERAL) {
-    auto literal = StringLiteral(expr);
-    const auto& type_name = literal.text();
+    const auto& type_name = StringLiteral(expr).text();
 
     // Check if the type is a custom class. This is done by checking
     // if type_name starts with "torch.classes."

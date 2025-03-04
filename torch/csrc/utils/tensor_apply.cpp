@@ -53,7 +53,7 @@ static void recursive_apply(
   }
 
   auto n = sizes[dim];
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     recursive_apply(sizes, scalarType, dim + 1, fn, strided_data);
     for (auto& td : strided_data) {
       td.step(dim);

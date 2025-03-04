@@ -317,7 +317,7 @@ algorithms.
 How to utilize named parameters to load optimizer state dict
 ------------------------------------------------------------
 
-The function :func:`~Optimizer.load_state_dict` stores the optional ``param_names``content from the
+The function :func:`~Optimizer.load_state_dict` stores the optional ``param_names`` content from the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
 as the order of the parameters matters to maintain compatibility (in case of different ordering).
 To utilize the loaded parameters names from the loaded state dict, a custom ``register_load_state_dict_pre_hook``
@@ -520,7 +520,7 @@ EMA models are constructed by specifying the ``multi_avg_fn`` argument as follow
 >>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Decay value should be close to 1.0, as smaller values can cause optimization convergence issues.
 
 :func:`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 

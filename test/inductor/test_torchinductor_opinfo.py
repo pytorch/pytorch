@@ -41,7 +41,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_XPU,
+    maybe_skip_size_asserts,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -110,8 +116,8 @@ def print_seen():
         return "{" + r + "}"
 
     def sort_key(kv):
-        k, v = kv
-        device_type, op = k
+        k, _ = kv
+        _, op = k
         if isinstance(op, tuple):
             return op
         else:
@@ -223,10 +229,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "multinomial": {f16, f32, f64},
-    "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64},
-    "nn.functional.avg_pool3d": {i64},
-    "nn.functional.local_response_norm": {i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -269,93 +271,20 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f16, f32, f64, b8, i32, i64},
+    "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
-    "__rmatmul__": {f64},
-    ("addmm", "decomposed"): {f64},
-    "addr": {f64},
-    "baddbmm": {f64},
-    "bmm": {f64},
     "byte": {f16, f32},
-    "cdist": {f64},
-    "corrcoef": {f64},
-    "cov": {f64},
-    "einsum": {f64},
-    "inner": {f64},
-    "linalg.cholesky_ex": {f64},
-    "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
-    "linalg.ldl_factor_ex": {f64},
-    "linalg.ldl_factor": {f64},
-    "linalg.ldl_solve": {f64},
-    "linalg.matrix_power": {f64},
-    "linalg.multi_dot": {f64},
-    "matmul": {f64},
-    "mm": {f64},
-    "mv": {f64},
-    "nn.functional.bilinear": {f64},
-    "nn.functional.linear": {f64},
-    "pca_lowrank": {f64},
-    "svd_lowrank": {f64},
-    "tensordot": {f64},
-    "triangular_solve": {f64},
-    "svd": {f64},
-    "qr": {f64},
-    "pinverse": {f64},
-    "ormqr": {f64},
-    ("norm", "nuc"): {f64},
-    "lu": {f64},
-    "lu_solve": {f64},
-    "logdet": {f64},
-    "linalg.tensorsolve": {f64},
-    "linalg.tensorinv": {f64},
-    "linalg.svdvals": {f64},
-    "linalg.svd": {f64},
-    "linalg.solve": {f64},
-    "linalg.solve_triangular": {f64},
-    "linalg.solve_ex": {f64},
-    "linalg.slogdet": {f64},
-    "linalg.qr": {f64},
-    "linalg.pinv": {f64},
-    ("linalg.pinv", "hermitian"): {f64},
-    "linalg.norm": {f64},
-    ("linalg.norm", "subgradients_at_zero"): {f64},
-    "linalg.matrix_rank": {f64},
-    ("linalg.matrix_rank", "hermitian"): {f64},
-    "linalg.matrix_norm": {f64},
-    "linalg.lu": {f64},
-    "linalg.lu_solve": {f64},
-    "linalg.lu_factor": {f64},
-    "linalg.lu_factor_ex": {f64},
-    "linalg.lstsq": {f64},
-    ("linalg.lstsq", "grad_oriented"): {f64},
-    "linalg.inv": {f64},
-    "linalg.inv_ex": {f64},
-    "linalg.householder_product": {f64},
-    "linalg.eigvalsh": {f64},
-    "linalg.eigh": {f64},
-    "linalg.det": {f64},
-    "linalg.cond": {f64},
-    "geqrf": {f64},
-    "cholesky_solve": {f64},
-    "cholesky_inverse": {f64},
+    ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
-    "addbmm": {f16, f32, f64},
-    "addmm": {f16, f32, f64},
-    "addmv": {f32, f64},
+    "addmv": {f64},
     # could not create a primitive descriptor for
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # rrelu not supported on XPU now
-    "nn.functional.rrelu": {f16, f32, f64},
-    "histc": {i32, i64},
     # not implemented for 'Half'
-    "nn.functional.multilabel_margin_loss": {f16},
-    "nn.functional.multi_margin_loss": {f16},
-    "nn.functional.avg_pool3d": {f16},
+    "sort": {b8},
+    "argsort": {b8},
 }
 
 
@@ -444,6 +373,10 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
+    },
+    ("nn.functional.triplet_margin_with_distance_loss", f16): {
+        "atol": 3e-4,
+        "rtol": 0.003,
     },
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("polygamma.polygamma_n_0", f32): {"atol": 1e-3, "rtol": 1e-4},
@@ -555,7 +488,12 @@ inductor_override_kwargs["xpu"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("dot", f16): {"atol": 1e-5, "rtol": 0.002},
-    "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    "logcumsumexp": {
+        "atol": 5e-5,
+        "rtol": 0.005,
+        "grad_atol": 8e-4,
+        "grad_rtol": 0.001,
+    },
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -686,7 +624,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.cross_entropy": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16},
-    "nn.functional.grid_sample": {f32, f64},
+    "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -974,6 +912,7 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
+    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1008,7 +947,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP
+            test_expect = ExpectedTestResult.SKIP  # noqa: F841
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1019,9 +958,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = ExpectedTestResult.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
-            test_expect = ExpectedTestResult.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
         overridden_kwargs = {}
         overridden_kwargs.update(
@@ -1101,7 +1040,9 @@ class TestInductorOpInfo(TestCase):
                         {"assert_equal": False},
                     ),
                 )
-            return ((contextlib.nullcontext, {}),)
+
+            ctx = functools.partial(maybe_skip_size_asserts, op)
+            return ((ctx, {}),)
 
         try:
 

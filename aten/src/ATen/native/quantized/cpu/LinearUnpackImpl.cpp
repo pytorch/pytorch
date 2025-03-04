@@ -19,8 +19,6 @@
 #include <ATen/ops/from_blob.h>
 #endif
 
-int register_linear_params();
-
 #ifdef USE_FBGEMM
 std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   auto packB = w.get();

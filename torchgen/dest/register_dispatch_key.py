@@ -332,7 +332,7 @@ class RegisterDispatchKey:
                 f"{copy_op}(std::get<{i}>({func_res}), {ret_name});"
                 for i, ret_name in enumerate(return_names)
             )
-            returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
+            returns = f"{sig.returns_type().cpp_type()}({', '.join(return_names)})"
         elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
@@ -448,7 +448,7 @@ class RegisterDispatchKey:
                 def generate_defn(cpp_sig: CppSignature) -> str:
                     return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
 
@@ -515,9 +515,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                         # CUDA requires special handling
                         if is_cuda_dispatch_key(self.backend_index.dispatch_key):
-                            device_guard = (
-                                f"globalContext().lazyInitCUDA();\n{device_guard}"
-                            )
+                            device_guard = f"globalContext().lazyInitDevice(c10::DeviceType::CUDA);\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -613,6 +611,7 @@ void set_output_{name}(
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
+            DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]:
             maybe_set_guard = """
@@ -722,6 +721,8 @@ resize_out(out, sizes, strides, options);
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
             guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.XPU:
+            guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
 
@@ -801,7 +802,7 @@ resize_out(out, sizes, strides, options);
             def generate_defn(cpp_sig: CppSignature) -> str:
                 return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
 
@@ -878,13 +879,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     self.g.out.precomputed.add,
                 ]
                 for precomputed_elems in precomputed_values:
-                    for arg in precomputed_elems:
-                        context.append(
-                            Expr(
-                                expr=f"precompute.{arg.name}",
-                                type=structured.argument_type(arg, binds=arg.name),
-                            )
+                    context.extend(
+                        Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
                         )
+                        for arg in precomputed_elems
+                    )
 
                 # Add a use of the precompute struct so FB internal compilers don't
                 # complain that there is an unused variable.
@@ -985,12 +986,15 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # For an overview of what this template code looks like, see
             # https://github.com/pytorch/rfcs/pull/9
             return f"""\
-{self.gen_class(
-f, k,
-class_name=class_name,
-parent_class=parent_class,
-generate_super=self.g.out.structured_inherits is not None
-)}
+{
+                self.gen_class(
+                    f,
+                    k,
+                    class_name=class_name,
+                    parent_class=parent_class,
+                    generate_super=self.g.out.structured_inherits is not None,
+                )
+            }
 
 {sig.defn()} {{
 {sig_body_str}

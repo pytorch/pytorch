@@ -2,7 +2,6 @@
 
 # Owner(s): ["oncall: distributed"]
 
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -70,7 +69,7 @@ class CompositeParamModel(nn.Module):
 class FakeSequential(nn.Module):
     # Define this class to achieve a desired nested wrapping using the module
     # wrap policy with `nn.Sequential`
-    def __init__(self, *modules: Tuple[nn.Module, ...]) -> None:
+    def __init__(self, *modules: tuple[nn.Module, ...]) -> None:
         super().__init__()
         self._module_sequence = list(modules)
 
@@ -107,5 +106,7 @@ class NestedSequentialModel(nn.Module):
             ),
         )
 
+        # FIXME(rec): forward() is not a method, it's a local function inside __init__
+        # that is never used. It should probabkly be outdented by four spaces, or removed.
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))

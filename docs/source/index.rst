@@ -52,7 +52,7 @@ Features described in this documentation are classified by release status:
 
 .. toctree::
    :glob:
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Python API
 
    torch
@@ -64,12 +64,14 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   accelerator
    cpu
    cuda
    torch.cuda.memory <torch_cuda_memory>
    mps
    xpu
    mtia
+   mtia.memory
    meta
    torch.backends <backends>
    torch.export <export>
@@ -78,6 +80,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
+   torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.optim <distributed.optim>
    torch.distributed.pipelining <distributed.pipelining>
@@ -145,6 +148,7 @@ Features described in this documentation are classified by release status:
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
    PyTorch on XLA Devices <https://pytorch.org/xla/>
+   torchao <https://pytorch.org/ao>
 
 Indices and tables
 ==================

@@ -61,15 +61,15 @@ class ConstCuSparseDescriptor {
 #endif // AT_USE_CUSPARSE_CONST_DESCRIPTORS || AT_USE_HIPSPARSE_CONST_DESCRIPTORS
 
 #if defined(USE_ROCM)
-using cusparseMatDescr = std::remove_pointer<hipsparseMatDescr_t>::type;
-using cusparseDnMatDescr = std::remove_pointer<hipsparseDnMatDescr_t>::type;
-using cusparseDnVecDescr = std::remove_pointer<hipsparseDnVecDescr_t>::type;
-using cusparseSpMatDescr = std::remove_pointer<hipsparseSpMatDescr_t>::type;
-using cusparseSpMatDescr = std::remove_pointer<hipsparseSpMatDescr_t>::type;
-using cusparseSpGEMMDescr = std::remove_pointer<hipsparseSpGEMMDescr_t>::type;
+using cusparseMatDescr = std::remove_pointer_t<hipsparseMatDescr_t>;
+using cusparseDnMatDescr = std::remove_pointer_t<hipsparseDnMatDescr_t>;
+using cusparseDnVecDescr = std::remove_pointer_t<hipsparseDnVecDescr_t>;
+using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
+using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
+using cusparseSpGEMMDescr = std::remove_pointer_t<hipsparseSpGEMMDescr_t>;
 #if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-using bsrsv2Info = std::remove_pointer<bsrsv2Info_t>::type;
-using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
+using bsrsv2Info = std::remove_pointer_t<bsrsv2Info_t>;
+using bsrsm2Info = std::remove_pointer_t<bsrsm2Info_t>;
 #endif
 #endif
 

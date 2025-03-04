@@ -47,6 +47,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
+    {"std::string_view", ParameterType::STRING},
+    {"::std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
@@ -86,16 +88,37 @@ static const std::unordered_map<std::string, std::vector<std::string>>
 // functions.)
 bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
-      "add",          "add_",          "add_out",
-      "div",          "div_",          "div_out",
-      "divide",       "divide_",       "divide_out", // alias of div
-      "mul",          "mul_",          "mul_out",
-      "multiply",     "multiply_",     "multiply_out", // alias of mul
-      "sub",          "sub_",          "sub_out",
-      "subtract",     "subtract_",     "subtract_out", // alias of sub
-      "true_divide",  "true_divide_",  "true_divide_out",
-      "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out",
+      "add",
+      "add_",
+      "add_out",
+      "div",
+      "div_",
+      "div_out",
+      "divide",
+      "divide_",
+      "divide_out", // alias of div
+      "mul",
+      "mul_",
+      "mul_out",
+      "multiply",
+      "multiply_",
+      "multiply_out", // alias of mul
+      "sub",
+      "sub_",
+      "sub_out",
+      "subtract",
+      "subtract_",
+      "subtract_out", // alias of sub
+      "true_divide",
+      "true_divide_",
+      "true_divide_out",
+      "to",
+      "_to_copy",
+      "copy_",
+      "copy",
+      "floor_divide",
+      "floor_divide_",
+      "floor_divide_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
@@ -214,14 +237,6 @@ static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   }
   return args_;
 }
-
-// TODO: I'm not sure if I should call this __torch_function__ or
-// torch_function.  The former makes it easier to take an existing
-// Tensor-like __torch_function__ object and turn it into a mode;
-// but in general modes don't have to be Tensor-like (and we will
-// improperly accept mode objects as arguments when they shouldn't
-// be passed around in this way).
-const char* torch_function_mode_name = "__torch_function__";
 
 auto handle_torch_function(
     PyObject* self,
@@ -538,15 +553,13 @@ auto handle_torch_function_no_python_arg_parser(
   if (is_mode_active()) {
     // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
     // modes, which will always be at the bottom of the mode stack).
-    auto ret_ = dispatch_on_mode(
+    std::tie(ret, mode_obj) = dispatch_on_mode(
         args,
         kwargs,
         py_types,
         torch_api_function,
         is_torch_function,
         torch_function_name_str);
-    ret = std::get<0>(ret_);
-    mode_obj = std::get<1>(ret_);
   }
 
   // Step 2: Try to dispatch based on any user subclasses,
@@ -828,6 +841,18 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
+static bool is_float_or_symfloat(PyObject* obj) {
+  if (torch::is_symfloat(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkDouble(obj)) {
+    return true;
+  }
+
+  return false;
+}
+
 static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -838,7 +863,7 @@ static bool is_float_or_complex_list(PyObject* obj) {
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+    if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj)) {
       return false;
     }
   }
@@ -934,7 +959,7 @@ auto FunctionParameter::check(
       }
       [[fallthrough]];
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
+      if (is_float_or_symfloat(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
@@ -988,7 +1013,15 @@ auto FunctionParameter::check(
     case ParameterType::PYOBJECT:
       return true;
     case ParameterType::SCALARTYPE:
-      return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
+      if (THPDtype_Check(obj) || THPPythonScalarType_Check(obj)) {
+        return true;
+      }
+      if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
+        // tensor subclasses and unrelated objects with __torch_function__
+        append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
+        return true;
+      }
+      return false;
     case ParameterType::LAYOUT:
       return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT:
@@ -1076,7 +1109,7 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
+static std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return std::nullopt;
   char* str_end = nullptr;
@@ -1093,7 +1126,7 @@ There are two kinds of default values:
 2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be
 space after comma since native_parse.py uses ', ' to split args)
 */
-static inline std::vector<int64_t> parse_intlist_args(
+static std::vector<int64_t> parse_intlist_args(
     const std::string& s,
     int64_t size) {
   size_t n = s.size();
@@ -1127,7 +1160,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 }
 
 // Parse a string literal to remove quotes and escape sequences
-static std::string parse_string_literal(c10::string_view str) {
+static std::string parse_string_literal(std::string_view str) {
   TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
 
   if (str.front() == '"') {

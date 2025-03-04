@@ -57,8 +57,7 @@ bool is_numpy_dlpack_deleter_bugged() {
 using namespace at;
 using namespace torch::autograd;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 bool is_numpy_available() {
   static bool available = []() {
@@ -402,7 +401,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype{};
-  int dtype_size_in_bytes = 0;
+  int64_t dtype_size_in_bytes = 0;
   {
     PyObject* py_typestr = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {
@@ -567,7 +566,6 @@ void validate_numpy_for_dlpack_deleter_bug() {
 bool is_numpy_dlpack_deleter_bugged() {
   return numpy_with_dlpack_deleter_bug_installed;
 }
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
 
 #endif // USE_NUMPY

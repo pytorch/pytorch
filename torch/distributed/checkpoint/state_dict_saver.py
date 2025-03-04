@@ -9,7 +9,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
-from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -63,6 +63,7 @@ def save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -112,6 +113,10 @@ def save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
+        no_dist (bool):
+            If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization.
+            (Default: ``False``)
 
     Returns:
         Metadata: Metadata object for the saved checkpoint.
@@ -122,7 +127,9 @@ def save(
 
         >>> state_dict = {"model": my_model}
 
-        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter(
+        ...     "/checkpoint/1"
+        ... )
         >>> torch.distributed.checkpoint.save(
         >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
@@ -138,10 +145,10 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
         )
 
     with _profile():
@@ -201,7 +208,9 @@ def async_save(
 
         >>> state_dict = {"model": my_model}
 
-        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter(
+        ...     "/checkpoint/1"
+        ... )
         >>> checkpoint_future = torch.distributed.checkpoint.async_save(
         >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
@@ -218,7 +227,9 @@ def async_save(
         pg = process_group or _get_default_group()
         assert (
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
-        ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+        ), (
+            "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+        )
 
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
@@ -228,7 +239,8 @@ def async_save(
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
+        staged_state_dict = _create_cpu_state_dict(state_dict)
+        _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
@@ -280,6 +292,7 @@ def _save_state_dict(
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
+        ckpt_kwargs["process_group"] = distW.group
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():

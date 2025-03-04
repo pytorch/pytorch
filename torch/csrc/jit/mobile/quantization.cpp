@@ -49,8 +49,8 @@ void PTQQuanizationHelper::quantize_dynamic(
 
   m.compareMethodSchemas(method_name, quantized_method_name);
   m.unsafeRemoveMethod(method_name);
-  const auto& quantized_method = m.find_method(quantized_method_name);
-  const Function& to_be_copied = quantized_method.value().function();
+  const Function& to_be_copied =
+      m.find_method(quantized_method_name).value().function();
   m.unsafeCopyMethod(method_name, to_be_copied);
   m.unsafeRemoveMethod(quantized_method_name);
   m.unsafeRemoveMethod(quantize_method_name);

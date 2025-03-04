@@ -1,5 +1,5 @@
 # Represents all kernels used by an Executorch model.
-# It maintains a Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]] structure.
+# It maintains a dict[OperatorName, dict[ETKernelKey, BackendMetadata]] structure.
 
 from __future__ import annotations
 
@@ -94,9 +94,9 @@ class ETKernelKey:
             assert type_alias in type_alias_map, "Undefined type alias: " + str(
                 type_alias
             )
-            assert (
-                dim_order in dim_order_alias_map
-            ), f"Undefined dim_order alias: {dim_order}"
+            assert dim_order in dim_order_alias_map, (
+                f"Undefined dim_order alias: {dim_order}"
+            )
             dtype_alias_used.add(type_alias)
 
         # Generate all permutations of dtype alias values
@@ -193,9 +193,9 @@ class ETKernelIndex:
         index: dict[OperatorName, BackendMetadata] = {}
         for op in self.index:
             kernel_dict = self.index[op]
-            assert (
-                len(kernel_dict.values()) == 1
-            ), f"Can't convert ETKernelIndex to BackendIndex because {op} has more than one kernels. Got {kernel_dict}"
+            assert len(kernel_dict.values()) == 1, (
+                f"Can't convert ETKernelIndex to BackendIndex because {op} has more than one kernels. Got {kernel_dict}"
+            )
             index[op] = kernel_dict.get(
                 ETKernelKey(default=True),
                 BackendMetadata(kernel="", structured=False, cpp_namespace=""),

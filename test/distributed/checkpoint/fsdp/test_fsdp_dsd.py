@@ -6,7 +6,6 @@ import copy
 import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed.checkpoint.state_dict import (
@@ -14,7 +13,11 @@ from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
+from torch.distributed.fsdp import (
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+)
 from torch.distributed.fsdp.wrap import always_wrap_policy
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,

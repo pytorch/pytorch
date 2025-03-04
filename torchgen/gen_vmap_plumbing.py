@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.translate import translate
 from torchgen.api.types import DispatcherSignature
@@ -20,6 +20,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def is_tensor(typ: Type) -> bool:
@@ -93,7 +97,7 @@ def gen_case_where_all_bdims_are_none(
         e.expr for e in translate(outer_sig.arguments(), sig.arguments())
     )
     return f"""\
-if ({' && '.join(conditions)}) {{
+if ({" && ".join(conditions)}) {{
   return at::_ops::{sig.func.name.unambiguous_name()}::call({translated_args});
 }}"""
 
@@ -111,7 +115,7 @@ def gen_returns(
             idx += 2
         elif is_tensor_list(ret.type):
             wrapped_returns.append(
-                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx+1}>({results_var}), {cur_level_var})"
+                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx + 1}>({results_var}), {cur_level_var})"
             )
             idx += 2
         else:
@@ -120,7 +124,7 @@ def gen_returns(
     if len(wrapped_returns) == 1:
         result = f"return {wrapped_returns[0]};"
     else:
-        result = f'return std::make_tuple({", ".join(wrapped_returns)});'
+        result = f"return std::make_tuple({', '.join(wrapped_returns)});"
     return result
 
 
@@ -164,14 +168,14 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> str | None:
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_inplace_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  batch_rule({', '.join(unwrapped_arg_list)});
+  batch_rule({", ".join(unwrapped_arg_list)});
   return {schema.arguments.flat_all[0].name};
 }}"""
 
@@ -186,14 +190,14 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing_no_returns");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  batch_rule({', '.join(unwrapped_arg_list)});
+  batch_rule({", ".join(unwrapped_arg_list)});
 }}"""
 
 
@@ -236,14 +240,14 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
     wrapped_returns = gen_returns(returns, cur_level_var, results_var)
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  auto {results_var} = batch_rule({', '.join(unwrapped_arg_list)});
+  auto {results_var} = batch_rule({", ".join(unwrapped_arg_list)});
   {wrapped_returns}
 }}"""
 

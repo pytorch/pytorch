@@ -16,7 +16,7 @@ static std::string demangle(const std::string& mangled_name) {
       abi::__cxa_demangle(mangled_name.c_str(), nullptr, nullptr, &status);
   if (status == 0) {
     std::string demangled_name(realname);
-    // NOLINTNEXTLINE
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     free(realname);
     return demangled_name;
   } else {

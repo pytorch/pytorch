@@ -9,9 +9,7 @@
 #include <chrono>
 #include <utility>
 
-namespace torch {
-namespace data {
-namespace detail {
+namespace torch::data::detail {
 
 /// Encapsulates the full life cycle of DataLoader jobs.
 ///
@@ -51,7 +49,7 @@ class DataShuttle {
       --in_flight_jobs_;
       return result;
     }
-    return nullopt;
+    return std::nullopt;
   }
 
   /// Discards any jobs that are not yet in flight, and waits for all in-flight
@@ -82,6 +80,4 @@ class DataShuttle {
   Queue<Result> results_;
 };
 
-} // namespace detail
-} // namespace data
-} // namespace torch
+} // namespace torch::data::detail

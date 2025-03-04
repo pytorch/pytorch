@@ -7,7 +7,7 @@ from __future__ import annotations
 import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -21,6 +21,10 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx._internal import jit_utils, registration
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -534,7 +538,7 @@ def stack(g: jit_utils.GraphContext, tensor_list, dim):
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 def _unique2(g: jit_utils.GraphContext, self, sorted, return_inverse, return_counts):
-    u, indices, inverse_indices, counts = g.op(
+    u, _indices, inverse_indices, counts = g.op(
         "Unique", self, sorted_i=sorted, outputs=4
     )
     return u, inverse_indices, counts
@@ -545,7 +549,7 @@ def _unique2(g: jit_utils.GraphContext, self, sorted, return_inverse, return_cou
 def unique_dim(
     g: jit_utils.GraphContext, self, dim, sorted, return_inverse, return_counts
 ):
-    u, indices, inverse_indices, counts = g.op(
+    u, _indices, inverse_indices, counts = g.op(
         "Unique", self, axis_i=dim, sorted_i=sorted, outputs=4
     )
     return u, inverse_indices, counts
@@ -945,7 +949,6 @@ def index(g: jit_utils.GraphContext, self, index):
 
 @_onnx_symbolic("aten::index_fill")
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -957,8 +960,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
-    expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
+    _expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
     return scatter(g, self, dim, expanded_index, source)

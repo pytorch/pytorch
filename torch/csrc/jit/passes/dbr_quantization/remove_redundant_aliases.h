@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This function replaces instances of
 //
@@ -17,5 +16,4 @@ namespace jit {
 // on the module forward, if it's safe to do so.
 TORCH_API Module DBRQuantRemoveRedundantAliases(Module& module);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

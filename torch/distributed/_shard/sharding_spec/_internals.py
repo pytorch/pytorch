@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from torch.distributed._shard.metadata import ShardMetadata
 
@@ -24,8 +24,8 @@ def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetad
 
 
 def _find_nd_overlapping_shards(
-    shards: List[ShardMetadata], sharded_dims: List[int]
-) -> Optional[Tuple[int, int]]:
+    shards: list[ShardMetadata], sharded_dims: list[int]
+) -> Optional[tuple[int, int]]:
     # Each rank has len(sharded_dims) tuples. Each tuple represent the
     # [begin, end] (inclusive) pair of that dimension.
     shard_intervals = [
@@ -55,8 +55,8 @@ def _find_nd_overlapping_shards(
 
 
 def _find_1d_overlapping_shards(
-    shards: List[ShardMetadata], dim: int
-) -> Optional[Tuple[int, int]]:
+    shards: list[ShardMetadata], dim: int
+) -> Optional[tuple[int, int]]:
     # (begin, end, index_in_shards). Begin and end are inclusive.
     intervals = [
         (s.shard_offsets[dim], s.shard_offsets[dim] + s.shard_sizes[dim] - 1, i)
@@ -69,7 +69,7 @@ def _find_1d_overlapping_shards(
     return None
 
 
-def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
+def validate_non_overlapping_shards_metadata(shards: list[ShardMetadata]):
     """
     Ensures none of the shards overlap with each other.
 
@@ -82,7 +82,7 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
     if not shards or len(shards) == 1:
         return
 
-    sharded_dims: List[int] = []
+    sharded_dims: list[int] = []
     for dim in range(len(shards[0].shard_offsets)):
         for i in range(1, len(shards)):
             if (
@@ -92,7 +92,7 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
                 sharded_dims.append(dim)
                 break
 
-    pair: Optional[Tuple[int, int]] = None
+    pair: Optional[tuple[int, int]] = None
     if len(sharded_dims) == 0:
         # All shards are the same, all dims are not partitioned. Choose any 2.
         pair = (0, 1)

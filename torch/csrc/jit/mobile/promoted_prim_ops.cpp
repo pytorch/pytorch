@@ -190,7 +190,7 @@ void toList(Stack& stack) {
       "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
   // Wrap out_ty in a ListType dim times.
-  for (C10_UNUSED const auto i : c10::irange(dim_val)) {
+  for ([[maybe_unused]] const auto i : c10::irange(dim_val)) {
     out_ty = at::ListType::create(out_ty);
   }
 
@@ -227,33 +227,36 @@ void dictIndex(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(key);
   if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
+    TORCH_CHECK(false, "KeyError: ", key);
   }
   push(stack, value->value());
 }
 
-static const C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
-    mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
-    mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
-    mobile::prim_op_fn_register("aten::format", aten_format),
-    mobile::prim_op_fn_register("prim::NumToTensor.Scalar", numToTensorScalar),
-    mobile::prim_op_fn_register(
-        "prim::RaiseException",
-        raiseExceptionWithMessage),
-    mobile::prim_op_fn_register("prim::device", device),
-    mobile::prim_op_fn_register("prim::dtype", dtype),
-    mobile::prim_op_fn_register("prim::layout", layout),
-    mobile::prim_op_fn_register("aten::__not__", _not),
-    mobile::prim_op_fn_register("aten::__is__", is),
-    mobile::prim_op_fn_register("aten::__isnot__", isNot),
-    mobile::prim_op_fn_register("aten::dim", dim),
-    mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
-    mobile::prim_op_fn_register("prim::is_cuda", isCuda),
-    mobile::prim_op_fn_register("aten::__getitem__.Dict_str", dictIndex),
-    mobile::prim_op_fn_register("prim::unchecked_cast", noop),
-    // TODO: (@pavithran) size is overloaded with int[] and Tensor
-    // so this throws error expecting int not Tensor
-    // mobile::prim_op_fn_register("aten::size", size)
+[[maybe_unused]] static const std::array<mobile::prim_op_fn_register, 16>
+    op_reg = {
+        mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
+        mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
+        mobile::prim_op_fn_register("aten::format", aten_format),
+        mobile::prim_op_fn_register(
+            "prim::NumToTensor.Scalar",
+            numToTensorScalar),
+        mobile::prim_op_fn_register(
+            "prim::RaiseException",
+            raiseExceptionWithMessage),
+        mobile::prim_op_fn_register("prim::device", device),
+        mobile::prim_op_fn_register("prim::dtype", dtype),
+        mobile::prim_op_fn_register("prim::layout", layout),
+        mobile::prim_op_fn_register("aten::__not__", _not),
+        mobile::prim_op_fn_register("aten::__is__", is),
+        mobile::prim_op_fn_register("aten::__isnot__", isNot),
+        mobile::prim_op_fn_register("aten::dim", dim),
+        mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
+        mobile::prim_op_fn_register("prim::is_cuda", isCuda),
+        mobile::prim_op_fn_register("aten::__getitem__.Dict_str", dictIndex),
+        mobile::prim_op_fn_register("prim::unchecked_cast", noop),
+        // TODO: (@pavithran) size is overloaded with int[] and Tensor
+        // so this throws error expecting int not Tensor
+        // mobile::prim_op_fn_register("aten::size", size)
 };
 
 } // namespace torch::jit

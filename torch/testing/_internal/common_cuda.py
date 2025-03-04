@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_
 import inspect
 import contextlib
 import os
+import unittest
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -31,13 +32,17 @@ SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
+SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 
-IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() in [(7, 2), (8, 7)])
+IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
+                  and torch.cuda.get_device_capability()[1] > 0)
+IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
         gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
-        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx942"})
     return False
 
 def evaluate_gfx_arch_exact(matching_arch):
@@ -82,19 +87,28 @@ PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+            archs = ['gfx94']
+            if ROCM_VERSION >= (6, 3):
+                archs.extend(['gfx120'])
+            if ROCM_VERSION >= (6, 5):
+                archs.append('gfx95')
+            for arch in archs:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     return False
 
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 
 if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
+    except Exception:
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:
@@ -114,19 +128,6 @@ def initialize_cuda_context_rng():
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device=f"cuda:{i}")
         __cuda_ctx_rng_initialized = True
-
-
-# Test whether hardware TF32 math mode enabled. It is enabled only on:
-# - CUDA >= 11
-# - arch >= Ampere
-def tf32_is_not_fp32():
-    if not torch.cuda.is_available() or torch.version.cuda is None:
-        return False
-    if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-        return False
-    if int(torch.version.cuda.split('.')[0]) < 11:
-        return False
-    return True
 
 
 @contextlib.contextmanager
@@ -152,6 +153,23 @@ def tf32_on(self, tf32_precision=1e-5):
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for CUDA operations.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with torch.backends.cudnn.flags(
+            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+        ):
+            yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -199,7 +217,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         def wrapped(*args, **kwargs):
             for k, v in zip(arg_names, args):
                 kwargs[k] = v
-            cond = tf32_is_not_fp32()
+            cond = torch.cuda.is_tf32_supported()
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
             if 'dtype' in kwargs:
@@ -297,6 +315,10 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
     return _create_scaling_models_optimizers(
         device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
     ) + (data, loss_fn, skip_iter)
+
+
+def xfailIfSM89(func):
+    return func if not IS_SM89 else unittest.expectedFailure(func)
 
 
 # Importing this module should NOT eagerly initialize CUDA

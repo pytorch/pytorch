@@ -6,7 +6,7 @@ import sys
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -16,6 +16,12 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._shard.sharded_tensor.metadata import (
+    MEM_FORMAT_ENCODING,
+    ShardedTensorMetadata,
+    TensorProperties,
+)
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec, ShardMetadata
 from torch.distributed._state_dict_utils import (
     _all_gather_sharded_tensor,
     _gather_state_dict,
@@ -37,6 +43,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp._common_utils import FSDP_PREFIX
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
+from torch.distributed.remote_device import _remote_device
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -780,7 +787,7 @@ class TestFSDPStateDict(FSDPTest):
 
     @staticmethod
     def _load_state_dict(
-        model: Module, state_dict_type: str, state_dict: Dict[str, Any]
+        model: Module, state_dict_type: str, state_dict: dict[str, Any]
     ):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]
@@ -959,7 +966,7 @@ class TestFSDPStateDict(FSDPTest):
                 setattr(module, LINEAR_SKIP, linear_skip)
                 return fsdp, linear_skip_tensor_names
 
-        fsdp, linear_skip_tensor_names = _create_module()
+        fsdp, _ = _create_module()
         # Run a forward pass
         inp = torch.randn((1, 10), device=torch.cuda.current_device())
         loss = fsdp(inp)
@@ -1160,7 +1167,21 @@ class TestFSDPStateDict(FSDPTest):
             checkpoint = io.BytesIO()
             torch.save(state_dict, checkpoint)
             checkpoint.seek(0)
-            state_dict_saved = torch.load(checkpoint)
+            with torch.serialization.safe_globals(
+                [
+                    Shard,
+                    ShardMetadata,
+                    ShardedTensor,
+                    ShardedTensorMetadata,
+                    TensorProperties,
+                    MEM_FORMAT_ENCODING,
+                    _remote_device,
+                    getattr,
+                    ShardedTensor.ProcessGroupState,
+                    ChunkShardingSpec,
+                ]
+            ):
+                state_dict_saved = torch.load(checkpoint)
             for k, v in state_dict_saved.items():
                 if isinstance(v, ShardedTensor):
                     self.assertEqual(

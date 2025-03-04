@@ -98,6 +98,7 @@ struct CUDACachingHostAllocatorImpl
             pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
@@ -136,8 +137,8 @@ struct CUDACachingHostAllocatorImpl
 
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
-        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            pinned_max_register_threads());
+        static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_max_register_threads()));
     return pool;
   }
 
@@ -157,6 +158,7 @@ struct CUDACachingHostAllocatorImpl
     uintptr_t alignedStart =
         (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
     for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
   }
@@ -180,6 +182,7 @@ struct CUDACachingHostAllocatorImpl
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
     // can minimize the cost for the cuda global lock.
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     *ptr = std::malloc(roundSize);
 
     // Parallelize the mapping/registering of pages to reduce wall time

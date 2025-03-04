@@ -10,8 +10,8 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -46,6 +46,22 @@ public:
   }
   operator svfloat64_t() const {
     return values;
+  }
+  template <uint64_t mask>
+  static Vectorized<double> blend(const Vectorized<double>& a, const Vectorized<double>& b) {
+    // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
+    __at_align__ int64_t flag_arr[size()];
+    for (int i = 0; i < size(); i++) {
+      flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
+    }
+    // Load the flag array into an SVE int64 vector.
+    svint64_t int_mask = svld1_s64(svptrue_b64(), flag_arr);
+    // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
+    svbool_t blend_mask = svcmpne_n_s64(svptrue_b64(), int_mask, 0);
+
+    // Use svsel to select elements from b where the predicate is true, else from a.
+    svfloat64_t result = svsel(blend_mask, b.values, a.values);
+    return Vectorized<double>(result);
   }
   static Vectorized<double> blendv(const Vectorized<double>& a, const Vectorized<double>& b,
                               const Vectorized<double>& mask_) {
@@ -146,6 +162,9 @@ public:
   }
   Vectorized<double> asin() const {
     return USE_SLEEF(Vectorized<double>(Sleef_asindx_u10sve(values)),map(std::asin));
+  }
+  Vectorized<double> asinh() const {
+    return USE_SLEEF(Vectorized<double>(Sleef_asinhdx_u10sve(values)),map(std::asinh));
   }
   Vectorized<double> atan() const {
     return USE_SLEEF(Vectorized<double>(Sleef_atandx_u10sve(values)),map(std::atan));
@@ -502,4 +521,4 @@ Vectorized<double> inline fmadd(const Vectorized<double>& a, const Vectorized<do
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

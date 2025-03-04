@@ -13,24 +13,19 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import logging
 import math
 import operator
 import types
-import typing
 from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
-
-
-if typing.TYPE_CHECKING:
-    import onnxscript
-
-_DEFAULT_OPSET_VERSION = 18
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
 TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Callable]
@@ -38,22 +33,59 @@ TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Cal
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class OnnxDecompMeta:
     """A wrapper of onnx-script function with additional metadata.
 
     onnx_function: The onnx-script function from torchlib.
     fx_target: The PyTorch node callable target.
+    signature: The ONNX signature of the function. When None, the signature is inferred.
     is_custom: Whether the function is a custom function.
     is_complex: Whether the function is a function that handles complex valued inputs.
     device: The device the function is registered to. If None, it is registered to all devices.
+    skip_signature_inference: Whether to skip signature inference for the function.
     """
 
     onnx_function: Callable
     fx_target: TorchOp
+    signature: _schemas.OpSignature | None
     is_custom: bool = False
     is_complex: bool = False
     device: Literal["cuda", "cpu"] | str | None = None  # noqa: PYI051
+    skip_signature_inference: bool = False
+
+    def __post_init__(self) -> None:
+        if self.signature is None and not self.skip_signature_inference:
+            try:
+                if isinstance(self.onnx_function, onnxscript.OnnxFunction):
+                    signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        self.onnx_function,
+                        self.onnx_function.function_ir.domain,
+                        self.onnx_function.name,
+                        opset_version=self.onnx_function.opset.version,
+                    )
+                else:
+                    signature = _schemas.OpSignature.from_function(
+                        self.onnx_function, "__traced", self.onnx_function.__name__
+                    )
+            except Exception as e:
+                # Log an warning if the op is custom. Raise exception for builtin ops.
+                if not self.is_custom:
+                    raise
+                else:
+                    # When the function is targeting an HOP, for example, it will accept
+                    # functions as arguments and fail to generate an ONNX signature.
+                    # In this case we set signature to None and dispatch to this function always.
+                    logger.warning(
+                        "Failed to infer the signature for function '%s' because '%s'"
+                        "All nodes targeting `%s` will be dispatched to this function",
+                        self.onnx_function,
+                        e,
+                        self.fx_target,
+                    )
+            else:
+                self.signature = signature
+                self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
 
 
 def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
@@ -67,18 +99,9 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
     if namespace == "math":
         return getattr(math, op_name)
     if namespace == "torchvision":
-        try:
-            import torchvision.ops  # type: ignore[import-untyped]
-        except ImportError:
+        if importlib.util.find_spec("torchvision") is None:
             logger.warning("torchvision is not installed. Skipping %s", qualified_name)
             return None
-        try:
-            return getattr(torchvision.ops, op_name)
-        except AttributeError:
-            logger.warning("Failed to find torchvision op '%s'", qualified_name)
-            return None
-        except Exception:
-            logger.exception("Failed to find torchvision op '%s'", qualified_name)
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
         if maybe_overload:
@@ -118,20 +141,12 @@ class ONNXRegistry:
 
     def __init__(self) -> None:
         """Initializes the registry"""
-
-        # TODO: Design multi-opset version support
-        self._opset_version = _DEFAULT_OPSET_VERSION
-
+        self._opset_version = onnxscript_apis.torchlib_opset_version()
         self.functions: dict[TorchOp | str, list[OnnxDecompMeta]] = {}
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target.
-
-        Defaults to the latest supported ONNX opset version: 18.
-        The default version will increment over time as ONNX continues to evolve.
-        """
-
+        """The ONNX opset version the exporter should target."""
         return self._opset_version
 
     @classmethod
@@ -142,39 +157,34 @@ class ONNXRegistry:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         registry = cls()
+        for meta in _torchlib_registry.get_torchlib_ops():
+            registry._register(meta.fx_target, meta)
 
+        # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
         torchlib_ops = onnxscript_apis.get_torchlib_ops()
 
-        for meta in torchlib_ops:
-            qualified_name = meta.qualified_name
-            overload_func = meta.function
-            domain = meta.domain
-            name = meta.name
+        for torchlib_meta in torchlib_ops:
+            qualified_name = torchlib_meta.qualified_name
+            overload_func = torchlib_meta.function
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
-                if qualified_name.startswith("internal::"):
-                    # Skip the custom defined internal functions
-                    continue
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
 
-                overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
-                    overload_func,
-                    domain,
-                    name,
-                )
-                onnx_decomposition = OnnxDecompMeta(
+                meta = OnnxDecompMeta(
                     onnx_function=overload_func,
                     fx_target=target,
+                    signature=None,
                     is_custom=False,
-                    is_complex=meta.is_complex,
+                    is_complex=torchlib_meta.is_complex,
                 )
-                registry._register(target, onnx_decomposition)
+                registry._register(target, meta)
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
         return registry
 
     def _register(
@@ -203,7 +213,7 @@ class ONNXRegistry:
     def register_op(
         self,
         target: TorchOp,
-        function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+        function: Callable,
         is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
@@ -213,13 +223,23 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
-        onnx_decomposition = OnnxDecompMeta(
-            onnx_function=function,
-            fx_target=target,
-            is_custom=True,
-            is_complex=is_complex,
+        if isinstance(target, torch._ops.OpOverloadPacket):
+            raise TypeError(
+                f"Target '{target}' should be provided as an OpOverload instead of an "
+                "OpOverloadPacket. You can get the default overload with "
+                "<op>.default"
+            )
+
+        self._register(
+            target,
+            OnnxDecompMeta(
+                onnx_function=function,
+                fx_target=target,
+                signature=None,
+                is_custom=True,
+                is_complex=is_complex,
+            ),
         )
-        self._register(target, onnx_decomposition)
 
     def get_decomps(self, target: TorchOp) -> list[OnnxDecompMeta]:
         """Returns a list of OnnxDecompMeta for the given op: torch.ops.<namespace>.<op_name>.<overload>.

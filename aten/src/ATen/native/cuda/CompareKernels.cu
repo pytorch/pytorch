@@ -95,9 +95,9 @@ void lt_kernel_cuda(TensorIteratorBase& iter) {
   compare_kernel_with_scalars(iter, OpType::LT);
 }
 
-REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
-REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
-REGISTER_DISPATCH(le_stub, &le_kernel_cuda);
-REGISTER_DISPATCH(lt_stub, &lt_kernel_cuda);
+REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda)
+REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda)
+REGISTER_DISPATCH(le_stub, &le_kernel_cuda)
+REGISTER_DISPATCH(lt_stub, &lt_kernel_cuda)
 
 } // namespace at::native

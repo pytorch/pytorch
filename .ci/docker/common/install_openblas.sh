@@ -4,7 +4,7 @@
 set -ex
 
 cd /
-git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.25 --depth 1 --shallow-submodules
+git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.29 --depth 1 --shallow-submodules
 
 
 OPENBLAS_BUILD_FLAGS="

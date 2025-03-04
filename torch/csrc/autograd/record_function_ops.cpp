@@ -9,7 +9,7 @@
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 // NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(at::RecordFunction);
+CAFFE_KNOWN_TYPE(at::RecordFunction)
 } // namespace caffe2
 
 namespace torch::autograd::profiler {

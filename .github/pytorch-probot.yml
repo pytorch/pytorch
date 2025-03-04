@@ -2,15 +2,15 @@ tracking_issue: 24422
 ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/binaries
-- ciflow/binaries_conda
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/inductor
+- ciflow/inductor-periodic
 - ciflow/inductor-rocm
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
-- ciflow/inductor-cu124
+- ciflow/inductor-cu126
 - ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
@@ -22,11 +22,13 @@ ciflow_push_tags:
 - ciflow/unstable
 - ciflow/xpu
 - ciflow/torchbench
+- ciflow/autoformat
 retryable_workflows:
 - pull
 - trunk
 - linux-binary
 - windows-binary
+- inductor-A100-perf-nightly
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
 mergebot: True

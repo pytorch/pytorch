@@ -104,7 +104,7 @@ static PyObject* THPVariable_pynew(
     }
   }
 
-  return THPVariable_Wrap(std::move(var));
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 

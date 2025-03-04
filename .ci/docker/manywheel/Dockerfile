@@ -144,6 +144,10 @@ COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=10.1
 ARG DEVTOOLSET_VERSION=9
+# Install Anaconda
+ADD ./common/install_conda_docker.sh install_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh
+ENV PATH /opt/conda/bin:$PATH
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
@@ -194,10 +198,3 @@ ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
-
-# Install AOTriton
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton

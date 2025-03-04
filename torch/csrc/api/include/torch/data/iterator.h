@@ -100,12 +100,14 @@ struct ValidIterator : public IteratorImpl<Batch> {
 template <typename Batch>
 struct SentinelIterator : public IteratorImpl<Batch> {
   void next() override {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Incrementing the DataLoader's past-the-end iterator is not allowed");
   }
 
   Batch& get() override {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Dereferencing the DataLoader's past-the-end iterator is not allowed");
   }
 

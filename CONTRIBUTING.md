@@ -78,8 +78,10 @@ git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
-make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
-conda activate pytorch-deps
+make setup-env
+# Or run `make setup-env-cuda` for pre-built CUDA binaries
+# Or run `make setup-env-rocm` for pre-built ROCm binaries
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 ### Tips and Debugging
@@ -166,7 +168,7 @@ conda activate pytorch-deps
 ## Nightly Checkout & Pull
 
 The `tools/nightly.py` script is provided to ease pure Python development of
-PyTorch. This uses `conda` and `git` to check out the nightly development
+PyTorch. This uses `venv` and `git` to check out the nightly development
 version of PyTorch and installs pre-built binaries into the current repository.
 This is like a development or editable install, but without needing the ability
 to compile any C++ code.
@@ -175,33 +177,40 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 Or if you would like to re-use an existing conda environment, you can pass in
-the regular environment parameters (`--name` or `--prefix`):
+the prefix argument (`--prefix`):
 
 ```bash
-./tools/nightly.py checkout -b my-nightly-branch -n my-env
-conda activate my-env
+./tools/nightly.py checkout -b my-nightly-branch -p my-env
+source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
+
+To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --rocm
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -n my-env
-conda activate my-env
+./tools/nightly.py pull -p my-env
+source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
-Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
-into the repo directory.
+Pulling will recreate a fresh virtual environment and reinstall the development
+dependencies as well as the nightly binaries into the repo directory.
 
 ## Codebase structure
 
@@ -286,6 +295,11 @@ The following packages should be installed with either `conda` or `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
+Running
+```
+pip install -r requirements.txt
+```
+will install these dependencies for you.
 
 All PyTorch test suites are located in the `test` folder and start with
 `test_`. Run the entire test
@@ -781,17 +795,15 @@ python setup.py develop
 
 #### Use a faster linker
 
-If you are editing a single file and rebuilding in a tight loop, the time spent
-linking will dominate. The system linker available in most Linux distributions
-(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
 
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
 
-The easiest way to use `lld` this is download the
-[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
-```bash
-ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```sh
+CMAKE_LINKER_TYPE=MOLD python setup.py develop
 ```
 
 #### Use pre-compiled headers
@@ -878,7 +890,7 @@ Process 87741 stopped
 * thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
     frame #0: 0x00000001024e2628 libtorch_python.dylib`at::indexing::impl::applySelect(self=0x00000001004ee8a8, dim=0, index=(data_ = 3), real_dim=0, (null)=0x000000016fdfe535, self_sizes= Has Value=true ) at TensorIndexing.h:239:7
    236         const at::Device& /*self_device*/,
-   237         const c10::optional<SymIntArrayRef>& self_sizes) {
+   237         const std::optional<SymIntArrayRef>& self_sizes) {
    238       // See NOTE [nested tensor size for indexing]
 -> 239       if (self_sizes.has_value()) {
    240         auto maybe_index = index.maybe_as_int();
@@ -1080,10 +1092,6 @@ Here are a few well known pitfalls and workarounds:
   might work, but on Windows your program will crash. ASAN may not
   catch all of these problems: stay vigilant to the possibility that
   your crash is due to a real memory problem.
-
-* (NVCC) `c10::optional` does not work when used from device code. Don't use
-  it from kernels. Upstream issue: https://github.com/akrzemi1/Optional/issues/58
-  and our local issue #10329.
 
 * `constexpr` generally works less well on MSVC.
 

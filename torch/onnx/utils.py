@@ -13,22 +13,21 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast, Collection, Mapping, Sequence
+from typing import Any, Callable, cast
+from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.jit._trace
 import torch.serialization
 from torch import _C
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _exporter_states,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
 
 
 __all__ = [
@@ -41,7 +40,6 @@ __all__ = [
     "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
-    "export_to_pretty_string",
     "unconvertible_ops",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
@@ -58,10 +56,14 @@ def is_in_onnx_export() -> bool:
 _params_dict = {}  # type: ignore[var-annotated]
 
 
+@deprecated("Please set training mode before exporting the model", category=None)
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
-    r"""A context manager to temporarily set the training mode of ``model``
+    """A context manager to temporarily set the training mode of ``model``
     to ``mode``, resetting it when we exit the with-block.
+
+    .. deprecated:: 2.7
+        Please set training mode before exporting the model.
 
     Args:
         model: Same type and meaning as ``model`` arg to :func:`export`.
@@ -106,8 +108,17 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
             model.train(originally_training)
 
 
+@deprecated(
+    "Please remove usage of this function. Copy its logic if it is required in user code",
+    category=None,
+)
 @contextlib.contextmanager
 def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFunction):
+    """A context manager to temporarily disable the Apex O2 hook that returns.
+
+    .. deprecated:: 2.7
+        Please remove usage of this function.
+    """
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
@@ -137,8 +148,14 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
             pass
 
 
+@deprecated("The feature will be removed. Please remove usage of this function")
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
+    """A context manager to temporarily set the ONNX logging verbosity.
+
+    .. deprecated:: 2.7
+        Please remove usage of this function.
+    """
     is_originally_enabled = _C._jit_is_onnx_log_enabled
     if is_originally_enabled or verbose:  # type: ignore[truthy-function]
         _C._jit_set_onnx_log_enabled(True)
@@ -149,15 +166,25 @@ def setup_onnx_logging(verbose: bool):
             _C._jit_set_onnx_log_enabled(False)
 
 
+@deprecated(
+    "The feature will be removed. Please remove usage of this function "
+    "and implement equivalent logic if needed",
+    category=None,
+)
 @contextlib.contextmanager
 def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
-    with select_model_mode_for_export(
-        model, mode
-    ) as mode_ctx, disable_apex_o2_state_dict_hook(
-        model
-    ) as apex_ctx, setup_onnx_logging(
-        verbose
-    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
+    """A context manager to temporarily set the training mode of ``model``
+    to ``mode``, disable the Apex O2 hook, and set the ONNX logging verbosity.
+
+    .. deprecated:: 2.7
+        Please set training mode before exporting the model.
+    """
+    with (
+        select_model_mode_for_export(model, mode) as mode_ctx,
+        disable_apex_o2_state_dict_hook(model) as apex_ctx,
+        setup_onnx_logging(verbose) as log_ctx,
+        diagnostics.create_export_diagnostic_context() as diagnostic_ctx,
+    ):
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
@@ -485,14 +512,14 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args
@@ -660,9 +687,14 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError:
+            # NOTE: shape type inference error should not stop the export process
+            # https://github.com/pytorch/pytorch/issues/132205
+            pass
 
     return graph
 
@@ -1066,7 +1098,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception as e:
+    except Exception:
         _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
@@ -1125,9 +1157,14 @@ def _model_to_graph(
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError:
+            # NOTE: shape type inference error should not stop the export process
+            # https://github.com/pytorch/pytorch/issues/132205
+            pass
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1146,85 +1183,9 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
-@torch._disable_dynamo
-@_deprecation.deprecated("2.5", "the future", "use onnx.printer.to_text() instead")
-def export_to_pretty_string(
-    model,
-    args,
-    export_params=True,
-    verbose=False,
-    training=_C_onnx.TrainingMode.EVAL,
-    input_names=None,
-    output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-    export_type=None,
-    google_printer=False,
-    opset_version=None,
-    keep_initializers_as_inputs=None,
-    custom_opsets=None,
-    add_node_names=True,
-    do_constant_folding=True,
-    dynamic_axes=None,
-):
-    """Similar to :func:`export`, but returns a text representation of the ONNX model.
-
-    Only differences in args listed below. All other args are the same
-    as :func:`export`.
-
-    Args:
-        add_node_names (bool, default True): Whether or not to set
-            NodeProto.name. This makes no difference unless
-            ``google_printer=True``.
-        google_printer (bool, default False): If False, will return a custom,
-            compact representation of the model. If True will return the
-            protobuf's `Message::DebugString()`, which is more verbose.
-
-    Returns:
-        A UTF-8 str containing a human-readable representation of the ONNX model.
-    """
-    if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
-    if custom_opsets is None:
-        custom_opsets = {}
-    GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
-
-    with exporter_context(model, training, verbose):
-        val_keep_init_as_ip = _decide_keep_init_as_input(
-            keep_initializers_as_inputs, operator_export_type, opset_version
-        )
-        val_add_node_names = _decide_add_node_names(
-            add_node_names, operator_export_type
-        )
-        val_do_constant_folding = _decide_constant_folding(
-            do_constant_folding, operator_export_type, training
-        )
-        args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(
-            model,
-            args,
-            verbose,
-            input_names,
-            output_names,
-            operator_export_type,
-            val_do_constant_folding,
-            training=training,
-            dynamic_axes=dynamic_axes,
-        )
-
-        return graph._pretty_print_onnx(  # type: ignore[attr-defined]
-            params_dict,
-            opset_version,
-            False,
-            operator_export_type,
-            google_printer,
-            val_keep_init_as_ip,
-            custom_opsets,
-            val_add_node_names,
-        )
-
-
-@_deprecation.deprecated("2.5", "the future", "avoid using this function")
+@deprecated(
+    "Unconvertible ops are not definitive. Please remove usage of this function"
+)
 def unconvertible_ops(
     model,
     args,
@@ -1232,6 +1193,9 @@ def unconvertible_ops(
     opset_version: int | None = None,
 ) -> tuple[_C.Graph, list[str]]:
     """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
+
+    .. deprecated:: 2.5
+        Unconvertible ops are not definitive. Please remove usage of this function.
 
     The list is approximated because some ops may be removed during the conversion
     process and don't need to be converted. Some other ops may have partial support
@@ -1423,9 +1387,6 @@ def _export(
 ):
     assert GLOBALS.in_onnx_export is False
 
-    if export_type is None:
-        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1516,10 +1477,6 @@ def _export(
                 dynamic_axes=dynamic_axes,
             )
 
-            # TODO: Don't allocate a in-memory string for the protobuf
-            defer_weight_export = (
-                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
-            )
             if custom_opsets is None:
                 custom_opsets = {}
 
@@ -1540,12 +1497,13 @@ def _export(
                     getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
+            defer_weight_export = False
             if export_params:
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _val_use_external_data_format,
+                    _node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
                     opset_version,
@@ -1563,13 +1521,13 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _,
+                    _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,
                     dynamic_axes,
-                    False,
+                    defer_weight_export,
                     operator_export_type,
                     not verbose,
                     val_keep_init_as_ip,
@@ -1585,7 +1543,7 @@ def _export(
             )
             if verbose:
                 _C._jit_onnx_log("Exported graph: ", graph)
-            onnx_proto_utils._export_file(proto, f, export_type, export_map)
+            onnx_proto_utils._export_file(proto, f, export_map)
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
@@ -1613,8 +1571,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
             return
         if len(name_list) > len(node_list):
             raise RuntimeError(
-                "number of %s names provided (%d) exceeded number of %ss (%d)"
-                % (descriptor, len(name_list), descriptor, len(node_list))
+                f"number of {descriptor} names provided ({len(name_list)}) "
+                f"exceeded number of {descriptor}s ({len(node_list)})"
             )
 
         # Mark if the output node DebugName is set before.

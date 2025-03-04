@@ -5,7 +5,6 @@ import logging
 import math
 
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
@@ -20,14 +19,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-if torch.version.hip:
-
-    def _scaled_dot_product_attention(*args, **kwargs):
-        with sdpa_kernel(backends=[SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]):
-            return aten.scaled_dot_product_attention(*args, **kwargs)
-
-else:
-    _scaled_dot_product_attention = aten.scaled_dot_product_attention
+_scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -577,6 +569,13 @@ def _sfdp_params_check(match):
                 or attn_mask.dtype == torch.float
             )
             or query.device != attn_mask.device
+            # When we tensorify floats we end up turning floats
+            # into 0d scalar tensors. It doesn't make any sense
+            # to have a 0d scalar tensor attention mask so
+            # conveniently we can insert this check to get
+            # tests that erroneously passing in a float
+            # attention mask to fail as expected.
+            or attn_mask.dim() == 0
         ):
             return False
     return True
@@ -867,15 +866,18 @@ def _get_sfdp_patterns():
                 name += "_bs1"
 
             training_name = name + "_training"
-            yield training_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-            }
+            yield (
+                training_name,
+                {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": joint_fwd_bwd,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                },
+            )
 
             if workaround:
                 assert len(workaround) == 1 and "dropout_p" in workaround
@@ -887,18 +889,21 @@ def _get_sfdp_patterns():
                 workaround = {}
 
             inference_name = name + "_inference"
-            yield inference_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": fwd_only,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-                # with dropout turned into clone, we end up with a number of
-                # semantically identical graphs
-                "skip_duplicates": True,
-            }
+            yield (
+                inference_name,
+                {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": fwd_only,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                    # with dropout turned into clone, we end up with a number of
+                    # semantically identical graphs
+                    "skip_duplicates": True,
+                },
+            )
 
 
 @functools.lru_cache(None)

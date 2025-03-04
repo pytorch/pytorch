@@ -1,12 +1,11 @@
 import os
 import site
 import sys
-import typing
 
 import torch
 
 
-def _prefix_regex() -> typing.List[str]:
+def _prefix_regex() -> list[str]:
     raw_paths = (
         site.getsitepackages()
         + sys.path

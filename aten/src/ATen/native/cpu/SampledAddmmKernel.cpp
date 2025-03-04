@@ -94,6 +94,6 @@ void sampled_addmm_sparse_csr_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(sampled_addmm_sparse_csr_stub, &sampled_addmm_sparse_csr_kernel);
+REGISTER_DISPATCH(sampled_addmm_sparse_csr_stub, &sampled_addmm_sparse_csr_kernel)
 
 } // at::native

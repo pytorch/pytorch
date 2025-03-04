@@ -75,7 +75,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // SX-Aurora / NEC
         at::ScalarType::Undefined, // Lazy Tensors
         at::kHalf, // Graphcore IPU
-        at::ScalarType::Undefined, // Meta training and inference devices
+        at::kHalf, // Meta training and inference devices
         at::kHalf, // PrivateUse1 device
 };
 
@@ -149,7 +149,7 @@ Banned functions
 *******************************/
 
 static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
-  AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
+  TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
            "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
@@ -236,6 +236,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(chain_matmul, lower_precision_fp)
   KERNEL_MPS(linalg_multi_dot, lower_precision_fp)
   KERNEL_MPS(lstm_cell, lower_precision_fp)
+  KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
   KERNEL_MPS(acos, fp32)
@@ -461,6 +462,45 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 
+// MTIA
+TORCH_LIBRARY_IMPL(_, AutocastMTIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMTIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MTIA_LOW_PRECISION_FP(...) \
+  KERNEL_MTIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MTIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MTIA_FP32(...) KERNEL_MTIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MTIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MTIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MTIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MTIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MTIA)
+
+  // promote
+#define _KERNEL_MTIA_PROMOTE(...) KERNEL_MTIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MTIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// XPU
 TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
