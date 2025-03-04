@@ -119,7 +119,7 @@ def ordering(signatures):
     """A sane ordering of signatures to check, first to last
     Topological sort of edges as given by ``edge`` and ``supercedes``
     """
-    signatures = list(map(tuple, signatures))
+    signatures = [*map(tuple, signatures)]
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
     edges = groupby(first, edges)
     for s in signatures:

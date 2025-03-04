@@ -328,7 +328,7 @@ class ComboKernel(Kernel):
             x_blocks_list: list[Union[str, int]],
             dynamic_shape: bool,
         ) -> tuple[Any, ...]:
-            xnumel = list(x_blocks_list)
+            xnumel = [*x_blocks_list]
             ynumel: Any = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
             znumel: Any = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
 
@@ -754,7 +754,7 @@ class ComboKernel(Kernel):
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
-        self.block_args = list(block_names.keys())
+        self.block_args = [*block_names.keys()]
 
         return [ConstexprArg(x) for x in block_names.keys()]
 
@@ -1056,9 +1056,9 @@ class ComboKernel(Kernel):
         wrapper = V.graph.wrapper_code
         assert self.dispatch_class is not None
         dynamic_shape = self.dynamic_shape_args != []
-        grid = list(
-            self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
-        )
+        grid = [
+            *self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
+        ]
         num_kernels = len(self.sub_kernels)
         min_blocks = (
             max(self.min_x_blocks_list) * num_kernels if not dynamic_shape else None
@@ -1083,7 +1083,7 @@ class ComboKernel(Kernel):
         # autotuning is enabled
         grid = wrapper.generate_default_grid(
             name,
-            list(grid),
+            [*grid],
             grid_callable=grid_combo_kernels,
             num_kernels=num_kernels,
             min_blocks=min_blocks,

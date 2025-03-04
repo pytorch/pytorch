@@ -55,7 +55,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have
     # experienced identical operations, but are separate data structures in eager mode.
-    output_node: fx.Node = list(fx_g.nodes)[-1]
+    output_node: fx.Node = [*fx_g.nodes][-1]
     assert output_node.op == "output"
 
     def checkable_node(node: fx.Node) -> bool:

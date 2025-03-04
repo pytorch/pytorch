@@ -471,14 +471,14 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             return cls(
                 node1.scheduler,
                 (
-                    list(node1.get_outer_nodes())
+                    [*node1.get_outer_nodes()]
                     if type(node1) is OuterLoopFusedSchedulerNode
                     else [
                         node1,
                     ]
                 )
                 + (
-                    list(node2.get_outer_nodes())
+                    [*node2.get_outer_nodes()]
                     if type(node2) is OuterLoopFusedSchedulerNode
                     else [
                         node2,
@@ -502,7 +502,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         flatten_snodes = []
         for _node in self.outer_fused_nodes:
             assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
-            flatten_snodes.extend(list(_node.get_nodes()))
+            flatten_snodes.extend([*_node.get_nodes()])
         super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
 
     def get_outer_nodes(self):
@@ -1109,7 +1109,7 @@ class CppVecOverrides(CppOverrides):
                     for arg in args
                     if isinstance(arg, CppCSEVariable) and arg.is_vec
                 ]
-                new_args = list(args)
+                new_args = [*args]
                 if scalars and vectors:
                     new_args = []
                     for arg in args:
@@ -3457,7 +3457,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]
     and if all the nodes can codegen with this data type without converting to float.
     Otherwise returns None and True.
     """
-    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+    sub_blocks = [_body.root_block] + [*_body.subblocks.values()]
 
     _lowp_fp_type: Optional[torch.dtype] = None
     _use_fp32 = False
@@ -3583,7 +3583,7 @@ class TilingSelect:
                 # index_expr, load, store
                 non_contig_indexing_op_counter: dict[str, int] = {}
                 for _body in loop_bodies:
-                    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+                    sub_blocks = [_body.root_block] + [*_body.subblocks.values()]
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
                             if _node.target in ["index_expr", "load", "store"]:
@@ -3801,7 +3801,7 @@ class CppKernelProxy(CppKernel):
                     is_lowp_fp_sink(user, dt) for user in node.users
                 )
 
-            sub_graph_nodes = list(sub_graph.nodes)
+            sub_graph_nodes = [*sub_graph.nodes]
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
@@ -3970,7 +3970,7 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+        sub_blocks = [loop_body.root_block] + [*loop_body.subblocks.values()]
         for sub_block in sub_blocks:
             add_to_dtype(sub_block.graph)
 
@@ -3981,9 +3981,9 @@ class CppKernelProxy(CppKernel):
         ):
             # Mark the load node to load bf16/fp16
             for _node in nodes:
-                sub_blocks = [_node._body.root_block] + list(
-                    _node._body.subblocks.values()
-                )
+                sub_blocks = [_node._body.root_block] + [
+                    *_node._body.subblocks.values()
+                ]
                 for sub_block in sub_blocks:
                     for fx_node in sub_block.graph.nodes:
                         if fx_node.target in ["load", "store"]:
@@ -4430,13 +4430,13 @@ class CppScheduling(BaseScheduling):
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
                             indexing_exprs.update(exprs)
-                        return var_ranges, list(indexing_exprs)
+                        return var_ranges, [*indexing_exprs]
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
                         assert isinstance(comp_buffer, ir.ComputedBuffer)
                         _, body, _ = comp_buffer.get_default_sizes_body()
-                        return body.var_ranges, list(body.indexing_exprs.values())
+                        return body.var_ranges, [*body.indexing_exprs.values()]
 
                 node_to_recomp = node1 if len(vars1) < len(vars2) else node2
                 assert isinstance(node_to_recomp, SchedulerNode)
@@ -4541,7 +4541,7 @@ class CppScheduling(BaseScheduling):
             if len(ranges_set) != 1:
                 return False
 
-            ranges1 = list(next(iter(ranges_set)))
+            ranges1 = [*next(iter(ranges_set))]
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
@@ -4760,7 +4760,7 @@ class CppScheduling(BaseScheduling):
             if not extra_indexing_constraints:
                 extra_indexing_constraints = (
                     body.var_ranges,
-                    list(body.indexing_exprs.values()),
+                    [*body.indexing_exprs.values()],
                 )
             return (
                 (new_index_size, reduce_size),

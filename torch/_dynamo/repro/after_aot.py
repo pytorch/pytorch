@@ -829,7 +829,7 @@ def repro_run(options, mod, load_args):
                 need_sync = True
                 break
 
-        compiled(list(args))
+        compiled([*args])
 
         if need_sync:
             synchronize()  # ensure segfaults are surfaced

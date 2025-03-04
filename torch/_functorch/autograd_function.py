@@ -715,7 +715,7 @@ def reductify_leaf(
 
     if grad_input_bdim is None:
         grad_input = grad_input.unsqueeze(input_bdim)
-        new_shape = list(grad_input.shape)
+        new_shape = [*grad_input.shape]
         new_shape[input_bdim] = batch_size
         grad_input = grad_input.expand(new_shape)
         grad_input_bdim = input_bdim

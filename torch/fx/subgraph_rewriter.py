@@ -343,8 +343,8 @@ def _replace_pattern(
                     # Update match.placeholder_nodes and match.nodes_map with the node that replaced gn
                     gn_ind = match.placeholder_nodes.index(gn)
                     match.placeholder_nodes[gn_ind] = match_changed_node[gn]
-                    map_key = list(match.nodes_map.keys())[
-                        list(match.nodes_map.values()).index(gn)
+                    map_key = [*match.nodes_map.keys()][
+                        [*match.nodes_map.values()].index(gn)
                     ]
                     match.nodes_map[map_key] = match_changed_node[gn]
             else:

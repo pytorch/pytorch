@@ -186,7 +186,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
-    nodes = list(graph.nodes)
+    nodes = [*graph.nodes]
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
             nodes[i + 1] if node not in placeholders else first_non_placeholder

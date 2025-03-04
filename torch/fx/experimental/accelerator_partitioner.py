@@ -591,15 +591,13 @@ class Partitioner:
             # Those 'getitem' nodes are the output node for this node.
             # Otherwise, the output node is this node itself.
             if len(node.users) > 1:
-                output_nodes = list(node.users)
+                output_nodes = [*node.users]
             else:
                 output_nodes = [node]
             partition_id = int(node.name.rsplit("_", 1)[-1])
             device_ids = self.partitions[partition_id].logical_device_ids
             size_bytes = self.partitions[partition_id].used_mem_bytes
-            dag.create_node(
-                node, list(input_nodes), output_nodes, device_ids, size_bytes
-            )
+            dag.create_node(node, [*input_nodes], output_nodes, device_ids, size_bytes)
         return dag
 
     def create_partition(self) -> Partition:
@@ -985,7 +983,7 @@ class Partitioner:
             """This function helps to swap one node from partition p0
             with all the nodes in another partition p1
             """
-            p1_nodes = list(p1.nodes) + [None]
+            p1_nodes = [*p1.nodes] + [None]
             min_cost = float("inf")
             node_pair: list[Node] = []
             for n1 in p1_nodes:

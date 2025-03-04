@@ -377,7 +377,7 @@ def split_module(
                 node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
             )  # noqa: B950
 
-    original_partition_order = list(partitions.keys())
+    original_partition_order = [*partitions.keys()]
     # find partitions with no dependencies
     root_partitions: list[str] = []
     for partition_name, partition in partitions.items():

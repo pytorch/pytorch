@@ -91,19 +91,19 @@ class CUDATemplate(KernelTemplate):
         input_reorder = (
             self.input_reorder
             if self.input_reorder is not None
-            else list(range(len(self.input_nodes)))
+            else [*range(len(self.input_nodes))]
         )
-        expected_args = list(
-            unique(self.input_nodes[idx].get_name() for idx in input_reorder)
-        )
+        expected_args = [
+            *unique(self.input_nodes[idx].get_name() for idx in input_reorder)
+        ]
         expected_args.extend([self.output_node.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
+        assert [*call_args][: len(expected_args)] == expected_args, (
             call_args,
             expected_args,
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
-        extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
+        extra_args = tuple([*size_args] + self.get_runtime_arg_values(**kwargs))
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 

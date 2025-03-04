@@ -31,7 +31,7 @@ class GraphInfoProvider:
     ):
         self.graph_nodes_in_order = graph_nodes_in_order
         self.graph_edges = graph_edges
-        self.all_node_runtimes: dict[str, float] = dict()
+        self.all_node_runtimes: dict[str, float] = {}
         if all_node_runtimes is None:
             if recorded_knapsack_input_runtimes is None:
                 raise ValueError(
@@ -43,7 +43,7 @@ class GraphInfoProvider:
             }
         else:
             self.all_node_runtimes.update(all_node_runtimes)
-        self.all_node_memories: dict[str, float] = dict()
+        self.all_node_memories: dict[str, float] = {}
         if all_node_memories is None:
             if recorded_knapsack_input_memories is None:
                 raise ValueError(

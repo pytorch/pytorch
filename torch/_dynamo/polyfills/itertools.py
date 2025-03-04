@@ -191,7 +191,7 @@ def zip_longest(
 ) -> Iterator[tuple[_T | _U, ...]]:
     # zip_longest('ABCD', 'xy', fillvalue='-') -> Ax By C- D-
 
-    iterators = list(map(iter, iterables))
+    iterators = [*map(iter, iterables)]
     num_active = len(iterators)
     if not num_active:
         return

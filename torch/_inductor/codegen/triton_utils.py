@@ -113,7 +113,7 @@ def signature_to_meta(
     indices: Optional[list[int]] = None,
 ) -> dict[str, str]:
     if indices is None:
-        indices = list(range(len(signature)))
+        indices = [*range(len(signature))]
     return {
         argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
@@ -161,7 +161,7 @@ def equal_1_arg_indices(
     indices: Optional[list[int]] = None,
 ) -> tuple[int, ...]:
     if indices is None:
-        indices = list(range(len(args)))
+        indices = [*range(len(args))]
 
     equal_to_1 = tuple([i for i, arg in zip(indices, args) if _arg_equals_1(arg)])
 
@@ -174,7 +174,7 @@ def config_of(
     indices: Optional[list[int]] = None,
 ) -> Any:
     if indices is None:
-        indices = list(range(len(args)))
+        indices = [*range(len(args))]
 
     def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """

@@ -591,7 +591,7 @@ class TensorVariable(VariableTracker):
             is_base_tensor_method = False
 
         if (
-            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            can_dispatch_torch_function(tx, tuple([self] + [*args]), kwargs)
             and is_base_tensor_method
         ):
             if self.source:
@@ -602,7 +602,7 @@ class TensorVariable(VariableTracker):
                 func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
 
             return dispatch_torch_function(
-                tx, func_var, tuple([self] + list(args)), kwargs
+                tx, func_var, tuple([self] + [*args]), kwargs
             )
 
         """
@@ -900,7 +900,7 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function",
             fn,
-            *proxy_args_kwargs([self] + list(args), kwargs),
+            *proxy_args_kwargs([self] + [*args], kwargs),
         )
 
         return wrap_fx_proxy(tx, proxy)
@@ -1376,7 +1376,7 @@ class NumpyNdarrayVariable(TensorVariable):
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
-            *proxy_args_kwargs([self] + list(args), kwargs),
+            *proxy_args_kwargs([self] + [*args], kwargs),
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 

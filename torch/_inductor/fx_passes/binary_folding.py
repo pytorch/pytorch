@@ -345,7 +345,7 @@ def binary_folding_init():
 
     def _create_new_conv_node(graph, conv_node, binary_node, other):
         assert conv_node.target == aten.convolution.default
-        conv_args = list(conv_node.args)
+        conv_args = [*conv_node.args]
         weight_meta_value = conv_node.args[1].meta.get("val")
         bias = conv_args[2]
         if binary_node.target in [aten.add.Tensor, aten.sub.Tensor]:

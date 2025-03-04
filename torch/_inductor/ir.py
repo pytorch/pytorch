@@ -509,8 +509,8 @@ class IRNode:
     def str_helper(
         self, lines: Sequence[object], shorten: bool = True, multiline: bool = True
     ) -> str:
-        lines = list(lines) + list(self.common_repr(shorten))
-        lines = list(map(str, lines))
+        lines = [*lines] + [*self.common_repr(shorten)]
+        lines = [*map(str, lines)]
         if multiline:
             new_lines = indent(",\n".join(lines))
             return f"{type(self).__name__}(\n{new_lines}\n)"
@@ -1261,7 +1261,7 @@ class Reduction(Loops):
         for i in indices:
             j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
             strides = V.graph.sizevars.stride_hints(
-                j, reduction_vars, list(ranges1.keys())
+                j, reduction_vars, [*ranges1.keys()]
             )
             outer = all(s > 1 for s in strides)
             if outer:
@@ -1373,7 +1373,7 @@ class Reduction(Loops):
                 device=device,
                 dtype=src_dtype,
                 inner_fn=const_fn,
-                ranges=list(ranges),
+                ranges=[*ranges],
             )
 
         if reduction_numel == 1:
@@ -1814,7 +1814,7 @@ class WelfordReduction(Reduction):
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
-                ranges=list(ranges),
+                ranges=[*ranges],
             )
 
         if reduction_numel == 0:
@@ -1836,7 +1836,7 @@ class WelfordReduction(Reduction):
                     device=device,
                     dtype=dtype,
                     inner_fn=inner_fn,
-                    ranges=list(ranges),
+                    ranges=[*ranges],
                 )
 
             if reduction_type == "welford_reduce":
@@ -2555,9 +2555,9 @@ class ExpandView(BaseView):
     def _normalize_size(x, new_size):  # type: ignore[no-untyped-def]
         """Replace `-1` with correct sizes"""
         sizevars = V.graph.sizevars
-        new_size = list(map(sympy.expand, new_size))
+        new_size = [*map(sympy.expand, new_size)]
         old_size = x.get_size()
-        old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
+        old_size = [None] * (len(new_size) - len(old_size)) + [*old_size]
         assert len(new_size) == len(old_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
@@ -2598,7 +2598,7 @@ class ExpandView(BaseView):
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
-                list(new_size),
+                [*new_size],
                 new_stride,
                 old_layout.offset,
             )
@@ -2615,7 +2615,7 @@ class ExpandView(BaseView):
         skip = len(target) - len(actual)
 
         def reindex(index):  # type: ignore[no-untyped-def]
-            index = list(index[skip:])
+            index = [*index[skip:]]
             assert len(index) == len(actual)
             for i in range(len(actual)):
                 if actual[i] == 1:
@@ -2741,7 +2741,7 @@ class GenericView(BaseView):
         index_old = [
             sympy_index_symbol_with_prefix(SymT.INDEX, n) for n in range(len(self.size))
         ]
-        index_new = list(self.reindex(index_old))
+        index_new = [*self.reindex(index_old)]
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
     def __str__(self) -> str:
@@ -2753,7 +2753,7 @@ class GenericView(BaseView):
 
     @classmethod
     def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def]
-        return cls(data=x, size=list(new_size), reindex=reindex)
+        return cls(data=x, size=[*new_size], reindex=reindex)
 
     def get_size(self) -> Sequence[Expr]:
         return self.size
@@ -2791,7 +2791,7 @@ class View(GenericView):
             def fake_reindex(index):  # type: ignore[no-untyped-def]
                 return tuple([0] * len(old_size))
 
-            return cls(data=x, size=list(new_size), reindex=fake_reindex)
+            return cls(data=x, size=[*new_size], reindex=fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
@@ -2815,14 +2815,14 @@ class View(GenericView):
             return ReinterpretView(data=storage, layout=new_layout)
 
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        return cls(data=x, size=list(new_size), reindex=reindex)
+        return cls(data=x, size=[*new_size], reindex=reindex)
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):  # type: ignore[no-untyped-def]
         new_size = [V.graph.sizevars.simplify(x) for x in new_size]
         old_size = [V.graph.sizevars.simplify(x) for x in old_size]
 
-        new_size = list(new_size)
+        new_size = [*new_size]
         for i in range(len(new_size)):
             if new_size[i] == -1:
                 new_size[i] = sympy.S.One
@@ -2856,8 +2856,8 @@ class View(GenericView):
             sympy_index_symbol_with_prefix(SymT.VIEW, i) for i in range(len(new_size))
         ]
 
-        stack_new = list(zip(vars, new_size))
-        stack_old = list(old_size)
+        stack_new = [*zip(vars, new_size)]
+        stack_old = [*old_size]
 
         view_expr = []
         while stack_new and stack_old:
@@ -2947,10 +2947,10 @@ class ReinterpretView(BaseView):
         return self.layout.dtype
 
     def get_size(self) -> Sequence[Expr]:
-        return list(self.layout.size)
+        return [*self.layout.size]
 
     def get_stride(self):  # type: ignore[no-untyped-def]
-        return list(self.layout.stride)
+        return [*self.layout.stride]
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
@@ -3085,7 +3085,7 @@ class SliceView(View):
         except TypeError:
             pass
 
-        new_size = list(x.get_size())
+        new_size = [*x.get_size()]
 
         # NB: Ordinarily we default to clamping.
         # We only don't clamp for split_with_sizes. For split_with_sizes, sizes should be already valid
@@ -3098,7 +3098,7 @@ class SliceView(View):
         if is_storage_and_layout(x):
             # Fast path
             storage, old_layout = as_storage_and_layout(x)
-            new_stride = list(old_layout.stride)
+            new_stride = [*old_layout.stride]
             new_stride[dim] = new_stride[dim] * step
             new_layout = FixedLayout(
                 old_layout.device,
@@ -3111,7 +3111,7 @@ class SliceView(View):
 
         def reindex(index):  # type: ignore[no-untyped-def]
             assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
-            index = list(index)
+            index = [*index]
             index[dim] = index[dim] * step + start
             return index
 
@@ -3254,7 +3254,7 @@ class Layout(OutputSpec):
     def is_transposed(self) -> bool:
         for left, right, size in zip(
             self.stride,
-            reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
+            reversed(FlexibleLayout.contiguous_strides([*reversed(self.size)])),
             self.size,
         ):
             if size != 1 and left != right:
@@ -3298,7 +3298,7 @@ class Layout(OutputSpec):
 
     def is_channels_last_stride_ordered(self):  # type: ignore[no-untyped-def]
         # create channels_last order(NCHW, NCDHW, the C is the first order).
-        order = [0] + list(reversed(range(1, len(self.stride) - 1)))
+        order = [0] + [*reversed(range(1, len(self.stride) - 1))]
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
@@ -3433,7 +3433,7 @@ class FlexibleLayout(Layout):
         reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
             reversed_strides.append(size * reversed_strides[-1])
-        return list(reversed(reversed_strides))
+        return [*reversed(reversed_strides)]
 
     @staticmethod
     def fill_ordered(sizes, order):  # type: ignore[no-untyped-def]
@@ -4243,7 +4243,7 @@ class ComputedBuffer(OperationBuffer):
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
+            order = [*reversed(pick_loop_order(strides, sizes, priority_idx))]
         except Exception:
             if config.debug:
                 log.warning(
@@ -4251,7 +4251,7 @@ class ComputedBuffer(OperationBuffer):
                     dict(zip(index_vars, sizes)),
                     memory_addrs,
                 )
-            order = list(range(len(sizes)))
+            order = [*range(len(sizes))]
         sizes = [sizes[i] for i in order]
         return sizes, same_reorder(order), inverse_reorder(order)
 
@@ -4641,7 +4641,7 @@ class ConcatKernel(NopKernel):
     def create(cls, inputs, dim):  # type: ignore[no-untyped-def]
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
-        new_size = list(inputs[0].get_size())
+        new_size = [*inputs[0].get_size()]
         offsets_start = [0]
         offsets_end = [new_size[dim]]
         assert 0 <= dim < len(new_size)
@@ -5361,7 +5361,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
-        return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
+        return cls.require_stride_order(x, [*reversed(range(len(x.get_size())))])
 
     def apply_constraint(self) -> None:
         pass
@@ -5377,7 +5377,7 @@ class ExternKernel(InputsKernel):
         # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
         assert isinstance(args, (list, tuple))
         if isinstance(args, tuple):
-            args = list(args)
+            args = [*args]
         assert self.arg_properties, "ExternKernel.arg_properties should not be empty"
 
         n_args = len(args)
@@ -5975,7 +5975,7 @@ class UserDefinedTritonKernel(ExternKernel):
         V.graph.register_operation(self)
 
     def get_outputs(self) -> list[Buffer]:
-        return list(self.mutation_outputs)
+        return [*self.mutation_outputs]
 
     def get_device(self) -> Optional[torch.device]:
         return self.device

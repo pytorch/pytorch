@@ -423,10 +423,10 @@ def _merge_graph_inputs(
             return sorted(vars, key=lambda var: var.node.name)
 
         return (
-            list(_sort_by_name(list(l_shared_freevars))),
-            list(_sort_by_name(list(r_shared_freevars))),
-            list(_sort_by_name(list(unique_l_freevars))),
-            list(_sort_by_name(list(unique_r_freevars))),
+            [*_sort_by_name([*l_shared_freevars])],
+            [*_sort_by_name([*r_shared_freevars])],
+            [*_sort_by_name([*unique_l_freevars])],
+            [*_sort_by_name([*unique_r_freevars])],
         )
 
     (l_shared, r_shared, unique_l, unique_r) = dedup_and_sort_lifted_freevars(
@@ -832,7 +832,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args.append(v)
 
         if kwargs:
-            unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
+            unimplemented(f"torch.cond: Got unexpected kwargs: {[*kwargs.keys()]}")
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -1060,7 +1060,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         if kwargs:
             unimplemented(
-                f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
+                f"torch.while_loop: Got unexpected kwargs: {[*kwargs.keys()]}"
             )
 
         if len(args) != 4:
@@ -1502,8 +1502,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         "The postion lifted freevars doesn't match the order of placeholders in subgraph."
                     )
 
-        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
-        combine_freevars_proxy = list(combine_lifted_freevars.keys())
+        _check_phs_position_match(combine_graph, [*combine_lifted_freevars.values()])
+        combine_freevars_proxy = [*combine_lifted_freevars.keys()]
 
         if combine_result.python_type() != list:
             unimplemented(
@@ -1650,7 +1650,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             body_node,
             [args[1].as_proxy()],
-            [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
+            [arg.as_proxy() for arg in args[2:]] + [*body_lifted_freevars.keys()],
         )
 
         return _call_function_and_unflatten_output(
@@ -1840,7 +1840,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         if kwargs:
             unimplemented(
-                f"wrap_with_set_grad_enabled: Got unexpected kwargs: {list(kwargs.keys())}"
+                f"wrap_with_set_grad_enabled: Got unexpected kwargs: {[*kwargs.keys()]}"
             )
 
         grad_enabled, fn_var, *rest_args = args
@@ -1912,7 +1912,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         if kwargs:
             unimplemented(
-                f"wrap_with_autocast: Got unexpected kwargs: {list(kwargs.keys())}"
+                f"wrap_with_autocast: Got unexpected kwargs: {[*kwargs.keys()]}"
             )
 
         device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
@@ -2103,7 +2103,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         if kwargs:
             unimplemented(
-                f"strict_mode HOO received unexpected kwargs: {list(kwargs.keys())}"
+                f"strict_mode HOO received unexpected kwargs: {[*kwargs.keys()]}"
             )
 
         (
@@ -2827,7 +2827,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         p_args = (
             fwd_node,
             bwd_node,
-            *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
+            *([arg.as_proxy() for arg in filtered_args] + [*fwd_freevars.keys()]),
         )
         kwargs = {
             "args_tensor_mask": args_tensor_mask,
@@ -2849,7 +2849,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     *(
                         [
                             _get_fake_value(arg)
-                            for arg in filtered_args + list(fwd_freevars.keys())
+                            for arg in filtered_args + [*fwd_freevars.keys()]
                         ]
                     ),
                 )

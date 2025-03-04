@@ -2637,7 +2637,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.backends.cuda.can_use_efficient_attention,
             "is_integer",
         ]
-        + list(supported_const_comparison_op_values.keys())
+        + [*supported_const_comparison_op_values.keys()]
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)

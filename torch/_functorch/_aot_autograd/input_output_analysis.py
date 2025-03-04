@@ -315,7 +315,7 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
         and num_aliases > 1
         and aot_config.aot_autograd_arg_pos_to_source
     ):
-        no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
+        no_overlap_indices = [*(set(aliased_input_indices) - actual_aliased_indices)]
 
         overlapping_sources = [
             aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices

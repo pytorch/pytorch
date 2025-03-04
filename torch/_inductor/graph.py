@@ -577,7 +577,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
-        if len(list(gm.graph.nodes)) >= 300 * nconv:
+        if len([*gm.graph.nodes]) >= 300 * nconv:
             log.debug("Skipped layout opt because only a few conv")
             return False
 

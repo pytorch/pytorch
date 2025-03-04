@@ -194,7 +194,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                 )
                 all_gathers.append(ag_match)
 
-    return list(reversed(all_gathers))
+    return [*reversed(all_gathers)]
 
 
 @dataclass
@@ -283,7 +283,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         group_name=match.kwargs["group_name"],
                     )
                 )
-    return list(reversed(reduce_scatters))
+    return [*reversed(reduce_scatters)]
 
 
 @dataclass
@@ -334,7 +334,7 @@ class _Matmul:
             with graph.inserting_after(new_node):
                 new_mm_node = graph.call_function(
                     aten.reshape.default,
-                    args=(new_node, list(_get_tensor(mm_node).shape)),
+                    args=(new_node, [*_get_tensor(mm_node).shape]),
                 )
             mm_node.replace_all_uses_with(new_mm_node)
 
@@ -415,7 +415,7 @@ class _ScaledMatmul(_Matmul):
             ), "Parent node must have exactly one input node"
 
             parent_input_node = parent_node.all_input_nodes[0]
-            parent_input_shape = list(_get_tensor(parent_input_node).shape)
+            parent_input_shape = [*_get_tensor(parent_input_node).shape]
 
             # insert reshape back to shape from before the parent reshape op
             graph = node.graph
@@ -425,7 +425,7 @@ class _ScaledMatmul(_Matmul):
                 )
 
             # ensure all users of original node (except the reshape node) now use the reshaped node instead
-            node_users = list(node.users)
+            node_users = [*node.users]
             for user in node_users:
                 if user != reshape_node:
                     user.replace_input_with(node, reshape_node)

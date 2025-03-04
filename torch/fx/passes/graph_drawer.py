@@ -382,7 +382,7 @@ if HAS_PYDOT:
             return result
 
         def _get_tensor_label(self, t: torch.Tensor) -> str:
-            return str(t.dtype) + str(list(t.shape)) + r"\n"
+            return str(t.dtype) + str([*t.shape]) + r"\n"
 
         # when parse_stack_trace=True
         # print file:lineno code

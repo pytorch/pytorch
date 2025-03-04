@@ -234,7 +234,7 @@ class CUDATemplateKernel(CUDAKernel):
         if input_reorder is not None:
             assert len(inputs) == len(input_reorder)
         else:
-            input_reorder = list(range(len(inputs)))
+            input_reorder = [*range(len(inputs))]
 
         for idx in input_reorder:
             name = names[idx]

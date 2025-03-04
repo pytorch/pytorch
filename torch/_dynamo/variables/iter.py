@@ -66,7 +66,7 @@ class ItertoolsVariable(VariableTracker):
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = [
-                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+                variables.TupleVariable([*item]) for item in itertools.product(*seqs)
             ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
@@ -130,7 +130,7 @@ class ItertoolsVariable(VariableTracker):
 
             items = []
             for item in itertools.combinations(iterable, r):
-                items.append(variables.TupleVariable(list(item)))
+                items.append(variables.TupleVariable([*item]))
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )
@@ -178,7 +178,7 @@ class ItertoolsVariable(VariableTracker):
                                 if variables.ConstantVariable.is_literal(k)
                                 else k,
                                 variables.ListIteratorVariable(
-                                    list(v), mutation_type=ValueMutationNew()
+                                    [*v], mutation_type=ValueMutationNew()
                                 ),
                             ],
                             mutation_type=ValueMutationNew(),
@@ -381,7 +381,7 @@ class ZipVariable(IteratorVariable):
                 iterables.append(it.unpack_var_sequence(tx))
         kwargs = {"strict": self.strict} if self.strict else {}
         zipped = zip(*iterables, **kwargs)
-        return [variables.TupleVariable(list(var)) for var in zipped]
+        return [variables.TupleVariable([*var]) for var in zipped]
 
     def next_variable(self, tx):
         assert self.is_mutable()

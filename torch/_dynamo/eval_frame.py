@@ -1209,7 +1209,7 @@ def rewrite_signature(
             torch.SymFloat,
             torch.SymBool,
             torch._C.ScriptObject,
-        ] + list(common_constant_types)
+        ] + [*common_constant_types]
 
         def is_supported_type(val):
             return isinstance(val, tuple(supported_types))
@@ -1280,7 +1280,7 @@ def rewrite_signature(
 
     assert graph_captured_output is not None
     matched_output_elements_positions = produce_matching(
-        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
+        "outputs", [*graph_captured_output] + flat_args, flat_results_traced
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1298,7 +1298,7 @@ def rewrite_signature(
     def argument_names(f_sig, args, kwargs) -> list[str]:
         def signature_to_fullargspec(sig: inspect.Signature):
             # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
+            params = [*sig.parameters.values()]
             # Separate positional arguments, keyword-only arguments and varargs/varkw
             args = [
                 p.name
@@ -1367,7 +1367,7 @@ def rewrite_signature(
                 assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
 
         # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
+        input_strs += [*kwargs.keys()]
 
         # 5. Keyword-only arguments with default values if not provided are not exported
         # as part of the function signature.
@@ -1664,7 +1664,7 @@ def export(
             if out_guards is None:
                 out_guards = _guards.GuardsSet()
             assert out_guards is not None  # suppress mypy error
-            parameter_names = list(original_signature.parameters.keys())
+            parameter_names = [*original_signature.parameters.keys()]
             fx_graph = torch.fx.Graph()
             for i, name in enumerate(parameter_names):
                 if torch.is_tensor(flat_args[i]):

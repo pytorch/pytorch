@@ -431,7 +431,7 @@ def conv_layout(
 
 
 def channels_last_order(rank):
-    order = list(reversed(range(rank)))
+    order = [*reversed(range(rank))]
     order.insert(1, order.pop(-1))
     return order
 
@@ -444,7 +444,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
     weight = L[aten.permute](weight, [1, 0])
 
     x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
-    x_permute = list(range(rank))
+    x_permute = [*range(rank)]
     x_permute.append(x_permute.pop(1))
     x = L[aten.permute](x, x_permute)
     *sizes, in_chan = x.get_size()
@@ -454,7 +454,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
     else:
         result = L[aten.addmm](bias, x, weight)
     result = L[aten.reshape](result, [*sizes, -1])
-    result_permute = list(range(rank))
+    result_permute = [*range(rank)]
     result_permute.insert(1, result_permute.pop(-1))
     return L[aten.permute](result, result_permute)
 

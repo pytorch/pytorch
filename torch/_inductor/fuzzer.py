@@ -229,7 +229,7 @@ class SamplingMethod(Enum):
                 for _ in range(random.randint(1, 3))
             ]
         elif is_type(type_hint, set):  # noqa: set_linter
-            indexable = list(default)
+            indexable = [*default]
             elem_type = getattr(
                 type_hint,
                 "__args__",
@@ -243,7 +243,7 @@ class SamplingMethod(Enum):
                 for _ in range(random.randint(1, 3))
             }
         elif is_type(type_hint, OrderedSet):
-            indexable = list(default)
+            indexable = [*default]
             elem_type = getattr(
                 type_hint,
                 "__args__",
@@ -351,7 +351,7 @@ class SamplingMethod(Enum):
             return None
         elif is_callable_type(type_hint):
             try:
-                return_type = list(type_hint.__args__)[-1]
+                return_type = [*type_hint.__args__][-1]
             except AttributeError as err:
                 raise ValueError("Callable type with no args") from err
 
@@ -831,7 +831,7 @@ class ConfigFuzzer:
     def _bisect_failing_config(
         self, results: ResultType, failing_config: ConfigType
     ) -> Optional[ConfigType]:
-        return self._bisect_failing_config_helper(results, list(failing_config.items()))
+        return self._bisect_failing_config_helper(results, [*failing_config.items()])
 
     def _bisect_failing_config_helper(
         self, results: ResultType, failing_config: list[tuple[str, Any]]

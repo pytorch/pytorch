@@ -1817,7 +1817,7 @@ class SIMDScheduling(BaseScheduling):
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
-        splits = list(tiling.values())
+        splits = [*tiling.values()]
         is_pointwise = "x" in tiling
 
         total_numel = numel * reduction_numel

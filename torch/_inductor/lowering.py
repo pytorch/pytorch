@@ -300,9 +300,9 @@ def get_overloads(aten_fn):
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
     else:
-        aten_fn = list(aten_fn)
+        aten_fn = [*aten_fn]
 
-    for fn in list(aten_fn):
+    for fn in [*aten_fn]:
         if isinstance(fn, torch._ops.OpOverloadPacket):
             for overload in fn.overloads():
                 other_fn = getattr(fn, overload)
@@ -368,14 +368,14 @@ def transform_args(
 
     if broadcast:
         broadcasted = broadcast_tensors(
-            *list(
-                itertools.chain(
+            *[
+                *itertools.chain(
                     (args[i] for i in args_indices),
                     (kwargs[k] for k in kwargs_indices),
                 )
-            )
+            ]
         )
-        size = list(broadcasted[0].get_size())
+        size = [*broadcasted[0].get_size()]
 
         for i, x in zip(args_indices, broadcasted[: len(args_indices)]):
             args[i] = x
@@ -437,13 +437,13 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: list[Any] = list(args)
+        args: list[Any] = [*args]
         kwargs: dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
-            args = list(args[0])
+            args = [*args[0]]
 
         if not all(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
@@ -550,7 +550,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                     ir.Constant(
                         value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
                     ),
-                    list(ex.get_size()),
+                    [*ex.get_size()],
                 )
             )
         elif isinstance(x, sympy.Basic):
@@ -559,7 +559,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                     IndexingConstant(
                         index=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
                     ),
-                    list(ex.get_size()),
+                    [*ex.get_size()],
                 )
             )
         else:
@@ -587,7 +587,7 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                inputs = list(inputs)
+                inputs = [*inputs]
                 inputs[-1] = mul(inputs[-1], alpha)
         else:
             assert alpha is None
@@ -948,7 +948,7 @@ def where(cond, a, b):
         args[i] = x
     for i in range(len(args)):
         if isinstance(args[i], ir.Constant):
-            args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
+            args[i] = ExpandView.create(args[i], [*args[indices[0]].get_size()])
     return make_pointwise(fn, override_return_dtype=dtype)(
         args[0], to_dtype(args[1], dtype), to_dtype(args[2], dtype)
     )
@@ -1116,7 +1116,7 @@ def expand(x, sizes):
 
 @register_lowering(prims.broadcast_in_dim, type_promotion_kind=None)
 def broadcast_in_dim(a, shape, broadcast_dimensions):
-    s = list(shape)
+    s = [*shape]
     for broadcast_dimension in broadcast_dimensions:
         s[broadcast_dimension] = -1
 
@@ -1135,13 +1135,13 @@ def expand_as(x, y):
 
 @register_lowering(aten.repeat)
 def repeat(x, repeats):
-    old_size = list(x.get_size())
+    old_size = [*x.get_size()]
     if len(repeats) > len(old_size):
         old_size = [sympy.S.One] * (len(repeats) - len(old_size)) + old_size
-        x = view(x, list(old_size))
+        x = view(x, [*old_size])
     assert len(repeats) == len(x.get_size())
 
-    new_size = list(x.get_size())
+    new_size = [*x.get_size()]
 
     zero_tensor = False
     for i in range(len(repeats)):
@@ -1158,7 +1158,7 @@ def repeat(x, repeats):
 
     def inner_fn(index):
         assert len(index) == len(repeats)
-        index = list(index)
+        index = [*index]
         for i in range(len(repeats)):
             if repeats[i] != 1:
                 if old_size[i] == 1:
@@ -1179,7 +1179,7 @@ def repeat(x, repeats):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=inner_fn,
-        ranges=list(new_size),
+        ranges=[*new_size],
     )
 
 
@@ -1271,7 +1271,7 @@ def pointwise_cat(inputs, dim=0):
                 mask = ops.and_(start_cond, end_cond)
 
             masks.append(mask)
-            idx_load = list(idx)
+            idx_load = [*idx]
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
@@ -1296,7 +1296,7 @@ def pointwise_cat(inputs, dim=0):
             )
         return next_val
 
-    new_size = list(inputs[0].get_size())
+    new_size = [*inputs[0].get_size()]
     new_size[dim] = inputs_ranges[-1][-1]
 
     return Pointwise.create(
@@ -1858,7 +1858,7 @@ def unfold(x, dimension, size, step):
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
-    new_shape = list(x.get_size())
+    new_shape = [*x.get_size()]
     new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
 
@@ -2067,7 +2067,7 @@ def philox_rand(size, seed, offset, stride, device, dtype):
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
-        ranges=list(size),
+        ranges=[*size],
     )
 
     offset_node = philox_rand_offset(size)
@@ -2473,7 +2473,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
-            stride_order = list(reversed(range(len(arg.get_size()))))
+            stride_order = [*reversed(range(len(arg.get_size())))]
 
         if (
             fx_node.target
@@ -2520,7 +2520,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         if effn_attn_fwd_bias:
-            out_size = list(arg.get_size())
+            out_size = [*arg.get_size()]
 
             expanded_dims = []
             # We require a dense last dimension, but the other strides
@@ -2810,7 +2810,7 @@ def clone(x, *, memory_format=None):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
-        ranges=list(x.get_size()),
+        ranges=[*x.get_size()],
     )
 
 
@@ -2885,7 +2885,7 @@ def select_scatter(x, src, dim: int, index: int):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=inner_fn,
-        ranges=list(x.get_size()),
+        ranges=[*x.get_size()],
     )
 
 
@@ -2898,7 +2898,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
-    src_size = list(x.get_size())
+    src_size = [*x.get_size()]
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
     src = expand(src, src_size)
     src_loader = src.make_loader()
@@ -2909,7 +2909,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             return src_loader(idx)
 
         idx_dim = ops.index_expr(idx[dim], torch.int64)
-        src_idx = list(idx)
+        src_idx = [*idx]
         src_idx[dim] = FloorDiv(idx[dim] - start, step)
 
         mask = []
@@ -2953,7 +2953,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=inner_fn,
-        ranges=list(x.get_size()),
+        ranges=[*x.get_size()],
     )
 
 
@@ -3125,7 +3125,7 @@ def _full(fill_value, device, dtype, size):
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
-        ranges=list(size),
+        ranges=[*size],
     )
 
 
@@ -3196,7 +3196,7 @@ def create_tensor_like(creation_fn):
         else:
             dtype = decode_dtype(dtype)
         device = device or x.get_device()
-        size = list(x.get_size())
+        size = [*x.get_size()]
         return creation_fn(
             size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
         )
@@ -3329,7 +3329,7 @@ def gather(x, dim, index, sparse_grad=False):
     index_loader = index.make_loader()
 
     def fn(idx):
-        idx = list(idx)
+        idx = [*idx]
         gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
         if len(idx) == 0:
             idx = [gather_idx]
@@ -3492,7 +3492,7 @@ def index_impl_helper(x, indices, check, wrap_neg=True):
     # no guards on output size, all the guards are set in broadcast_tensors
 
     # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[tensor_indices[0]].get_size())
+    tensor_size = [*indices[tensor_indices[0]].get_size()]
 
     x_size = x.get_size()
 
@@ -3684,7 +3684,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         self = view(self, [1])
 
     # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[tensor_indices[0]].get_size())
+    tensor_size = [*indices[tensor_indices[0]].get_size()]
     indexed_size = [x_size[i] for i in range(len(indices))]
 
     expected_vals_size, inner_fn = index_output_size_and_inner_fn(
@@ -3901,7 +3901,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         # self is captured from the end of the function, so it may have 0 dim
         shape = self.get_size()
         ndim = len(shape)
-        indirect_idx = list(idx)
+        indirect_idx = [*idx]
         indirect_idx[dim] = ops.indirect_indexing(
             index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
@@ -4070,7 +4070,7 @@ def rev(x, dims):
     sizes = x.get_size()
 
     def loader(idx):
-        idx = list(idx)
+        idx = [*idx]
         assert len(idx) == len(sizes)
         for dim in dims:
             idx[dim] = (sizes[dim] - 1) - idx[dim]
@@ -4194,7 +4194,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     sizes = x.get_size()
 
-    bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
+    bounds = [*reversed([*zip(padding[::2], padding[1::2])])]
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
@@ -4202,7 +4202,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
-    output_size = list(sizes[:n])
+    output_size = [*sizes[:n]]
     mask_sizes = []
     for (low, high), size in zip(bounds, sizes[n:]):
         mask_sizes.append(size)
@@ -4221,7 +4221,7 @@ def constant_pad_nd(x, padding, fill_value=0):
         return ops.masked(mask, lambda: x_loader(index), fill_value)
 
     def offset_fn(index):
-        new_index = list(index[:n])
+        new_index = [*index[:n]]
         for idx, (low, _high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
@@ -4365,7 +4365,7 @@ def _max_pool2d_with_offsets(
         else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
     )
 
-    new_size = list(batch) + [h_out, w_out]
+    new_size = [*batch] + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition(x, min_value, dim=2)
     else:
@@ -4569,7 +4569,7 @@ def max_pool2d_with_indices_backward(
 
     indices_loader = indices.make_loader()
     grad_loader = grad_output.make_loader()
-    new_size = list(x.get_size())
+    new_size = [*x.get_size()]
 
     h_window_size = max(
         [
@@ -4832,7 +4832,7 @@ def _adaptive_avg_pool2d(x, output_size):
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
 
-    new_size = list(batch) + [h_out, w_out]
+    new_size = [*batch] + [h_out, w_out]
     dtype = x.get_dtype()
 
     window_size = h_kernel_max * w_kernel_max
@@ -4906,7 +4906,7 @@ def adaptive_max_pool2d(x, output_size):
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
 
-    new_size = list(batch) + [h_out, w_out]
+    new_size = [*batch] + [h_out, w_out]
     dtype = x.get_dtype()
 
     window_size = h_kernel_max * w_kernel_max
@@ -5043,7 +5043,7 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
         else:
             return maxval
 
-    new_size = list(batch) + [h_out, w_out]
+    new_size = [*batch] + [h_out, w_out]
     rv = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -5100,7 +5100,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=list(input_size),
+        ranges=[*input_size],
     )
 
     return rv
@@ -5200,7 +5200,7 @@ def _avg_poolnd(
         x_loader = x.make_loader()
         had_padding = False
 
-    new_size = list(batch) + list(h_out)
+    new_size = [*batch] + [*h_out]
     dtype = x.get_dtype()
 
     window_size = functools.reduce(operator.mul, kernel_size)
@@ -5319,7 +5319,7 @@ def avg_pool2d_backward(
     had_padding = padding[0] or padding[1] or ceil_mode1 or ceil_mode2
 
     *_, pooled_height, pooled_width = grad_output.get_size()
-    new_size = list(x.get_size())
+    new_size = [*x.get_size()]
     dtype = x.get_dtype()
 
     h_window_size = max(
@@ -5498,7 +5498,7 @@ def avg_pool3d_backward(
     had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
 
     *_, pooled_depth, pooled_height, pooled_width = grad_output.get_size()
-    new_size = list(x.get_size())
+    new_size = [*x.get_size()]
     dtype = x.get_dtype()
 
     d_window_size, h_window_size, w_window_size = (
@@ -5667,7 +5667,7 @@ def _validate_reduction_axis(x, axis):
     if len(size) == 0:
         assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
         return []
-    axis = list(axis)
+    axis = [*axis]
     for i in range(len(axis)):
         if axis[i] < 0:
             axis[i] += len(size) if len(size) else 1
@@ -5708,7 +5708,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
         return inner_loader(new_index)
 
     if keepdims:
-        new_size = list(size)
+        new_size = [*size]
         for i in reduced_idx:
             new_size[i] = sympy.S.One
     else:
@@ -5772,7 +5772,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
-    denom = ExpandView.create(denom, list(sum_result.get_size()))
+    denom = ExpandView.create(denom, [*sum_result.get_size()])
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
@@ -5793,7 +5793,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if correction:
         denom = sympy.Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
-    denom = ExpandView.create(denom, list(sum_result.get_size()))
+    denom = ExpandView.create(denom, [*sum_result.get_size()])
     x_var = div(sum_result, denom)
     if not return_mean:
         return (x_var,)
@@ -6779,7 +6779,7 @@ def resize(x, size, *, memory_format=None):
         return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
 
     out = Pointwise.create(
-        device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
+        device=device, dtype=dtype, inner_fn=inner_fn, ranges=[*size]
     )
     return out
 
@@ -6820,7 +6820,7 @@ def cond(pred, true_fn, false_fn, operands):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
-    return list(map(TensorBox.create, result))
+    return [*map(TensorBox.create, result)]
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
@@ -6835,13 +6835,13 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    return list(map(TensorBox.create, result))
+    return [*map(TensorBox.create, result)]
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, operands)
-    return list(map(TensorBox.create, result))
+    return [*map(TensorBox.create, result)]
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)

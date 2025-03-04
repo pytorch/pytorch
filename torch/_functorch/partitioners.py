@@ -421,8 +421,8 @@ def default_partition(
         return min_cut_rematerialization_partition(
             joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs
         )
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    primal_inputs = [*filter(_is_primal, joint_module.graph.nodes)]
+    fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, joint_module.graph.nodes)]
     inputs = primal_inputs + fwd_seed_offset_inputs
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
@@ -466,8 +466,8 @@ def default_partition(
                 saved_sym_nodes.extend(backward_usages)
             else:
                 saved_values.append(node)
-    saved_values = list(dict.fromkeys(saved_values).keys())
-    saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    saved_values = [*dict.fromkeys(saved_values).keys()]
+    saved_sym_nodes = [*dict.fromkeys(saved_sym_nodes).keys()]
 
     return _extract_fwd_bwd_modules(
         joint_module,
@@ -600,7 +600,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     # Find first bwd node in the graph
-    tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
+    tangent_inputs = [*filter(_is_tangent, gm.graph.nodes)]
     first_node_in_bwd = None
     minimum_order = math.inf
     for tangent in tangent_inputs:
@@ -614,7 +614,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
-    for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
+    for node in [*gm.graph.nodes][order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 
     # The output node is already built by the traversal.
@@ -1597,7 +1597,7 @@ from torch.utils._mode_utils import no_dispatch
 
 # replace symbols in size and strides with their hints without guarding.
 def _remove_symbols_without_guarding(x: torch.Tensor) -> torch.Tensor:
-    shape = list(x.shape)
+    shape = [*x.shape]
 
     def realize_symbol(d):
         return hint_int(d, fallback=4096)
@@ -1919,10 +1919,10 @@ def min_cut_rematerialization_partition(
             if node in required_bw_nodes:
                 required_bw_nodes.update(node.users)
 
-        primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_seed_offset_inputs = list(
-            filter(_is_fwd_seed_offset, joint_module.graph.nodes)
-        )
+        primal_inputs = [*filter(_is_primal, joint_module.graph.nodes)]
+        fwd_seed_offset_inputs = [
+            *filter(_is_fwd_seed_offset, joint_module.graph.nodes)
+        ]
         inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
             joint_module, num_fwd_outputs=num_fwd_outputs
@@ -1986,8 +1986,8 @@ def min_cut_rematerialization_partition(
         memory_budget=memory_budget,
     )
     # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(is_sym_node, saved_values))
-    saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    saved_sym_nodes = [*filter(is_sym_node, saved_values)]
+    saved_values = [*filter(lambda n: not is_sym_node(n), saved_values)]
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(

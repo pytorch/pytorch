@@ -190,7 +190,7 @@ def make_functional_deprecated_v1(model: nn.Module):
 
     To put the state back into a model, use `load_state`.
     """
-    buffers = list(model.buffers())
+    buffers = [*model.buffers()]
     if len(buffers) > 0:
         raise RuntimeError(
             "make_functional_deprecated_v1(model): `model` has buffers. Please use "
@@ -396,7 +396,7 @@ def make_functional(
             history with PyTorch autograd.
 
     """
-    buffers = list(model.buffers())
+    buffers = [*model.buffers()]
     if len(buffers) > 0:
         raise RuntimeError(
             "make_functional(model): `model` has buffers. Please use "

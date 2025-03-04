@@ -780,8 +780,8 @@ class GraphSignature:
     ) -> "GraphSignature":
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
-        parameters = list(named_parameters)
-        buffers = list(named_buffers)
+        parameters = [*named_parameters]
+        buffers = [*named_buffers]
         num_tokens = len(view_mutation_metadata.tokens)
 
         # Calling convention assumptions:

@@ -770,7 +770,7 @@ def create_node_mapping(
 
         def convert_sets_to_lists(d: dict[str, Any]) -> None:
             for key in d:
-                d[key] = list(d[key])
+                d[key] = [*d[key]]
             d = dict(d)
 
         # convert to list because set is not JSON serializable

@@ -407,9 +407,9 @@ class ContinueExecutionCache:
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
                 # into the mapping later, but show up earlier in the prefix.
-                meta.prefix_block_target_offset_remap = list(
-                    reversed(meta.prefix_block_target_offset_remap)
-                )
+                meta.prefix_block_target_offset_remap = [
+                    *reversed(meta.prefix_block_target_offset_remap)
+                ]
 
             assert not hooks
 

@@ -392,7 +392,7 @@ def _flatten_chunks_output(chunks_output_):
 
     # transpose chunk dim and flatten structure
     # flat_output_chunks is flat list of chunks
-    flat_output_chunks = list(zip(*flat_chunks_output))
+    flat_output_chunks = [*zip(*flat_chunks_output)]
     return flat_output_chunks, arg_spec
 
 

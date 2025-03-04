@@ -54,7 +54,7 @@ class KnapsackEvaluator:
             (peak_memory_after_forward_pass, "Initial Peak/Current Memory")
         ]
         already_computed = set()
-        sorted_nodes = list(reversed(list(nx.topological_sort(node_graph))))
+        sorted_nodes = [*reversed([*nx.topological_sort(node_graph)])]
         dependencies_computed = set()
 
         for node in sorted_nodes:
@@ -204,7 +204,7 @@ class KnapsackEvaluator:
             knapsack_algo (Callable): The knapsack algorithm to use for evaluation.
             memory_budget_values (List[float]): A list of memory budgets to evaluate.
         """
-        results = list()
+        results = []
         for memory_budget in memory_budget_values:
             _, saved_nodes, recomputed_nodes = knapsack_algo(
                 self._graph_info_provider.get_knapsack_memory_input(),

@@ -709,7 +709,7 @@ class NNModuleVariable(VariableTracker):
                 src = AttrSource(AttrSource(self.source, name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=src),
-                    [self] + list(args),
+                    [self] + [*args],
                     kwargs,
                 )
 
@@ -723,7 +723,7 @@ class NNModuleVariable(VariableTracker):
                     result = []
 
                     # Turn the slice into the list of integers
-                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    keys = [*range(len(module))][args[0].as_python_constant()]
                     for idx, submod in enumerate(module[args[0].as_python_constant()]):
                         key = keys[idx]
                         src = NNModuleSource(GetItemSource(self.source, key))
@@ -950,7 +950,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
     def call_method(
@@ -968,7 +968,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 source = None
 
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
         if name not in getattr(self.value, "__dict__", {}):

@@ -255,7 +255,7 @@ def fuse_by_partitions(
     always_return_tuple: bool = False,
 ) -> GraphModule:
     for partition_id, partition in enumerate(partitions):
-        sorted_nodes = topo_sort(list(partition))
+        sorted_nodes = topo_sort([*partition])
 
         submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(

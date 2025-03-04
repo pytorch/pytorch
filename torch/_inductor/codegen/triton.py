@@ -380,7 +380,7 @@ class BlockPtrOptions:
         result = BlockPtrOptions(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            order=list(reversed(range(len(params.shape)))),
+            order=[*reversed(range(len(params.shape)))],
             mask_vars=mask_vars,
             final_shape=final_shape,
             broadcast_shape=broadcast_shape,
@@ -3823,7 +3823,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def get_reduction_prefixes(self) -> list[str]:
         return [
             prefix_str[symt]
-            for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
+            for symt in [*TritonSymbols.reduction_types][: self.num_reduction_dims]
         ]
 
     def codegen_reduction_numels(self, buffer: IndentedBuffer) -> None:

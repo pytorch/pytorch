@@ -2775,9 +2775,7 @@ class PythonWrapperCodegen(CodeGen):
             *outer_additional_inputs,
         ]
         cond_outer_outputs = [f"{name}_cond_result"]
-        body_outer_inputs = list(
-            cond_outer_inputs
-        )  # same inputs for cond_fn and body_fn
+        body_outer_inputs = [*cond_outer_inputs]  # same inputs for cond_fn and body_fn
         # Carry over the state from body_fn. Note: We only carry over
         # the carried_inputs part of the inputs, the additional ones
         # are passed in as they're before.
@@ -2910,7 +2908,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_input_names(self) -> list[str]:
         if signature := self.partition_signatures:
-            names = list(signature.input_nodes.keys())
+            names = [*signature.input_nodes.keys()]
         else:
             names = V.graph.graph_input_names
         return names

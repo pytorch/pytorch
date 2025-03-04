@@ -99,7 +99,7 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
 
 
 def wrap_args_kwargs(tx: "InstructionTranslator", result):
-    for k, v in list(result.items()):
+    for k, v in [*result.items()]:
         if isinstance(v, (tuple, dict)):
             # args/kwargs
             result[k] = wrap_bound_arg(tx, v)
@@ -198,7 +198,7 @@ class BaseUserFunctionVariable(VariableTracker):
         return variables.ConstantVariable.create(result)
 
     def inspect_parameter_names(self):
-        return list(inspect.signature(self.get_function()).parameters)
+        return [*inspect.signature(self.get_function()).parameters]
 
     def closure_vars(self, tx):
         return {}
@@ -1810,7 +1810,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args_raw.keys()):
+        for k in [*combined_args_raw.keys()]:
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()

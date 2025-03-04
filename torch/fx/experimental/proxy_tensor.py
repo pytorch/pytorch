@@ -123,7 +123,7 @@ null_ctx_type = type(nullcontext)
 # This could plausibly be handled at the Dynamo level.
 pytree.register_pytree_node(
     torch.Size,
-    lambda xs: (list(xs), None),
+    lambda xs: ([*xs], None),
     lambda xs, _: tuple(xs),
     flatten_with_keys_fn=lambda xs: (
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
@@ -1025,7 +1025,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.sympy_expr_tracker = dict()
+        self.sympy_expr_tracker = {}
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None

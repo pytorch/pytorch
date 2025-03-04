@@ -755,7 +755,7 @@ def compile_times(repr="str", aggregate: bool = False):
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
             for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_time_metrics.keys())
+        headers = [*compilation_time_metrics.keys()]
         return headers, values
     return None
 
@@ -1116,7 +1116,7 @@ def proxy_args_kwargs(args, kwargs):
 
         unimplemented_v2(
             gb_type="Failed to convert args/kwargs to proxy",
-            context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            context=f"call_function args: {typestr(*args)} {typestr(*[*kwargs.values()])}",
             explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
             hints=[],
             from_exc=e,
@@ -1335,15 +1335,13 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
+        non_compliant_ops=[*c.non_compliant_ops]
         if c.non_compliant_ops is not None
         else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
+        compliant_custom_ops=[*c.compliant_custom_ops]
         if c.compliant_custom_ops is not None
         else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        restart_reasons=[*c.restart_reasons] if c.restart_reasons is not None else None,
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -1410,7 +1408,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
                     keys_to_scrub.add(key)
                 # Convert set() to list for json.dumps()
                 if isinstance(val, set):
-                    inductor_config_copy[key] = list(val)
+                    inductor_config_copy[key] = [*val]
             # Evict unwanted keys
             for key in keys_to_scrub:
                 del inductor_config_copy[key]
@@ -1483,7 +1481,7 @@ def record_compilation_metrics(
     torch._logging.trace_structured(
         name,
         lambda: {
-            k: list(v) if isinstance(v, set) else v
+            k: [*v] if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
         },
         # NB: Because compilation metrics *includes* the logging overhead time,
@@ -1524,7 +1522,7 @@ def clear_compilation_metrics() -> None:
 
 
 def get_compilation_metrics() -> list[CompilationMetrics]:
-    return list(_compilation_metrics)
+    return [*_compilation_metrics]
 
 
 class ChromiumEventLogger:
@@ -2002,7 +2000,7 @@ def clone_inputs(example_inputs):
                 res[key] = clone_input(value)
         return res
 
-    res = list(example_inputs)
+    res = [*example_inputs]
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):
             res[i] = clone_input(res[i])
@@ -3977,7 +3975,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         markers = [marker.replace("~", "^") for marker in markers]
     else:
         # make markers mutable
-        mutable_markers: list[list[str]] = [list(marker) for marker in markers]
+        mutable_markers: list[list[str]] = [[*marker] for marker in markers]
 
         # anchor positions do not take start_offset into account
         if anchors.left_end_lineno == 0:
@@ -4162,7 +4160,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
-        args: list[Any] = list(args)
+        args: list[Any] = [*args]
         return self.gm(*self.unflatten_fn(args))
 
 
@@ -4186,7 +4184,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         boxed_inputs_count = len(inputs[0])
 
         def flatten_fn(args):
-            return args[0] + list(args[1:])
+            return args[0] + [*args[1:]]
 
         def unflatten_fn(flat_args):
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])

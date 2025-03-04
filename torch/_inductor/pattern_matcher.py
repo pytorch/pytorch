@@ -175,7 +175,7 @@ class Match:
         super().__init__()
         self.pattern = pattern
         # The input nodes that must be passed in to the result
-        self.args = list(args or [])
+        self.args = [*(args or [])]
         self.kwargs = kwargs or {}
         # The nodes matched in this expression
         self.nodes = []
@@ -474,7 +474,7 @@ class _TargetExpr(PatternExpr):
         self, fns: Union[FnsType, Sequence[FnsType]], users: Union[Multiple, int] = 1
     ) -> None:
         super().__init__()
-        fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
+        fns = [fns] if callable(fns) or isinstance(fns, str) else [*fns]
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
                 fns.extend([getattr(fn, overload) for overload in fn.overloads()])
@@ -832,7 +832,7 @@ class MultiOutputPattern(PatternExpr):
         super().__init__()
         assert isinstance(outputs[0], _TargetExpr)
         assert all(x is None or isinstance(x, PatternExpr) for x in outputs), outputs
-        self.outputs = list(outputs)
+        self.outputs = [*outputs]
         self.op = outputs[0].op
 
     @property
@@ -1097,7 +1097,7 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = output_nodes[0]
         else:
             assert output_nodes[0]
-            nodes = list(output_nodes[0].graph.nodes)
+            nodes = [*output_nodes[0].graph.nodes]
             indices = [
                 (nodes.index(n), n)
                 for n in output_nodes
@@ -1200,7 +1200,7 @@ class ReplacementPatternEntry(PatternEntry):
                 #     b = w
                 #     c = z
                 #     ...
-                old_uses = list(old.users.keys())
+                old_uses = [*old.users.keys()]
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
@@ -1315,7 +1315,7 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
-        argnames = list(argnames_static)
+        argnames = [*argnames_static]
         for name in argnames:
             if name not in match.kwargs:
                 raise RuntimeError(
@@ -1323,11 +1323,11 @@ def register_replacement(
                     f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
                 )
 
-        args = list(
-            torch.fx.map_arg(
+        args = [
+            *torch.fx.map_arg(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
-        )
+        ]
 
         sym_args: list[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
@@ -2069,7 +2069,7 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
     # Nodes are in exactly one of these three collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
-    pending = list(reversed(graph.nodes))
+    pending = [*reversed(graph.nodes)]
 
     # - Nodes in `ready` have been processed and are already in the correct
     #   order.

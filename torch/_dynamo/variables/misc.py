@@ -681,7 +681,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )
         if name == "saved_tensors" and self.saved_tensors is not None:
-            return variables.TupleVariable(list(self.saved_tensors.tensors))
+            return variables.TupleVariable([*self.saved_tensors.tensors])
         if name == "needs_input_grad":
             if self.needs_input_grad is not None:
                 return variables.ConstantVariable.create(self.needs_input_grad)
@@ -1215,7 +1215,7 @@ class StringFormatVariable(VariableTracker):
                     **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
                 )
             )
-        return cls(format_string, list(sym_args), dict(sym_kwargs))
+        return cls(format_string, [*sym_args], dict(sym_kwargs))
 
     def __init__(self, format_string, sym_args, sym_kwargs, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1274,7 +1274,7 @@ class DebuggingVariable(VariableTracker):
                 f"with inputs {args} {kwargs} is not yet implemented."
             )
 
-        tx.debug_locals.append((self, list(args)))
+        tx.debug_locals.append((self, [*args]))
 
     def reconstruct(self, codegen):
         return self.source.reconstruct(codegen)

@@ -266,10 +266,7 @@ class SubgraphMatcher:
         # Flatten all args/kwargs into 1 list of args
         pn_args, gn_args = None, None
         if (
-            (
-                len(pn.args) != len(gn.args)
-                or list(pn.kwargs.keys()) != list(gn.kwargs.keys())
-            )
+            (len(pn.args) != len(gn.args) or [*pn.kwargs.keys()] != [*gn.kwargs.keys()])
             and pn.op == "call_function"
             and isinstance(pn.target, torch._ops.OpOverload)
         ):
@@ -289,13 +286,13 @@ class SubgraphMatcher:
             pn_args = get_all_arguments(pn.args, pn.kwargs)
             gn_args = get_all_arguments(gn.args, gn.kwargs)
 
-        elif len(pn.args) == len(gn.args) and list(pn.kwargs.keys()) == list(
-            gn.kwargs.keys()
-        ):
-            pn_args = list(pn.args)
-            gn_args = list(gn.args)
-            pn_args.extend(list(pn.kwargs.values()))
-            gn_args.extend(list(gn.kwargs.values()))
+        elif len(pn.args) == len(gn.args) and [*pn.kwargs.keys()] == [
+            *gn.kwargs.keys()
+        ]:
+            pn_args = [*pn.args]
+            gn_args = [*gn.args]
+            pn_args.extend([*pn.kwargs.values()])
+            gn_args.extend([*gn.kwargs.values()])
         else:
             match_found = False
 
@@ -357,7 +354,7 @@ class SubgraphMatcher:
             for node in graph.nodes:
                 if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
-        match_candidates_list = list(match_candidates.items())
+        match_candidates_list = [*match_candidates.items()]
 
         logger.info("Initial match_candidates_list: %s\n", match_candidates_list)
 

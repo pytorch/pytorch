@@ -611,7 +611,7 @@ def partialize_and_update_signature(func, **kwargs):
     new_parameters = {
         key: value for key, value in parameters.items() if key not in kwargs
     }
-    new_sig = inspect.Signature(parameters=list(new_parameters.values()))
+    new_sig = inspect.Signature(parameters=[*new_parameters.values()])
 
     partial_func = functools.partial(func, **kwargs)
 

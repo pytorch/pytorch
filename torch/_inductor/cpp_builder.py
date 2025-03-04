@@ -1159,7 +1159,7 @@ def _set_gpu_runtime_env() -> None:
 
 @functools.lru_cache(8)
 def _find_libcudart_static(path: str) -> Optional[Path]:
-    lib_dirs = list(Path(path).rglob("libcudart_static.a"))
+    lib_dirs = [*Path(path).rglob("libcudart_static.a")]
     if lib_dirs:
         return lib_dirs[0].resolve().parent
     log_msg = f'"libcudart_static.a" not found under {path}'

@@ -344,7 +344,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         )
 
             assert all(
-                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+                isinstance(v, torch.Tensor) for v in [*V.graph.constants.values()]
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:

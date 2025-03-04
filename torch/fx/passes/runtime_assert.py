@@ -269,7 +269,7 @@ def insert_deferred_runtime_asserts(
                     )
                 added_asserts.add(ra.expr)
 
-    nodes = list(graph.nodes)
+    nodes = [*graph.nodes]
     for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
         # with size we have to make sure we insert the nodes after all

@@ -319,7 +319,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    for v in list(tys.values()):
+    for v in [*tys.values()]:
         tys[v] = v
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
@@ -658,7 +658,7 @@ def dominated_nodes(
     skip_filter: Optional[Callable[[Any], bool]] = None,
 ) -> OrderedSet[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
-    initial_queue = list(initial_queue)
+    initial_queue = [*initial_queue]
     dominated_set = OrderedSet(initial_queue)
 
     while initial_queue:
@@ -926,7 +926,7 @@ def argsort(seq: Sequence[Any]) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+    return [*reversed(sorted(a_r, key=getter, reverse=True))]  # noqa: C413
 
 
 def argsort_sym(
@@ -2115,7 +2115,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
                 static_arg_idxs.append(arg_count)
             arg_count += 1
 
-    assert static_arg_idxs == list(range(len(static_arg_idxs)))
+    assert static_arg_idxs == [*range(len(static_arg_idxs))]
     return len(static_arg_idxs)
 
 

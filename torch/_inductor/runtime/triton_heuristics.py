@@ -2085,7 +2085,7 @@ def split_scan(
     # Fixup configs to enforce the minimum Rn_BLOCK size
     min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
     for cfg in configs:
-        for var in list(cfg.kwargs.keys()):
+        for var in [*cfg.kwargs.keys()]:
             if var.startswith("R") and cfg.kwargs[var] < min_rblock:
                 cfg.kwargs[var] = min_rblock
 
@@ -2260,7 +2260,7 @@ def grid_combo_kernels(
     """min_blocks is the minimal size of the grid x dimension"""
     if not is_sequential:
         # round robin dispatch
-        numels_agg = list(numels)
+        numels_agg = [*numels]
         for i in range(len(numels_agg)):
             if isinstance(numels_agg[i], (list, tuple)):
                 numels_agg[i] = max(max(numels_agg[i]), 0)  # noqa: PLW3301
@@ -2279,7 +2279,7 @@ def grid_combo_kernels(
             ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
     else:
         # sequential dispatch
-        seq_numels = list(numels)
+        seq_numels = [*numels]
         # x numels are not used here, just a place holder
         seq_numels[-1] = 1024
         for i in range(len(seq_numels) - 1):
@@ -2297,12 +2297,12 @@ def grid_combo_kernels(
 
     def grid_fn(meta):
         assert min_blocks is not None, "min_blocks must be a number"
-        cuda_grid = list(kernel_grid_fn(meta))
+        cuda_grid = [*kernel_grid_fn(meta)]
         cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
         return tuple(cuda_grid)
 
     def seq_grid_fn(meta):
-        cuda_grid = list(kernel_grid_fn(meta))
+        cuda_grid = [*kernel_grid_fn(meta)]
         # x <= 0 means this kernel's x grid is not tunable (x_no_dim is true)
         x_grid = sum(
             [

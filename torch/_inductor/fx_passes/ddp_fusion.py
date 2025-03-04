@@ -351,14 +351,14 @@ def _scatter_fused_allreduce_waits(
         # `incorrect_order_nodes` records these nodes.
 
         orig_wait = comm_block.wait_nodes[0]
-        nodes = collections.deque(list(orig_wait.users))
+        nodes = collections.deque([*orig_wait.users])
         while nodes:
             user_node = nodes.popleft()
             if not isinstance(user_node, fx.Node):
                 continue
             if node_indices[user_node] < last_wait_node_idx:
                 incorrect_order_nodes.append(user_node)
-                nodes.extend(list(user_node.users))
+                nodes.extend([*user_node.users])
 
         orig_wait.replace_all_uses_with(fused_output)
 

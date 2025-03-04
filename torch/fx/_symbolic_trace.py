@@ -295,7 +295,7 @@ class Tracer(TracerBase):
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
-        self._autowrap_search: list[ModuleType] = list(autowrap_modules)
+        self._autowrap_search: list[ModuleType] = [*autowrap_modules]
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[dict[torch.nn.Module, str]] = None
@@ -614,7 +614,7 @@ class Tracer(TracerBase):
         fn_for_analysis = inspect.unwrap(root_fn)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
-        orig_args = list(co.co_varnames)
+        orig_args = [*co.co_varnames]
         names_iter = iter(co.co_varnames)
         args: list[Any] = []
         skip_arg_idx = 0
@@ -686,7 +686,7 @@ class Tracer(TracerBase):
             )
 
             def flatten_fn(*args):
-                tree_args = pytree.tree_unflatten(list(args), in_spec)
+                tree_args = pytree.tree_unflatten([*args], in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
                 assert isinstance(self.graph._codegen, _PyTreeCodeGen)

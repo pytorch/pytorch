@@ -135,7 +135,7 @@ def promote_args(new_args):
         )
         and promote_type
     ):
-        new_args = list(map(promote_fn, new_args))
+        new_args = [*map(promote_fn, new_args)]
     return new_args
 
 
@@ -744,7 +744,7 @@ def _get_dtype_from_loopbodies(loop_bodies):
     dtypes = OrderedSet[torch.dtype]()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
-            body.graph for body in list(loop_body.subblocks.values())
+            body.graph for body in [*loop_body.subblocks.values()]
         ]
         for graph in graphs:
             for node in graph.nodes:

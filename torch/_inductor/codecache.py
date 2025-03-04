@@ -1013,7 +1013,7 @@ class FxGraphCache:
         # their guards to determine whether there's a hit.
         graph = None
         pickled_content = None
-        cache_info: dict[str, Any] = dict()
+        cache_info: dict[str, Any] = {}
 
         for candidate, pickled_content in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1832,7 +1832,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
 
     # convert any kwarg-only arguments to kwargs
-    kwargs = dict()
+    kwargs = {}
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2651,7 +2651,7 @@ class PyCodeCache:
         mod = _reload_python_module(key, path)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        cls.linemaps[path] = [*zip(*linemap)]
 
         if attrs is not None:
             for k, v in attrs.items():

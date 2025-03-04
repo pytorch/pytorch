@@ -216,10 +216,10 @@ class NNModuleToString:
                 assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
                 tensor_str = repr(buffer)
             elif torch.is_floating_point(buffer):
-                tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+                tensor_str = f"torch.randn({[*buffer.shape]}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
-                    f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                    f"torch.randint(1, size={[*buffer.shape]}, dtype={buffer.dtype})"
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
@@ -233,7 +233,7 @@ class NNModuleToString:
             maybe_device = ""
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
+            tensor_str = f"torch.nn.Parameter(torch.randn({[*param.shape]}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.

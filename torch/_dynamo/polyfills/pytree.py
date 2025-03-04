@@ -100,7 +100,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
     ) -> list[Any]:
-        return list(tree_iter(tree, is_leaf=is_leaf))
+        return [*tree_iter(tree, is_leaf=is_leaf)]
 
     __all__ += ["tree_leaves"]
 
@@ -193,13 +193,13 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             return self.num_nodes == 1 and self.num_leaves == 1
 
         def children(self) -> list[PyTreeSpec]:
-            return list(self._children)
+            return [*self._children]
 
         def child(self, index: int) -> PyTreeSpec:
             return self._children[index]
 
         def entries(self) -> list[Any]:
-            return list(self._entries)
+            return [*self._entries]
 
         def entry(self, index: int) -> Any:
             return self._entries[index]
@@ -295,7 +295,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
         def unflatten(self, leaves: Iterable[Any]) -> PyTree:
             if not isinstance(leaves, (list, tuple)):
-                leaves = list(leaves)
+                leaves = [*leaves]
             if len(leaves) != self.num_leaves:
                 raise ValueError(
                     f"treespec.unflatten(leaves): `leaves` has length {len(leaves)} "

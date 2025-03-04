@@ -1477,14 +1477,14 @@ class BuiltinVariable(VariableTracker):
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
-                list(obj.unpack_var_sequence(tx)),
+                [*obj.unpack_var_sequence(tx)],
                 mutation_type=ValueMutationNew(),
             )
 
     def _call_iter_tuple_generator(self, tx, obj, *args, **kwargs):
         cls = variables.BaseListVariable.cls_for(self.fn)
         return cls(
-            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
+            [*obj.force_unpack_var_sequence(tx)],  # exhaust generator
             mutation_type=ValueMutationNew(),
         )
 
@@ -1492,7 +1492,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
-                list(obj.force_unpack_var_sequence(tx)),
+                [*obj.force_unpack_var_sequence(tx)],
                 mutation_type=ValueMutationNew(),
             )
         elif isinstance(obj, variables.LocalGeneratorObjectVariable):
@@ -2048,7 +2048,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
+            items = [*reversed(obj.unpack_var_sequence(tx))]
             return variables.TupleVariable(items)
 
     def call_sorted(
@@ -2188,7 +2188,7 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items & b.set_items))
+            return SetVariable([*(a.set_items & b.set_items)])
         # None no-ops this handler and lets the driving function proceed
 
     call_iand = call_and_
@@ -2208,7 +2208,7 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items | b.set_items))
+            return SetVariable([*(a.set_items | b.set_items)])
         # None no-ops this handler and lets the driving function proceed
         return None
 

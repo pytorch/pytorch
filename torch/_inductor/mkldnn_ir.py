@@ -71,7 +71,7 @@ def _prepare_convolution_fusion_create(
                 + output_padding[d - 2]
             )
             input_size.append(input_size_d)
-        return list(map(int, input_size))
+        return [*map(int, input_size)]
 
     # The size of prepacked_weight is the prepacked weight size of deconv:
     #   Groups > 1:  [g*o, i/g, ...]
@@ -146,7 +146,7 @@ def _prepare_convolution_fusion_create(
             )
             output_size = output.size()
 
-        req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
+        req_stride_order = [0] + [*reversed(range(1, len(stride) + 1))]
         req_stride_order = [len(req_stride_order)] + req_stride_order
 
     x = cls.require_stride_order(x, req_stride_order)
@@ -224,8 +224,8 @@ def _prepare_linear_fusion_create(
     # https://github.com/pytorch/pytorch/blob/4979f9c0d72490970e2019bb1d2284f83d93f76b/
     # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp#L291
     _, oc = weight.get_size()
-    output_size = list(m) + [oc]
-    req_stride_order = list(reversed(range(len(x.get_size()))))
+    output_size = [*m] + [oc]
+    req_stride_order = [*reversed(range(len(x.get_size())))]
 
     x = cls.require_stride_order(x, req_stride_order)
     assert get_device_type(x) == get_device_type(weight)
@@ -791,7 +791,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
         oc, _ = orig_w.get_size()
-        output_size = list(m) + [oc]
+        output_size = [*m] + [oc]
         output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
@@ -836,7 +836,7 @@ class LinearUnary(ExternKernelAlloc):
 
         *m, _ic = x.get_size()
         oc, _ic = w.get_size()
-        output_size = list(m) + [oc]
+        output_size = [*m] + [oc]
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -890,7 +890,7 @@ class LinearBinary(ExternKernelAlloc):
 
         *m, _ic = x.get_size()
         oc, _ic = w.get_size()
-        output_size = list(m) + [oc]
+        output_size = [*m] + [oc]
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:

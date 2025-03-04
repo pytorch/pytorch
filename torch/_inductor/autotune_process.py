@@ -344,7 +344,7 @@ class TuningProcessPool:
             assert len(devices) <= count
             return devices
 
-        return list(range(count))
+        return [*range(count)]
 
     def terminate(self) -> None:
         """
@@ -667,7 +667,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
-        extra_args = list(self.extra_args)
+        extra_args = [*self.extra_args]
         run_method.__self__.with_bandwidth_info = False
 
         # Newer version of triton add warmup argument to JITFunction.run.
@@ -794,8 +794,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [
-            c_void_p(tensor.data_ptr())
-            for tensor in list(input_tensors) + [output_tensor]
+            c_void_p(tensor.data_ptr()) for tensor in [*input_tensors] + [output_tensor]
         ]
         autotuning_log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
@@ -907,7 +906,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     ) -> Callable[[], None]:
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
         self.DLL = CppCodeCache.load(self.source_code, device_type="cpu")
-        args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
+        args = [tensor.data_ptr() for tensor in [*input_tensors] + [output_tensor]]
         autotuning_log.debug(
             "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.kernel_name,
@@ -919,7 +918,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         # Assume only size with type ctypes.c_ulonglong in extra_args
         assert all(isinstance(arg, ctypes.c_ulonglong) for arg in self.extra_args)
         run_method.argtypes = [ctypes.c_ulonglong] * (
-            len(args) + len(list(self.extra_args))
+            len(args) + len([*self.extra_args])
         )
 
         # Generate partial function.

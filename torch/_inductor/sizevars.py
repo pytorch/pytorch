@@ -232,7 +232,7 @@ class SizeVarAllocator:
             2) fuse contiguous dimensions into a single loop
             If channel_last = True, we will prevent the last dim fused with other dims
         """
-        sizes = list(map(self.simplify, sizes))
+        sizes = [*map(self.simplify, sizes)]
 
         strides = [
             # index_formulas may contain boolean expressions (e.g. s0 < 10),
@@ -286,7 +286,7 @@ class SizeVarAllocator:
                     sizes[j] = None
 
         def reindex(index):
-            it = list(reversed(index))
+            it = [*reversed(index)]
             new_index = []
             for size in sizes:
                 if size is None:
@@ -680,7 +680,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
         strides = tuple(map(abs, self.stride_hints(index, vars)))
-        order = list(range(len(strides)))
+        order = [*range(len(strides))]
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 

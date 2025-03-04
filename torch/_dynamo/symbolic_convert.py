@@ -2413,7 +2413,7 @@ class InstructionTranslatorBase(
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
         if seq.has_force_unpack_var_sequence(self):
-            vals = list(seq.force_unpack_var_sequence(self))
+            vals = [*seq.force_unpack_var_sequence(self)]
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2963,7 +2963,7 @@ class InstructionTranslatorBase(
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
+                [self.frame_summary()] + [*reversed(additional_stack_frames)]
             )
         )
 

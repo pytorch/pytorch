@@ -527,7 +527,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
             assert all(
-                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+                isinstance(v, torch.Tensor) for v in [*V.graph.constants.values()]
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
@@ -988,7 +988,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
             # For cpp wrapper, we need to pass this python value to the inductor_entry_impl function explicitly.
             assert all(
-                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+                isinstance(v, torch.Tensor) for v in [*V.graph.constants.values()]
             ), "Expect all constants to be Tensor"
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
             wrapper_body += f"""
@@ -1747,7 +1747,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cond_outer_inputs.extend(outer_additional_inputs)
 
         cond_outer_outputs = [cond_result_name]
-        body_outer_inputs = list(cond_outer_inputs)
+        body_outer_inputs = [*cond_outer_inputs]
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
         self.writeline("while (1) {")

@@ -332,7 +332,7 @@ def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     strides: list[Int] = [1]
     for dim in reversed(shape[:-1]):
         strides.append(dim * strides[-1])  # type: ignore[operator]
-    return list(reversed(strides))
+    return [*reversed(strides)]
 
 
 def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
@@ -745,7 +745,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
             else:
                 # Mul._from_args require a canonical list of args
                 # so we remove the first arg (x.args[0] / factor) if it was 1
-                args = list(x.args[1:])
+                args = [*x.args[1:]]
             return _sympy_from_args(sympy.Mul, args, is_commutative=x.is_commutative)
         else:
             raise AssertionError(f"illegal arg to div_by_factor: {x}")
@@ -2801,7 +2801,7 @@ class DimConstraints:
         # we want instead:
         # {"_dx": {"min": 1, "max": 4}, "dx": 3*_dx+1, "dy": 3*_dx+2, "dz": 3*_dx+3}
         introduced_roots: dict[str, str] = {}  # map new root -> old root
-        for k, c in list(results.items()):
+        for k, c in [*results.items()]:
             if "eq" in c and isinstance(c["eq"], sympy.Expr):  # derived dim
                 root = next(iter(c["eq"].free_symbols))
                 if str(root) not in name_to_dim:
@@ -2822,7 +2822,7 @@ class DimConstraints:
         # alter derivations that depend on old root, to unify to new root
         # e.g. dx=3*_dx+1, dy=dx+1 -> dy=3*_dx+2
         for old_root in introduced_roots.values():
-            for k, c in list(results.items()):
+            for k, c in [*results.items()]:
                 if (
                     "eq" in c
                     and isinstance(c["eq"], sympy.Expr)
@@ -2900,7 +2900,7 @@ class DimConstraints:
         # we only want to suggest fixes for the root, to avoid derived names.
         # also, remove anything in modified_roots, since we either add new modified values after this,
         # or have decided they are unchanged.
-        for k in list(results.keys()):
+        for k in [*results.keys()]:
             if k not in name_to_dim:
                 continue
             if self._is_derived_dim(name_to_dim[k]) or k in modified_roots:
@@ -6241,7 +6241,7 @@ class ShapeEnv:
         if isinstance(expr, sympy.Ne):
             return
 
-        free = list(expr.free_symbols)
+        free = [*expr.free_symbols]
 
         assert (
             len(free) > 0
@@ -6490,7 +6490,7 @@ class ShapeEnv:
             return _FrameLocalResult()
 
         # find bytecode instructions relevant to the frame
-        instructions = list(dis.Bytecode(frame.f_code))
+        instructions = [*dis.Bytecode(frame.f_code)]
         co_lines, offset = inspect.getsourcelines(frame.f_code)
         start, end, cur = None, None, None
         for i, instr in enumerate(instructions):

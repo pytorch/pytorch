@@ -130,9 +130,7 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), (
-        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
-    )
+    ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -177,9 +175,9 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert kwargs is None or len(kwargs) == 0, (
-            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
-        )
+        assert (
+            kwargs is None or len(kwargs) == 0
+        ), "when checking for accuracy, the inputs must have been flattened and kwargs is None"
 
     from .package import package_aoti
 
@@ -345,7 +343,7 @@ def list_options() -> list[str]:
 
     current_config: dict[str, Any] = config.get_config_copy()
 
-    return list(current_config.keys())
+    return [*current_config.keys()]
 
 
 def cudagraph_mark_step_begin():

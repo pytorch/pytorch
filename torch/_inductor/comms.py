@@ -343,7 +343,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     is actually a per-unsharded-param decision, since for each unsharded param, we look at its resize sequence pattern
     (in `check_resize_pattern()`) to determine if its set of resize and copy nodes can be removed.
     """
-    node_list = list(graph.nodes)
+    node_list = [*graph.nodes]
 
     # Find all graph inputs and their resize counts
     graph_input_to_resized_to_full_node_idxes = defaultdict(list)
@@ -566,7 +566,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     def remove_unused_getitem(g):
         # Remove `getitem_X = all_gather_copy_in[1]` which is never used.
-        node_list = list(g.nodes)
+        node_list = [*g.nodes]
         for n in node_list:
             if (
                 n.target == operator.getitem

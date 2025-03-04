@@ -446,7 +446,7 @@ class Node(_NodeBase):
             List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
             ``Node``, in that order.
         """
-        return list(self._input_nodes.keys())
+        return [*self._input_nodes.keys()]
 
     @compatibility(is_backward_compatible=True)
     def update_arg(self, idx: int, arg: Argument) -> None:
@@ -459,7 +459,7 @@ class Node(_NodeBase):
             idx (int): The index into ``self.args`` of the element to update
             arg (Argument): The new argument value to write into ``args``
         """
-        args = list(self.args)
+        args = [*self.args]
         args[idx] = arg
         self.args = tuple(args)
 
@@ -648,7 +648,7 @@ class Node(_NodeBase):
             )
             for k, v in self.meta.items():
                 replace_with.meta[k] = v
-        to_process = list(self.users)
+        to_process = [*self.users]
         skipped = []
         m = self.graph.owning_module
         for use_node in to_process:

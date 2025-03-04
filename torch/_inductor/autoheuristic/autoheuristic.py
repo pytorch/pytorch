@@ -240,7 +240,7 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         self.choicestr2choice: dict[str, ChoiceCaller] = {}
         for choice in choices:
             self.choicestr2choice[choice.autoheuristic_id()] = choice
-        choices_str = list(self.choicestr2choice.keys())
+        choices_str = [*self.choicestr2choice.keys()]
 
         def fallback_str() -> str:
             fallback_choice = fallback()

@@ -697,7 +697,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             self.range_trees = range_trees
             self.numels = {k: V.graph.sizevars.simplify(v) for k, v in groups.items()}
-            indices = list(map(OpOverrides.paren, indices))
+            indices = [*map(OpOverrides.paren, indices)]
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
 
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
@@ -858,7 +858,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
-            indices = list(map(OpOverrides.paren, indices))
+            indices = [*map(OpOverrides.paren, indices)]
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
@@ -932,7 +932,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(name, str)
         assert isinstance(mask, str)
         stride = self.named_input_nodes[name].get_stride()
-        indices = list(map(OpOverrides.paren, indices))
+        indices = [*map(OpOverrides.paren, indices)]
         assert len(indices) == len(stride)
         index = " + ".join(
             [f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)]
@@ -2002,7 +2002,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
                 for i, x in enumerate(input_nodes)
             }
-            example_inputs = list(unique_example_inputs.values())
+            example_inputs = [*unique_example_inputs.values()]
             example_inputs_extern = [
                 (
                     unique_example_inputs[input_node.get_name()]

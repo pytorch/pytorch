@@ -95,7 +95,7 @@ def ambiguous(a, b):
 
 def ambiguities(signatures):
     """All signature pairs such that A is ambiguous with B"""
-    signatures = list(map(tuple, signatures))
+    signatures = [*map(tuple, signatures)]
     return {
         (a, b)
         for a in signatures
@@ -131,7 +131,7 @@ def ordering(signatures):
     """A sane ordering of signatures to check, first to last
     Topological sort of edges as given by ``edge`` and ``supercedes``
     """
-    signatures = list(map(tuple, signatures))
+    signatures = [*map(tuple, signatures)]
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
     edges = groupby(operator.itemgetter(0), edges)
     for s in signatures:

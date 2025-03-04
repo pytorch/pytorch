@@ -169,7 +169,7 @@ class SchedulerBuffer:
                 result[id(use.node)] = use.merge(result[id(use.node)])
             else:
                 result[id(use.node)] = use
-        self.users = list(result.values())
+        self.users = [*result.values()]
 
     def get_aliases(self) -> Sequence[str]:
         assert self.node is not None
@@ -1320,7 +1320,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             )
         else:
             assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
-        nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
+        nodes = [*itertools.chain(node1.get_nodes(), node2.get_nodes())]
         return cls(node1.scheduler, nodes)
 
     def reorder_loops_by_dep_pair(
@@ -1788,12 +1788,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_subkernel_nodes(self) -> list[BaseSchedulerNode]:
         """Returns a list of nodes which comprise the combo kernel.
         These nodes may be vertically fused."""
-        return list(self.snodes)
+        return [*self.snodes]
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         """Returns all nodes contained in this kernel, unpacking fused nodes
         into their constituent scheduler nodes."""
-        return list(itertools.chain.from_iterable(x.get_nodes() for x in self.snodes))
+        return [*itertools.chain.from_iterable(x.get_nodes() for x in self.snodes)]
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_first_name()
@@ -1910,7 +1910,7 @@ def pick_loop_order(
         # otherwise contiguous
         return cmp(b, a)
 
-    order = list(reversed(range(len(stride_lengths[0]))))
+    order = [*reversed(range(len(stride_lengths[0])))]
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
         stride_lengths = [stride_lengths[pi] for pi in priority_idx]
@@ -2155,7 +2155,7 @@ class Scheduler:
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
-        ] + list(fe_nodes)
+        ] + [*fe_nodes]
 
     def compute_dependencies(self) -> None:
         """
@@ -2402,7 +2402,7 @@ class Scheduler:
                         self.name_to_buf[read.name].users = [
                             u for u in users if u.node.get_name() != node.get_name()
                         ]
-        self.nodes = list(reversed(updated_nodes))
+        self.nodes = [*reversed(updated_nodes)]
 
         # Prune any WeakDeps no longer needed
         for node in self.nodes:
@@ -2415,7 +2415,7 @@ class Scheduler:
         Ensure nodes is in topologically sorted order
         """
         seen = OrderedSet[BaseSchedulerNode]()
-        name_to_node: dict[str, BaseSchedulerNode] = dict()
+        name_to_node: dict[str, BaseSchedulerNode] = {}
         result: list[BaseSchedulerNode] = []
 
         def visit(n: BaseSchedulerNode) -> None:
@@ -2453,7 +2453,7 @@ class Scheduler:
                 f"get_unmet_dep_nodes is not implemented for {type(snode)}."
             )
         unmet_dep_ops = (self.name_to_buf[dep].defining_op_name() for dep in unmet_deps)
-        return list(OrderedSet([self.name_to_fused_node[n] for n in unmet_dep_ops]))
+        return [*OrderedSet([self.name_to_fused_node[n] for n in unmet_dep_ops])]
 
     def _topological_sort_nodes(self) -> list[list[BaseSchedulerNode]]:
         """
@@ -2730,7 +2730,7 @@ class Scheduler:
             return True
 
         node_list_2 = node2.get_nodes()
-        node_list_fused = list(itertools.chain(node_list_1, node_list_2))
+        node_list_fused = [*itertools.chain(node_list_1, node_list_2)]
 
         # We can not accurately benchmark kernel using atomic_add
         # due to how we generate random integer inputs.
@@ -3956,7 +3956,7 @@ class Scheduler:
             if n.node is not None
             for e in n.node.get_origins()
         }
-        origins = list(origins.keys())
+        origins = [*origins.keys()]
         if origins:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
@@ -4220,7 +4220,7 @@ class Scheduler:
 
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
-                    list(node.get_nodes())
+                    [*node.get_nodes()]
                 )
                 self.get_backend(device).codegen_template(
                     template_node, epilogue, prologue

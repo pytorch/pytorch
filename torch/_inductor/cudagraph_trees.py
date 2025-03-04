@@ -620,7 +620,7 @@ class CUDAWarmupNode:
         non_cudagraph_inps_storages = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
-            refs = list(self.path_live_weakrefs())
+            refs = [*self.path_live_weakrefs()]
             check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
         with (
@@ -665,7 +665,7 @@ class CUDAWarmupNode:
         )
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
-            out_refs = list(self.path_live_weakrefs())
+            out_refs = [*self.path_live_weakrefs()]
             check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
 
         return out
@@ -690,7 +690,7 @@ class CUDAWarmupNode:
                     yield output  # type: ignore[misc]
 
     def all_outputs_are_dead(self) -> bool:
-        return not list(self.path_live_weakrefs())
+        return not [*self.path_live_weakrefs()]
 
     def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor) -> bool:
         for storage_weak_ref in self.path_live_weakrefs():
@@ -839,10 +839,12 @@ class CUDAGraphNode:
         # and also aliases an output of the current CUDAGraphNode
         self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
-        self.static_input_idxs: list[int] = list(
-            OrderedSet(wrapped_function.static_input_idxs)
-            | OrderedSet(self.cudagraph_managed_idxs)
-        )
+        self.static_input_idxs: list[int] = [
+            *(
+                OrderedSet(wrapped_function.static_input_idxs)
+                | OrderedSet(self.cudagraph_managed_idxs)
+            )
+        ]
 
         self.non_static_input_idx: LevelList[int] = [
             i for i in range(len(inputs)) if i not in self.static_input_idxs
@@ -1194,9 +1196,7 @@ class CUDAGraphNode:
 
         if config.triton.slow_path_cudagraph_asserts:
             # need to use parent live weakrefs because live_indices isnt set yet
-            memory = (
-                [] if self.parent is None else list(self.parent.path_live_weakrefs())
-            )
+            memory = [] if self.parent is None else [*self.parent.path_live_weakrefs()]
             memory += [
                 StorageWeakRefWrapper(elem)
                 for i, elem in enumerate(inputs)
@@ -1330,13 +1330,13 @@ class CUDAGraphNode:
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
-                self.device, self.cuda_graphs_pool, list(self.path_live_weakrefs())
+                self.device, self.cuda_graphs_pool, [*self.path_live_weakrefs()]
             )
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex) -> None:
         "Remove a graph output from the unaliased, cached tensors in an ancestor node"
         depth, output_index = index
-        node = list(self._path_from_root)[depth]
+        node = [*self._path_from_root][depth]
         node.unaliased_in_all_paths[output_index] = False
         x = self.path_weakrefs[depth][output_index]
         assert x is not None
@@ -1406,7 +1406,7 @@ class CUDAGraphNode:
     @property
     def _path_from_root(self) -> Generator[CUDAGraphNode, None, None]:
         "Returns all nodes in the path starting at the root and ending at self"
-        nodes = reversed(list(self._path_to_root))
+        nodes = reversed([*self._path_to_root])
         yield from nodes
 
     def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor) -> bool:
@@ -1486,7 +1486,7 @@ class CUDAGraphNode:
         for i, node in enumerate(self._path_from_root):
             assert self.path_weakrefs[i] is node.outputs_weakrefs
 
-        nodes = list(self._path_from_root)
+        nodes = [*self._path_from_root]
 
         live_blocks = get_block_addrs(self.cuda_graphs_pool)
 
@@ -1536,7 +1536,7 @@ class CUDAGraphNode:
             self.recorded_liveness_after_graph, curr_liveness
         )
 
-        path = list(self._path_from_root)
+        path = [*self._path_from_root]
         ptrs_to_deallocate = []
         for depth, output_index in _get_different_indices:
             ptrs_to_deallocate.append(
@@ -2251,7 +2251,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
             model,
-            list(static_input_idxs),
+            [*static_input_idxs],
             id,
             tuple([t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda]),
             placeholders,
@@ -2490,7 +2490,7 @@ class CUDAGraphTreeManager:
         # remove cached tensors, otherwise they would prevent memory from being
         # reclaimed in subsequent recordings
         self.current_node.remove_path_cached_tensors()
-        live_storages_wrappers = list(self.current_node.path_live_weakrefs())
+        live_storages_wrappers = [*self.current_node.path_live_weakrefs()]
 
         # path_live_weakrefs guarantees that t() will not be None
         live_storages_weak_refs: list[int] = [t() for t in live_storages_wrappers]  # type: ignore[misc]

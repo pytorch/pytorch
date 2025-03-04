@@ -537,7 +537,7 @@ def _args_kwargs_to_normalized_args_kwargs(
         # Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None
         # `from` is Python keyword and as such functions with that signature should have
         # positional-only args, but at the same time they could be dispatched as kwargs
-        if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
+        if [*sig.parameters.keys()] != ["input", "from", "to", "generator"]:
             return None
 
     bound_args = sig.bind(*args, **kwargs)

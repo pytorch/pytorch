@@ -522,7 +522,7 @@ def generate_calc_product(constraint, counter):
     all_constraints = []
 
     for p in all_possibilities:
-        p = list(p)
+        p = [*p]
         # this tells us there is a dynamic variable
         contains_dyn = not all(constraint.op == op_neq for constraint in p)
         if contains_dyn:
@@ -883,8 +883,8 @@ def generate_all_int_dyn_dim_possibilities(my_list: list[DVar]):
         BinConstraintD(my_list[i], Dyn, op_neq) for i in range(len(my_list))
     ]
 
-    d_possibilities = [list(i) for i in zip(eq_possibilities, neq_possibilities)]
-    all_possibilities = list(itertools.product(*d_possibilities))
+    d_possibilities = [[*i] for i in zip(eq_possibilities, neq_possibilities)]
+    all_possibilities = [*itertools.product(*d_possibilities)]
     return all_possibilities
 
 
@@ -936,7 +936,7 @@ def gen_all_reshape_possibilities(list_of_dims, target):
     for p in all_possibilities:
         to_multiply = []
 
-        p = list(p)
+        p = [*p]
 
         for constraint in p:
             assert isinstance(constraint, BinConstraintD)
@@ -1288,7 +1288,7 @@ def gen_broadcasting_constraints(
     """
     dims, counter = gen_lists_of_dims(4, i, counter)
     [d1, d2, d3, d4] = dims
-    nat_dims_i = gen_nat_constraints(list(itertools.chain.from_iterable(dims)))
+    nat_dims_i = gen_nat_constraints([*itertools.chain.from_iterable(dims)])
 
     initialize_tensors_constraints = create_equality_constraints_for_broadcasting(
         e1, e2, e11, e12, d1, d2, d3, d4

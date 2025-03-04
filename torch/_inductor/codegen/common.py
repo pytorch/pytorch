@@ -2384,7 +2384,7 @@ class CSEProxy(DefaultHandler):
                 else:
                     return x
 
-            arg_bounds = list(map(arg_to_bound, args))
+            arg_bounds = [*map(arg_to_bound, args)]
             return getattr(self.vr_analysis, name)(*arg_bounds)
         return ValueRanges.unknown()
 

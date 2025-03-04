@@ -595,7 +595,7 @@ def merge_splits(
     first_split = node.args[0].args[0]  # type: ignore[union-attr]
     next_split_index = node.args[0].args[1]  # type: ignore[union-attr]
 
-    new_split_sections = list(first_split_sections)
+    new_split_sections = [*first_split_sections]
     new_split_sections[next_split_index : next_split_index + 1] = next_split_sections  # type: ignore[operator, misc]
 
     first_split_dim = _get_dim(first_split)
@@ -1506,7 +1506,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
     # 'immutable_list' object does not support mutation. Create a new copy of it
-    split_sections = list(split_sections)
+    split_sections = [*split_sections]
     for cat_user in next_users:
         if cat_user.target == torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim")
@@ -1554,7 +1554,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
                 # remove all unused getitem nodes
                 to_remove = [cat_user]
                 # dictionary keys changed during iteration
-                new_split_getitem_nodes = list(new_split_node.users.keys())
+                new_split_getitem_nodes = [*new_split_node.users.keys()]
                 for getitem_node in new_split_getitem_nodes:
                     if getitem_node.args[1] in indices[1:]:
                         to_remove.append(getitem_node)
@@ -1640,7 +1640,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
                 # check the split dim, and construct the slice tuple
                 start_fused_size = calculate_fused_tensor_size(
                     split_node,
-                    list(range(indices[0])),  # type: ignore[arg-type]
+                    [*range(indices[0])],  # type: ignore[arg-type]
                 )
                 end_fused_size = start_fused_size + calculate_fused_tensor_size(
                     split_node,
@@ -1733,8 +1733,8 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
     split_node = match.nodes[0]
     split_input, _, split_dim = _get_split_args_default(split_node)
     # get the getitem nodes from the split node
-    getitem_nodes = list(split_node.users.keys())
-    for cat_node in list(getitem_nodes[0].users.keys()):
+    getitem_nodes = [*split_node.users.keys()]
+    for cat_node in [*getitem_nodes[0].users.keys()]:
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
         # check split node and cat node has same dim, and all getitem nodes have same parent node
@@ -1777,8 +1777,8 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
     node = match.nodes[0]
     node_input = get_arg_value(node, 0, "tensors")
     # get the select nodes from the node
-    select_nodes = list(node_input.users.keys())
-    for cat_node in list(node.users.keys()):
+    select_nodes = [*node_input.users.keys()]
+    for cat_node in [*node.users.keys()]:
         if cat_node.target == torch.ops.aten.cat.default:
             cat_dim = get_arg_value(cat_node, 1, "dim")
             cat_inputs = get_arg_value(cat_node, 0, "tensors")
@@ -1880,7 +1880,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     node = match.nodes[-1]
     graph = match.graph
     # pyre-fixme[6]
-    unsqueeze_nodes = list(node.args[0])  # type: ignore[arg-type]
+    unsqueeze_nodes = [*node.args[0]]  # type: ignore[misc]
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
     if not all(
@@ -2027,7 +2027,7 @@ def reshape_cat_node(
         # construct the permute node args, which has the same shape as the slice node
         # then it has the same dim as the unbind_input, i.e., shape of cat + 1
         with graph.inserting_after(cat_node):
-            permute_list = list(range(len(cat_shape) + 1))
+            permute_list = [*range(len(cat_shape) + 1)]
             permute_list[unbind_dim], permute_list[cat_dim] = (
                 permute_list[cat_dim],
                 permute_list[unbind_dim],
@@ -2065,7 +2065,7 @@ def update_args_from_unbind_getitem(
     unbind_dim = get_arg_value(parents_seen[-1], 1, "dim")  # split or unbind dim
     cat_dim = get_arg_value(node, 1, "dim")  # cat or stack dim
     # case 1: the number of getitems is the same as the split size, elimiate the split
-    size = list(unbind_input.meta["example_value"].shape)[unbind_dim]
+    size = [*unbind_input.meta["example_value"].shape][unbind_dim]
     if size == len(getitem_indices):
         cat_shape = torch.cat(
             [idx_to_getitems[i].meta["example_value"] for i in getitem_indices],
@@ -2376,7 +2376,7 @@ def reshape_cat_node_to_stack(
     if stack_dim != split_or_unbind_dim:
         # case 1: the stack dim is not the same as the split dim
         # we need to reshape the split input before we do the reshape
-        reshape_list = list(stack_shape)
+        reshape_list = [*stack_shape]
         reshape_list[stack_dim], reshape_list[split_or_unbind_dim] = (
             reshape_list[split_or_unbind_dim],
             reshape_list[stack_dim],
@@ -2388,7 +2388,7 @@ def reshape_cat_node_to_stack(
         reshape_node.meta["example_value"] = torch.reshape(
             cat_node.meta["example_value"], tuple(reshape_list)
         )
-        permute_list = list(range(len(stack_shape)))
+        permute_list = [*range(len(stack_shape))]
         permute_list[stack_dim], permute_list[split_or_unbind_dim] = (
             permute_list[split_or_unbind_dim],
             permute_list[stack_dim],
@@ -2428,7 +2428,7 @@ def convert_reshape_cat_arg_to_stack(
     # reshape the cat node to the stack node shape
     cat_shape = cat_node.meta["example_value"].shape
     if stack_dim != split_dim:
-        permute_list = list(range(len(cat_shape)))
+        permute_list = [*range(len(cat_shape))]
         permute_list[stack_dim], permute_list[split_dim] = (
             permute_list[split_dim],
             permute_list[stack_dim],
@@ -2637,12 +2637,12 @@ def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
                         if user.target == torch.reshape
                     ]
                     if len(reshape_user) > 0:
-                        view_shape_list = list(
-                            reshape_user[0]
+                        view_shape_list = [
+                            *reshape_user[0]
                             .meta["example_value"]
                             .unsqueeze(stack_dim)
                             .shape
-                        )
+                        ]
                         view_shape_list[stack_dim] = -1
                         return view_shape_list
     return view_shape_list
@@ -2660,7 +2660,7 @@ def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
 def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
     split_node = next(node for node in match.nodes if node.target == torch.split)
     split_dim = _get_dim(split_node)
-    split_users = list(split_node.users.keys())
+    split_users = [*split_node.users.keys()]
     stack_nodes = [node for node in match.nodes if node.target == torch.stack]
     graph = match.graph
     threshold_to_cat = torch._inductor.config.pre_grad_fusion_options[

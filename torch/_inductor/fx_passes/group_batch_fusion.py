@@ -123,9 +123,9 @@ def register_fusion(name: str, pre_grad=True):
 
 def list_group_batch_fusions(pre_grad=True) -> list[str]:
     if pre_grad:
-        return list(PRE_GRAD_FUSIONS.keys())
+        return [*PRE_GRAD_FUSIONS.keys()]
     else:
-        return list(POST_GRAD_FUSIONS.keys())
+        return [*POST_GRAD_FUSIONS.keys()]
 
 
 def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> Any:
@@ -411,7 +411,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             alpha = node.kwargs.get("alpha", DEFAULT_ALPHA)
             rounding_mode = node.kwargs.get("rounding_mode", None)
             input, other = node.args
-            shape = list(input.meta["val"].shape)  # type: ignore[union-attr]
+            shape = [*input.meta["val"].shape]  # type: ignore[union-attr]
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
                 # only consider the linear case so far
                 # pyre-fixme[16]
@@ -805,9 +805,9 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(eps == group_epss[0] for eps in group_epss), (
-            "all epsilon values must be equal"
-        )
+        assert all(
+            eps == group_epss[0] for eps in group_epss
+        ), "all epsilon values must be equal"
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -1351,7 +1351,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
                 log.debug(
-                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
+                    f"{rule.__class__.__name__}: key = {key}; subset size = {len([*subset])}"  # noqa: G004
                 )
                 log_to_scuba = True
     if log_to_scuba:

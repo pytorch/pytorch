@@ -937,7 +937,7 @@ class DictValuesVariable(DictViewVariable):
 
     @property
     def view_items_vt(self):
-        return list(self.view_items)
+        return [*self.view_items]
 
     def python_type(self):
         return dict_values

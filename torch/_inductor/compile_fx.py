@@ -202,7 +202,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     # like we do for normal inputs on each run, we will re-record a cudagraph if these
     # parameter locations change.
     context = torch._guards.TracingContext.try_get()
-    fixed = list(range(num_fixed))
+    fixed = [*range(num_fixed)]
     if not context or not context.fw_metadata:
         return fixed
 
@@ -290,7 +290,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
+    outputs = [*gm.graph.nodes][-1].args[0]
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -1588,7 +1588,7 @@ def cudagraphify_impl(
     stream.wait_stream(torch.cuda.current_stream())
     # copy static_inputs because it will be cleared in model
     with torch.cuda.stream(stream):
-        model(list(static_inputs))
+        model([*static_inputs])
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
@@ -1596,7 +1596,7 @@ def cudagraphify_impl(
     # record
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
-        static_outputs = model(list(static_inputs))
+        static_outputs = model([*static_inputs])
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
@@ -1743,7 +1743,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = [*range(num_fixed)]
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -2166,7 +2166,7 @@ def compile_fx(
                     return inner_compile(
                         gm,
                         example_inputs,
-                        static_input_idxs=list(range(fixed)),
+                        static_input_idxs=[*range(fixed)],
                         cudagraphs=cudagraphs,
                         is_backward=True,
                         graph_id=graph_id,

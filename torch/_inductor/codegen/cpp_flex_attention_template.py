@@ -719,15 +719,15 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
         self.block_vars = block_vars
-        self.extra_sizevars = list(
-            OrderedSet(
+        self.extra_sizevars = [
+            *OrderedSet(
                 [
                     val
                     for val in self.kernel_input_name_to_buffer.values()
                     if isinstance(val, sympy.Symbol)
                 ]
             )
-        )
+        ]
         self.other_buf_start_idx = 5
         self.score_mod_other_buffers = (
             self.input_nodes[
@@ -850,9 +850,9 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         body = LoopBody(
             fn,
-            (list(var_ranges.keys())),
+            ([*var_ranges.keys()]),
             var_ranges,
-            list(var_ranges.keys()),
+            [*var_ranges.keys()],
             tuple(),
         )
 

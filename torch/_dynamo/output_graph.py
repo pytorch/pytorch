@@ -712,7 +712,7 @@ class OutputGraph:
         return count_calls(self.graph)
 
     def is_empty_graph(self):
-        return len(list(self.graph.nodes)) == 0
+        return len([*self.graph.nodes]) == 0
 
     def get_submodule(self, keys):
         assert keys
@@ -1046,7 +1046,7 @@ class OutputGraph:
 
         self.cleanup_graph()
         tx.prune_dead_locals()
-        stack_values = list(tx.stack)
+        stack_values = [*tx.stack]
 
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
@@ -1139,7 +1139,7 @@ class OutputGraph:
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(
-                    tx, list(reversed(stack_values)), root, output_replacements
+                    tx, [*reversed(stack_values)], root, output_replacements
                 )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
@@ -1242,7 +1242,7 @@ class OutputGraph:
             torch._C._set_grad_enabled(True)
         """
         assert self.should_exit
-        nodes = list(self.graph.nodes)
+        nodes = [*self.graph.nodes]
         for node in nodes:
             node.meta.pop("creation_timestamp", None)
 
@@ -1559,7 +1559,7 @@ class OutputGraph:
         if torch._dynamo.config.use_graph_deduplication:
             return apply_graph_deduplication(self)
         else:
-            return dict()
+            return {}
 
     def install_subgraph(self, name, sub_gm):
         next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
@@ -1576,7 +1576,7 @@ class OutputGraph:
 
     def remove_unused_get_attr_nodes(self) -> None:
         for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):
-            if len(list(node.users)) == 0:
+            if len([*node.users]) == 0:
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
@@ -1642,8 +1642,8 @@ class OutputGraph:
 
         from torch.fx.experimental.symbolic_shapes import is_accessor_node
 
-        for node in reversed(list(self.graph.nodes)):
-            if len(list(node.users)) == 0:
+        for node in reversed([*self.graph.nodes]):
+            if len([*node.users]) == 0:
                 if (
                     node.op == "get_attr"
                     or (node.op == "call_function" and node.target is operator.getitem)
@@ -1757,7 +1757,7 @@ class OutputGraph:
                     example_value.item_memo.node._expr.name
                 )
             ):
-                for u in list(node.users):
+                for u in [*node.users]:
                     u.replace_all_uses_with(guard_scalar(example_value.item_memo))
                     self.remove_node(u)
                 self.remove_node(node)
@@ -2250,7 +2250,7 @@ class SubgraphTracer(fx.Tracer):
                     # This is a nested graph, which needs to be deleted.
                     # If we do not do this, we will raise on attempting to remove this.
                     # As we only get here during restoration cleanup, this is sound.
-                    user_graph_nodes.extend(reversed(list(user.graph.nodes)))
+                    user_graph_nodes.extend(reversed([*user.graph.nodes]))
             for other_graph_node in user_graph_nodes:
                 other_graph_node.graph.erase_node(other_graph_node)
         self.graph.erase_node(node)

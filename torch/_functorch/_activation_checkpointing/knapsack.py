@@ -5,7 +5,7 @@ def greedy_knapsack(
     memory: list[float], runtimes: list[float], max_memory: float
 ) -> tuple[float, list[int], list[int]]:
     n = len(runtimes)
-    items = list(range(n))
+    items = [*range(n)]
 
     # Sort items based on the ratio of runtime to memory in descending order
     items = sorted(items, key=lambda i: runtimes[i] / memory[i], reverse=True)
