@@ -331,18 +331,12 @@ class Backend(str):  # noqa: SLOT000
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        # Allow UCC plugin if Pytorch is not built with native support.
-        # TODO: remove this exception once UCC plugin is fully deprecated.
-        if name != Backend.UCC or (name == Backend.UCC and is_ucc_available()):
-            assert not hasattr(Backend, name.upper()), (
-                f"{name.upper()} c10d backend already exist"
-            )
-        assert name.upper() not in Backend._plugins, (
-            f"{name.upper()} c10d backend creator function already exist"
-        )
+        # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
+        if not hasattr(Backend, name.upper()):
+            setattr(Backend, name.upper(), name.lower())
+        if name.lower() not in Backend.backend_list:
+            Backend.backend_list.append(name.lower())
 
-        setattr(Backend, name.upper(), name.lower())
-        Backend.backend_list.append(name.lower())
         if devices is not None:
             for device in devices:
                 if device != "cpu" and device != "cuda":
