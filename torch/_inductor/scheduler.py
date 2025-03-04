@@ -1132,15 +1132,15 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return bool(self.node.get_reduction_type())
 
     def is_split_scan(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
         )
@@ -2109,9 +2109,9 @@ class Scheduler:
                 node.log_details()
 
     def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
-        assert (
-            node.get_origins() is not None
-        ), "All nodes passed to scheduling must have an origin"
+        assert node.get_origins() is not None, (
+            "All nodes passed to scheduling must have an origin"
+        )
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2270,9 +2270,9 @@ class Scheduler:
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node}"
+                )
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
@@ -2332,9 +2332,9 @@ class Scheduler:
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
             for s in out.get_unbacked_symbol_uses():
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                )
                 if r := unbacked_symbol_to_origin_node[s]:
                     for buf_name in self.name_to_node[r].get_buffer_names():
                         log.debug(
@@ -3917,9 +3917,9 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        assert (
-            not is_gpu(device.type) or device.index is not None
-        ), f"{device} should have been normalized in lowering"
+        assert not is_gpu(device.type) or device.index is not None, (
+            f"{device} should have been normalized in lowering"
+        )
         V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
@@ -4149,9 +4149,9 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         for partition, signature in zip(partitions, signatures):
-            assert (
-                len(partition) >= 1
-            ), f"Each partition must have at least one node but found {len(partition)}"
+            assert len(partition) >= 1, (
+                f"Each partition must have at least one node but found {len(partition)}"
+            )
 
             if signature.skip_cudagraph:
                 self._codegen(partition)

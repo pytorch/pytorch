@@ -392,9 +392,9 @@ class VariableBuilder:
         tx,
         source: Source,
     ) -> None:
-        assert (
-            source is not None
-        ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
+        assert source is not None, (
+            "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
+        )
         assert TracingContext.try_get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
@@ -1026,9 +1026,9 @@ class VariableBuilder:
             )
             # We bind the new_symint to graph input.
             sym_expr = new_symint.node.expr
-            assert isinstance(
-                sym_expr, sympy.Symbol
-            ), f"{sym_expr} is not a basic Symbol."
+            assert isinstance(sym_expr, sympy.Symbol), (
+                f"{sym_expr} is not a basic Symbol."
+            )
             self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
 
             tracing_symint = (
@@ -1141,9 +1141,9 @@ class VariableBuilder:
             self_obj = VariableBuilder(
                 self.tx, source=AttrSource(self.source, "__self__")
             )(value.__self__)
-            assert self_obj and isinstance(
-                self_obj, VariableTracker
-            ), "Failed to produce a valid self obj"
+            assert self_obj and isinstance(self_obj, VariableTracker), (
+                "Failed to produce a valid self obj"
+            )
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserMethodVariable(
                 value.__func__,
@@ -2375,9 +2375,9 @@ def _wrap_fx_preexisting_tensor(
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
-    assert isinstance(
-        tensor, torch.Tensor
-    ), f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
+    assert isinstance(tensor, torch.Tensor), (
+        f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
+    )
 
     assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
@@ -2386,13 +2386,13 @@ def _wrap_fx_preexisting_tensor(
     # Placeholders always carry example_value in node.meta.
     # non-placeholders always have no example_value in node.meta
     if proxy.node.op == "placeholder":
-        assert (
-            "example_value" in proxy.node.meta
-        ), f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+        assert "example_value" in proxy.node.meta, (
+            f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+        )
     else:
-        assert (
-            "example_value" not in proxy.node.meta
-        ), f"{proxy.node.meta['example_value']}"
+        assert "example_value" not in proxy.node.meta, (
+            f"{proxy.node.meta['example_value']}"
+        )
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
@@ -2562,7 +2562,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             assert (
                 example_value.__class__.__module__ == "torch.return_types"
                 or hasattr(example_value, "_fields")
-            ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
+            ), (
+                f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
+            )
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)

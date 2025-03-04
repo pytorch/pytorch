@@ -595,9 +595,9 @@ class ComboKernel(Kernel):
             num_persistent_reduction = len(
                 [e for e in heuristics_list if e == "persistent_reduction"]
             )
-            assert (
-                num_reduction == 0
-            ), "combining pointwise and reduction are not supported yet."
+            assert num_reduction == 0, (
+                "combining pointwise and reduction are not supported yet."
+            )
             heuristics = (
                 "pointwise_with_reduction"
                 if num_persistent_reduction > 0
@@ -786,13 +786,13 @@ class ComboKernel(Kernel):
                         name, tree, suffix=str(num)
                     )
                 if not tree.is_reduction:
-                    assert isinstance(
-                        grid[i][num], str
-                    ), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(grid[i][num], str), (
+                        f"Grid {grid[i][num]} should be a dynamic shape."
+                    )
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert (
-                        grid[i][num] == numel_sign + numel_name
-                    ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
+                    assert grid[i][num] == numel_sign + numel_name, (
+                        f"numel args mismatch: {grid[i][num]} vs {numel_name}"
+                    )
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
@@ -809,13 +809,13 @@ class ComboKernel(Kernel):
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
                 if not tree.is_reduction:
-                    assert isinstance(
-                        grid[i][num], str
-                    ), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(grid[i][num], str), (
+                        f"Grid {grid[i][num]} should be a dynamic shape."
+                    )
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert (
-                        grid[i][num] == numel_sign + numel_name
-                    ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
+                    assert grid[i][num] == numel_sign + numel_name, (
+                        f"grid mismatch: {grid[i][num]} vs {numel_name}"
+                    )
                     grid[i][num] = -expr if numel_sign == "-" else expr
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
