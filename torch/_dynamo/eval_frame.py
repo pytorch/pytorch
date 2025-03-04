@@ -56,13 +56,14 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
+    set_code_exec_strategy,
     set_eval_frame,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
-    skip_code,
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -71,6 +72,10 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
 )
 from torch.fx import GraphModule
+from torch.fx.experimental._dynamism import (
+    clone_and_convert_to_meta,
+    track_dynamism_across_examples,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -151,6 +156,19 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
+_EXAMPLE_INPUTS: Optional[dict[str, list[Any]]] = None
+
+
+def get_example_inputs(key) -> list[Any]:
+    global _EXAMPLE_INPUTS
+    if _EXAMPLE_INPUTS is None:
+        _EXAMPLE_INPUTS = {}
+
+    if key not in _EXAMPLE_INPUTS:
+        _EXAMPLE_INPUTS[key] = []
+
+    return _EXAMPLE_INPUTS[key]
+
 
 def _callback_from_stance(callback):
     if _stance.stance == "default":
@@ -165,6 +183,38 @@ def _callback_from_stance(callback):
                 hooks,
             )
 
+        return callback
+    elif _stance.stance == "eager_then_compile":
+        if callback not in (False, None):
+
+            def eager_then_compile(*args, **kwargs):
+                frame = args[0]
+                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+                example_inputs = get_example_inputs(key)
+
+                if len(example_inputs) < 2:
+                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+                dynamism = track_dynamism_across_examples(example_inputs)
+                if len(example_inputs) == 1:
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.DEFAULT, FrameAction.DEFAULT
+                        )
+                    )
+
+                compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
+                hooks = Hooks()
+                return convert_frame.catch_errors_wrapper(
+                    convert_frame.convert_frame(  # type: ignore[arg-type]
+                        compiler_fn,
+                        hooks,
+                        dynamism=dynamism,
+                    ),
+                    hooks,
+                )(*args, **kwargs)
+
+            return eager_then_compile
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -209,7 +259,7 @@ DONT_WRAP_FILES = {
 
 
 def _debug_get_cache_entry_list(
-    code: Union[types.CodeType, Callable[..., Any]]
+    code: Union[types.CodeType, Callable[..., Any]],
 ) -> list[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
@@ -416,6 +466,7 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
     ) -> None:
         super().__init__()
@@ -426,6 +477,7 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self._dynamic = dynamic
+        self.dynamism = dynamism
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -489,9 +541,9 @@ class _TorchDynamoContext:
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(fn)
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = (
+                weakref.ref(fn)
+            )
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -663,6 +715,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
@@ -679,6 +732,7 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
+            dynamism=dynamism,
             compiler_config=compiler_config,
         )
 
@@ -786,6 +840,7 @@ def _optimize_catch_errors(
     backend_ctx_ctor=null_context,
     export=False,
     dynamic=None,
+    dynamism=None,
     compiler_config=None,
     rebuild_ctx=None,
 ):
@@ -795,6 +850,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        dynamism=None,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
     )
@@ -850,9 +906,9 @@ def is_inductor_supported():
 
 def check_for_incompatible_configs():
     # Some of the configs should be mutually exclusive
-    assert not (
-        config.suppress_errors and config.fail_on_recompile_limit_hit
-    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
+    assert not (config.suppress_errors and config.fail_on_recompile_limit_hit), (
+        "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
+    )
 
 
 def optimize(*args, **kwargs):
@@ -861,9 +917,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {
-                "fullgraph"
-            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
+            assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
+                f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
+            )
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -879,6 +935,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    dynamism=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -903,8 +960,7 @@ def _optimize(
     Example Usage::
 
         @torch._dynamo.optimize()
-        def toy_example(a, b):
-            ...
+        def toy_example(a, b): ...
     """
     check_if_dynamo_supported()
     check_for_incompatible_configs()
@@ -938,10 +994,11 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, dynamism=dynamism),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        dynamism=dynamism,
         compiler_config=(
             backend.get_compiler_config()
             if hasattr(backend, "get_compiler_config")
@@ -1371,9 +1428,9 @@ def rewrite_signature(
         # as part of the function signature.
         for kwonly_arg in fullargspec.kwonlyargs:
             kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert (
-                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
-            ), f"Missing keyword only argument {kwonly_arg}"
+            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
+                f"Missing keyword only argument {kwonly_arg}"
+            )
 
         return input_strs
 
@@ -1477,9 +1534,9 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert (
-                aten_graph
-            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+            assert aten_graph, (
+                "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+            )
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)
@@ -1494,9 +1551,9 @@ def export(
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
-            assert (
-                out_guards is None
-            ), "whole graph export entails exactly one guard export"
+            assert out_guards is None, (
+                "whole graph export entails exactly one guard export"
+            )
             out_guards = guards
 
         example_inputs = []
@@ -1505,9 +1562,9 @@ def export(
             gm: torch.fx.GraphModule, inner_example_inputs
         ):
             nonlocal graph
-            assert (
-                graph is None
-            ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
+            assert graph is None, (
+                "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
+            )
             graph = gm
 
             nonlocal fake_mode, example_inputs
@@ -1546,8 +1603,10 @@ def export(
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 
                 with (
-                    ambient_fake_mode
-                ), enable_python_dispatcher(), ignore_fresh_unbacked:
+                    ambient_fake_mode,
+                    enable_python_dispatcher(),
+                    ignore_fresh_unbacked,
+                ):
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,
@@ -1647,9 +1706,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert (
-                same_signature
-            ), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
+            assert same_signature, (
+                "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
+            )
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
@@ -1726,7 +1785,8 @@ def export(
             for node in graph.graph.find_nodes(op="get_attr"):
                 if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
+                        getattr(graph, node.target),  # type: ignore[arg-type]
+                        static_shapes=True,
                     )
 
         if same_signature:
@@ -1884,3 +1944,9 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
+
+
+def skip_code(code: types.CodeType):
+    set_code_exec_strategy(
+        code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+    )

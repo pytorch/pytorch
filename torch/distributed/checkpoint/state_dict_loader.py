@@ -125,7 +125,9 @@ def load(
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()
-        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader("/checkpoint/1")
+        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader(
+        ...     "/checkpoint/1"
+        ... )
 
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
@@ -277,7 +279,7 @@ def _load_state_dict_from_keys(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        keys (Optional[Union[Set[str], str]]):
+        keys (Optional[Union[set[str], str]]):
             Loads any key specified in this set. If no keys are specified, the entire checkpoint
             is loaded.
         checkpoint_id (Union[str, os.PathLike, None]):
