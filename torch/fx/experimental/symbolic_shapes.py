@@ -1152,7 +1152,7 @@ def compute_unbacked_bindings(
 # This is used for size oblivious reasoning to avoid 0/1 specializations.
 def guard_else_false(a: BoolLikeType) -> bool:
     """
-    try to gaurd a if you a data dependent error just return false.
+    try to gaurd a, if data dependent error encountered just return false.
     """
     if isinstance(a, SymBool):
         try:
@@ -1164,7 +1164,7 @@ def guard_else_false(a: BoolLikeType) -> bool:
 
 def guard_else_true(a: BoolLikeType) -> bool:
     """
-    try to gaurd a if you a data dependent error just return false.
+    try to gaurd a, if data dependent error encountered just return true.
     """
     if isinstance(a, SymBool):
         try:
