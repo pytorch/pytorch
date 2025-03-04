@@ -235,6 +235,7 @@ IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False,
 )
+IN_RE_WORKER: bool = os.environ.get("INSIDE_RE_WORKER") is not None
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and
@@ -1436,11 +1437,7 @@ NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEP
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 
 
-# Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN: bool = TestEnvironment.def_flag(
-    "NO_MULTIPROCESSING_SPAWN",
-    env_var="NO_MULTIPROCESSING_SPAWN",
-)
+NO_MULTIPROCESSING_SPAWN: bool = False
 TEST_WITH_ASAN: bool = TestEnvironment.def_flag(
     "TEST_WITH_ASAN",
     env_var="PYTORCH_TEST_WITH_ASAN",
@@ -2034,20 +2031,24 @@ class DeterministicGuard:
         self.warn_only = warn_only
         self.fill_uninitialized_memory = fill_uninitialized_memory
 
-    def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
-        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        torch.use_deterministic_algorithms(
-            self.deterministic,
-            warn_only=self.warn_only)
+    @classmethod
+    def _current_state(cls):
+        return cls(
+            torch.are_deterministic_algorithms_enabled(),
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
+        )
+
+    def _update(self):
+        torch.use_deterministic_algorithms(self.deterministic, warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory  # type: ignore[attr-defined]
 
+    def __enter__(self):
+        self._restore = self._current_state()
+        self._update()
+
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(
-            self.deterministic_restore,
-            warn_only=self.warn_only_restore)
-        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore  # type: ignore[attr-defined]
+        self._restore._update()
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -2300,7 +2301,7 @@ def to_gpu(obj, type_map=None):
         assert obj.is_leaf
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().to(dtype=t, device="cuda")
+            res = obj.to(dtype=t, device="cuda", copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):

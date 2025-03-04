@@ -819,6 +819,9 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         yield from _iterate_exprs(val.storage_offset())
     elif val is None:
         pass
+    # see Note: [Generator arguments in AOTDispatcher]
+    elif isinstance(val, torch.Generator):
+        pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
@@ -6595,6 +6598,10 @@ class ShapeEnv:
         sym_node: SymNode,
         size_oblivious: bool = False,
     ) -> sympy.Basic:
+        """
+        Given a a SymNode, evaluates sym_node.expr, adding guards if necessary.
+        """
+
         self._expr_sym_node_id = id(sym_node)
         return self.evaluate_expr(
             sym_node.expr, sym_node.hint, sym_node.fx_node, size_oblivious
