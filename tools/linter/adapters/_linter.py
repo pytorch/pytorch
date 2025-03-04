@@ -438,8 +438,7 @@ class FileLinter(Generic[PythonFileT], ABC):
 
             for i, ri in enumerate(results):
                 if not ri.is_recursive:
-                    for j in range(i + 1, len(results)):
-                        rj = results[j]
+                    for rj in results[i + 1 :]:
                         if ri.contains(rj):
                             rj.is_recursive = True
                         else:
