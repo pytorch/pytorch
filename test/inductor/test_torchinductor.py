@@ -4291,7 +4291,7 @@ class CommonTemplate:
             indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
                 kernel_size,
-                x.size[-dim:],
+                x.shape[-dim:],
                 stride,
                 padding,
                 dilation=dilation,
