@@ -36,15 +36,6 @@ make sure that there is a test for it.
 
 
 class GraphBreakMessagesTest(LoggingTestCase):
-    # remove "Set TORCHDYNAMO_VERBOSE=1..." from output to reduce expecttest spam
-    def _post_munge_wrapper(self, post_munge=None):
-        def wrapper(s):
-            if post_munge:
-                s = post_munge(s)
-            return re.sub(r"(?s)\n[^\n]*Set TORCHDYNAMO_VERBOSE=1[^\n]*\n", "", s)
-
-        return wrapper
-
     def test_dynamic_shape_operator(self):
         def fn():
             return torch.nonzero(torch.rand([10, 10]))
@@ -64,7 +55,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.nonzero(torch.rand([10, 10]))
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_dynamic_shape_operator_no_meta_kernel(self):
@@ -87,7 +77,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
 """,
-                post_munge=self._post_munge_wrapper(),
             )
 
     def test_data_dependent_operator(self):
@@ -106,7 +95,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x.item()
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_data_dependent_operator2(self):
@@ -131,7 +119,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.equal(x, x)
 """,
-                post_munge=self._post_munge_wrapper(),
             )
 
     def test_super_call_method(self):
@@ -157,7 +144,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return [x + 1 for x in it]
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_super_call_function(self):
@@ -182,7 +168,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return [x + 1 for x in it()]
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_unsupported_context(self):
@@ -206,7 +191,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     with obj:
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -234,7 +218,6 @@ Backend compiler exception
 
 
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_unsupported_builtin(self):
@@ -258,7 +241,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     print("abc")
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_skipfile_call(self):
@@ -285,7 +267,7 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return unittest.skip("test")
 """,
-            post_munge=self._post_munge_wrapper(post_munge),
+            post_munge=post_munge,
         )
 
     def test_skipfile_dynamo_call(self):
@@ -307,7 +289,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.disable()
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_skipfile_inline(self):
@@ -337,7 +318,7 @@ from user code:
    File "test_error_messages.py", line N, in fn
     Foo().fn()
 """,
-            post_munge=self._post_munge_wrapper(post_munge),
+            post_munge=post_munge,
         )
 
     def test_disable(self):
@@ -370,7 +351,7 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return inner()
 """,
-            post_munge=self._post_munge_wrapper(post_munge),
+            post_munge=post_munge,
         )
 
     def test_dynamo_graph_break_fn(self):
@@ -392,7 +373,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_dynamo_graph_break_fn_with_msg(self):
@@ -414,7 +394,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break(msg="test graph break")
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_warnings(self):
@@ -437,7 +416,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     warnings.warn("test")
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
@@ -564,7 +542,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x[:y]
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_observed_exception(self):
@@ -587,7 +564,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     raise RuntimeError("test")
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_uninitialized_module(self):
@@ -614,7 +590,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return mod(1)
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
@@ -644,7 +619,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return mod.attr
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_generic_ctx_mgr_graph_break(self):
@@ -668,9 +642,7 @@ from user code:
             torch.compile(fn, backend="eager", fullgraph=True)()
 
         self.assertExpectedInline(
-            self._post_munge_wrapper()(
-                munge_exc(cm.exception, suppress_suffix=True, skip=0)
-            ),
+            munge_exc(cm.exception, suppress_suffix=True, skip=0),
             """\
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
@@ -722,7 +694,7 @@ from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:
 """,
-            post_munge=self._post_munge_wrapper(post_munge),
+            post_munge=post_munge,
         )
 
     def test_reconstruction_failure(self):
@@ -753,7 +725,7 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return Foo().meth
 """,
-            post_munge=self._post_munge_wrapper(post_munge),
+            post_munge=post_munge,
         )
 
     @make_logging_test(graph_breaks=True)
@@ -769,8 +741,6 @@ from user code:
 
         def post_munge(s):
             return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
-
-        post_munge = self._post_munge_wrapper(post_munge)
 
         torch.compile(fn, backend="eager")()
 
@@ -837,7 +807,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.ops.mylib.foo(x)
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     def test_data_dependent_branching_fullgraph(self):
@@ -862,7 +831,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     if x.sum() > 0:
 """,
-            post_munge=self._post_munge_wrapper(),
         )
 
     @make_logging_test(graph_breaks=True)
@@ -938,6 +906,7 @@ from user code:
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,
+            strip_torchdynamo_verbose_log=False,
         )
 
     @torch._dynamo.config.patch(verbose=True)
