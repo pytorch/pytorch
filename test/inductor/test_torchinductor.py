@@ -4286,7 +4286,6 @@ class CommonTemplate:
                 padding,
                 dilation,
                 ceil_mode,
-                dilation=dilation,
             )
             indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,

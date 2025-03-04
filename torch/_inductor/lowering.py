@@ -4481,7 +4481,10 @@ def _low_memory_max_pool_offsets_to_indices(
             ops.index_expr(bh[d] * stride[d] - padding[d], torch.int64)
             for d in range(dim)
         ]
-        idhw = [hbase[d] + dhw_inc[d] * ops.index_expr(dilation[d], torch.int64) for d in range(dim)]
+        idhw = [
+            hbase[d] + dhw_inc[d] * ops.index_expr(dilation[d], torch.int64)
+            for d in range(dim)
+        ]
         return inductor_prims._flatten_index(idhw, w_in)
 
     def offsets_to_indices(idx):
@@ -4518,7 +4521,12 @@ def _max_pool_with_indices(
     )
 
     indices = _low_memory_max_pool_offsets_to_indices(
-        offsets, kernel_size, x.shape[-dim:], stride, padding
+        offsets,
+        kernel_size,
+        x.shape[-dim:],
+        stride,
+        padding,
+        dilation,
     )
 
     return out, indices
