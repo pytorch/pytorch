@@ -1312,7 +1312,10 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             del arg_names[2]
         else:
             # Reorder them as Bias, A, B
-            arg_names[0:3] = [arg_names[2], arg_names[0], arg_names[1]]
+            if self.input_reorder is not None:
+                arg_names[0:len(self.input_reorder)] = [
+                    arg_names[i] for i in self.input_reorder
+                ]
         return arg_names
 
     def render_gemm_arguments(
