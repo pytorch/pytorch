@@ -163,7 +163,6 @@ def allow_in_graph(fn):
         # Avoid id reuse which creates subtle bugs.
         def deregister():
             trace_rules._allowed_callable_ids.remove(fn_id)
-            trace_rules._nonstrict_trace_callable_ids.remove(fn_id)
 
         weakref.finalize(fn, deregister)
     return fn
