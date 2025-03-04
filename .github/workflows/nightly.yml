@@ -75,9 +75,9 @@ jobs:
       - name: update-vision-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         with:
-          repo-owner: {{ matrix.repo-owner }}
-          repo-name: {{ matrix.repo-name }}
-          branch: {{ matrix.branch }}
-          pin-folder: {{ matrix.pin-folder}}
+          repo-owner: ${{ matrix.repo-owner }}
+          repo-name: ${{ matrix.repo-name }}
+          branch: ${{ matrix.branch }}
+          pin-folder: ${{ matrix.pin-folder}}
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
