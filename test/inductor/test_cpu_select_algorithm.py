@@ -1435,8 +1435,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("reshape_a", [True, False])
     @parametrize("expand_a_scale", [True, False])
     @parametrize("dynamic", [True, False])
+    @parametrize("M", [1, 32])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic, M
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
@@ -1451,7 +1452,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
-        M = 32
         in_feature = 48
         out_feature = 64
         q_min, q_max = -32, 31
@@ -1505,7 +1505,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        if torch._C._cpu._is_amx_tile_supported():
+            # Only AMX ISA based micro-kernel is currently supported for da8w8
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
