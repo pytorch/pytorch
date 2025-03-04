@@ -225,13 +225,9 @@ class TestGenericPytree(TestCase):
     )
     def test_flatten_unflatten_leaf(self, pytree_impl):
         def run_test_with_leaf(leaf):
-            leafspec = pytree_impl.tree_structure(object())
-            self.assertTrue(leafspec.is_leaf())
-
             values, treespec = pytree_impl.tree_flatten(leaf)
             self.assertEqual(values, [leaf])
-            self.assertEqual(treespec, leafspec)
-            self.assertTrue(treespec.is_leaf())
+            self.assertEqual(treespec, pytree_impl.LeafSpec())
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, leaf)
@@ -1388,6 +1384,9 @@ class TestCxxPytree(TestCase):
     def setUp(self):
         if IS_FBCODE:
             raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
+
+    def test_treespec_equality(self):
+        self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
     def test_treespec_repr(self):
         # Check that it looks sane
