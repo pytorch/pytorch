@@ -102,11 +102,11 @@ def calculate_tflops(
     # Forward pass FLOPs
     qk_flops = (
         M * N * D * 2
-    )  # Q*K^T matmul: M×D times D×N = M×N with 2 FLOPs per multiply-add
+    )  # Q*K^T matmul: (M,D) @ (D,N) with 2 FLOPs per multiply-add
     softmax_flops = M * N * 2  # Softmax operations (exp and div)
     av_flops = (
         M * N * D * 2
-    )  # Attention * V matmul: M×N times N×D = M×D with 2 FLOPs per multiply-add
+    )  # Attention @ V: (M,N) @ (N,D) with 2 FLOPs per multiply-add
 
     total_flops = B * H * (qk_flops + softmax_flops + av_flops)
 
