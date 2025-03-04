@@ -2780,9 +2780,7 @@ class DimConstraints:
             return (
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
-                and (
-                    (dim.min < 2 and c.get("min", 2) == 2) or dim.min == c.get("min", 2)  # type: ignore[attr-defined]
-                )  # let pass if analysis min = 2 and specified min = 0/1
+                and dim.min == c.get("min", 0)  # type: ignore[attr-defined]
                 and dim.max == c.get("max", int_oo)  # type: ignore[attr-defined]
             )
 
@@ -2804,7 +2802,7 @@ class DimConstraints:
                     introduced_roots[str(root)] = k
                     # calculate necessary min & max
                     modulus, remainder = sympy.polys.polytools.div(c["eq"], root)
-                    c_min = c.get("min", 2)
+                    c_min = c.get("min", 0)
                     min_ = math.ceil((c_min - remainder) / modulus)
                     c_max = c.get("max", int_oo)
                     max_ = math.floor((c_max - remainder) / modulus)
@@ -3259,9 +3257,9 @@ class ShapeEnv:
         self.size_like: set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: dict[int, sympy.Symbol] = {}
-        if specialize_zero_one:
-            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
+        self.val_to_var: dict[int, sympy.Symbol] = {0: sympy.S.Zero, 1: sympy.S.One}
+        # if specialize_zero_one:
+        #     self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -4052,6 +4050,7 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_offset,
                 constraint_dim=None,
+                specialize_zero_one=True,
                 symbolic_context=symbolic_context,
             ),
             hint=ex_storage_offset,
@@ -4361,7 +4360,7 @@ class ShapeEnv:
             dynamic_dim,
             constraint_dim,
             positive=None,
-            do_not_specialize_zero_one=True,
+            specialize_zero_one=False,
             symbolic_context=symbolic_context,
         )
 
@@ -4373,7 +4372,7 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
-        do_not_specialize_zero_one: bool = False,
+        specialize_zero_one: Optional[bool] = None,
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
@@ -4429,9 +4428,7 @@ class ShapeEnv:
                 self.oblivious_var_to_val[out] = val
             return out
 
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
+        if specialize_zero_one is None:
             specialize_zero_one = self.specialize_zero_one
 
         assert isinstance(source, Source), f"{type(source)} {source}"
@@ -5257,7 +5254,7 @@ class ShapeEnv:
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in guards if guards is not None else self.guards:
-            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
+            if self._maybe_evaluate_static(guard.expr, axioms=(), size_oblivious=guard.size_oblivious) is not None:
                 continue
             issue_guard(guard)
 
@@ -5586,7 +5583,7 @@ class ShapeEnv:
                     # NB: do NOT set upper to 2 ** 48, we're using this solely
                     # to determine if we can do size-like replacement, the
                     # upper bound is irrelevant here
-                    var_to_range[x] = ValueRanges(0, int_oo)
+                    var_to_range[x] = ValueRanges(2, int_oo)
         return bound_sympy(expr, var_to_range)  # type: ignore[arg-type]
 
     @_lru_cache
@@ -6378,8 +6375,7 @@ class ShapeEnv:
 
     # See: Note - On 0/1 specialization
     def _default_value_range(self) -> ValueRanges:
-        # lower = 2 if self.specialize_zero_one else 0
-        lower = 0
+        lower = 2 if self.specialize_zero_one else 0
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
@@ -6731,6 +6727,10 @@ class ShapeEnv:
                     else size_oblivious,
                     static_expr,
                 )
+                if not size_oblivious and hint is not None:
+                    # TODO: maybe reconcile this with use of counterfactual hints
+                    # in unbacked case
+                    assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
             transmute_into_runtime_assert = False
@@ -6875,7 +6875,7 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard = ShapeGuard(g, self._get_sloc())
+                    guard = ShapeGuard(g, self._get_sloc(), size_oblivious=size_oblivious)
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:

@@ -267,6 +267,8 @@ capture_dynamic_output_shape_ops = (
     os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
 )
 
+specialize_zero_one = True
+
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
 

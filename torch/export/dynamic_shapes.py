@@ -448,6 +448,7 @@ def _process_equalities(
                     dynamic_dim=torch.fx.experimental.symbolic_shapes.DimDynamic.DYNAMIC,
                     constraint_dim=constraint.root.constraint_range,
                 )
+                shape_env.size_like.add(root)
                 phantom_symbols[constraint.root.name] = root
 
         fn = constraint.fn

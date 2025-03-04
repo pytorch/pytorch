@@ -112,6 +112,7 @@ class ExportDynamoConfig:
     reorderable_logging_functions: set[Callable] = dataclasses.field(
         default_factory=set
     )
+    specialize_zero_one: bool = False
     # Emit runtime asserts after AOTAutograd instead.
     # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
     # but if we want to reason more about what guards/runtime asserts to emit,
