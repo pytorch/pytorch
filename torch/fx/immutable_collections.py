@@ -111,12 +111,12 @@ register_pytree_node(
     _immutable_list_flatten,
     _immutable_list_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_list",
-    flatten_with_keys_fn=_list_flatten_with_keys,
+    flatten_with_keys_func=_list_flatten_with_keys,
 )
 register_pytree_node(
     immutable_dict,
     _immutable_dict_flatten,
     _immutable_dict_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_dict",
-    flatten_with_keys_fn=_dict_flatten_with_keys,
+    flatten_with_keys_func=_dict_flatten_with_keys,
 )
