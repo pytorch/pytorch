@@ -8514,6 +8514,15 @@ class TestMPS(TestCaseMPS):
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
 
+                # test for non contiguous input/output with similar strides
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype).mT
+                mps_x = cpu_x.to('mps')
+                cpu_y = torch.empty_like(cpu_x)
+                mps_y = cpu_y.to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+
 
         helper((5, 5), torch.exp, False)
         helper((5, 5), torch.cos, False)
