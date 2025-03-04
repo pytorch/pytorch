@@ -2607,10 +2607,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
                 # combine
+                # Note, we pass config.use_fast_math to the JITFunction
+                # since a triton kernel can not access a config.
                 self.compute.splice(
                     f"""
                     {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
-                        {accumulator_max}, {accumulator_sum}, {value}
+                        {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
                     )
                     """
                 )
@@ -2773,7 +2775,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
-                {accumulator_max}, {accumulator_sum}, {dim})
+                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
             {result_max} = {self.reduction_resize(f"{result_max}")}
             {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """

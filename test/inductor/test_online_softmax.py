@@ -43,7 +43,7 @@ class TestOnlineSoftmax(TestCase):
         expected = f(x)
         actual = opt_f(x)
 
-        self.assertTrue(torch.allclose(expected, actual, atol=1e-2, rtol=1e-2))
+        self.assertTrue(same(expected, actual, tol=1e-2))
 
         if DO_PERF_TEST:
             from triton.testing import do_bench
@@ -58,6 +58,10 @@ class TestOnlineSoftmax(TestCase):
 
     def test_log_softmax(self):
         self.do_test_acc_and_perf(torch.log_softmax)
+
+    @inductor_config.patch(use_fast_math=True)
+    def test_prepare_softmax_perf(self):
+        self.do_test_acc_and_perf(_prepare_softmax)
 
     def get_softmax_wrapper(self, V=50304, use_log_softmax=False, device=GPU_TYPE):
         N = 32 * 1024
