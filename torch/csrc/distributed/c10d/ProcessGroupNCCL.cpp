@@ -3283,10 +3283,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp ? ncclStreams_.at(key) : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
-    // Used many times below, so we stash the unordered_map lookup
-    ncclStream = ncclStreams_.at(key);
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
   }
@@ -3406,7 +3404,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
-  return work;
+  return asyncOp ? work : nullptr;
 }
 
 template <typename Fn>
@@ -3464,11 +3462,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream = ncclStreams_.at(key);
-
-  // First let NCCL streams wait for input tensors allocation streams
-  syncStream(device, ncclEvents_[key], ncclStream);
+  // in asyncOp=false [default] mode, we use currentStream as ncclStream
+  // otherwise, we use separate ncclStream and let it sync on currentStream
+  auto ncclStream = asyncOp ? ncclStreams_.at(key) : at::cuda::getCurrentCUDAStream(device.index());
+  if (asyncOp) {
+    // First let NCCL streams wait for input tensors allocation streams
+    syncStream(device, ncclEvents_[key], ncclStream);
+  }
 
   auto work = initWork(
       device,
@@ -3600,7 +3600,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // it, since interactions with it by usercode won't behave normally - they
   // won't observe work completion, for instance.  Will this lead to silent
   // problems during capture?
-  return work;
+  return asyncOp ? work : nullptr;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
