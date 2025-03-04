@@ -114,7 +114,7 @@ Motivation
 ----------
 There are several use cases for offline tuning.
 
-One use case, is a workload with a high-memory utilization where one might run out of memory with regular tuning.
+One use case involves a workload with a high-memory utilization, where regular tuning might lead to running out of memory.
 
 Another use case would be a workload that is compute intensive to run and it would be more resource efficient to collect
 the GEMMs for the workload once, and then tune repeatedly with different tuning parameters or libraries.
