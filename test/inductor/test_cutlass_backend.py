@@ -896,13 +896,10 @@ class TestCutlassBackend(TestCase):
             with config.patch(
                 {
                     "max_autotune": True,
-                    # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
-                    # unless we tune in a subproc here.
-                    "autotune_in_subproc": False,
-                    "max_autotune_gemm_backends": "CUTLASS,ATen",
+                    "max_autotune_gemm_backends": "CUTLASS",
                     "cuda.cutlass_max_profiling_configs": 2,
                     "cuda.cutlass_op_allowlist_regex": "",
-                    "cuda.cutlass_op_denylist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
+                    "cuda.cutlass_op_denylist_regex": "pingpong",
                 }
             ):
                 with mock.patch(
@@ -945,13 +942,10 @@ class TestCutlassBackend(TestCase):
             with config.patch(
                 {
                     "max_autotune": True,
-                    # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
-                    # unless we tune in a subproc here.
-                    "autotune_in_subproc": False,
-                    "max_autotune_gemm_backends": "CUTLASS,ATen",
+                    "max_autotune_gemm_backends": "CUTLASS",
                     "cuda.cutlass_max_profiling_configs": 2,
                     "cuda.cutlass_op_allowlist_regex": "pingpong",
-                    "cuda.cutlass_op_denylist_regex": None,  # Pingpong Kernels can lead to numerical issues
+                    "cuda.cutlass_op_denylist_regex": None,
                 }
             ):
                 with mock.patch(
