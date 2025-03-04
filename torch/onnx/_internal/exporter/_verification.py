@@ -146,7 +146,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
                 "The ONNX program does not contain an exported_program. "
                 "Please provide an exported_program to verify the ONNX program."
             )
-        super().__init__(onnx_program.exported_program.graph_module)
+        super().__init__(onnx_program.exported_program.module())
         self._onnx_program = onnx_program
         self._onnx_values = _create_value_mapping(onnx_program.model.graph)
         self.verification_info: list[VerificationInfo] = []
@@ -186,9 +186,10 @@ class VerificationInterpreter(torch.fx.Interpreter):
         if node_name not in self._onnx_values:
             return result
         (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
+        result_ = torch.tensor(result)
         max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
             _compare_tensors(
-                result,
+                result_,
                 onnx_result,
             )
         )
@@ -203,7 +204,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
                 max_rel_diff=max_relative_difference,
                 abs_diff_hist=torch.histogram(abs_diff.float(), bins=bins),
                 rel_diff_hist=torch.histogram(rel_diff.float(), bins=bins),
-                expected_dtype=result.dtype,
+                expected_dtype=result_.dtype,
                 actual_dtype=onnx_result.dtype,
             )
         )
