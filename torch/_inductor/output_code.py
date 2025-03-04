@@ -122,7 +122,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
-        indices = list(range(len(strides)))
+        indices = [*range(len(strides))]
         indices = [x for _, x in sorted(zip(strides, indices))]
         for i in range(len(strides)):
             prev_stride = 1 if i == 0 else strides[indices[i - 1]]

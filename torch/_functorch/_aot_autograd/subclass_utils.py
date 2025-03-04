@@ -380,7 +380,7 @@ def wrap_tensor_subclasses(
         activations = unwrapped_args[num_args_tallied:]
         if isinstance(wrapped_args, tuple) and isinstance(activations, tuple):
             return wrapped_args + activations
-        return tuple(list(wrapped_args) + list(activations))
+        return tuple([*wrapped_args] + [*activations])
     else:
         assert (
             len(unwrapped_args) == num_args_tallied

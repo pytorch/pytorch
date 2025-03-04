@@ -231,7 +231,7 @@ class CapabilityBasedPartitioner:
             ):
                 merge_candidates[partition_id] = None
 
-            merge_candidates_list = list(merge_candidates.keys())
+            merge_candidates_list = [*merge_candidates.keys()]
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:

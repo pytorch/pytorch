@@ -297,7 +297,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     def get_size_hint(self) -> int:
         if not self.allocations:
             return 0
-        return max(x.get_size_hint() for x in self.allocations)
+        return max([x.get_size_hint() for x in self.allocations])
 
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
@@ -477,7 +477,7 @@ class AllocationPools:
     def allocate_output(self, block: Allocation):
         """Outputs get different pools so memory gets freed properly"""
         pools = self.get_pools(block)
-        if pools and config.memory_pool in ("outputs", "combined"):
+        if pools and config.memory_pool in {"outputs", "combined"}:
             pools[-1].allocate_at_end(block)
         else:
             # create a new pool

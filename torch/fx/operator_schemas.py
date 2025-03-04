@@ -324,7 +324,7 @@ def type_matches(signature_type: Any, argument_type: Any):
     if signature_type is int and argument_type is torch.dtype:
         return True
 
-    if signature_type is numbers.Number and argument_type in {int, float}:
+    if signature_type is numbers.Number and argument_type in (int, float):
         return True
     if inspect.isclass(argument_type) and inspect.isclass(signature_type):
         return issubclass(argument_type, signature_type)
@@ -444,7 +444,7 @@ def normalize_function(
                     # Matched more than one schema. In this situation, the caller must provide the types of
                     # the arguments of the overload they expect.
                     schema_printouts = "\n".join(
-                        str(schema) for schema in matched_schemas
+                        [str(schema) for schema in matched_schemas]
                     )
                     raise RuntimeError(
                         f"Tried to normalize arguments to {torch.typename(target)} but "
@@ -537,7 +537,7 @@ def _args_kwargs_to_normalized_args_kwargs(
         # Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None
         # `from` is Python keyword and as such functions with that signature should have
         # positional-only args, but at the same time they could be dispatched as kwargs
-        if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
+        if [*sig.parameters.keys()] != ["input", "from", "to", "generator"]:
             return None
 
     bound_args = sig.bind(*args, **kwargs)

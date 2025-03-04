@@ -208,7 +208,9 @@ class BuiltinVariable(VariableTracker):
         from .tensor import supported_comparison_ops
 
         fns.update(supported_comparison_ops.values())
-        fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
+        fns.update(
+            [x for x in math.__dict__.values() if isinstance(x, type(math.sqrt))]
+        )
         return fns
 
     def can_constant_fold_through(self):
@@ -262,9 +264,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> dict[
-        Callable[..., object], tuple[list[str], Callable[..., object]]
-    ]:
+    def _binops() -> (
+        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
+    ):
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -1419,7 +1421,7 @@ class BuiltinVariable(VariableTracker):
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = tuple(
-                variables.ConstantVariable.create(guard_if_dyn(arg)) for arg in args
+                [variables.ConstantVariable.create(guard_if_dyn(arg)) for arg in args]
             )
             return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
@@ -1475,14 +1477,14 @@ class BuiltinVariable(VariableTracker):
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
-                list(obj.unpack_var_sequence(tx)),
+                [*obj.unpack_var_sequence(tx)],
                 mutation_type=ValueMutationNew(),
             )
 
     def _call_iter_tuple_generator(self, tx, obj, *args, **kwargs):
         cls = variables.BaseListVariable.cls_for(self.fn)
         return cls(
-            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
+            [*obj.force_unpack_var_sequence(tx)],  # exhaust generator
             mutation_type=ValueMutationNew(),
         )
 
@@ -1490,7 +1492,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
-                list(obj.force_unpack_var_sequence(tx)),
+                [*obj.force_unpack_var_sequence(tx)],
                 mutation_type=ValueMutationNew(),
             )
         elif isinstance(obj, variables.LocalGeneratorObjectVariable):
@@ -1887,10 +1889,10 @@ class BuiltinVariable(VariableTracker):
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
 
-        elif istype(obj, variables.UserFunctionVariable) and name in (
+        elif istype(obj, variables.UserFunctionVariable) and name in {
             "__name__",
             "__module__",
-        ):
+        }:
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
@@ -2046,7 +2048,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
+            items = [*reversed(obj.unpack_var_sequence(tx))]
             return variables.TupleVariable(items)
 
     def call_sorted(
@@ -2115,7 +2117,7 @@ class BuiltinVariable(VariableTracker):
 
         op = self.fn
 
-        if op in [operator.is_, operator.is_not]:
+        if op in (operator.is_, operator.is_not):
             is_result = (
                 isinstance(left, TensorVariable)
                 and isinstance(right, TensorVariable)
@@ -2186,7 +2188,7 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items & b.set_items))
+            return SetVariable([*(a.set_items & b.set_items)])
         # None no-ops this handler and lets the driving function proceed
 
     call_iand = call_and_
@@ -2206,7 +2208,7 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items | b.set_items))
+            return SetVariable([*(a.set_items | b.set_items)])
         # None no-ops this handler and lets the driving function proceed
         return None
 

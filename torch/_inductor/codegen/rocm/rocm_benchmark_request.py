@@ -60,8 +60,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [
-            c_void_p(tensor.data_ptr())
-            for tensor in list(input_tensors) + [output_tensor]
+            c_void_p(tensor.data_ptr()) for tensor in [*input_tensors] + [output_tensor]
         ]
         size_args = [c_int(arg) for arg in self.extra_args]
         log.debug(

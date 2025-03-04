@@ -1084,7 +1084,7 @@ def aot_module_simplified(
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = list(params_flat)
+    params_flat = [*params_flat]
     params_len = len(params_flat)
 
     if cudagraphs is None:
@@ -1407,8 +1407,8 @@ https://github.com/pytorch/pytorch/issues/101192
         out_spec,
         user_args_flat=user_args_flat,
         params_and_buffers_flat=params_and_buffers_flat,
-        param_names=list(named_parameters.keys()),
-        buffer_names=list(named_buffers.keys()),
+        param_names=[*named_parameters.keys()],
+        buffer_names=[*named_buffers.keys()],
         trace_joint=trace_joint,
         num_user_fw_outs=num_fw_outs,
         loss_index=output_loss_index,

@@ -553,7 +553,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 field_defaults = self.value._field_defaults
 
-                items = list(args)
+                items = [*args]
                 items.extend([None] * (len(fields) - len(items)))
 
                 var_tracker_kwargs = {}
@@ -577,7 +577,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
-            items = list(args)
+            items = [*args]
             items.extend([None] * (len(fields) - len(items)))
 
             default_kwargs = {}
@@ -746,12 +746,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
-        if inner in [
+        if inner in {
             "builtin_function_or_method",
             "getset_descriptor",
             "method_descriptor",
             "method",
-        ]:
+        }:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
@@ -771,9 +771,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().guard_as_python_constant()
 
     def torch_function_check(self):
-        assert has_torch_function(self), (
-            f"calling torch function on object without __torch_function__ {self}"
-        )
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
@@ -1275,7 +1275,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and not tx.output.export
         ):
             # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
+            if name in {"_buffers", "_parameters"}:
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
 
@@ -1510,9 +1510,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
         if self._dict_vt is None:
-            assert self.source is None, (
-                "dict_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed by builder.py when source is present"
             self._dict_vt = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
             )
@@ -1557,9 +1557,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
         if self._list_vt is None:
-            assert self.source is None, (
-                "list_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "list_vt must be constructed by builder.py when source is present"
             self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
 
     def call_method(

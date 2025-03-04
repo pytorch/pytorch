@@ -122,7 +122,7 @@ class ConstDictVariable(VariableTracker):
                 x = self.vt.as_proxy().node.meta["example_value"]
             elif isinstance(self.vt, variables.TupleVariable):
                 Hashable = ConstDictVariable._HashableTracker
-                x = tuple(Hashable(e).underlying_value for e in self.vt.items)
+                x = tuple([Hashable(e).underlying_value for e in self.vt.items])
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.value
             elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
@@ -157,9 +157,9 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
-                type(other)
-            )
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
+                other
+            ), type(other)
             if isinstance(other, Hashable):
                 return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
@@ -207,7 +207,10 @@ class ConstDictVariable(VariableTracker):
         return (
             "{"
             + ", ".join(
-                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
+                [
+                    f"{k.vt.debug_repr()}: {v.debug_repr()}"
+                    for k, v in self.items.items()
+                ]
             )
             + "}"
         )
@@ -657,7 +660,7 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join([k.vt.debug_repr() for k in self.items.keys()]) + "}"
 
     @property
     def set_items(self):
@@ -770,7 +773,7 @@ class FrozensetVariable(SetVariable):
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join([k.vt.debug_repr() for k in self.items.keys()]) + "}"
 
     @property
     def set_items(self):
@@ -800,7 +803,7 @@ class FrozensetVariable(SetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+        if name in {"add", "pop", "update", "remove", "discard", "clear"}:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
         return super().call_method(tx, name, args, kwargs)
 
@@ -819,7 +822,7 @@ class DictKeySetVariable(SetVariable):
         else:
             return (
                 "dict_keys(["
-                + ",".join(k.vt.debug_repr() for k in self.items.keys())
+                + ",".join([k.vt.debug_repr() for k in self.items.keys()])
                 + "])"
             )
 
@@ -842,7 +845,7 @@ class DictKeySetVariable(SetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+        if name in {"add", "pop", "update", "remove", "discard", "clear"}:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
         return super().call_method(tx, name, args, kwargs)
 
@@ -934,7 +937,7 @@ class DictValuesVariable(DictViewVariable):
 
     @property
     def view_items_vt(self):
-        return list(self.view_items)
+        return [*self.view_items]
 
     def python_type(self):
         return dict_values

@@ -950,9 +950,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        assert isinstance(op, cutlass_gemm_op.GemmOperation), (
-            "op argument is required and has to be an instance of GemmOperation"
-        )
+        assert isinstance(
+            op, cutlass_gemm_op.GemmOperation
+        ), "op argument is required and has to be an instance of GemmOperation"
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1146,8 +1146,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
-        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
+        A_size = [*V.graph.sizevars.size_hints(A_layout.size)]
+        B_size = [*V.graph.sizevars.size_hints(B_layout.size)]
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
@@ -1369,13 +1369,13 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
+                new_stride = [*old_layout.stride]  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 assert old_layout.device is not None
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),  # type: ignore[union-attr]
+                    [*old_layout.size],  # type: ignore[union-attr]
                     new_stride,
                     old_layout.offset,  # type: ignore[union-attr]
                 )

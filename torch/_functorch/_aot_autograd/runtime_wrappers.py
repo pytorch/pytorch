@@ -284,8 +284,10 @@ def _create_runtime_wrapper(
 
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
-            make_output_handler(info, runtime_metadata, trace_joint)
-            for info in runtime_metadata.output_info
+            [
+                make_output_handler(info, runtime_metadata, trace_joint)
+                for info in runtime_metadata.output_info
+            ]
         )
 
     def runtime_wrapper(args: list[Any]):
@@ -300,7 +302,7 @@ def _create_runtime_wrapper(
             torch.autograd.graph.increment_version(mutated_args)
 
         if trace_joint:
-            args_ = list(args)
+            args_ = [*args]
             # See Note [Detaching inputs that never need gradients]
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
@@ -537,7 +539,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
-                n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])
+                n.meta["val"] for n in ([*fw_module.graph.nodes][-1].args[0])
             ]
         else:
             self.needs_post_compile = False
@@ -1320,7 +1322,7 @@ def merge_view_inputs(
             for inpt_idx in aliased_input_indices
         ):
             other_args.extend(
-                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+                [fwd_inputs[curr_idx] for curr_idx in aliased_input_indices]
             )
             continue
 
@@ -1335,7 +1337,7 @@ def merge_view_inputs(
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
-                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+                [fwd_inputs[curr_idx] for curr_idx in aliased_input_indices]
             )
             continue
 
@@ -1627,8 +1629,8 @@ def _backward_prologue_functional(
                 "The grad inputs should be same number as forward output tangents"
             )
 
-        flat_processed_tangents = list(
-            itertools.chain.from_iterable(
+        flat_processed_tangents = [
+            *itertools.chain.from_iterable(
                 (
                     AOTDispatchAutograd.process_runtime_tangent(
                         t,
@@ -1640,7 +1642,7 @@ def _backward_prologue_functional(
                     metadata.subclass_tangent_meta,
                 )
             )
-        )
+        ]
 
         all_args = (
             runtime_unwrap_tensor_subclasses(

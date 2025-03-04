@@ -230,7 +230,7 @@ def do_bench_using_profiling(
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
+    res = sum([event.device_time_total for event in actual_events]) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -268,7 +268,7 @@ def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
 
 def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
-    return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
+    return sympy.expand(sum([a * b for a, b in zip(seq1, seq2)]))
 
 
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
@@ -283,9 +283,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
-    )
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return runtime_ceildiv(numer, denom)
 
 
@@ -319,7 +319,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    for v in list(tys.values()):
+    for v in [*tys.values()]:
         tys[v] = v
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
@@ -609,7 +609,7 @@ def get_kernel_metadata(
     # is not supported. An example of this is conditional statements.
     single_graph = None
     if len(inductor_nodes):
-        unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
+        unique_graphs = OrderedSet([n.graph for n in inductor_nodes])
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
@@ -658,7 +658,7 @@ def dominated_nodes(
     skip_filter: Optional[Callable[[Any], bool]] = None,
 ) -> OrderedSet[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
-    initial_queue = list(initial_queue)
+    initial_queue = [*initial_queue]
     dominated_set = OrderedSet(initial_queue)
 
     while initial_queue:
@@ -926,7 +926,7 @@ def argsort(seq: Sequence[Any]) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+    return [*reversed(sorted(a_r, key=getter, reverse=True))]  # noqa: C413
 
 
 def argsort_sym(
@@ -1357,9 +1357,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> tuple[
-    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
-]:
+def try_import_ck_lib() -> (
+    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
+):
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1409,7 +1409,7 @@ def use_ck_template(layout: Layout) -> bool:
     if not requested_supported_archs:
         return False
     # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
+    if layout.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         return False
 
     ck_package_dirname, _, _, _ = try_import_ck_lib()
@@ -1629,18 +1629,18 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
 def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
 def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1766,9 +1766,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(val, sympy.Expr), (
-        "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    )
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -2115,7 +2115,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
                 static_arg_idxs.append(arg_count)
             arg_count += 1
 
-    assert static_arg_idxs == list(range(len(static_arg_idxs)))
+    assert static_arg_idxs == [*range(len(static_arg_idxs))]
     return len(static_arg_idxs)
 
 
@@ -2356,7 +2356,8 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
         needed_size = 0
     else:
         needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+            sum([(shape - 1) * stride for shape, stride in zip(x.size(), x.stride())])
+            + 1
         )
     buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
     return torch.as_strided(buffer, x.size(), x.stride())
@@ -2430,7 +2431,7 @@ def set_tracing_context_output_strides(
                     return shape_env.evaluate_symexpr(e)
 
                 context.output_strides.append(
-                    tuple(map_expr(e) for e in exprs)  # type: ignore[misc]
+                    tuple([map_expr(e) for e in exprs])  # type: ignore[misc]
                 )
 
 

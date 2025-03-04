@@ -263,8 +263,8 @@ class MetaTracer(torch.fx.Tracer):
         except NameError:
             if (
                 self.allow_insert_stateless_mods
-                and len(list(mod.parameters())) == 0
-                and len(list(mod.buffers())) == 0
+                and len([*mod.parameters()]) == 0
+                and len([*mod.buffers()]) == 0
             ):
                 path = self._insert_module_as_submodule(mod)
                 self.prev_module = path

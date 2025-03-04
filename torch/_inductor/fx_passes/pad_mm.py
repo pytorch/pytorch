@@ -477,7 +477,7 @@ def _should_pad_bench(
                 size_hints = realize_symbols(t.size())
                 stride_hint = realize_symbols(t.stride())
                 real_size = (
-                    sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
+                    sum([(d - 1) * s for d, s in zip(size_hints, stride_hint)]) + 1
                 )
                 real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
                 return torch.as_strided(real_t, size_hints, stride_hint)

@@ -653,10 +653,10 @@ class AutogradCompilerInstance:
     def move_graph_nodes_to_cuda(self, graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
-        nodes = list(graph.nodes)
+        nodes = [*graph.nodes]
         assert nodes[0].target == "inputs"
         inputs = nodes[0]
-        inputs_users = list(inputs.users.keys())
+        inputs_users = [*inputs.users.keys()]
         # input access nodes should immediately follow placeholder nodes
         first_getitem_idx = len(_graph_placeholders)
         assert nodes[first_getitem_idx] == inputs_users[0]
@@ -671,7 +671,7 @@ class AutogradCompilerInstance:
             is_cpu = node.meta["val"].device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
-                node_users = list(node.users.keys())
+                node_users = [*node.users.keys()]
                 # We can only move the cpu scalar if it is not exposed to user code.
                 if all(
                     (
@@ -695,7 +695,7 @@ class AutogradCompilerInstance:
                 node.meta["val"] = node.meta["val"].cuda()
 
             # return runtime indices we need to move to cuda
-            return list(to_move.keys())
+            return [*to_move.keys()]
 
         return []
 
@@ -1051,7 +1051,7 @@ class AutogradCompilerInstance:
         for node in reversed(pre_hooks):
             hook_getitem_node = node.args[0]
 
-            users = list(node.users.keys())
+            users = [*node.users.keys()]
             if len(users) == 0:
                 continue
 
@@ -1091,7 +1091,7 @@ class AutogradCompilerInstance:
 
             # find the corresponding acc_grad node
             acc_grad_node = None
-            for n in list(param_node.users.keys()):
+            for n in [*param_node.users.keys()]:
                 if (
                     n.op == "call_function"
                     and n.target == torch.ops.inductor.accumulate_grad_.default
@@ -1099,9 +1099,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            assert acc_grad_node is not None, (
-                "post_acc_grad_hook must have corresponding acc grad node"
-            )
+            assert (
+                acc_grad_node is not None
+            ), "post_acc_grad_hook must have corresponding acc grad node"
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
@@ -1131,16 +1131,18 @@ class AutogradCompilerInstance:
                 continue
 
             input_nodes_and_users = []
-            input_nodes_and_users.extend(list(input_nodes))
+            input_nodes_and_users.extend([*input_nodes])
             for input_node in input_nodes:
                 input_nodes_and_users.extend(
-                    user
-                    for user in list(input_node.users.keys())
-                    if not (
-                        user.op == "call_function"
-                        and user.target == call_hook
-                        and node.kwargs.get("hook_type", None) == "post_hook"
-                    )
+                    [
+                        user
+                        for user in [*input_node.users.keys()]
+                        if not (
+                            user.op == "call_function"
+                            and user.target == call_hook
+                            and node.kwargs.get("hook_type", None) == "post_hook"
+                        )
+                    ]
                 )
 
             arg = max(input_nodes_and_users)  # last input users
@@ -1150,7 +1152,7 @@ class AutogradCompilerInstance:
             ):
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
-                for n in list(param_node.users.keys()):
+                for n in [*param_node.users.keys()]:
                     if (
                         n.op == "call_function"
                         and n.target == call_hook
@@ -1173,7 +1175,7 @@ class AutogradCompilerInstance:
         if isinstance(t, list):
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
-            return tuple(self.to_proxy(x) for x in t)
+            return tuple([self.to_proxy(x) for x in t])
         if isinstance(t, (torch.SymInt, torch.SymFloat)):
             return self.symnode_proxy_lookup[t.node]
         if not isinstance(t, torch.Tensor):

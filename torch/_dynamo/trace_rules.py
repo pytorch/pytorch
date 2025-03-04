@@ -3479,7 +3479,7 @@ FBCODE_SKIP_TORCHREC_DIRS = {
 }
 
 FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
-    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_SKIP_TORCHREC_DIRS)})"
+    f".*({'|'.join([re.escape(_as_posix_path(d)) for d in FBCODE_SKIP_TORCHREC_DIRS])})"
 )
 
 # TODO(yanboliang, anijain2305) - There are a few concerns that we should
@@ -3493,7 +3493,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
     "torchrec/distributed/types.py",
 }
 FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
-    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_INLINE_FILES_IN_SKIPPED_DIRS)})"
+    f".*({'|'.join([re.escape(_as_posix_path(d)) for d in FBCODE_INLINE_FILES_IN_SKIPPED_DIRS])})"
 )
 
 # torch.optim is a special case,
@@ -3507,7 +3507,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 def _recompile_re():
     global SKIP_DIRS_RE
     SKIP_DIRS_RE = re.compile(
-        rf"^[^\s<]*({'|'.join(re.escape(_as_posix_path(d)) for d in SKIP_DIRS)})"
+        rf"^[^\s<]*({'|'.join([re.escape(_as_posix_path(d)) for d in SKIP_DIRS])})"
     )
 
 

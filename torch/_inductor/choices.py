@@ -233,7 +233,7 @@ class InductorChoices:
                             "node2_name": node2.get_name(),
                             "node1_debug_str": write_text(node1.debug_str()),
                             "node2_debug_str": write_text(node2.debug_str()),
-                            "common_buffer_names": list(common_buf_names),  # type: ignore[dict-item]
+                            "common_buffer_names": [*common_buf_names],  # type: ignore[dict-item]
                             "failure_reason": scheduler.decide_fusion_fail_reason(
                                 node1, node2, common_buf_names
                             ),

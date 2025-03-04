@@ -1074,7 +1074,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
     new_insts = []
     for inst in instructions:
         new_insts.append(inst)
-        if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
+        if inst.opname in {"BINARY_SLICE", "STORE_SLICE"}:
             # new instruction
             subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
@@ -1210,9 +1210,9 @@ def update_offsets(instructions) -> None:
 def debug_bytes(*args) -> str:
     index = range(max(map(len, args)))
     result = [
-        " ".join(f"{x:03}" for x in arg)
+        " ".join([f"{x:03}" for x in arg])
         for arg in [index]
-        + list(args)
+        + [*args]
         + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
     ]
 
@@ -1515,7 +1515,7 @@ def _clone_instructions(instructions):
 
 @functools.lru_cache
 def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
-    instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    instructions = [*map(convert_instruction, dis.get_instructions(code))]
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
         populate_kw_names_argval(instructions, code.co_consts)

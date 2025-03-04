@@ -107,7 +107,7 @@ class ShapeEnvEvent:
             return ShapeEnv(**self.kwargs)
 
         assert shape_env is not None
-        args = list(self.args or [])
+        args = [*(self.args or [])]
         kwargs = dict(self.kwargs or {})
 
         # Replace any argument of type ShapeEnv by the given one.
@@ -152,7 +152,7 @@ class ShapeEnvEvent:
             replacearg(
                 index=2,
                 key="args",
-                fn=lambda args: tuple(maybe_convert_node(a) for a in args),
+                fn=lambda args: tuple([maybe_convert_node(a) for a in args]),
             )
         if self.is_evaluate_expr() or self.is_defer_runtime_assert():
             # ShapeEnv.evaluate_expr and ShapeEnv.defer_runtime_assert:
@@ -280,7 +280,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     )
                     # Record the event for 'fn'.
                     event = ShapeEnvEvent(
-                        fn, list(args), kwargs, tracked_fakes, name=fn.__name__
+                        fn, [*args], kwargs, tracked_fakes, name=fn.__name__
                     )
                     # Play the event on this ShapeEnv.
                     # NB: It's important to put the event first, because running
@@ -433,11 +433,11 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
         if isinstance(value, dict):
             return (
                 "{"
-                + ", ".join(f"{k}: {value[k]}" for k in sorted(value.keys(), key=str))
+                + ", ".join([f"{k}: {value[k]}" for k in sorted(value.keys(), key=str)])
                 + "}"
             )
         if isinstance(value, set):
-            return "{" + ", ".join(f"{v}" for v in sorted(value)) + "}"
+            return "{" + ", ".join([f"{v}" for v in sorted(value)]) + "}"
         return str(value)
 
     # Compares env1_vars with env2_vars.
@@ -462,7 +462,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
             )
 
         # Then, sort the keys, and compare the mapped values of each key.
-        sorted_keys = list(env1_set)
+        sorted_keys = [*env1_set]
         sorted_keys.sort()
 
         mapped_dict = [

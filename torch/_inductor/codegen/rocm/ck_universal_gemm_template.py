@@ -540,7 +540,7 @@ class CKGemmTemplate(CKTemplate):
             version = int(version_str[1:])  # Assuming the format is always 'vX'
         except ValueError as e:
             raise ValueError(f"Invalid version string: {version_str}") from e
-        if version not in [1, 2, 3, 4, 5]:
+        if version not in {1, 2, 3, 4, 5}:
             raise ValueError(
                 f"unknown prefetch stages for {op.block_gemm_pipeline_version}"
             )
@@ -935,7 +935,7 @@ class CKGemmTemplate(CKTemplate):
             for kBatch in kBatches:
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
-        filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
+        filtered_instances = [*filter(lambda op: self.filter_op(op), ops)]
 
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.

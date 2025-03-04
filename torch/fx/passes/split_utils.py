@@ -196,7 +196,7 @@ def split_by_tags(
         node_to_component[node] = comp
 
         # Max order of upperstream components.
-        mx = max((c.order for c in upstream_components), default=0)
+        mx = max(([c.order for c in upstream_components]), default=0)
 
         # Expect the component for `node` has higher order then its upstream components.
         assert (

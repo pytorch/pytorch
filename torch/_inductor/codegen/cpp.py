@@ -167,13 +167,13 @@ def reduction_init(reduction_type, dtype):
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
-    if reduction_type in ("xor_sum", "sum", "any"):
+    if reduction_type in {"xor_sum", "sum", "any"}:
         return 0
     if reduction_type == "prod":
         return 1
-    if reduction_type in ("max", "argmax", "min", "argmin"):
+    if reduction_type in {"max", "argmax", "min", "argmin"}:
         cdtype = DTYPE_TO_CPP[dtype]
-        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
+        if dtype == torch.bool and reduction_type in {"argmin", "argmax"}:
             cdtype = DTYPE_TO_CPP[torch.float]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
@@ -200,7 +200,7 @@ def reduction_acc_type(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in {"argmin", "argmax"}:
         if dtype == torch.bool:
             scalar_type = DTYPE_TO_CPP[torch.float]
         return f"IndexValue<{scalar_type}>"
@@ -224,7 +224,7 @@ def reduction_combine(
         return f"{var} ^ {next_value}"
     if reduction_type == "any":
         return f"{var} || {next_value}"
-    if reduction_type in ("min", "max"):
+    if reduction_type in {"min", "max"}:
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
@@ -234,7 +234,7 @@ def reduction_combine(
         else:
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in {"argmin", "argmax"}:
         if (
             hasattr(next_value, "dtype")
             and next_value.dtype == torch.bool
@@ -256,7 +256,7 @@ def reduction_combine(
 def reduction_project(reduction_type, acc):
     if is_welford_reduction(reduction_type):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
-    elif reduction_type in ("argmin", "argmax"):
+    elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
 
@@ -471,14 +471,14 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             return cls(
                 node1.scheduler,
                 (
-                    list(node1.get_outer_nodes())
+                    [*node1.get_outer_nodes()]
                     if type(node1) is OuterLoopFusedSchedulerNode
                     else [
                         node1,
                     ]
                 )
                 + (
-                    list(node2.get_outer_nodes())
+                    [*node2.get_outer_nodes()]
                     if type(node2) is OuterLoopFusedSchedulerNode
                     else [
                         node2,
@@ -502,7 +502,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         flatten_snodes = []
         for _node in self.outer_fused_nodes:
             assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
-            flatten_snodes.extend(list(_node.get_nodes()))
+            flatten_snodes.extend([*_node.get_nodes()])
         super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
 
     def get_outer_nodes(self):
@@ -885,7 +885,7 @@ class CppOverrides(OpOverrides):
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
-            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
+            return tuple([V.kernel.cse.try_get(cache_key) for cache_key in cache_keys])
 
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar(dtype=torch.int32)
@@ -1109,7 +1109,7 @@ class CppVecOverrides(CppOverrides):
                     for arg in args
                     if isinstance(arg, CppCSEVariable) and arg.is_vec
                 ]
-                new_args = list(args)
+                new_args = [*args]
                 if scalars and vectors:
                     new_args = []
                     for arg in args:
@@ -1166,10 +1166,10 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in [
+            if getattr(method, "__class__", None) == staticmethod and name not in {
                 "masked",
                 "index_expr",
-            ]:
+            }:
                 setattr(self, name, wrap(method.__func__))
 
         return self
@@ -1395,9 +1395,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def remainder(a, b):
-        assert a.dtype == b.dtype, (
-            "remainder vec implementation expect the same inputs' dtype."
-        )
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1499,9 +1499,9 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def floordiv(a, b):
         if is_float_dtype(a.dtype):
-            assert a.dtype == b.dtype, (
-                "div_floor_floating_vec implementation expect the same inputs' dtype."
-            )
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
             return f"div_floor_floating_vec({a}, {b})"
         else:
             assert all(is_integer_dtype(item.dtype) for item in [a, b])
@@ -1711,7 +1711,7 @@ class CppVecOverrides(CppOverrides):
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
-            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
+            return tuple([V.kernel.cse.try_get(cache_key) for cache_key in cache_keys])
 
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
@@ -2139,9 +2139,9 @@ class CppKernel(Kernel):
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
-            assert self.call_ranges == tuple(lengths) + tuple(reduction_lengths), (
-                f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
-            )
+            assert self.call_ranges == tuple(lengths) + tuple(
+                reduction_lengths
+            ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
             assert self.reduction_depth == len(lengths)
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
@@ -2908,11 +2908,11 @@ class CppVecKernel(CppKernel):
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
-                if reduction_type in (
+                if reduction_type in {
                     "any",
                     "sum",
                     "max",
-                ):
+                }:
                     next_value = f"!{acc_vec}.all_zero()"
                 else:
                     assert reduction_type == "min"
@@ -3021,7 +3021,7 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in {"argmin", "argmax"}:
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
@@ -3053,7 +3053,7 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in {"argmin", "argmax"}:
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
@@ -3145,7 +3145,7 @@ class CppVecKernel(CppKernel):
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {cexpr_index(self.tail_size)})"
             else:
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-        elif reduction_type in ("argmin", "argmax"):
+        elif reduction_type in {"argmin", "argmax"}:
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
             if src_dtype == torch.bool:
@@ -3457,26 +3457,26 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]
     and if all the nodes can codegen with this data type without converting to float.
     Otherwise returns None and True.
     """
-    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+    sub_blocks = [_body.root_block] + [*_body.subblocks.values()]
 
     _lowp_fp_type: Optional[torch.dtype] = None
     _use_fp32 = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
-            if _node.op == "placeholder" or _node.target in (
+            if _node.op == "placeholder" or _node.target in {
                 "get_index",
                 "index_expr",
-            ):
+            }:
                 continue
 
             # Fast path if all operations can support bf16/fp16 without converting to fp32
-            if _node.target not in [
+            if _node.target not in {
                 "load",
                 "store",
                 "abs",
                 "neg",
                 "output",
-            ]:
+            }:
                 _use_fp32 = True
 
             if hasattr(_node, "meta") and _node.meta:
@@ -3583,10 +3583,10 @@ class TilingSelect:
                 # index_expr, load, store
                 non_contig_indexing_op_counter: dict[str, int] = {}
                 for _body in loop_bodies:
-                    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+                    sub_blocks = [_body.root_block] + [*_body.subblocks.values()]
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+                            if _node.target in {"index_expr", "load", "store"}:
                                 # get the index and replace prefix from z to x
                                 arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
@@ -3770,7 +3770,7 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                elif node.target in {"to_dtype", "constant", "index_expr"}:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -3801,7 +3801,7 @@ class CppKernelProxy(CppKernel):
                     is_lowp_fp_sink(user, dt) for user in node.users
                 )
 
-            sub_graph_nodes = list(sub_graph.nodes)
+            sub_graph_nodes = [*sub_graph.nodes]
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
@@ -3970,7 +3970,7 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+        sub_blocks = [loop_body.root_block] + [*loop_body.subblocks.values()]
         for sub_block in sub_blocks:
             add_to_dtype(sub_block.graph)
 
@@ -3981,12 +3981,12 @@ class CppKernelProxy(CppKernel):
         ):
             # Mark the load node to load bf16/fp16
             for _node in nodes:
-                sub_blocks = [_node._body.root_block] + list(
-                    _node._body.subblocks.values()
-                )
+                sub_blocks = [_node._body.root_block] + [
+                    *_node._body.subblocks.values()
+                ]
                 for sub_block in sub_blocks:
                     for fx_node in sub_block.graph.nodes:
-                        if fx_node.target in ["load", "store"]:
+                        if fx_node.target in {"load", "store"}:
                             assert fx_node.meta
                             assert OptimizationContext.key in fx_node.meta
                             opt_ctx: OptimizationContext = fx_node.meta[
@@ -4024,10 +4024,10 @@ class CppKernelProxy(CppKernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
             in_suffix = False
             for fn, var_sizes in zip(fn_list, var_sizes_list):
-                if var_sizes in [
+                if var_sizes in (
                     (group, reduction_group),
                     (tuple(itertools.chain(group, reduction_group)), ()),
-                ]:
+                ):
                     assert not in_suffix
                     fn(vars, reduction_vars)
                 else:
@@ -4390,7 +4390,7 @@ class CppScheduling(BaseScheduling):
         self._ready_to_flush = status
 
     def group_fn(self, sizes):
-        return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+        return tuple([tuple(map(V.graph.sizevars.simplify, s)) for s in sizes])
 
     def reset_kernel_group(self):
         from .cpp_wrapper_cpu import CppWrapperCpu
@@ -4430,13 +4430,13 @@ class CppScheduling(BaseScheduling):
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
                             indexing_exprs.update(exprs)
-                        return var_ranges, list(indexing_exprs)
+                        return var_ranges, [*indexing_exprs]
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
                         assert isinstance(comp_buffer, ir.ComputedBuffer)
                         _, body, _ = comp_buffer.get_default_sizes_body()
-                        return body.var_ranges, list(body.indexing_exprs.values())
+                        return body.var_ranges, [*body.indexing_exprs.values()]
 
                 node_to_recomp = node1 if len(vars1) < len(vars2) else node2
                 assert isinstance(node_to_recomp, SchedulerNode)
@@ -4541,7 +4541,7 @@ class CppScheduling(BaseScheduling):
             if len(ranges_set) != 1:
                 return False
 
-            ranges1 = list(next(iter(ranges_set)))
+            ranges1 = [*next(iter(ranges_set))]
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
@@ -4760,7 +4760,7 @@ class CppScheduling(BaseScheduling):
             if not extra_indexing_constraints:
                 extra_indexing_constraints = (
                     body.var_ranges,
-                    list(body.indexing_exprs.values()),
+                    [*body.indexing_exprs.values()],
                 )
             return (
                 (new_index_size, reduce_size),
@@ -5022,9 +5022,9 @@ class CppScheduling(BaseScheduling):
         # a templated kernel was successfully compiled in a UT
         counters["inductor"]["cpp_templated_kernel_counter"] += 1
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cpp_template(template_node), (
-            "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
-        )
+        assert self.is_cpp_template(
+            template_node
+        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
@@ -5032,9 +5032,9 @@ class CppScheduling(BaseScheduling):
         epilogue_ir_nodes: list[Optional[ir.Operation]] = [
             n.node for n in epilogue_nodes
         ]
-        assert all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes), (
-            "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        )
+        assert all(
+            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
+        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
 
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
@@ -5072,16 +5072,16 @@ class CppScheduling(BaseScheduling):
         if is_multi_outputs_template(template_node.node):
             # For multi outputs template, allocate buffers for each output after the epilogue
             # codegen to which determines if the buffer has been removed.
-            assert len(template_node.outputs) == 1, (
-                "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
-            )
+            assert (
+                len(template_node.outputs) == 1
+            ), "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
             for user in template_node.outputs[0].users:
-                assert isinstance(user.node, ExternKernelSchedulerNode), (
-                    "Multi outputs template should be with ExternKernelSchedulerNode"
-                )
-                assert isinstance(user.node.node, ir.MultiOutput), (
-                    "Multi outputs template has multi users with MultiOutput"
-                )
+                assert isinstance(
+                    user.node, ExternKernelSchedulerNode
+                ), "Multi outputs template should be with ExternKernelSchedulerNode"
+                assert isinstance(
+                    user.node.node, ir.MultiOutput
+                ), "Multi outputs template has multi users with MultiOutput"
                 user.node.mark_run()
 
         kernel.call_kernel(kernel_name, ctb)
@@ -5413,9 +5413,9 @@ class LoopNest:
         return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
     def mark_parallel(self, par_depth):
-        assert par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth, (
-            "Parallel depth cannot exceed the maximal allowed parallel depth"
-        )
+        assert (
+            par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth
+        ), "Parallel depth cannot exceed the maximal allowed parallel depth"
         assert self.loops is not None
         assert len(self.loops) >= par_depth.parallel_depth
         loop = self.loops[par_depth.start_depth]

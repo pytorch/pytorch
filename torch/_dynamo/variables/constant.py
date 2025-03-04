@@ -229,7 +229,7 @@ class EnumVariable(VariableTracker):
     @classmethod
     def create(cls, cls_type, value_vt, options):
         if isinstance(value_vt, variables.ConstantVariable):
-            for member in list(cls_type):
+            for member in [*cls_type]:
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
         unimplemented("Enum variable is constructed with non constant values")

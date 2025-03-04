@@ -53,7 +53,7 @@ def lift_subgraph_as_module(
     submodule = HolderModule({})
     orig_to_split_fqn_mapping: dict[str, str] = {}
     for n in subgraph.nodes:
-        if n.op not in ("call_module", "get_attr"):
+        if n.op not in {"call_module", "get_attr"}:
             continue
 
         target = n.target

@@ -521,31 +521,31 @@ def deduce_output_dtype_by_name(
     """
     if op_name in boolean_ops():
         return torch.bool
-    elif op_name in (
+    elif op_name in {
         "to_dtype",
         "index_expr",
-    ):
+    }:
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
-    elif op_name in (
+    elif op_name in {
         "rand",
         "randn",
-    ):
+    }:
         return torch.float
-    elif op_name in (
+    elif op_name in {
         "get_index",
         "randint64",
         "load_seed",
-    ):
+    }:
         return torch.int64
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
-    elif op_name in (
+    elif op_name in {
         "load",
         "store",
         "store_reduction",
-    ):
+    }:
         buf_name = args[1]
         return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
     elif op_name == "to_dtype_bitcast":
@@ -986,9 +986,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert funcname not in cls.__dict__, (
-                    f"multiple definitions of {funcname} on {cls.__name__}"
-                )
+                assert (
+                    funcname not in cls.__dict__
+                ), f"multiple definitions of {funcname} on {cls.__name__}"
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1471,9 +1471,7 @@ class KernelArgs:
         if value in self.sizevars:
             return self.sizevars[value]
         if name in self.sizevars.values():
-            name = (
-                f"{name}{sum(1 for v in self.sizevars.values() if v.startswith(name))}"
-            )
+            name = f"{name}{sum([1 for v in self.sizevars.values() if v.startswith(name)])}"
         self.sizevars[value] = name
         return name
 
@@ -2386,7 +2384,7 @@ class CSEProxy(DefaultHandler):
                 else:
                     return x
 
-            arg_bounds = list(map(arg_to_bound, args))
+            arg_bounds = [*map(arg_to_bound, args)]
             return getattr(self.vr_analysis, name)(*arg_bounds)
         return ValueRanges.unknown()
 

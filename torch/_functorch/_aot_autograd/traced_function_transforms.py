@@ -117,7 +117,7 @@ def fn_prepped_for_autograd(
 
         outs = fn(*args_maybe_cloned)
         assert isinstance(outs, (tuple, list))
-        outs = list(outs)
+        outs = [*outs]
         assert len(meta.output_info) == len(outs)
 
         mutated_inputs_to_return = [

@@ -243,7 +243,7 @@ class LoopBody:
         inverse_order = [inverse_order[i] for i in range(len(new_order))]
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = list(itertools.chain(*indices))
+            index = [*itertools.chain(*indices)]
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
@@ -388,9 +388,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(v not in self.var_ranges for v in index), (
-            f"{self.var_ranges=}, {indices=}"
-        )
+        assert all(
+            v not in self.var_ranges for v in index
+        ), f"{self.var_ranges=}, {indices=}"
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
@@ -554,7 +554,7 @@ class CaptureIndexing(WrapperHandler):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
         if "welford" in reduction_type:
-            return tuple(result[i] for i in range(3))
+            return tuple([result[i] for i in range(3)])
         return result
 
     def index_expr(self, index, dtype):
@@ -645,12 +645,12 @@ class CaptureIndexing(WrapperHandler):
             {},
         )
         # Proxies are iterable, but some methods expect tuples/lists
-        return tuple(result[i] for i in range(len(value_proxy)))
+        return tuple([result[i] for i in range(len(value_proxy))])
 
     def sort(self, dtypes, values, stable, descending):
         result = self._inner.sort(dtypes, values, stable, descending)
         # Proxies are iterable, but some methods expect tuples/lists
-        return tuple(result[i] for i in range(len(values)))
+        return tuple([result[i] for i in range(len(values))])
 
     def frexp(self, value_proxy):
         result = self._inner.frexp(value_proxy)

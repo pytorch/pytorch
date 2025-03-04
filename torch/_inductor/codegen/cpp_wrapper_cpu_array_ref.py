@@ -126,12 +126,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        assert not gpu, (
-            "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
-        )
-        assert arg_types is not None and len(call_args) == len(arg_types), (
-            "Mismatch call_args and arg_types in generate_kernel_call"
-        )
+        assert (
+            not gpu
+        ), "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+        assert arg_types is not None and len(call_args) == len(
+            arg_types
+        ), "Mismatch call_args and arg_types in generate_kernel_call"
         new_args = []
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
@@ -161,12 +161,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 and not V.graph.is_const_graph
             ):
                 input_cpp_types = ", ".join(
-                    f"{CppWrapperCpuArrayRef.get_input_cpp_type(x)}"
-                    for x in V.graph.graph_inputs.values()
+                    [
+                        f"{CppWrapperCpuArrayRef.get_input_cpp_type(x)}"
+                        for x in V.graph.graph_inputs.values()
+                    ]
                 )
                 output_arrayref_types = ", ".join(
-                    f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
-                    for x in V.graph.graph_outputs
+                    [
+                        f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
+                        for x in V.graph.graph_outputs
+                    ]
                 )
 
                 self.prefix.splice(
@@ -328,9 +332,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
-                        assert dtype is not None, (
-                            "Fails to get the dtype of the sympy.Expr"
-                        )
+                        assert (
+                            dtype is not None
+                        ), "Fails to get the dtype of the sympy.Expr"
                         self.codegen_tensor_item(
                             dtype, f"inputs[{idx}]", input_key, self.prefix
                         )
@@ -340,7 +344,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         )
 
             assert all(
-                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+                isinstance(v, torch.Tensor) for v in [*V.graph.constants.values()]
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
@@ -533,7 +537,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
         total_allocated_buffer_size = sum(
-            s.total_allocated_buffer_size for s in past_planning_states
+            [s.total_allocated_buffer_size for s in past_planning_states]
         )
 
         self.allow_stack_allocation = (
@@ -724,9 +728,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
-                assert reduce is None, (
-                    "Expect reduce to be None for aten.scatter_ with scalar src"
-                )
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
         line += ");"
         self.writeline(line)
 

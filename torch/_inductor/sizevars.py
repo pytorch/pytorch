@@ -34,7 +34,7 @@ def evaluate_expr(
     axioms: Optional[tuple[sympy.Expr]] = None,
     var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
 ) -> bool:
-    if expr in (True, False):
+    if expr in {True, False}:
         return bool(expr)
 
     try:
@@ -232,7 +232,7 @@ class SizeVarAllocator:
             2) fuse contiguous dimensions into a single loop
             If channel_last = True, we will prevent the last dim fused with other dims
         """
-        sizes = list(map(self.simplify, sizes))
+        sizes = [*map(self.simplify, sizes)]
 
         strides = [
             # index_formulas may contain boolean expressions (e.g. s0 < 10),
@@ -286,7 +286,7 @@ class SizeVarAllocator:
                     sizes[j] = None
 
         def reindex(index):
-            it = list(reversed(index))
+            it = [*reversed(index)]
             new_index = []
             for size in sizes:
                 if size is None:
@@ -564,7 +564,7 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        return tuple([self.size_hint(x, fallback=fallback) for x in exprs])
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -680,7 +680,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
         strides = tuple(map(abs, self.stride_hints(index, vars)))
-        order = list(range(len(strides)))
+        order = [*range(len(strides))]
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 

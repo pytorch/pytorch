@@ -169,7 +169,7 @@ def aot_dispatch_base_graph(
 
         # We add nodes corresponding to buffer assignments as output nodes in the graph.
         add_nodes = []
-        output_node = list(fw_module.graph.nodes)[-1]
+        output_node = [*fw_module.graph.nodes][-1]
         for name in assigned_buffers.values():  # type: ignore[possibly-undefined]
             for node in fw_module.graph.nodes:
                 if node.name == name:

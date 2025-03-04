@@ -216,10 +216,10 @@ class NNModuleToString:
                 assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
                 tensor_str = repr(buffer)
             elif torch.is_floating_point(buffer):
-                tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+                tensor_str = f"torch.randn({[*buffer.shape]}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
-                    f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                    f"torch.randint(1, size={[*buffer.shape]}, dtype={buffer.dtype})"
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
@@ -233,7 +233,7 @@ class NNModuleToString:
             maybe_device = ""
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
+            tensor_str = f"torch.nn.Parameter(torch.randn({[*param.shape]}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -658,7 +658,7 @@ class InputWriter:
         r = [
             "def load_args(reader):",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend([f"    {l}" for l in self._lines])
         # In case we need to change the internal format of load_args
         # in an FC-breaking way
         r.append("load_args._version = 0")
@@ -717,7 +717,7 @@ class InputWriter:
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
-            args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+            args.extend([f"{k}={v!r}" for k, v in tensor_metadata.items()])
         if _requires_grad_or_default(None) != t.requires_grad:
             args.append(f"requires_grad={t.requires_grad!r}")
         is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)

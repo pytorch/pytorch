@@ -132,7 +132,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
         except StopIteration:
             return
 
-    return tuple(_tee(shared_link) for _ in range(n))
+    return tuple([_tee(shared_link) for _ in range(n)])
 
 
 @overload
@@ -191,7 +191,7 @@ def zip_longest(
 ) -> Iterator[tuple[_T | _U, ...]]:
     # zip_longest('ABCD', 'xy', fillvalue='-') -> Ax By C- D-
 
-    iterators = list(map(iter, iterables))
+    iterators = [*map(iter, iterables)]
     num_active = len(iterators)
     if not num_active:
         return

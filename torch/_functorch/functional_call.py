@@ -226,12 +226,12 @@ def stack_module_state(
         )
     all_params = [dict(model.named_parameters()) for model in models]
     params = {
-        k: construct_stacked_leaf(tuple(params[k] for params in all_params), k)
+        k: construct_stacked_leaf(tuple([params[k] for params in all_params]), k)
         for k in all_params[0]
     }
     all_buffers = [dict(model.named_buffers()) for model in models]
     buffers = {
-        k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
+        k: construct_stacked_leaf(tuple([buffers[k] for buffers in all_buffers]), k)
         for k in all_buffers[0]
     }
 

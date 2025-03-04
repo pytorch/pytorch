@@ -391,10 +391,10 @@ class CompilerBisector:
         """
         Tries Move to the next backend.
         """
-        current_system_index = list(BACKENDS.keys()).index(curr_backend)
+        current_system_index = [*BACKENDS.keys()].index(curr_backend)
 
         if current_system_index < len(BACKENDS) - 1:
-            curr_backend = list(BACKENDS.keys())[current_system_index + 1]
+            curr_backend = [*BACKENDS.keys()][current_system_index + 1]
             cls.update_bisect_status(curr_backend, "")
             print(f"Moving to the next system: {curr_backend}")
             return curr_backend
@@ -603,7 +603,7 @@ def command_line_usage() -> None:
         bisection_manager.initialize_system()
         sys.exit(0)
 
-    if command not in ["good", "bad"]:
+    if command not in {"good", "bad"}:
         print("Invalid command. Must be 'good', 'bad', 'start', or 'end'.")
         sys.exit(1)
 

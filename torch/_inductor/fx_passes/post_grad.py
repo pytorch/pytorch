@@ -332,7 +332,7 @@ def scatter_upon_const_tensor(
     selector_loader = selector.make_loader()
 
     def inner_fn(idx):
-        selector_idx = list(idx)
+        selector_idx = [*idx]
         selector_idx[dim] = 0
 
         selector = selector_loader(selector_idx)
@@ -397,7 +397,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, [*shape])
 
 
 _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)
@@ -472,7 +472,7 @@ def is_valid_splitwithsizes_cat(match):
     if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
         return False
     get_item_args = OrderedSet(
-        get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
+        [get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes]
     )
     assert None not in get_item_args
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
@@ -485,7 +485,7 @@ def is_valid_splitwithsizes_cat(match):
     cat_items_args_order = [
         get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
     ]
-    if cat_items_args_order != list(range(len(split_sizes))):
+    if cat_items_args_order != [*range(len(split_sizes))]:
         return False
 
     return True
@@ -838,7 +838,7 @@ def is_valid_cat_splitwithsizes(match):
     if dim != get_arg_value(cat_node, 1, "dim"):
         return False
 
-    cat_inputs = list(get_arg_value(cat_node, 0))
+    cat_inputs = [*get_arg_value(cat_node, 0)]
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # the number of input tensors in cat and the
     # length of the split sizes should match
@@ -1001,10 +1001,10 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
 def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     from torch.fx.operator_schemas import normalize_function
 
-    if node.target not in [
+    if node.target not in (
         torch.ops.aten.index_put.default,
         torch.ops.aten.index_put_.default,
-    ]:
+    ):
         return False
     # Inductor falls back to aten.index_put_.
     # index_put_ will will call nonzero() and perform a H2D sync if
@@ -1017,7 +1017,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
-        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+        if i is not None and i.meta["val"].dtype in (torch.bool, torch.int8):
             any_byte_bool_indices = True
 
     val = args_[2].meta["val"]
@@ -1180,7 +1180,7 @@ class ConstructorMoverPass:
                 equal_constructor_sets[obj] = set1
             return set1
 
-        queue: list[fx.Node] = list(constructors)
+        queue: list[fx.Node] = [*constructors]
 
         for c in queue:
             constructor_dependencies[c].add(c)

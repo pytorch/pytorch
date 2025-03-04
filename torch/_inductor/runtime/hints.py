@@ -181,7 +181,7 @@ class HalideInputSpec(typing.NamedTuple):
     alias_of: Optional[str] = None
 
     def bindings_type(self) -> str:
-        if self.ctype in ("half*", "bfloat16*"):
+        if self.ctype in {"half*", "bfloat16*"}:
             return "uint16_t*"  # half not defined
         return self.ctype
 
