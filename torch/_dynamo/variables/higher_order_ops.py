@@ -126,55 +126,61 @@ def check_meta_consistency_vt(
 
     return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
 
-def flatten_nested_lists(li):
-    result = []
-    for el in li:
-        if isinstance(el, (list, tuple)):
-            result.extend(el)
-        else:
-            result.append(el)
-    return result
-
-def check_mutation_and_alias(tx, graph_module, inputs, name):
-    from torch._higher_order_ops.utils import (
-        has_potential_input_mutation_or_alias
-    )
-    from torch._subclasses.functional_tensor import FunctionalTensor
-
-    with tx.fake_mode:        
-        # Get the example values of the tensors.
-        # In case a BatchedTensor is detected, get the unwrapped tensor
-        inputs_fake = []
-        for inp in inputs:
-            if hasattr(inp, 'node'):
-                val = inp.node.meta["example_value"]
-                if isinstance(val, torch.Tensor):
-                    if torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
-                        # This case is for batched or functional tensors
-                        while torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
-                            val = torch._C._functorch.get_unwrapped(val)
-                        inputs_fake.append(val)
-                    else:
-                        # This is the standard case of a TensorVariable
-                        inputs_fake.append(val)
+def _collect_fake_inputs(tx, inputs):
+    from torch._subclasses.fake_tensor import FakeTensor
+    
+    # with tx.fake_mode:
+    # Get the example values of the tensors.
+    # In case a BatchedTensor is detected, get the unwrapped tensor
+    inputs_fake = []
+    for inp in inputs:
+        if hasattr(inp, 'node'):
+            val = inp.node.meta["example_value"]
+            if isinstance(val, torch.Tensor):
+                if torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
+                    # This case is for batched or functional tensors
+                    while torch._C._functorch.is_batchedtensor(val) or torch._C._functorch.is_functionaltensor(val):
+                        val = torch._C._functorch.get_unwrapped(val)
+                    assert(isinstance(val, FakeTensor))
+                    inputs_fake.append(val)
                 else:
-                    # This case is for SymInts and other non-Tensor elements
+                    # This is the standard case of a TensorVariable
+                    assert(isinstance(val, FakeTensor))
                     inputs_fake.append(val)
             else:
-                # This case is for ints
-                inputs_fake.append(inp)
-        
-        pre_dispatch = False
-        inp_mutation, aliases = has_potential_input_mutation_or_alias(graph_module, inputs_fake, pre_dispatch=pre_dispatch)
+                # This case is for SymInts and other non-Tensor elements
+                inputs_fake.append(val)
+        else:
+            # This case is for ints
+            assert(isinstance(inp, int))
+            inputs_fake.append(inp)
+                
+    return inputs_fake
 
-        if inp_mutation:
-            raise RuntimeError(
-                f"{name} might be modifying the input!"
-            )  # noqa: F541
-        if aliases:
-            raise RuntimeError(
-                f"{name} might be aliasing the input or the output!"
-            )  # noqa: F541
+def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
+    from torch._higher_order_ops.utils import (
+        has_potential_input_alias_or_mutation
+    )
+    
+    inp_mutation, aliases = has_potential_input_alias_or_mutation(graph_module, inputs_fake, pre_dispatch=pre_dispatch)
+
+    if inp_mutation:
+        raise RuntimeError(
+            f"{name} might be modifying the input!"
+        )  # noqa: F541
+    if aliases:
+        raise RuntimeError(
+            f"{name} might be aliasing the input or the output!"
+        )  # noqa: F541
+
+def check_mutation_and_alias(tx, graph_module, inputs, name, pre_dispatch=False):
+    
+    with tx.fake_mode:
+        # Collect the fake inputs from the input proxies
+        inputs_fake = _collect_fake_inputs(tx, inputs)
+
+        # Check for mutations and alias and raise Exceptions when needed
+        _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch)
 
 @contextlib.contextmanager
 def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
@@ -1017,7 +1023,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         
         for gm, gm_name in [(true_gm, true_gm_name), 
                             (false_gm, false_gm_name)]:
-            check_mutation_and_alias(tx, gm, flatten_nested_lists(proxy_vars), gm_name)
+            check_mutation_and_alias(tx, gm, pytree.tree_leaves(proxy_vars), gm_name)
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
@@ -1298,7 +1304,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         
         for gm, gm_name in [(cond_gm, cond_name), 
                             (body_gm, body_name)]:
-            check_mutation_and_alias(tx, gm, flatten_nested_lists(proxy_vars), gm_name)
+            check_mutation_and_alias(tx, gm, pytree.tree_leaves(proxy_vars), gm_name)
 
         cond_node = make_attr(tx, cond_name)
         body_node = make_attr(tx, body_name)
@@ -1398,7 +1404,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
         proxy_vars = xs_proxy, additional_inputs_proxy
         proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + additional_inputs_proxy
-        check_mutation_and_alias(tx, combine_gm, flatten_nested_lists(proxy_vars_inputcheck), 'Combine_fn')
+        check_mutation_and_alias(tx, combine_gm, pytree.tree_leaves(proxy_vars_inputcheck), 'Combine_fn')
 
         from torch._higher_order_ops.utils import (
             _maybe_fake_tracing,
@@ -1408,7 +1414,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         with tx.fake_mode:
             sub_args_fake = [
                 leaf.node.meta["example_value"].clone() if hasattr(leaf.node.meta["example_value"], 'clone') else leaf.node.meta["example_value"]
-                for leaf in flatten_nested_lists(proxy_vars_inputcheck)
+                for leaf in pytree.tree_leaves(proxy_vars_inputcheck)
             ]
             pre_dispatch = False
 
@@ -1574,7 +1580,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         y_proxies = [y_var.as_proxy() for y_var in y_vars]
         proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
         proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + tuple(additional_inputs_proxy)
-        check_mutation_and_alias(tx, combine_gm, flatten_nested_lists(proxy_vars_inputcheck), 'Combine_fn')
+        check_mutation_and_alias(tx, combine_gm, pytree.tree_leaves(proxy_vars_inputcheck), 'Combine_fn')
 
         if combine_result.python_type() != list:
             unimplemented(

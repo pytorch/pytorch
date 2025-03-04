@@ -89,15 +89,16 @@ def hints_wrapper_fake_tensor_mode(mode, body_func, args, kwargs, hints):
 
 @hints_wrapper.py_functionalize_impl
 def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
+    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    
     unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     unwrapped_hints = ctx.unwrap_tensors(hints)
     with ctx.redispatch_to_next():
         functional_body_fn = ctx.functionalize(body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        check_input_mutation_and_alias(
-            body_fn, unwrapped_args, pre_dispatch=pre_dispatch
-        )
+        _check_mutation_and_alias(body_fn, unwrapped_args, "hints_wrapper", pre_dispatch)
+        
         outputs = hints_wrapper(
             functional_body_fn,
             unwrapped_args,

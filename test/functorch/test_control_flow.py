@@ -4270,7 +4270,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_non_pointwise(self):
+    def test_associative_scan_non_pointwise1111(self):
         device = torch.device("cuda")
         x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(

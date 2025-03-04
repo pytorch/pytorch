@@ -186,7 +186,7 @@ def potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
                           inp_out_alias_map,
                           out_out_alias_map)
 
-def has_potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
+def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     inp_mutation, (inp_inp_alias_map,
                    inp_out_alias_map,
                    out_out_alias_map) = potential_input_mutation_or_alias(gm, inputs, pre_dispatch)

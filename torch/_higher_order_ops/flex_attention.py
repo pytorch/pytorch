@@ -9,7 +9,6 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
     autograd_not_implemented,
-    # check_input_mutation,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -394,6 +393,7 @@ def flex_attention_functionalize(
     are free variables.
     """
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
 
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
@@ -419,7 +419,7 @@ def flex_attention_functionalize(
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
-            check_input_mutation(score_mod, example_vals, pre_dispatch)
+            _check_mutation_and_alias(score_mod, example_vals, "flex_attention", pre_dispatch)
 
         out = flex_attention(
             query_unwrapped,
