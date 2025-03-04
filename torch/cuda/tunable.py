@@ -112,7 +112,7 @@ Offline Tuning
 
 Motivation
 ----------
-There are a couple of uses cases for offline tuning.
+There are several use cases for offline tuning.
 
 One use case, is a workload with a high-memory utilization where one might run out of memory with regular tuning.
 
