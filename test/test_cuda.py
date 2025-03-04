@@ -60,8 +60,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    MI300_ARCH,
-    NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
     serialTest,
@@ -69,7 +67,6 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
-    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -295,6 +292,9 @@ class TestCuda(TestCase):
         torch.cuda.reset_peak_memory_stats()
 
     @serialTest()
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_set_per_process_memory_fraction(self):
         orig = torch.cuda.get_per_process_memory_fraction(0)
         try:
@@ -454,7 +454,10 @@ class TestCuda(TestCase):
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
             # different size (128 MiB) expected on MI300 GPU
-            if torch.cuda.get_device_capability() >= (9, 4):
+            gcn_arch = str(
+                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+            )
+            if "gfx94" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -500,6 +503,26 @@ class TestCuda(TestCase):
                 os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
             else:
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hipblaslt_allow_tf32(self):
+        tf32_ctx = self._hip_allow_tf32
+        with tf32_ctx():
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "0"
+            # Save original value of allow_tf32
+            orig = torch.backends.cuda.matmul.allow_tf32
+            # If allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
+            # then matmul.allow_tf32 will return False after this point even if
+            # HIP_BLASLT_ALLOW_TF32 is set to 1 and matmul.allow_tf32 is changed.
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+            # Toggle torch.backends.cuda.matmul.allow_tf32 couple of times.
+            torch.backends.cuda.matmul.allow_tf32 = not orig
+            test1 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+            test2 = torch.backends.cuda.matmul.allow_tf32
+            self.assertNotEqual(test1, test2)
+            # Restore original value of allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_cublas_allow_tf32_get_set(self):
         """
@@ -575,6 +598,13 @@ class TestCuda(TestCase):
             torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
+
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
@@ -1060,11 +1090,6 @@ except RuntimeError as e:
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
@@ -1093,11 +1118,6 @@ except RuntimeError as e:
             return err
 
     @slowTest
-    @unittest.skipIf(
-        NO_MULTIPROCESSING_SPAWN,
-        "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
-    )
     @skipIfRocm
     def test_index_out_of_bounds_exception_cuda(self):
         test_method = TestCuda._test_index_bounds_cuda
@@ -1991,7 +2011,7 @@ exit(2)
                 )
 
     @unittest.skipIf(
-        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
+        (not TEST_CUDA) or TEST_WITH_ROCM,
         "CUDA >= 11.0 required for graphs",
     )
     def test_graph_warn_if_has_zero_nodes(self):
@@ -3415,7 +3435,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -3423,7 +3442,53 @@ print(f"{{r1}}, {{r2}}")
             error_msg = "cuFileHandleRegister failed"
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+                torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+    def test_is_pinned_no_context(self):
+        test_script = """\
+import torch
+import multiprocessing
+
+
+def fork_and_check_is_pinned():
+    # Create a pipe to communicate between parent and child processes
+    parent_conn, child_conn = multiprocessing.Pipe()
+
+    def worker(conn):
+        try:
+            x = torch.randn(10)
+            x.is_pinned(device="cuda")
+            x = torch.ones(10, device="cuda")[0].item()
+            conn.send(x)
+        except Exception as e:
+            conn.send(str(e))
+        finally:
+            conn.close()
+    # Fork a new process
+    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p.start()
+    # Receive the result from the child process
+    result = parent_conn.recv()
+    parent_conn.close()
+    # Wait for the child process to finish
+    p.join()
+    if isinstance(result, str) and result.startswith("Error"):
+        raise RuntimeError(result)
+    return result
+
+x = torch.randn(10)
+# check that is_pinned won't poison future fork
+x.is_pinned(device="cuda")
+ret = fork_and_check_is_pinned()
+print(ret)
+
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "1.0")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -4005,6 +4070,9 @@ class TestCudaMallocAsync(TestCase):
                 m.record(False, False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_notifies_oom(self):
         x = False
 
@@ -4081,12 +4149,10 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -5137,20 +5203,20 @@ class TestGDS(TestCase):
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
         with TemporaryFileName() as f:
-            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src1.untyped_storage(), offset=0)
             file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
             file.load_storage(dest1.untyped_storage(), offset=0)
             file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
         self.assertEqual(src1, dest1)
         self.assertEqual(src2, dest2)
-        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
-        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

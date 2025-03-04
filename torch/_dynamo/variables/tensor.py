@@ -1,5 +1,22 @@
 # mypy: ignore-errors
 
+"""
+This module contains variable tracker classes for handling tensors and tensor-related operations in Dynamo.
+
+The main class is TensorVariable which represents torch.Tensor inputs and intermediate values in the FX graph.
+It handles tensor operations, method calls, and maintains metadata about tensor properties like dtype, device, etc.
+
+Other key classes include:
+- SymNodeVariable: Represents symbolic scalars (int/float/bool) used for size computation and unspecialized values
+- NumpyNdarrayVariable: Handles numpy array interop through torch._numpy
+- UnspecializedPythonVariable: Represents unspecialized Python numeric values as 1-element tensors
+- TensorSubclassVariable: Handles tensor subclasses with __torch_function__ overrides
+- UntypedStorageVariable: Represents tensor storage objects
+- DataPtrVariable: Handles tensor data pointer operations
+
+These classes work together to track tensor operations and properties during Dynamo's tracing process.
+"""
+
 import functools
 import inspect
 import logging
@@ -28,7 +45,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import (
+    unimplemented,
+    UnknownPropertiesDuringBackwardTrace,
+    UserError,
+    UserErrorType,
+)
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -344,6 +366,9 @@ class TensorVariable(VariableTracker):
         if self.is_nested is not None:
             return ConstantVariable.create(self.is_nested)
 
+    def method_attr_retain_grad(self, tx):
+        unimplemented("retain_grad does not work with AOTDispatcher")
+
     def method_attr_data(self, tx):
         return variables.TorchInGraphFunctionVariable(
             torch._C._autograd._get_data_attr
@@ -362,7 +387,7 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
@@ -386,8 +411,15 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from . import UserDefinedClassVariable
 
-        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
-            unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx):
+            if name in self._strict_mode_banned_ops():
+                unimplemented(
+                    f"Getattr invocation {name} in strict mode is not supported"
+                )
+            elif name in self._strict_mode_conditional_banned_ops():
+                raise UnknownPropertiesDuringBackwardTrace(
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                )
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -511,9 +543,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert (
-                len(idxes) == length
-            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            assert len(idxes) == length, (
+                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            )
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -529,6 +561,11 @@ class TensorVariable(VariableTracker):
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
+
+    def _strict_mode_conditional_banned_ops(self):
+        return (
+            torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops
+        )
 
     def call_method(
         self,
@@ -573,6 +610,11 @@ class TensorVariable(VariableTracker):
         handler returns None (or doesn't exist) we put the method call
         in the graph.
         """
+
+        # This is seen in inspect signature where we check if the value is a default value
+        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+            return variables.ConstantVariable(False)
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
@@ -845,10 +887,13 @@ class TensorVariable(VariableTracker):
             # Standard indexing will force specialization due to
             # __index__.  Rewrite as a regular torch op which will
             # trace fine
-            fn, args = torch.select, [
-                variables.ConstantVariable.create(0),
-                args[0],
-            ]
+            fn, args = (
+                torch.select,
+                [
+                    variables.ConstantVariable.create(0),
+                    args[0],
+                ],
+            )
         else:
             fn = operator.getitem
 
@@ -1199,6 +1244,9 @@ class SymNodeVariable(VariableTracker):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
+            if torch.fx.experimental._config.no_data_dependent_graph_break:
+                raise
+
             raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
@@ -1422,7 +1470,7 @@ class UntypedStorageVariable(VariableTracker):
         example_value: torch.UntypedStorage,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"
         self.example_value = example_value
@@ -1478,7 +1526,7 @@ class DataPtrVariable(VariableTracker):
         from_tensor: TensorVariable,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):

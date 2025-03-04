@@ -113,14 +113,14 @@ def scan(
         raise RuntimeError("Reverse must be a bool, but got " + str(type(reverse)))
 
     leaves_init, spec_init = pytree.tree_flatten(init)
-    leaves_xs, spec_xs = pytree.tree_flatten(xs)
+    leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
     if len(leaves_init) == 0:
         raise RuntimeError("Init tensors must be provided")
     for x in leaves_init:
         if not isinstance(x, torch.Tensor):
             raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
-    for x in leaves_xs:
+    for x in leaves_xs_orig:
         if not isinstance(x, torch.Tensor):
             raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
         if x.shape[dim] == 0:
@@ -128,16 +128,23 @@ def scan(
                 f"All xs leaves must have a scan dimension > 0 but got {x}"
             )
 
-    if len(leaves_xs) == 0:
+    if len(leaves_xs_orig) == 0:
         return pytree.tree_unflatten(leaves_init, spec_init), xs
 
-    shape = leaves_xs[0].shape
-    ndim = len(shape)
+    ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
+
+    # Move scan dim to 0 and always perform scan on dim 0
+    leaves_xs = []
+    for elem in leaves_xs_orig:
+        leaves_xs.append(torch.movedim(elem, dim, 0))
+
+    if reverse:
+        leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
 
     out = combine_fn(
         pytree.tree_unflatten(leaves_init, spec_init),
-        pytree.tree_unflatten([elem.select(dim, 0) for elem in leaves_xs], spec_xs),
+        pytree.tree_unflatten([first_slice_copy(elem) for elem in leaves_xs], spec_xs),
     )
 
     # The first output needs to have the same pytree as init
@@ -187,10 +194,8 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
         num_inp_leaves=len(leaves_xs),
     )
 
-    def run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse):
-        return scan_op(
-            combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
-        )
+    def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
+        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=[])
 
     if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
@@ -209,16 +214,17 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
                     combine_fn,
                     leaves_init,
                     leaves_xs,
-                    dim=dim,
-                    reverse=reverse,
                 )
     else:
-        result = run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse)
+        result = run_flattened_scan(combine_fn, leaves_init, leaves_xs)
 
     result_carry, result_flat = _extract_carry_and_out(
         result,
         len(leaves_init),
     )
+
+    if reverse:
+        result_flat = [torch.flip(elem, [0]) for elem in result_flat]
 
     return pytree.tree_unflatten(result_carry, spec_init), pytree.tree_unflatten(
         result_flat, tree_out
@@ -229,16 +235,16 @@ class ScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("scan")
 
-    def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
+    def __call__(self, combine_fn, init, xs, additional_inputs):
         assert isinstance(additional_inputs, list), "additional_inputs must be a list."
         validate_subgraph_args_types(additional_inputs)
-        return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
+        return super().__call__(combine_fn, init, xs, additional_inputs)
 
 
 scan_op = ScanOp()
 
 
-def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=None):
+def generic_scan(operator, init, xs, dim=0, additional_inputs=None):
     additional_inputs = additional_inputs if additional_inputs is not None else []
 
     def _scan(init, xs):
@@ -248,10 +254,7 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
             return carry, []
 
         num_elems = xs[0].shape[dim]
-        if reverse:
-            ind = num_elems - 1
-        else:
-            ind = 0
+        ind = 0
 
         # Compute dummy shapes for the pre-allocation
         num_init_leaves = len(init)
@@ -293,7 +296,7 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
                 o.scatter_(0, ind * idx, x.unsqueeze(0))
 
         for i in range(num_elems):
-            ind = i if not reverse else num_elems - i - 1
+            ind = i
             carry, out = _extract_carry_and_out(
                 operator(
                     *carry,
@@ -312,7 +315,7 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
     return scans
 
 
-def first_slice_copy(t: torch.Tensor, dim: int) -> torch.Tensor:
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
@@ -333,15 +336,13 @@ def trace_scan(
     combine_fn: Callable,
     init: list[torch.Tensor],
     xs: list[torch.Tensor],
-    dim: int,
-    reverse: bool,
     additional_inputs: list[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
 
     with disable_proxy_modes_tracing():
         sample_inits = [clone_input(x_init) for x_init in init]
-        sample_inputs = [first_slice_copy(x, dim) for x in xs]
+        sample_inputs = [first_slice_copy(x) for x in xs]
         sample_additional_inputs = [
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
@@ -379,14 +380,14 @@ def trace_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, init, xs, dim, reverse, additional_inputs)
+    args = (combine_graph, init, xs, additional_inputs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
     )
 
     with disable_proxy_modes_tracing():
-        scan_length = xs[0].shape[dim]
+        scan_length = xs[0].shape[0]
         fake_carry, fake_outputs = _extract_carry_and_out(
             [o.meta["val"] for o in outputs], len(init)
         )
@@ -399,10 +400,10 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, init, xs, dim, reverse, additional_inputs):
+def scan_op_dense(combine_fn, init, xs, additional_inputs):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return generic_scan(combine_fn, init, xs, dim, reverse, additional_inputs)
+    return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
 
 scan_op.py_impl(DispatchKey.Autograd)(
@@ -411,20 +412,18 @@ scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
-def scan_proxy_mode(mode, combine_fn, init, xs, dim, reverse, additional_inputs):
-    return trace_scan(
-        mode, scan_op, combine_fn, init, xs, dim, reverse, additional_inputs
-    )
+def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
+    return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
 
 
 @scan_op.py_impl(FakeTensorMode)
-def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse, additional_inputs):
+def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
     with mode:
-        scan_length = xs[0].shape[dim]
+        scan_length = xs[0].shape[0]
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
-                *[first_slice_copy(inp, dim) for inp in xs],
+                *[first_slice_copy(inp) for inp in xs],
                 *additional_inputs,
             ),
             len(init),
@@ -437,16 +436,14 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse, additional_i
 
 
 @scan_op.py_functionalize_impl
-def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_inputs):
+def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        sample_unwrapped_xs_sliced = [
-            first_slice_copy(inp, dim) for inp in unwrapped_xs
-        ]
+        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(
                 unwrapped_init,
@@ -470,8 +467,6 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_input
             functional_combine_fn,
             unwrapped_init,
             unwrapped_xs,
-            dim,
-            reverse,
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)

@@ -169,9 +169,9 @@ def random_nt(
         assert max_dim > min_dim, "random_nt: max_dim must be greater than min_dim"
         assert min_dim >= 0, "random_nt: min_dim must be non-negative"
         if require_non_empty:
-            assert not (
-                min_dim == 0 and max_dim == 1
-            ), "random_nt: zero cannot be the only possible value if require_non_empty is True"
+            assert not (min_dim == 0 and max_dim == 1), (
+                "random_nt: zero cannot be the only possible value if require_non_empty is True"
+            )
 
     if require_non_empty:
         # Select a random idx that will be required to be non-empty
@@ -856,6 +856,21 @@ class TestNestedTensor(NestedTensorTestCase):
             "expected all nested tensors to have matching ragged structures outside of the concatenated dim",
         ):
             torch.cat([x, y], dim=-1)
+
+    def test_nested_view_from_buffer_overflow_errors(self):
+        buffer = torch.tensor([1])
+        sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
+        strides = torch.tensor(
+            [[0x41414141], [0x41414141], [0x41414141]], dtype=torch.int64
+        )
+        offsets = torch.tensor(
+            [[0x41414141], [0x41414141], [0x41414141]], dtype=torch.int64
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Storage size calculation overflowed with sizes=\[9223372036854775807\] and strides=\[1094795585\]",
+        ):
+            nt = torch._nested_view_from_buffer(buffer, sizes, strides, offsets)
 
 
 @markDynamoStrictTest
@@ -7021,13 +7036,17 @@ torch.cuda.synchronize()
             (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
         )
         offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
-        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16).transpose(
+            1, 2
+        )
 
         values_meta = torch.randn(
             (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
         )
         offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
-        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+        nt_meta = convert_jagged_to_nested_tensor(
+            values_meta, offsets_meta, max_length=16
+        ).transpose(1, 2)
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
 
@@ -7678,6 +7697,22 @@ torch.cuda.synchronize()
 
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    def test_dropout_inference_mode(self, device):
+        seq_len = 32
+        embed_dim = 128
+
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(11, seq_len, embed_dim, device=device),
+                torch.randn(11, seq_len, embed_dim, device=device),
+            ],
+            layout=torch.jagged,
+            device=device,
+        )
+
+        with torch.inference_mode():
+            torch.nn.functional.dropout(nt, p=0.05)
 
     @dtypes(torch.float32, torch.double, torch.half)
     def test_unbind_backward(self, device, dtype):

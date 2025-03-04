@@ -39,6 +39,31 @@ kernel void tanh_kernel(
   output[index] = T0(precise::tanh(input[index]));
 }
 
+template <typename T0, typename T1>
+kernel void sqrt_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(precise::sqrt(input[index]));
+}
+
+template <typename T0>
+kernel void sqrt_complex_kernel(
+    device vec2type_t<T0>* output [[buffer(0)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  T0 a = input[index].x;
+  T0 b = input[index].y;
+
+  // modulus
+  auto m = precise::sqrt(a * a + b * b);
+  // real part: sqrt((m + a)/2)
+  auto real_part = precise::sqrt((m + a) * .5);
+  // imaginary part: sign(b) * sqrt((m - a)/2)
+  auto imag_part = copysign(static_cast<T0>(precise::sqrt((m - a) * .5)), b);
+  output[index] = vec2type_t<T0>(real_part, imag_part);
+}
+
 #if __METAL_VERSION__ >= 310
 bfloat dot(bfloat2 a, bfloat2 b) {
   return a.x * b.x + a.y * b.y;
@@ -67,6 +92,22 @@ kernel void tanh_complex_kernel(
       vec2type_t<T0>(tanh_x, tan_y), vec2type_t<T0>(T0(1), tanh_x * tan_y));
 }
 
+template <typename T0, typename T1>
+kernel void sinc_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(sinc(static_cast<float>(input[index])));
+}
+
+template <typename T0>
+kernel void sinc_complex_kernel(
+    device vec2type_t<T0>* output [[buffer(0)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = vec2type_t<T0>(sinc(float2(input[index])));
+}
+
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1)                             \
   template [[host_name("erfinv_" #DTYPE0 "_" #DTYPE1)]] kernel void            \
   erfinv_kernel(                                                               \
@@ -77,7 +118,15 @@ kernel void tanh_complex_kernel(
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                    \
+  template [[host_name("sqrt_" #DTYPE0 "_" #DTYPE1)]] kernel void sqrt_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);                                    \
   template [[host_name("tanh_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);                                    \
+  template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);
@@ -94,17 +143,51 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE0, DTYPE1)                    \
-  template [[host_name("exp_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void  \
-  exp_complex_kernel<DTYPE0>(                                             \
-      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
-      uint did [[thread_position_in_grid]]);                              \
-  template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
-  tanh_complex_kernel<DTYPE0>(                                            \
-      device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)                           \
+  template [[host_name("exp_complex_" #DTYPE "_" #DTYPE)]] kernel void  \
+  exp_complex_kernel<DTYPE>(                                            \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("tanh_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  tanh_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("sqrt_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sqrt_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
+      uint did [[thread_position_in_grid]]);                            \
+  template [[host_name("sinc_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sinc_complex_kernel<DTYPE>(                                           \
+      device vec2type_t<DTYPE> * output [[buffer(0)]],                  \
+      constant vec2type_t<DTYPE> * input [[buffer(1)]],                 \
       uint did [[thread_position_in_grid]]);
 
-INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
-INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
+INSTANTIATE_UNARY_KERNELS_VEC2(half);
+INSTANTIATE_UNARY_KERNELS_VEC2(float);
+
+template <typename T>
+kernel void round_decimals_kernel(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant long& ndigits [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = static_cast<T>(
+      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
+}
+
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                 \
+  template [[host_name("round_decimals_" #DTYPE "_" #DTYPE)]] kernel void \
+  round_decimals_kernel(                                                  \
+      device DTYPE* output [[buffer(0)]],                                 \
+      constant DTYPE* input [[buffer(1)]],                                \
+      constant long& ndigits [[buffer(2)]],                               \
+      uint id [[thread_position_in_grid]])
+
+INSTANTIATE_ROUND_DECIMALS(float);
+INSTANTIATE_ROUND_DECIMALS(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_ROUND_DECIMALS(bfloat);
+#endif

@@ -27,6 +27,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -52,7 +53,7 @@ from .codegen.triton import (
     TritonKernel,
     TritonScheduling,
 )
-from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
@@ -167,9 +168,9 @@ class PartialRender:
                 )
             else:
                 return
-        assert (
-            self.replacement_hooks[hook_key] is not None
-        ), "hook_key can only be called once"
+        assert self.replacement_hooks[hook_key] is not None, (
+            "hook_key can only be called once"
+        )
         self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = None
 
@@ -228,8 +229,22 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            return f"tl.load({var} + {index_str})"
-        return f"({self.fixed_inputs[name]})"
+            var_dtype = V.graph.get_buffer(name).dtype
+            line = f"tl.load({var} + {index_str})"
+
+            if (
+                var_dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                var_dtype = torch.float32
+
+            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            return out
+
+        return self.kernel.cse.generate(
+            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+        )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
@@ -242,9 +257,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         This is used by flex_attention's backwards grad for captured buffers, see
         zeros_and_scatter lowering
         """
-        assert (
-            self.mask is not None
-        ), "Mask is required for inner stores in modifications"
+        assert self.mask is not None, (
+            "Mask is required for inner stores in modifications"
+        )
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
@@ -416,8 +431,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -445,7 +460,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            return f"{', '.join(arg_defs)}"
+            return f"{', '.join(x.full_name() for x in arg_defs)}"
 
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
@@ -515,7 +530,9 @@ class TritonTemplateKernel(TritonKernel):
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
-            code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
+            code.writeline(
+                f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
+            )
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
@@ -556,12 +573,12 @@ class TritonTemplateKernel(TritonKernel):
     def _get_subgraph(self, subgraph_number: int):
         assert isinstance(subgraph_number, int)
         assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(
-            self.subgraphs
-        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        assert (
-            self.body.getvalue() == ""
-        ), "Body should be clear before adding a modification"
+        assert subgraph_number < len(self.subgraphs), (
+            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        )
+        assert self.body.getvalue() == "", (
+            "Body should be clear before adding a modification"
+        )
         return self.subgraphs[subgraph_number]
 
     def _handle_scatter_graph(self, scatter_graph):
@@ -570,9 +587,9 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             scatter_graph: The scatter graph to process
         """
-        assert isinstance(
-            scatter_graph, ir.ComputedBuffer
-        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        assert isinstance(scatter_graph, ir.ComputedBuffer), (
+            f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        )
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -580,7 +597,9 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        return scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
+        return scatter_graph.data.store_output(  # type: ignore[attr-defined]
+            scatter_graph.name, contiguous_strides, []
+        )
 
     def modification(
         self,
@@ -609,9 +628,9 @@ class TritonTemplateKernel(TritonKernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_ops_handler(modification_handler):
-                assert isinstance(
-                    subgraph, (ir.ComputedBuffer, list)
-                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
+                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                )
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
@@ -632,7 +651,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(OrderedSet[str]())
+            self.cse.invalidate(OrderedSet())
             return body_val
 
     def load_input(
@@ -726,7 +745,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
+                name = "StoreOutputSubstitution"
 
                 def store(
                     self,
@@ -754,7 +773,10 @@ class TritonTemplateKernel(TritonKernel):
                         if value_dtype != V.graph.get_buffer(name).dtype:
                             value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
 
-                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
+                        # TODO: we should have intermediary var shapes
+                        V.kernel.compute.writeline(
+                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                        )
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -804,6 +826,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
+                    assert load_code is not None
                     self.body.writeline(load_code)
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
@@ -1063,6 +1086,14 @@ class TritonTemplate(KernelTemplate):
         """
         assert self.template, "requires jinja2"
         defines = StringIO()
+
+        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
+        # capability doesn't support them.  This is a bug in Triton, but for now we'll
+        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
+        # for one example issue with this problem.
+        if not torch.cuda.is_tf32_supported():
+            kwargs["ALLOW_TF32"] = "False"
+
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
@@ -1094,15 +1125,17 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
         }
 
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(fake_out)
-        ), V.graph.set_current_device(layout.device), TritonTemplateKernel(
-            kernel_name=kernel_name,
-            output_node=fake_out,
-            workspace_arg=workspace_arg,
-            use_jit=False,
-            **kernel_options,
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
+            V.graph.set_current_device(layout.device),
+            TritonTemplateKernel(
+                kernel_name=kernel_name,
+                output_node=fake_out,
+                workspace_arg=workspace_arg,
+                use_jit=False,
+                **kernel_options,
+            ) as kernel,
+        ):
             try:
                 template = kernel.render(self.template, kwargs)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
@@ -1413,9 +1446,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert (
-                self.choice.op_overload is not None
-            ), "Please provide an op_overload to use ir.FallbackKernel"
+            assert self.choice.op_overload is not None, (
+                "Please provide an op_overload to use ir.FallbackKernel"
+            )
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
@@ -1566,10 +1599,17 @@ class NoValidChoicesError(RuntimeError):
 
 
 @functools.lru_cache(None)
-def get_env_num_workers() -> Optional[int]:
+def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    return None
+
+    cpu_count = (
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count()
+    )
+    assert cpu_count
+    return cpu_count
 
 
 def create_inputs_key(input_nodes) -> str:
@@ -1604,6 +1644,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
             ]
         ] = []
+
+        clear_on_fresh_inductor_cache(self)
+
+    def cache_clear(self) -> None:
+        self.precompile_cache.clear()
+        self.feedback_saver_fns.clear()
 
     def __call__(
         self,
@@ -1681,6 +1727,8 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs_key = create_inputs_key(input_nodes)
 
         def precompile(choices) -> Callable[[], None]:
+            log.debug("Starting precompilation")
+
             def no_op(*args, **kwargs):
                 return
 
@@ -1688,10 +1736,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompilation_timeout_seconds is None
                 or precompilation_timeout_seconds <= 0
             ):
+                log.debug("Precompilation timeout is None or <= 0, returning no_op")
                 return no_op
 
-            env_workers = get_env_num_workers()
-            num_workers = env_workers if env_workers is not None else (len(choices))
+            num_workers = min(get_num_workers(), len(choices))
 
             if num_workers <= 0:
                 return no_op
@@ -1713,7 +1761,20 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
-                return no_op
+                # compilation in precompile stage is much cheaper than that in
+                # autotuning stage
+                if len(timings) == len(choices):
+                    log.debug("Timings found in cache, returning no_op")
+                    return no_op
+                else:
+                    # TODO: remove this branch in April 2025
+                    # added warning for debugging purpose
+                    log.info(
+                        "Found only %d/%d timings for %s, not skipping precompilation",
+                        len(timings),
+                        len(choices),
+                        name,
+                    )
 
             if config.search_autotune_cache and not (
                 config.max_autotune or config.max_autotune_gemm
@@ -1722,6 +1783,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
+                log.debug("Precompile function found in cache, returning it")
                 return precompile_func
 
             log.info(
@@ -1735,16 +1797,19 @@ class AlgorithmSelectorCache(PersistentCache):
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            initial_stdout = sys.stdout
-            initial_stderr = sys.stderr
-
             def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                log.debug("Precompiling choice with captured stdout: %s", choice)
+                with restore_stdout_stderr():
                     choice.precompile()
 
             def on_complete(future):
                 assert future in start_times
                 elapsed_times[future] = time.time() - start_times[future]
+                log.debug(
+                    "Precompilation complete for future: %s, elapsed time: %.02fs",
+                    future,
+                    elapsed_times[future],
+                )
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
@@ -1753,7 +1818,17 @@ class AlgorithmSelectorCache(PersistentCache):
             start_times: dict[concurrent.futures.Future[Any], float] = {}
             elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
 
+            # Some choices only differ in runtime arguments, so we
+            # skip a choice if it has the same hash as a previously seen choice
+            seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
             for c in choices:
+                # Skip choices which we have already issued a precompile
+                if c.hash_key() in seen_choices:
+                    log.debug("Skipping already seen choice: %s", c)
+                    continue
+                else:
+                    seen_choices.add(c.hash_key())
+
                 if hasattr(c, "precompile"):
                     triton_cuda_choice = isinstance(
                         c, TritonTemplateCaller
@@ -1764,16 +1839,19 @@ class AlgorithmSelectorCache(PersistentCache):
                         future = async_compile.triton(
                             kernel_name=c.bmreq.kernel_name, source_code=source_code
                         ).future
+                        log.debug("Submitted triton async compile for choice: %s", c)
                     else:
                         future = executor.submit(precompile_with_captured_stdout, c)
+                        log.debug("Submitted precompile for choice: %s", c)
 
                     start_times[future] = time.time()
                     future.add_done_callback(on_complete)
                     futures[future] = c
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr(initial_stdout, initial_stderr)
+            @restore_stdout_stderr()
             def wait_on_futures():
+                log.debug("Waiting on futures")
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 for future in as_completed(
                     futures,
@@ -1784,6 +1862,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s", e, futures[future]
                         )
                     else:
+                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
                         log.info(
                             "Precompiling benchmark choice %s took %.02fs",
                             futures[future],
@@ -1797,6 +1876,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
+            log.debug("Starting autotuning")
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
@@ -1819,6 +1899,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
+            log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
             autotune_start_ts = time.time()
             timings = self.lookup(
@@ -1828,6 +1909,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
+            log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
             if timings and all(
                 not math.isfinite(timing) for timing in timings.values()
@@ -1913,7 +1995,7 @@ class AlgorithmSelectorCache(PersistentCache):
             input_gen_fns = {}
 
         def get_inputs(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]]
+            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
         ) -> AutotuneArgs:
             # de-duplicate args
             unique_example_inputs = {
@@ -2033,7 +2115,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return timings
 
         def benchmark_in_sub_process(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]]
+            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
         ):
             from . import autotune_process
 
@@ -2073,7 +2155,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
+                            n.get_size(),
+                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         ),
                     )
                 )
@@ -2082,11 +2165,8 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if config.autotune_num_choices_displayed == 0:
             return
-        elif config.autotune_num_choices_displayed is None:
-            n = -1
-        else:
-            n = config.autotune_num_choices_displayed
-
+        # when autotune_num_choices_displayed is None, [:None] means all
+        n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
 
         best = top_k[0]
@@ -2250,15 +2330,15 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        kwargs[
-            "return_multi_template"
-        ] = torch._inductor.config.benchmark_epilogue_fusion
+        kwargs["return_multi_template"] = (
+            torch._inductor.config.benchmark_epilogue_fusion
+        )
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None]
+    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:

@@ -60,6 +60,10 @@ inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   if ((default_alignment <= 2) && (ip % (8 * default_alignment) == 0)) {
     return 8;
   }
+#else
+  if (ip % (8 * default_alignment) == 0) {
+    return 8;
+  }
 #endif
   if (ip % (4 * default_alignment) == 0) {
     return 4;
@@ -88,15 +92,17 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
 }
 
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
-#define JIT_THREAD_WORK_SIZE 4
-
 #ifdef USE_ROCM
+#define JIT_THREAD_WORK_SIZE 4
+#else
+#define JIT_THREAD_WORK_SIZE 8
+#endif
+
 int calc_io_size(
     const int nInputs,
     const int nOutputs,
     const c10::ScalarType& inputs_type,
     const c10::ScalarType& result_type);
-#endif
 
 int calc_thread_work_size(
     const int nInputs,
@@ -221,6 +227,10 @@ template <> inline std::string typeName<at::Float8_e5m2fnuz>() {
 }
 template <> inline std::string typeName<at::Float8_e4m3fnuz>() {
     return "at::Float8_e4m3fnuz";
+}
+template <> inline std::string typeName<at::Float8_e8m0fnu>() {
+    // TODO(#146647): Can the code here be made generic for any scalartype?
+    return "at::Float8_e8m0fnu";
 }
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \

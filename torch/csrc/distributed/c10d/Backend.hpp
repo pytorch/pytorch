@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -65,6 +66,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual bool supportsSplitting() const {
+    return false;
+  }
+
+  virtual bool supportsCoalescing() const {
     return false;
   }
 
@@ -407,6 +412,28 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support getError"));
+  }
+
+  virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support getMemAllocator"));
+  }
+
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  // Returns true if backend supports tensor allocation
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+    // Change to true in concrete backend if supported
+    return false;
   }
 
  protected:

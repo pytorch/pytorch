@@ -394,6 +394,7 @@ class TestGroupBatchFusion(TestCase):
         )
         counters.clear()
 
+    @unittest.skipIf(GPU_TYPE == "mps", "welford_reduce is yet not implemented for MPS")
     def test_batch_layer_norm_fusion(self):
         for has_weight in [True, False]:
             for has_bias in [True, False]:

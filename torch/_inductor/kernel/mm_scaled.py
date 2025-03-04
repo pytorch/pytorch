@@ -1,3 +1,4 @@
+import functools
 import logging
 from collections.abc import Sequence
 from typing import Any, Optional
@@ -258,8 +259,6 @@ scaled_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -340,8 +339,6 @@ scaled_mm_bias_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -428,7 +425,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
 ) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
@@ -443,7 +439,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -464,7 +459,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
 ) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
@@ -479,7 +473,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -561,6 +554,12 @@ def tuned_scaled_mm(
             for config in scaled_mm_configs(m, n, k):
                 if k == 16 and config.kwargs["BLOCK_M"] >= 64:
                     continue  # Triton crashes in this case
+
+                # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+                # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+                if using_b200() and k < 32:
+                    continue
+
                 kwargs = scaled_mm_options(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
@@ -592,3 +591,13 @@ def tuned_scaled_mm(
             "All choices for scaled_mm were invalid, using ATen backend as fallback"
         )
         return aten_choice.output_node()
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10

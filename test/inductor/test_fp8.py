@@ -21,7 +21,7 @@ from torch.utils._triton import has_triton_tma_device
 torch.set_float32_matmul_precision("high")
 
 
-f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
 # define the e4m3/e5m2 constants
 E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
@@ -416,7 +416,7 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
-    @parametrize("shape", ("16,16,32", "1024,1024,512"))
+    @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
@@ -493,7 +493,7 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize("shape", ("16,16,32", "1024,1024,512"))
+    @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
@@ -560,7 +560,7 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))
-    @parametrize("K", (16, 1024))
+    @parametrize("K", (16, 32, 1024))
     @parametrize("N", (16, 2048))
     @parametrize(
         "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
@@ -618,7 +618,7 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))
-    @parametrize("K", (16, 1024))
+    @parametrize("K", (16, 32, 1024))
     @parametrize("N", (16, 2048))
     @parametrize(
         "persistent_matmul", [False, True] if has_triton_tma_device() else [False]

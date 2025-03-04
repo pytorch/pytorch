@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -17,11 +17,16 @@ from .triton import TritonScheduling
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing_extensions import TypeAlias
+
+    from sympy import Expr
 
     import torch
     from torch.utils._ordered_set import OrderedSet
 
     from .common import BackendFeature
+
+    _IntLike: TypeAlias = Union[int, Expr]
 
 
 class CUDACombinedScheduling(BaseScheduling):
@@ -67,7 +72,9 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
-    def group_fn(self, sizes):
+    def group_fn(
+        self, sizes: Sequence[Sequence[_IntLike]]
+    ) -> tuple[tuple[_IntLike, ...], ...]:
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(
@@ -75,7 +82,7 @@ class CUDACombinedScheduling(BaseScheduling):
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
         prologue_nodes: Sequence[BaseSchedulerNode],
-    ):
+    ) -> Optional[str]:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
             assert not epilogue_nodes
             assert not prologue_nodes
@@ -93,25 +100,34 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
 
-    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
         return self._triton_scheduling.codegen_node(node)
 
-    def codegen_sync(self):
+    def codegen_sync(self) -> None:
         return self._triton_scheduling.codegen_sync()
 
-    def flush(self):
+    def flush(self) -> None:
         return self._triton_scheduling.flush()
 
-    def codegen_combo_kernel(self, *args, **kwargs):
+    def codegen_combo_kernel(self, *args: Any, **kwargs: Any) -> None:
         return self._triton_scheduling.codegen_combo_kernel(*args, **kwargs)
 
-    def benchmark_fused_nodes(self, nodes):
+    def benchmark_fused_nodes(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def benchmark_codegened_module(self, module):
+        return self._triton_scheduling.benchmark_codegened_module(module)
+
+    def generate_kernel_code_from_nodes(
+        self, nodes: Sequence[Any], benchmark_kernel: bool = False
+    ) -> str:
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel
         )
 
-    def benchmark_combo_kernel(self, node_list):
+    def benchmark_combo_kernel(
+        self, node_list: Sequence[BaseSchedulerNode]
+    ) -> tuple[float, float, list[Optional[str]]]:
         return self._triton_scheduling.benchmark_combo_kernel(node_list)

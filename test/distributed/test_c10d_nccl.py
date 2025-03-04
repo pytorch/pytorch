@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils.cpp_extension import load_inline
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -78,8 +77,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None
 )
 
 
@@ -252,6 +250,15 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         self._init_process_group(device_id=self.device)
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_scalable_init(self):
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        self._init_process_group(device_id=self.device)
+        x = torch.empty(1, device=self.device)
+        c10d.all_reduce(x)
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
@@ -1999,7 +2006,7 @@ class DistributedDataParallelTest(
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = dev0
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2013,7 +2020,7 @@ class DistributedDataParallelTest(
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -3104,40 +3111,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
-    def createNcclAllocator(self):
-        nccl_allocator_source = """
-        #include <torch/extension.h>
-        #include <nccl.h>
-        #include <iostream>
-
-        extern "C" {
-
-          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) {
-            std::cout << "Using ncclMemAlloc" << std::endl;
-            void* ptr;
-            ncclResult_t err = ncclMemAlloc(&ptr, size);
-            return ptr;
-          }
-
-          C10_EXPORT void nccl_free(void* ptr, size_t size, int device, void* stream) {
-            std::cout << "Using ncclMemFree" << std::endl;
-            ncclResult_t err = ncclMemFree(ptr);
-          }
-        }
-        """
-        nccl_allocator_libname = "nccl_allocator"
-        nccl_allocator = load_inline(
-            name=nccl_allocator_libname,
-            cpp_sources=nccl_allocator_source,
-            with_cuda=True,
-            extra_ldflags=["-lnccl"],
-            is_python_module=False,
-            keep_intermediates=False,
-            verbose=True,
-        )
-        return nccl_allocator
-
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -3172,13 +3145,9 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
-        allocator_path = self.createNcclAllocator()
-        allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            allocator_path,
-            "nccl_alloc",
-            "nccl_free",
-        )
-        pool = torch.cuda.MemPool(allocator.allocator())
+
+        # Use NCCL memory allocator
+        pool = torch.cuda.MemPool(backend.mem_allocator)
 
         # allocate memory with ncclMemAlloc
         with torch.cuda.use_mem_pool(pool):

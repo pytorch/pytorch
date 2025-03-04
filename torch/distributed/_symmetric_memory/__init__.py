@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -428,6 +428,10 @@ def _pipelined_produce_and_all2all(
             # The local P2P buffer can only be overwritten by the next
             # chunk_producer after all peers have finished reading from it.
             symm_mem.barrier(channel=step % 2)
+
+    # If the sleep wasn't issued in the above loop, do it now.
+    if group_size == 2:
+        torch.cuda._sleep(100)
 
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -1521,8 +1525,7 @@ if TYPE_CHECKING:
 @overload
 def empty(
     *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 @overload
@@ -1531,8 +1534,7 @@ def empty(
     *,
     dtype: Optional[_dtype] = None,
     device: Optional[_device] = None,
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 def empty(  # type: ignore[misc]
