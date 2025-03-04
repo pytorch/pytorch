@@ -467,6 +467,7 @@ S390X_TESTLIST = [
     "test_tensorexpr_pybind",
     "test_torch",
     "test_transformers",
+    "test_transformers_privateuse1",
     "test_type_hints",
     "test_type_info",
     "test_type_promotion",
@@ -759,7 +760,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f"-{'v' * options.verbose}")  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -1441,9 +1442,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert (
-        test.name == "test_ci_sanity_check_fail"
-    ), f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    assert test.name == "test_ci_sanity_check_fail", (
+        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1483,7 +1484,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_transformers": run_test_with_openreg,
+    "test_transformers_privateuse1": run_test_with_openreg,
 }
 
 
@@ -1895,8 +1896,7 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
-            "Running in slow gradcheck mode, skipping tests "
-            "that don't use gradcheck.",
+            "Running in slow gradcheck mode, skipping tests that don't use gradcheck.",
             exact_match=True,
         )
 
@@ -1915,21 +1915,26 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        # If job name isn't available, use build environment as a backup
+        job_name = os.environ.get("BUILD_ENVIRONMENT")
+    else:
+        job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
-    if test_config in test_times_file.get(build_environment, {}):
+    if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
-        return test_times_file[build_environment][test_config]
+        return test_times_file[job_name][test_config]
     elif test_config in test_times_file["default"]:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
-            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+            f"::warning:: Gathered no stats from artifacts for {job_name} build env"
+            f" and {test_config} test config. Using default job name and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
-            f" and {test_config} test config. Using default build env and default test config instead."
+            f"::warning:: Gathered no stats from artifacts for job name {job_name} build env"
+            f" and {test_config} test config. Using default job name and default test config instead."
         )
         return test_times_file["default"]["default"]
 
@@ -1952,9 +1957,9 @@ def get_sharding_opts(options) -> tuple[int, int]:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
+        assert which_shard <= num_shards, (
+            "Selected shard must be less than or equal to total number of shards"
+        )
 
     return (which_shard, num_shards)
 
@@ -1997,9 +2002,9 @@ def run_test_module(
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        assert isinstance(return_code, int) and not isinstance(
-            return_code, bool
-        ), f"While running {str(test)} got non integer return code {return_code}"
+        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
+            f"While running {str(test)} got non integer return code {return_code}"
+        )
         if return_code == 0:
             return None
 

@@ -77,6 +77,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "autograd_function_apply",
     "run_and_save_rng_state",
     "run_with_rng_state",
+    "graphsafe_run_with_rng_state",
     "out_dtype",
     "trace_wrapped",
     'tag_activation_checkpoint',
@@ -227,14 +228,14 @@ def simple_invoke_quant(x):
     def fn(x, y):
         return (torch.sin(x) * y,)
 
-    return quant_tracer(fn, (x, x))[0] * 2.
+    return quant_tracer(fn, x, x)[0] * 2.
 
 
 def simple_invoke_quant_packed(x):
     def fn(x):
         return (torch.sin(x),)
 
-    return invoke_quant_packed(fn, (x,))[0] * 2.
+    return invoke_quant_packed(fn, x)[0] * 2.
 
 
 
