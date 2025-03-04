@@ -560,7 +560,7 @@ class BlockMask:
     def to_string(self, grid_size=(20, 20), limit=4):
         """Returns a string representation of the block mask. Quite nifty.
 
-        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
+        If grid_size is -1, prints out an uncompressed version. Warning, it can be quite big!
         """
         dense_mask = self.to_dense()
         *batch_dims, num_rows, num_cols = dense_mask.shape
