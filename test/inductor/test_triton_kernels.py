@@ -71,10 +71,10 @@ if HAS_GPU:
             return f"equal_to_1={params}"
 
     # Define shared triton constants here.
-    CONSTANT_C: tl.constexpr = 4
-    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
-    BOOL_CONSTANT_C: tl.constexpr = True
-    FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+    CONSTANT_C = tl.constexpr(4)
+    BOOL_CONSTANT_C = tl.constexpr(True)
+    FLOAT_CONSTANT_C = tl.constexpr(3.14)
+    STRING_CONSTANT_C = tl.constexpr("CONSTANT_C")
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -726,7 +726,11 @@ def forward(self, x_1, output_1):
 
             grid = (x.numel(),)
             mulC_kernel[grid](
-                x, output, n_elements, BLOCK_SIZE=16, CONSTANT_NAME="CONSTANT_C"
+                x,
+                output,
+                n_elements,
+                BLOCK_SIZE=16,
+                CONSTANT_NAME=tl.constexpr("CONSTANT_C"),
             )
             return output
 
@@ -734,8 +738,9 @@ def forward(self, x_1, output_1):
         # not runtime value
         global CONSTANT_C
         prev_c = CONSTANT_C
-        # If the behavior of triton kernels change, this test will fail
-        CONSTANT_C = 10
+        # Triton doesn't allow constexpr annotations anymore.
+        # https://github.com/triton-lang/triton/pull/5961
+        CONSTANT_C = tl.constexpr(10)
         assert CONSTANT_C != prev_c
 
         t = torch.randn(5, device=GPU_TYPE)
