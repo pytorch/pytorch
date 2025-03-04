@@ -1149,6 +1149,31 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+# This is used for size oblivious reasoning to avoid 0/1 specializations.
+def guard_else_false(a: BoolLikeType) -> bool:
+    """
+    try to gaurd a if you a data dependent error just return false.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return False
+    return bool(a)
+
+
+def guard_else_true(a: BoolLikeType) -> bool:
+    """
+    try to gaurd a if you a data dependent error just return false.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return True
+    return bool(a)
+
+
 def definitely_true(a: BoolLikeType) -> bool:
     """
     Returns True only if we can tell that a is True, possibly introducing
