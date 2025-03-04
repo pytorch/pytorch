@@ -18,6 +18,11 @@ jobs:
   docker-cache:
     runs-on: linux.rocm.gpu.mi300.2
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
