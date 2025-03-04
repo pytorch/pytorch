@@ -164,7 +164,10 @@ Tensor q_linear_pointwise_binary(
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
-  TORCH_CHECK(dim == 2 || dim == 3, "qliner_pointwise_binary XPU: input dim should be 2 or 3, but got", dim);
+  TORCH_CHECK(
+      dim == 2 || dim == 3,
+      "qliner_pointwise_binary XPU: input dim should be 2 or 3, but got",
+      dim);
   int64_t K = act.size(dim - 1);
   int64_t M = act.numel() / K;
   // [M, K] x [K, N]
@@ -174,10 +177,12 @@ Tensor q_linear_pointwise_binary(
   std::vector<int64_t> dst_dims = {M, N};
   auto dst_dtype = qlinear_decide_out_dtype(act, output_dtype);
   bool has_accum_postop_sum = (binary_post_op == "sum");
-  if(dim == 3){
+  if (dim == 3) {
     other = other.has_value() ? other.value().reshape({-1, N}) : other;
   }
-  Tensor qout = has_accum_postop_sum ? other.value() : at::empty(dst_dims, act.options().dtype(dst_dtype));
+  Tensor qout = has_accum_postop_sum
+      ? other.value()
+      : at::empty(dst_dims, act.options().dtype(dst_dtype));
   quantized_matmul(
       input.contiguous(),
       act_scale,
@@ -200,7 +205,7 @@ Tensor q_linear_pointwise_binary(
       unary_post_op_algorithm,
       /*m2_trans*/ true);
 
-    return dim == 3 ? qout.reshape({act.size(0), -1, N}) : qout;
+  return dim == 3 ? qout.reshape({act.size(0), -1, N}) : qout;
 }
 
 Tensor q_linear_pointwise_binary_tensor(
@@ -222,25 +227,25 @@ Tensor q_linear_pointwise_binary_tensor(
     c10::string_view unary_post_op,
     torch::List<std::optional<at::Scalar>> unary_post_op_args,
     c10::string_view unary_post_op_algorithm) {
-    return q_linear_pointwise_binary(
-        act,
-        act_scale.item().toDouble(),
-        act_zero_point.item().toLong(),
-        weight,
-        weight_scales,
-        weight_zero_points,
-        other,
-        bias,
-        output_scale,
-        output_zero_point,
-        output_dtype,
-        other_scale,
-        other_zero_point,
-        binary_post_op,
-        binary_alpha,
-        unary_post_op,
-        unary_post_op_args,
-        unary_post_op_algorithm);
+  return q_linear_pointwise_binary(
+      act,
+      act_scale.item().toDouble(),
+      act_zero_point.item().toLong(),
+      weight,
+      weight_scales,
+      weight_zero_points,
+      other,
+      bias,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      other_scale,
+      other_zero_point,
+      binary_post_op,
+      binary_alpha,
+      unary_post_op,
+      unary_post_op_args,
+      unary_post_op_algorithm);
 }
 
 at::Tensor q_linear_prepack_onednn(

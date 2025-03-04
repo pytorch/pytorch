@@ -3,15 +3,17 @@
 # This files serves as supplementary tests for the cases in `test/inductor/test_mkldnn_pattern_matcher`
 # This files tests the issue cases that shown only in XPU mode.
 import contextlib
+
 import torch
+from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
-from torch._inductor import config
-from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
 )
+
 
 @config.patch({"freezing": True})
 @config.patch({"force_disable_caches": True})
@@ -71,14 +73,16 @@ class TestXPUInductorQuantizer(TestCase):
                 super(Model, self).__init__()
                 self.linear = torch.nn.Linear(10, 10)
                 self.relu = torch.nn.ReLU()
-            
+
             def forward(self, x):
                 orig = x
                 out = self.linear(x)
                 return out + orig
 
         def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1)
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+            )
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
         mod = Model().xpu()
