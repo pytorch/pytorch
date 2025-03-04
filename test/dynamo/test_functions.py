@@ -943,16 +943,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_list_compare_polyfill_non_lists(x):
+        conds = []
+
         # Non-list instances only work for eq and ne
         for a, b, c in [
             [(1, 2, 3), "(1, 2, 3)", 7.77],
             [143, (143,), 3.33],
         ]:
-            if a != b:
+            conds.append(a != b)
+            if conds[-1]:
                 x = x + 1 * c
-            if a == b:
+
+            conds.append(a == b)
+            if conds[-1]:
                 x = x + 2 * c
-        return x
+
+        return x, conds
 
     @make_test
     def test_promote_types(x):
